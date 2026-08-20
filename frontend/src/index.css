@@ -1,0 +1,52 @@
+@import 'tailwindcss';
+@import '@appica/ui-react/styles.css';
+
+/* Appica UI 规则：必须扫描组件库类名，否则组件无样式。路径相对本文件，勿改成裸包名。 */
+@source '../node_modules/@appica/ui-react/dist';
+
+/* ByteMD：取消编辑区/预览区的 800px 居中限宽，铺满容器（ByteMD 自带全屏按钮在工具栏右侧）。
+   注意必须提高选择器优先级：bytemd 的 CSS 在组件加载时注入，顺序晚于本文件。 */
+.bytemd .bytemd-editor .CodeMirror .CodeMirror-lines {
+  max-width: none;
+  margin: 0;
+}
+.bytemd .bytemd-preview .markdown-body {
+  max-width: none;
+  margin: 0;
+}
+
+/* 文档详情页：编辑器撑满剩余空间，底部与浏览器底部对齐（覆盖 ByteMD 默认固定高度）。
+   bytemd/react 在 .bytemd 外还包了一层无样式的 div，百分比高度需要逐层都是确定值才能生效。 */
+.doc-editor > div {
+  height: 100%;
+}
+.doc-editor .bytemd {
+  height: 100%;
+}
+
+/* 检查运行详情页终端面板：Gruvbox Dark 主题。
+   有意脱离角色 token —— 模拟真实终端配色是产品需求，非 UI 组件，故允许固定色值。 */
+.terminal-gruvbox {
+  background-color: #282828; /* bg0 */
+  color: #ebdbb2; /* fg1 */
+}
+.terminal-gruvbox .term-prompt {
+  color: #b8bb26; /* bright green */
+}
+.terminal-gruvbox .term-muted {
+  color: #a89984; /* fg4 */
+}
+.terminal-gruvbox .term-info {
+  color: #8ec07c; /* bright aqua */
+}
+.terminal-gruvbox .term-error {
+  color: #fb4934; /* bright red */
+}
+.terminal-gruvbox .term-warning {
+  color: #fabd2f; /* bright yellow */
+}
+/* 终端内文本选中：接近白色的灰底 + 深色文本（Gruvbox fg1 / bg0） */
+.terminal-gruvbox ::selection {
+  background-color: #ebdbb2;
+  color: #282828;
+}

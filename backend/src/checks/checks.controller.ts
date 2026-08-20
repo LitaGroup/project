@@ -1,0 +1,120 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  MessageEvent,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+  Sse,
+} from '@nestjs/common';
+import { Observable } from 'rxjs';
+import { CheckRun } from './check-run.entity';
+import { Check } from './check.entity';
+import { ChecksService } from './checks.service';
+
+class CreateCheckDto {
+  projectId: number;
+  /** 编号（手工定义，项目内唯一） */
+  code: string;
+  /** 描述：脚本检查的内容 */
+  description?: string;
+  /** 脚本位置：相对脚本根目录的 .check.ts 路径 */
+  scriptPath: string;
+}
+
+class UpdateCheckDto {
+  code?: string;
+  description?: string;
+  scriptPath?: string;
+}
+
+class ImportChecksDto {
+  projectId: number;
+}
+
+@Controller('checks')
+export class ChecksController {
+  constructor(private readonly checksService: ChecksService) {}
+
+  /** 脚本自动联想：扫描 .check.ts 文件；传 projectId 时限定在项目的脚本目录下（须声明在 :id 之前） */
+  @Get('scripts')
+  listScripts(
+    @Query('q') keyword?: string,
+    @Query('projectId') projectId?: string,
+  ): Promise<string[]> {
+    return this.checksService.listScripts(
+      keyword,
+      projectId === undefined ? undefined : Number(projectId),
+    );
+  }
+
+  @Get()
+  findByProject(
+    @Query('projectId', ParseIntPipe) projectId: number,
+  ): Promise<Check[]> {
+    return this.checksService.findByProject(projectId);
+  }
+
+  @Get(':id')
+  findOne(@Param('id', ParseIntPipe) id: number): Promise<Check> {
+    return this.checksService.findOne(id);
+  }
+
+  @Post()
+  create(@Body() dto: CreateCheckDto): Promise<Check> {
+    return this.checksService.create(dto);
+  }
+
+  /** 自动导入：扫描项目脚本目录下所有 .check.ts，过滤已登记的，其余全部导入 */
+  @Post('import')
+  importFromScripts(
+    @Body() dto: ImportChecksDto,
+  ): Promise<{ created: Check[]; skipped: number }> {
+    return this.checksService.importFromScripts(dto.projectId);
+  }
+
+  @Patch(':id')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateCheckDto,
+  ): Promise<Check> {
+    return this.checksService.update(id, dto);
+  }
+
+  /** 启动一次脚本运行：立即返回 running 记录，脚本后台异步执行，前端轮询 getRun 获取进度 */
+  @Post(':id/runs')
+  startRun(@Param('id', ParseIntPipe) id: number): Promise<CheckRun> {
+    return this.checksService.startRun(id);
+  }
+
+  /** 运行历史（倒序，上限 50；须声明在 :id 之前避免路由冲突） */
+  @Get(':id/runs')
+  listRuns(@Param('id', ParseIntPipe) id: number): Promise<CheckRun[]> {
+    return this.checksService.listRuns(id);
+  }
+
+  /** 单次运行详情（含实时进度与完整结果；须声明在 :id 之前） */
+  @Get('runs/:runId')
+  findRun(@Param('runId', ParseIntPipe) runId: number): Promise<CheckRun> {
+    return this.checksService.findRun(runId);
+  }
+
+  /** 单次运行的 SSE 实时流：先推当前快照，进度变化持续推送，终态推送后自动完成 */
+  @Sse('runs/:runId/stream')
+  streamRun(
+    @Param('runId', ParseIntPipe) runId: number,
+  ): Observable<MessageEvent> {
+    return this.checksService.streamRun(runId);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
+    return this.checksService.remove(id);
+  }
+}

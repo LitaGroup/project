@@ -1,0 +1,11 @@
+{
+  "name": "ai-pmp",
+  "private": true,
+  "scripts": {
+    "dev:backend": "pnpm -C backend start:dev",
+    "dev:frontend": "pnpm -C frontend dev",
+    "build": "pnpm -C backend build && pnpm -C frontend build",
+    "lint": "pnpm -C backend lint && pnpm -C frontend lint",
+    "test": "pnpm -C backend test"
+  }
+}
