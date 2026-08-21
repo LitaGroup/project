@@ -47,6 +47,7 @@ import {
   type ProjectStatus,
 } from '../lib/api'
 import { StatusBadge } from '../components/StatusBadge'
+import { TypeBadge, PriorityBadge } from '../components/ProjectBadges'
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -211,11 +212,11 @@ export function ProjectsPage() {
               <TableCell>{p.id}</TableCell>
               <TableCell className="max-w-md truncate" title={p.name}>{p.name}</TableCell>
               <TableCell className="text-center">
-                <Badge variant="secondary">{p.type}</Badge>
+                <TypeBadge type={p.type} />
               </TableCell>
               <TableCell className="text-center">
                 {p.priority ? (
-                  <Badge variant="primary-outline">{p.priority}</Badge>
+                  <PriorityBadge priority={p.priority} />
                 ) : (
                   '—'
                 )}
