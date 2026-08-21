@@ -126,8 +126,11 @@ export class ProjectSyncService {
 
   private async upsert(record: BitableRecord): Promise<void> {
     const f = record.fields;
-    const name = extractText(f['需求']);
-    if (!name) return; // 无标题的记录跳过
+    const fullText = extractText(f['需求']);
+    if (!fullText) return; // 无标题的记录跳过
+    // "需求"主字段可能存整段文档文本，取首行作为项目标题（列宽 varchar(200)）
+    const firstLine = fullText.split('\n')[0].trim();
+    const name = firstLine.length > 200 ? firstLine.slice(0, 200) : firstLine;
 
     const project =
       (await this.projects.findOne({
@@ -135,6 +138,7 @@ export class ProjectSyncService {
       })) ?? this.projects.create({ feishuRecordId: record.record_id });
 
     project.name = name;
+    project.description = fullText !== name ? fullText : null;
     project.type = toProjectType(f['需求类型']);
     project.priority = typeof f['优先级'] === 'string' ? f['优先级'] : null;
     project.expectedReleaseAt = extractDate(f['理想上线时间']);
