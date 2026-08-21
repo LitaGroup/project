@@ -30,8 +30,8 @@ TypeORM `synchronize` 仅在非 production 开启，**上生产前必须改 migr
 
 - `docs/`：项目文档与资料（现有 `product-overview.md`）
 - `frontend/`：前端代码，入口 `src/main.tsx`（ThemeProvider）、路由 `src/App.tsx`（react-router v7）
-  - `src/components/Layout.tsx`：顶栏 + 左侧导航 + 内容区布局；`StatusBadge.tsx`：状态 → Badge variant 映射
-  - `src/pages/`：`OverviewPage`（/，AI 用法说明 + 进行中项目）、`ProjectsPage`（/projects，列表 + 新建/删除）、`ProjectDetailPage`（/projects/:id，项目信息 + 文档列表 + 检查列表 + 测试列表 + 任务列表）、`CheckRunPage`/`TestRunPage`（检查/测试运行详情）、`TaskDetailPage`（/projects/:id/tasks/:taskId，任务详情：任务信息 + 该任务触发的运行）、`SettingsPage`（/settings，设置：脚本目录 + 访问域名）
+  - `src/components/Layout.tsx`：顶栏 + 左侧导航（概览/项目/用例/检查/缺陷(占位)/文档/脚本/任务/设置）+ 内容区布局；`StatusBadge.tsx`：状态 → Badge variant 映射；`ResourceListPage.tsx`：全局列表页骨架（名称 + 所属项目两列，项目名经 /projects 映射）
+  - `src/pages/`：`OverviewPage`（/，AI 用法说明 + 进行中项目）、`ProjectsPage`（/projects，列表 + 新建/删除）、`ProjectDetailPage`（/projects/:id，项目信息 + 文档列表 + 检查列表 + 测试列表 + 任务列表）、`CheckRunPage`/`TestRunPage`（检查/测试运行详情）、`TaskDetailPage`（/projects/:id/tasks/:taskId，任务详情：任务信息 + 该任务触发的运行）、`TestsPage`/`ChecksPage`/`DocumentsPage`/`TasksPage`（/tests、/checks、/documents、/tasks 全局列表页：名称 + 所属项目）、`ScriptsPage`（/scripts，脚本根目录下全部 .check.ts/.test.ts，所属项目取登记了该脚本的检查/用例，未登记显示 —）、`SettingsPage`（/settings，设置：脚本目录 + 访问域名）。全局列表数据走 `GET /api/{checks,tests,documents,tasks}`（projectId 均可选，不传返回全部）
   - `src/lib/api.ts`：API 客户端与类型，枚举与后端 `common/enums.ts` 保持同步
 - `backend/`：后端代码，入口 `src/main.ts`（全局前缀 `/api`、CORS 全开）
   - **`.md` URL 规范**：路径加 `.md` 后缀返回 Markdown 视图（`text/markdown`）。`GET /api/documents/:id.md`（文档元信息 + 正文）；`GET /api/projects/:id.md`（项目描述 + 文档/检查/测试/任务清单，文档条目链接到其 `.md`，检查/测试条目附运行端点，末尾"AI 操作"小节说明用法）。路由须声明在 `:id` 之前避免参数匹配冲突
@@ -66,7 +66,7 @@ TypeORM `synchronize` 仅在非 production 开启，**上生产前必须改 migr
 - **飞书同步永远单向**。`FeishuService` 只保留读方法，任何"回写飞书"都是需求变更，先确认。
 - **飞书导入的文档不允许本地修改正文**（`updateContent` 会 403），只能通过"更新同步"从源拉取覆盖；`remark`（备注，供 AI 阅读）任何来源都可编辑。
 - **导入内容统一为 Markdown**：docx 块级转换（图片块暂不导入，输出 `*[图片暂不导入]*` 占位）；sheets 只导链接 `?sheet=` 指定的工作表；bitable 只导 `?table=` 指定的数据表（`?view=` 生效）。判重 key 含子标识：`docx:<id>` / `sheets:<token>#<sheetId>` / `bitable:<token>#<tableId>`，同一表格不同 sheet 互不覆盖。
-- 测试管理 / 检查管理（/checks 全局页）/ 文档管理为"待补充"模块：前端已占位（Badge 标记），**需求未定义，勿自行实现**，先向用户确认范围。（项目级"检查"与"测试"板块已实现，见领域模型；这里指左侧导航的全局管理页）
+- 缺陷管理为"待补充"模块：前端已占位（Badge 标记），**需求未定义，勿自行实现**，先向用户确认范围。（用例/检查/文档/脚本/任务的全局列表页已实现，仅"名称 + 所属项目"两列，见目录结构；这里指左侧导航的缺陷页）
 - 飞书链接解析支持 `docx/docs/sheets/base/wiki` 五种路径；wiki 节点先经 `resolveWiki` 转成实际资源（query 参数如 sheet/table/view 会从原链接透传）。
 - bitable `records/search` 必须传 `automatic_fields: true`，否则响应没有记录级 `last_modified_time`（增量同步依赖它）。
 - **飞书 token 统一从 Lita 平台 API 获取**（`POST {LITA_API_HOST}/admin-ai/v1/auth/platform-token/getToken`，header `L-USER-TOKEN`，测试/生产一致），`FeishuService` 启动预热 + 每 30 分钟定时刷新（`@Cron`）；兜底才是 `FEISHU_APP_ID/SECRET` 自建应用模式。不要再引入静态 token。

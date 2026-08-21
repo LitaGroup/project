@@ -62,9 +62,10 @@ export class TestsService {
     );
   }
 
-  findByProject(projectId: number): Promise<Test[]> {
+  /** 按项目列出测试；不传 projectId 时返回全部（全局列表页用） */
+  findByProject(projectId?: number): Promise<Test[]> {
     return this.tests.find({
-      where: { projectId },
+      where: projectId === undefined ? {} : { projectId },
       order: { updatedAt: 'DESC' },
     });
   }

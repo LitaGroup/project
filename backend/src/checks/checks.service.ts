@@ -67,9 +67,10 @@ export class ChecksService {
     );
   }
 
-  findByProject(projectId: number): Promise<Check[]> {
+  /** 按项目列出检查；不传 projectId 时返回全部（全局列表页用） */
+  findByProject(projectId?: number): Promise<Check[]> {
     return this.checks.find({
-      where: { projectId },
+      where: projectId === undefined ? {} : { projectId },
       order: { updatedAt: 'DESC' },
     });
   }

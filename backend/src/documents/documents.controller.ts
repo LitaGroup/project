@@ -34,11 +34,12 @@ class SyncFeishuDocumentDto {
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
 
+  /** 文档列表：传 projectId 按项目过滤，不传返回全部 */
   @Get()
-  findByProject(
-    @Query('projectId', ParseIntPipe) projectId: number,
-  ): Promise<Document[]> {
-    return this.documentsService.findByProject(projectId);
+  findByProject(@Query('projectId') projectId?: string): Promise<Document[]> {
+    return this.documentsService.findByProject(
+      projectId === undefined ? undefined : Number(projectId),
+    );
   }
 
   /** Markdown 视图（须声明在 :id 之前，避免 :id 匹配到带 .md 后缀的路径） */

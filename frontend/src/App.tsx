@@ -7,6 +7,11 @@ import { DocumentDetailPage } from './pages/DocumentDetailPage'
 import { CheckRunPage } from './pages/CheckRunPage'
 import { TestRunPage } from './pages/TestRunPage'
 import { TaskDetailPage } from './pages/TaskDetailPage'
+import { TestsPage } from './pages/TestsPage'
+import { ChecksPage } from './pages/ChecksPage'
+import { DocumentsPage } from './pages/DocumentsPage'
+import { ScriptsPage } from './pages/ScriptsPage'
+import { TasksPage } from './pages/TasksPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
@@ -29,7 +34,12 @@ function App() {
             path="/projects/:id/tasks/:taskId"
             element={<TaskDetailPage />}
           />
+          <Route path="/tests" element={<TestsPage />} />
+          <Route path="/checks" element={<ChecksPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
+          <Route path="/scripts" element={<ScriptsPage />} />
+          <Route path="/tasks" element={<TasksPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

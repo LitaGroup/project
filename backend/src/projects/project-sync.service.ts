@@ -106,7 +106,9 @@ export class ProjectSyncService {
       viewId,
     );
     // search 接口 automatic_fields 的 last_modified_time 为微秒，需 /1000 转毫秒
-    const fresh = records.filter((r) => (r.last_modified_time ?? 0) / 1000 >= since);
+    const fresh = records.filter(
+      (r) => (r.last_modified_time ?? 0) / 1000 >= since,
+    );
 
     for (const record of fresh) {
       await this.upsert(record);

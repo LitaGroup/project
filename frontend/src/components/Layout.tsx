@@ -7,13 +7,16 @@ import {
 import { NavigationLink } from '@appica/ui-react/navigation'
 import { Badge } from '@appica/ui-react/badge'
 
-/** 与 AGENTS.md 模块全景一致："待补充"模块仅占位，不实现 */
+/** 导航项；"待补充"模块仅占位（缺陷后续实现），不实现 */
 const navItems = [
   { to: '/', label: '概览', ready: true },
   { to: '/projects', label: '项目', ready: true },
-  { to: '/tests', label: '测试管理', ready: false },
-  { to: '/checks', label: '检查管理', ready: false },
-  { to: '/docs', label: '文档管理', ready: false },
+  { to: '/tests', label: '用例', ready: true },
+  { to: '/checks', label: '检查', ready: true },
+  { to: '/defects', label: '缺陷', ready: false },
+  { to: '/documents', label: '文档', ready: true },
+  { to: '/scripts', label: '脚本', ready: true },
+  { to: '/tasks', label: '任务', ready: true },
   { to: '/settings', label: '设置', ready: true },
 ]
 

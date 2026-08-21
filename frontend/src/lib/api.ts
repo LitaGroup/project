@@ -238,6 +238,11 @@ export const api = {
       body: JSON.stringify({ remark }),
     }),
   getDocument: (id: number) => request<ProjectDocument>(`/documents/${id}`),
+  /** 文档列表：传 projectId 按项目过滤，不传返回全部 */
+  listDocuments: (projectId?: number) =>
+    request<ProjectDocument[]>(
+      `/documents${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
   updateDocumentContent: (id: number, content: string) =>
     request<ProjectDocument>(`/documents/${id}/content`, {
       method: 'PATCH',
@@ -280,8 +285,11 @@ export const api = {
       body: JSON.stringify({ projectId }),
     }),
   getCheck: (id: number) => request<ProjectCheck>(`/checks/${id}`),
-  listChecks: (projectId: number) =>
-    request<ProjectCheck[]>(`/checks?projectId=${projectId}`),
+  /** 检查列表：传 projectId 按项目过滤，不传返回全部 */
+  listChecks: (projectId?: number) =>
+    request<ProjectCheck[]>(
+      `/checks${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
   /** 启动一次脚本运行：立即返回 running 记录，脚本后台异步执行 */
   startCheckRun: (checkId: number) =>
     request<CheckRun>(`/checks/${checkId}/runs`, { method: 'POST' }),
@@ -325,6 +333,11 @@ export const api = {
       body: JSON.stringify({ projectId }),
     }),
   getTest: (id: number) => request<ProjectTest>(`/tests/${id}`),
+  /** 测试列表：传 projectId 按项目过滤，不传返回全部 */
+  listTests: (projectId?: number) =>
+    request<ProjectTest[]>(
+      `/tests${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
   /** 启动一次测试脚本运行：立即返回 running 记录，脚本后台异步执行 */
   startTestRun: (testId: number) =>
     request<TestRun>(`/tests/${testId}/runs`, { method: 'POST' }),
@@ -333,8 +346,10 @@ export const api = {
     request<TestRun[]>(`/tests/${testId}/runs`),
   /** 单次测试运行详情（含实时进度，运行中轮询） */
   getTestRun: (runId: number) => request<TestRun>(`/tests/runs/${runId}`),
-  listTasks: (projectId: number) =>
-    request<ProjectTask[]>(`/tasks?projectId=${projectId}`),
+  listTasks: (projectId?: number) =>
+    request<ProjectTask[]>(
+      `/tasks${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
   createTask: (input: {
     projectId: number
     title: string

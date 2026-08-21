@@ -56,9 +56,10 @@ export class TasksService implements OnModuleInit {
     }
   }
 
-  async findByProject(projectId: number): Promise<TaskView[]> {
+  /** 按项目列出任务；不传 projectId 时返回全部（全局列表页用） */
+  async findByProject(projectId?: number): Promise<TaskView[]> {
     const tasks = await this.tasks.find({
-      where: { projectId },
+      where: projectId === undefined ? {} : { projectId },
       order: { updatedAt: 'DESC' },
     });
     return tasks.map((t) => this.withNextRun(t));

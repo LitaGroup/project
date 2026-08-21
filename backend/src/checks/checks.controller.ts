@@ -56,11 +56,12 @@ export class ChecksController {
     );
   }
 
+  /** 检查列表：传 projectId 按项目过滤，不传返回全部 */
   @Get()
-  findByProject(
-    @Query('projectId', ParseIntPipe) projectId: number,
-  ): Promise<Check[]> {
-    return this.checksService.findByProject(projectId);
+  findByProject(@Query('projectId') projectId?: string): Promise<Check[]> {
+    return this.checksService.findByProject(
+      projectId === undefined ? undefined : Number(projectId),
+    );
   }
 
   @Get(':id')

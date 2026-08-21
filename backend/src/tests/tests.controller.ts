@@ -56,11 +56,12 @@ export class TestsController {
     );
   }
 
+  /** 测试列表：传 projectId 按项目过滤，不传返回全部 */
   @Get()
-  findByProject(
-    @Query('projectId', ParseIntPipe) projectId: number,
-  ): Promise<Test[]> {
-    return this.testsService.findByProject(projectId);
+  findByProject(@Query('projectId') projectId?: string): Promise<Test[]> {
+    return this.testsService.findByProject(
+      projectId === undefined ? undefined : Number(projectId),
+    );
   }
 
   @Get(':id')

@@ -17,9 +17,10 @@ export class DocumentsService {
     private readonly feishu: FeishuService,
   ) {}
 
-  findByProject(projectId: number): Promise<Document[]> {
+  /** 按项目列出文档；不传 projectId 时返回全部（全局列表页用） */
+  findByProject(projectId?: number): Promise<Document[]> {
     return this.documents.find({
-      where: { projectId },
+      where: projectId === undefined ? {} : { projectId },
       order: { updatedAt: 'DESC' },
     });
   }

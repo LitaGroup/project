@@ -35,11 +35,12 @@ class UpdateTaskDto {
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
+  /** 任务列表：传 projectId 按项目过滤，不传返回全部 */
   @Get()
-  findByProject(
-    @Query('projectId', ParseIntPipe) projectId: number,
-  ): Promise<TaskView[]> {
-    return this.tasksService.findByProject(projectId);
+  findByProject(@Query('projectId') projectId?: string): Promise<TaskView[]> {
+    return this.tasksService.findByProject(
+      projectId === undefined ? undefined : Number(projectId),
+    );
   }
 
   /** 任务触发的运行历史（倒序，上限 50） */
