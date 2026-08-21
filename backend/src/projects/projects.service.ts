@@ -13,7 +13,10 @@ import { TestsService } from '../tests/tests.service';
 import { Test } from '../tests/test.entity';
 import { TasksService } from '../tasks/tasks.service';
 import { Task } from '../tasks/task.entity';
-import { DocumentsService } from '../documents/documents.service';
+import {
+  DOCUMENT_LIST_SELECT,
+  DocumentsService,
+} from '../documents/documents.service';
 import { Document } from '../documents/document.entity';
 import { Project } from './project.entity';
 
@@ -53,7 +56,11 @@ export class ProjectsService {
     if (!project) throw new NotFoundException(`Project ${id} not found`);
     const { manager } = this.projects;
     const [documents, checks, tests, tasks] = await Promise.all([
-      manager.find(Document, { where: { projectId: id } }),
+      // 文档列表不取 longtext 正文（列表展示只需元信息）
+      manager.find(Document, {
+        where: { projectId: id },
+        select: DOCUMENT_LIST_SELECT,
+      }),
       manager.find(Check, { where: { projectId: id } }),
       manager.find(Test, { where: { projectId: id } }),
       manager.find(Task, { where: { projectId: id } }),

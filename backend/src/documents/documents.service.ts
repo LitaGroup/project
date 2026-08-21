@@ -4,10 +4,28 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsSelect, Repository } from 'typeorm';
 import { DocumentSource, DocumentType } from '../common/enums';
 import { FeishuService } from '../feishu/feishu.service';
 import { Document } from './document.entity';
+
+/**
+ * 列表查询不取 longtext 正文：列表页只需元信息，正文经 GET /documents/:id 单独加载。
+ * 全量返回正文会让 /api/documents 与项目详情的关系数据背上全部 Markdown 内容。
+ */
+export const DOCUMENT_LIST_SELECT: FindOptionsSelect<Document> = {
+  id: true,
+  title: true,
+  type: true,
+  source: true,
+  description: true,
+  remark: true,
+  feishuUrl: true,
+  feishuToken: true,
+  projectId: true,
+  createdAt: true,
+  updatedAt: true,
+};
 
 @Injectable()
 export class DocumentsService {
@@ -17,11 +35,12 @@ export class DocumentsService {
     private readonly feishu: FeishuService,
   ) {}
 
-  /** 按项目列出文档；不传 projectId 时返回全部（全局列表页用） */
+  /** 按项目列出文档；不传 projectId 时返回全部（全局列表页用）。不含正文 */
   findByProject(projectId?: number): Promise<Document[]> {
     return this.documents.find({
       where: projectId === undefined ? {} : { projectId },
       order: { updatedAt: 'DESC' },
+      select: DOCUMENT_LIST_SELECT,
     });
   }
 

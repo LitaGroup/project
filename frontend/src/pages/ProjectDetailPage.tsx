@@ -65,6 +65,7 @@ import {
 } from '../lib/api'
 import { StatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { RunStats } from '../components/RunStats'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -1275,9 +1276,7 @@ function TasksSection({ project }: { project: Project }) {
                   )}
                 </TableCell>
                 <TableCell title="成功/失败/总运行次数（失败含异常）">
-                  {t.runStats
-                    ? `${t.runStats.success}/${t.runStats.fail}/${t.runStats.total}`
-                    : '—'}
+                  {t.runStats ? <RunStats stats={t.runStats} /> : '—'}
                 </TableCell>
                 <TableCell className="text-center">
                   <div className="flex justify-center gap-2">

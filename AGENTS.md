@@ -30,14 +30,14 @@ TypeORM `synchronize` 仅在非 production 开启，**上生产前必须改 migr
 
 - `docs/`：项目文档与资料（现有 `product-overview.md`）
 - `frontend/`：前端代码，入口 `src/main.tsx`（ThemeProvider）、路由 `src/App.tsx`（react-router v7）
-  - `src/components/Layout.tsx`：顶栏 + 左侧导航（概览/项目/用例/检查/缺陷(占位)/文档/脚本/任务/设置）+ 内容区布局；`StatusBadge.tsx`：状态 → Badge variant 映射；`ResourceListPage.tsx`：全局列表页骨架（名称 + 所属项目两列，项目名经 /projects 映射）；`PageBreadcrumb.tsx`：页面顶部面包屑（全局列表 → 所属项目 → 当前页，详情页统一使用，替代原"返回项目详情"链接）
-  - `src/pages/`：`OverviewPage`（/，AI 用法说明 + 进行中项目）、`ProjectsPage`（/projects，列表 + 新建/删除）、`ProjectDetailPage`（/projects/:id，项目信息 + 文档列表 + 检查列表 + 测试列表 + 任务列表）、`CheckRunPage`/`TestRunPage`（检查/测试运行详情）、`TaskDetailPage`（/projects/:id/tasks/:taskId，任务详情：任务信息 + 该任务触发的运行）、`TestsPage`/`ChecksPage`/`DocumentsPage`/`TasksPage`（/tests、/checks、/documents、/tasks 全局列表页：名称 + 所属项目）、`ScriptsPage`（/scripts，脚本根目录下全部 .check.ts/.test.ts，所属项目取登记了该脚本的检查/用例，未登记显示 —）、`SettingsPage`（/settings，设置：脚本目录 + 访问域名）。全局列表数据走 `GET /api/{checks,tests,documents,tasks}`（projectId 均可选，不传返回全部）
+  - `src/components/Layout.tsx`：顶栏 + 左侧导航（概览/项目/用例/检查/缺陷(占位)/文档/脚本/任务/设置）+ 内容区布局；`StatusBadge.tsx`：状态 → Badge variant 映射；`PageBreadcrumb.tsx`：页面顶部面包屑（全局列表 → 所属项目 → 当前页，详情页统一使用，替代原"返回项目详情"链接）；`RunStats.tsx`：运行统计展示（success 绿 / fail 大于 0 红、为 0 绿 / total 默认色，任务列表与项目详情任务表共用）
+  - `src/pages/`：`OverviewPage`（/，AI 用法说明 + 进行中项目）、`ProjectsPage`（/projects，列表 + 新建/删除）、`ProjectDetailPage`（/projects/:id，项目信息 + 文档列表 + 检查列表 + 测试列表 + 任务列表）、`CheckRunPage`/`TestRunPage`（检查/测试运行详情）、`TaskDetailPage`（/projects/:id/tasks/:taskId，任务详情：任务信息 + 该任务触发的运行）、`TestsPage`/`ChecksPage`（/tests、/checks 全局列表：编号/描述/脚本/项目四列，支持编号、描述、脚本名模糊搜索）、`DocumentsPage`（/documents 全局文档列表：标题/类型/来源/项目四列，支持标题模糊搜索 + 类型/来源筛选，来源 `-` 显示为"手写"）、`TasksPage`（/tasks 全局任务列表：标题/计划/脚本/项目/运行五列，运行列展示 success/fail/total 统计，支持标题与脚本名模糊搜索）、`ScriptsPage`（/scripts，脚本根目录下全部 .check.ts/.test.ts，脚本/类型/项目三列，支持路径模糊搜索，所属项目取登记了该脚本的检查/用例，未登记显示 —）、`SettingsPage`（/settings，设置：脚本目录 + 访问域名）。全局列表数据走 `GET /api/{checks,tests,documents,tasks}`（projectId 均可选，不传返回全部）
   - `src/lib/api.ts`：API 客户端与类型，枚举与后端 `common/enums.ts` 保持同步
 - `backend/`：后端代码，入口 `src/main.ts`（全局前缀 `/api`、CORS 全开）
   - **`.md` URL 规范**：路径加 `.md` 后缀返回 Markdown 视图（`text/markdown`）。`GET /api/documents/:id.md`（文档元信息 + 正文）；`GET /api/projects/:id.md`（项目描述 + 文档/检查/测试/任务清单，文档条目链接到其 `.md`，检查/测试条目附运行端点，末尾"AI 操作"小节说明用法）。路由须声明在 `:id` 之前避免参数匹配冲突
   - `src/common/enums.ts`：领域枚举（见下，勿改名）
   - `src/feishu/`：飞书只读客户端 + `GET /api/feishu/read?url=` 预览
-  - `src/projects/` / `src/documents/`：实体与 CRUD，`POST /api/documents/sync-feishu` 为一键同步入口
+  - `src/projects/` / `src/documents/`：实体与 CRUD，`POST /api/documents/sync-feishu` 为一键同步入口；文档列表查询（`GET /api/documents`、项目详情的关系数据）用 `DOCUMENT_LIST_SELECT` 排除 longtext 正文，正文仅经 `GET /api/documents/:id` 单独返回
   - `src/checks/`：检查（Check）登记管理，`GET /api/checks/scripts?q=` 扫描脚本目录供自动联想
   - `src/tests/`：测试（Test），与检查结构一致（登记/自动导入/运行/SSE/历史），唯一区别是脚本后缀为 `.test.ts`，表为 `tests` / `test_runs`
   - `src/tasks/`：任务（Task），定时调度检查脚本（见领域模型"任务"）
