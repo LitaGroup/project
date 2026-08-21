@@ -6,6 +6,8 @@ import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { DocumentDetailPage } from './pages/DocumentDetailPage'
 import { CheckRunPage } from './pages/CheckRunPage'
 import { TestRunPage } from './pages/TestRunPage'
+import { TaskDetailPage } from './pages/TaskDetailPage'
+import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
   return (
@@ -23,7 +25,12 @@ function App() {
             path="/projects/:id/tests/:testId"
             element={<TestRunPage />}
           />
+          <Route
+            path="/projects/:id/tasks/:taskId"
+            element={<TaskDetailPage />}
+          />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

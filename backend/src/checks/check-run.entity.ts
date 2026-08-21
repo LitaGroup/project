@@ -81,4 +81,8 @@ export class CheckRun {
 
   @Column()
   checkId: number;
+
+  /** 触发来源任务（tasks 表 id；手动运行为 null）。仅记 id 不建关系，任务删除后运行记录保留 */
+  @Column({ type: 'int', nullable: true })
+  taskId: number | null;
 }

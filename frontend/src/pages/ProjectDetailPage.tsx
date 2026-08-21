@@ -60,14 +60,10 @@ import {
   type Project,
   type ProjectCheck,
   type ProjectDocument,
+  type ProjectTask,
   type ProjectTest,
 } from '../lib/api'
 import { StatusBadge } from '../components/StatusBadge'
-
-/** 内容区各板块：文档/检查/测试已可用，其余为占位（后端能力待定义，见 AGENTS.md） */
-const placeholderSections = [
-  { key: 'tasks', label: '任务', hint: '定时任务（待实现）' },
-]
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -130,20 +126,9 @@ export function ProjectDetailPage() {
           <TestsPanel project={project} onChanged={reload} />
         </section>
 
-        {placeholderSections.map((section) => (
-          <section key={section.key}>
-            <div className="mb-3 flex items-center gap-2">
-              <h2 className="text-xl font-semibold">{section.label}</h2>
-              <Badge variant="light">待实现</Badge>
-            </div>
-            <Card>
-              <CardHeader>
-                <CardTitle>{section.label}</CardTitle>
-                <CardDescription>{section.hint}</CardDescription>
-              </CardHeader>
-            </Card>
-          </section>
-        ))}
+        <section>
+          <TasksSection project={project} />
+        </section>
       </div>
 
       {/* 右侧：项目详情 */}
@@ -1195,6 +1180,270 @@ function DeleteTestButton({
           <AlertDialogTitle>删除测试</AlertDialogTitle>
           <AlertDialogDescription>
             确定删除测试「{test.code}」吗？只删除登记信息，不影响脚本文件本身。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </AlertDialogClose>
+          <AlertDialogClose>
+            <Button variant="destructive" onClick={onDeleted}>
+              确认删除
+            </Button>
+          </AlertDialogClose>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/** 任务板块：列表经 /api/tasks 独立拉取（含实时计算的下次执行时间），不随项目详情关系加载 */
+function TasksSection({ project }: { project: Project }) {
+  const [tasks, setTasks] = useState<ProjectTask[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const reload = useCallback(() => {
+    api
+      .listTasks(project.id)
+      .then(setTasks)
+      .catch((e: Error) => setError(e.message))
+  }, [project.id])
+
+  useEffect(reload, [reload])
+
+  const checks = project.checks ?? []
+  const checkOf = (checkId: number) => checks.find((c) => c.id === checkId)
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xl font-semibold">任务</h2>
+        <TaskFormDialog
+          projectId={project.id}
+          checks={project.checks ?? []}
+          onSaved={reload}
+        />
+      </div>
+      {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>标题</TableHead>
+            <TableHead className="w-44">计划</TableHead>
+            <TableHead>脚本</TableHead>
+            <TableHead className="w-24">运行</TableHead>
+            <TableHead className="w-40 text-center">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {(tasks ?? []).map((t) => {
+            const check = checkOf(t.checkId)
+            return (
+              <TableRow key={t.id}>
+                <TableCell className="max-w-md truncate" title={t.title}>
+                  <Link
+                    to={`/projects/${project.id}/tasks/${t.id}`}
+                    className="underline"
+                  >
+                    {t.title}
+                  </Link>
+                </TableCell>
+                <TableCell title={`执行周期：${t.cron}`}>
+                  {t.nextRunAt ? new Date(t.nextRunAt).toLocaleString() : '—'}
+                </TableCell>
+                <TableCell className="max-w-md truncate">
+                  {check ? (
+                    <Link
+                      to={`/projects/${project.id}/checks/${check.id}`}
+                      className="underline"
+                      title={check.scriptPath}
+                    >
+                      {check.code}
+                    </Link>
+                  ) : (
+                    `#${t.checkId}`
+                  )}
+                </TableCell>
+                <TableCell>{t.runCount} 次</TableCell>
+                <TableCell className="text-center">
+                  <div className="flex justify-center gap-2">
+                    <TaskFormDialog
+                      projectId={project.id}
+                      checks={checks}
+                      task={t}
+                      onSaved={reload}
+                    />
+                    <DeleteTaskButton
+                      task={t}
+                      onDeleted={() =>
+                        api
+                          .deleteTask(t.id)
+                          .then(reload)
+                          .catch((e: Error) => setError(e.message))
+                      }
+                    />
+                  </div>
+                </TableCell>
+              </TableRow>
+            )
+          })}
+          {tasks !== null && tasks.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5}>暂无任务</TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </>
+  )
+}
+
+/** 新建/编辑任务：标题 + crontab 表达式 + 使用的检查脚本（本项目已登记检查）；任务详情页复用 */
+export function TaskFormDialog({
+  projectId,
+  checks,
+  task,
+  onSaved,
+}: {
+  projectId: number
+  /** 可选的检查脚本（本项目已登记检查） */
+  checks: ProjectCheck[]
+  /** 传入则为编辑，否则为新建 */
+  task?: ProjectTask
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState('')
+  const [cron, setCron] = useState('')
+  const [checkId, setCheckId] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  // 打开时初始化表单
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setTitle(task?.title ?? '')
+      setCron(task?.cron ?? '')
+      setCheckId(task ? String(task.checkId) : '')
+      setError(null)
+    }
+  }
+
+  const submit = () => {
+    setError(null)
+    const saving = task
+      ? api.updateTask(task.id, { title, cron, checkId: Number(checkId) })
+      : api.createTask({
+          projectId,
+          title,
+          cron,
+          checkId: Number(checkId),
+        })
+    saving
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        {task ? (
+          <Button variant="outline" size="sm">
+            编辑
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">添加任务</Button>
+        )}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{task ? '编辑任务' : '添加任务'}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-sm">
+              标题
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="如 每小时检查榜单数据"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              执行周期（crontab：分 时 日 月 周，可在最前加"秒"）
+              <Input
+                value={cron}
+                onChange={(e) => setCron(e.target.value)}
+                placeholder="如 */5 * * * *（每 5 分钟）或 */10 * * * * *（每 10 秒）"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              检查脚本（到点自动运行该检查）
+              <Select
+                value={checkId}
+                onValueChange={(v) => setCheckId(v as string)}
+                items={Object.fromEntries(
+                  checks.map((c) => [String(c.id), `${c.code}（${c.scriptPath}）`]),
+                )}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择检查" />
+                </SelectTrigger>
+                <SelectContent>
+                  {checks.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.code}（{c.scriptPath}）
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            {checks.length === 0 && (
+              <p className="text-sm text-foreground-muted">
+                项目还没有登记检查，请先在上方「检查」板块添加
+              </p>
+            )}
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={!title.trim() || !cron.trim() || !checkId}
+          >
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function DeleteTaskButton({
+  task,
+  onDeleted,
+}: {
+  task: ProjectTask
+  onDeleted: () => void
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger>
+        <Button variant="outline" size="sm">
+          删除
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除任务</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除任务「{task.title}」吗？删除后不再定时触发，已产生的检查运行记录保留。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

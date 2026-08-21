@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { ProjectStatus, ProjectType } from '../common/enums';
 import { ChecksService } from '../checks/checks.service';
 import { TestsService } from '../tests/tests.service';
+import { TasksService } from '../tasks/tasks.service';
 import { DocumentsService } from '../documents/documents.service';
 import { Project } from './project.entity';
 
@@ -20,6 +21,9 @@ export interface CreateProjectInput {
   description?: string;
 }
 
+/** 编号的自然排序（数字段按数值比较，如 check-2 < check-10） */
+const codeCollator = new Intl.Collator('zh-Hans', { numeric: true });
+
 @Injectable()
 export class ProjectsService {
   constructor(
@@ -28,6 +32,7 @@ export class ProjectsService {
     private readonly documentsService: DocumentsService,
     private readonly checksService: ChecksService,
     private readonly testsService: TestsService,
+    private readonly tasksService: TasksService,
   ) {}
 
   findAll(): Promise<Project[]> {
@@ -37,9 +42,12 @@ export class ProjectsService {
   async findOne(id: number): Promise<Project> {
     const project = await this.projects.findOne({
       where: { id },
-      relations: { documents: true, checks: true, tests: true },
+      relations: { documents: true, checks: true, tests: true, tasks: true },
     });
     if (!project) throw new NotFoundException(`Project ${id} not found`);
+    // 检查/测试按编号自然排序
+    project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
+    project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
     return project;
   }
 
@@ -78,13 +86,21 @@ export class ProjectsService {
     const checks = project.checks.map((c) => {
       const parts = [`\`${c.code}\`（脚本：${c.scriptPath}）`];
       if (c.description) parts.push(c.description);
+      parts.push(`运行：\`POST /api/checks/${c.id}/run.md\``);
       return `- ${parts.join(' — ')}`;
     });
     const tests = project.tests.map((t) => {
       const parts = [`\`${t.code}\`（脚本：${t.scriptPath}）`];
       if (t.description) parts.push(t.description);
+      parts.push(`运行：\`POST /api/tests/${t.id}/run.md\``);
       return `- ${parts.join(' — ')}`;
     });
+    const checkName = (checkId: number) =>
+      project.checks.find((c) => c.id === checkId)?.code ?? `#${checkId}`;
+    const tasks = project.tasks.map(
+      (t) =>
+        `- **${t.title}**（cron：\`${t.cron}\`，检查：\`${checkName(t.checkId)}\`${t.enabled ? '' : '，已停用'}）`,
+    );
 
     return [
       `# ${project.name}`,
@@ -107,9 +123,18 @@ export class ProjectsService {
       '',
       ...(tests.length > 0 ? tests : ['（暂无）']),
       '',
-      '## 任务',
+      `## 任务（${project.tasks.length}）`,
       '',
-      '（定时任务模块尚未实现）',
+      ...(tasks.length > 0 ? tasks : ['（暂无）']),
+      '',
+      '## AI 操作',
+      '',
+      '运行检查/测试并流式获取结果（text/markdown，运行中逐行返回脚本输出，结束时附"结果"小节）：',
+      '',
+      '```bash',
+      'curl -N -X POST /api/checks/{checkId}/run.md',
+      'curl -N -X POST /api/tests/{testId}/run.md',
+      '```',
       '',
     ].join('\n');
   }
@@ -134,11 +159,13 @@ export class ProjectsService {
   }
 
   /**
-   * 删除项目。测试库无物理外键（见 AGENTS.md），文档/检查/测试需在应用层先清理。
+   * 删除项目。测试库无物理外键（见 AGENTS.md），文档/检查/测试/任务需在应用层先清理。
    */
   async remove(id: number): Promise<void> {
     const project = await this.findOne(id);
     await this.documentsService.removeByProject(project.id);
+    // 任务先于检查清理（任务依赖检查脚本；检查删除时也会再兜底清理）
+    await this.tasksService.removeByProject(project.id);
     await this.checksService.removeByProject(project.id);
     await this.testsService.removeByProject(project.id);
     await this.projects.remove(project);

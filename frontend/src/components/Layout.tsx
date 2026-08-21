@@ -14,6 +14,7 @@ const navItems = [
   { to: '/tests', label: '测试管理', ready: false },
   { to: '/checks', label: '检查管理', ready: false },
   { to: '/docs', label: '文档管理', ready: false },
+  { to: '/settings', label: '设置', ready: true },
 ]
 
 export function Layout() {

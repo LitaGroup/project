@@ -7,8 +7,10 @@ import { AppService } from './app.service';
 import { ProjectsModule } from './projects/projects.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ChecksModule } from './checks/checks.module';
+import { TasksModule } from './tasks/tasks.module';
 import { TestsModule } from './tests/tests.module';
 import { FeishuModule } from './feishu/feishu.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -31,8 +33,10 @@ import { FeishuModule } from './feishu/feishu.module';
     ProjectsModule,
     DocumentsModule,
     ChecksModule,
+    TasksModule,
     TestsModule,
     FeishuModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

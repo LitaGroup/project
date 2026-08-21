@@ -58,6 +58,8 @@ export interface CheckRunItem {
 export interface CheckRun {
   id: number
   checkId: number
+  /** 触发来源任务（定时任务触发时记录；手动运行为 null） */
+  taskId?: number | null
   /** running=执行中；success=全部通过；fail=有失败项；error=脚本异常 */
   status: 'running' | 'success' | 'fail' | 'error'
   /** 总步数（脚本 [start] 上报） */
@@ -136,8 +138,42 @@ export interface Project {
   documents?: ProjectDocument[]
   checks?: ProjectCheck[]
   tests?: ProjectTest[]
+  tasks?: ProjectTask[]
   createdAt: string
   updatedAt: string
+}
+
+/** 任务：按 crontab 表达式定时运行一个已登记的检查脚本 */
+export interface ProjectTask {
+  id: number
+  projectId: number
+  /** 标题 */
+  title: string
+  /** crontab 表达式（5 段：分 时 日 月 周） */
+  cron: string
+  /** 使用的检查脚本（checks 表 id） */
+  checkId: number
+  /** 是否启用（停用的任务不参与调度） */
+  enabled: boolean
+  /** 最近一次触发时间 */
+  lastRunAt: string | null
+  /** 已运行次数（任务触发累计，含失败） */
+  runCount: number
+  /** 下次执行时间（由 cron 表达式实时计算；停用为 null）。经 /tasks 接口返回，项目详情的关系数据不含此字段 */
+  nextRunAt?: string | null
+  /** 未来 5 次执行时间（仅 GET /tasks/:id 返回；停用为 null） */
+  nextRuns?: string[] | null
+  updatedAt: string
+}
+
+/** 平台设置（只读，来源于后端配置文件） */
+export interface Settings {
+  /** 脚本根目录（CHECK_SCRIPTS_DIR） */
+  scriptsDir: string
+  /** 浏览器访问地址 */
+  appUrl: string
+  /** 接口访问地址 */
+  apiUrl: string
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -244,6 +280,8 @@ export const api = {
       body: JSON.stringify({ projectId }),
     }),
   getCheck: (id: number) => request<ProjectCheck>(`/checks/${id}`),
+  listChecks: (projectId: number) =>
+    request<ProjectCheck[]>(`/checks?projectId=${projectId}`),
   /** 启动一次脚本运行：立即返回 running 记录，脚本后台异步执行 */
   startCheckRun: (checkId: number) =>
     request<CheckRun>(`/checks/${checkId}/runs`, { method: 'POST' }),
@@ -295,4 +333,42 @@ export const api = {
     request<TestRun[]>(`/tests/${testId}/runs`),
   /** 单次测试运行详情（含实时进度，运行中轮询） */
   getTestRun: (runId: number) => request<TestRun>(`/tests/runs/${runId}`),
+  listTasks: (projectId: number) =>
+    request<ProjectTask[]>(`/tasks?projectId=${projectId}`),
+  createTask: (input: {
+    projectId: number
+    title: string
+    cron: string
+    checkId: number
+  }) =>
+    request<ProjectTask>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateTask: (
+    id: number,
+    input: Partial<{
+      title: string
+      cron: string
+      checkId: number
+      enabled: boolean
+    }>,
+  ) =>
+    request<ProjectTask>(`/tasks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteTask: (id: number) =>
+    request<void>(`/tasks/${id}`, { method: 'DELETE' }),
+  getTask: (id: number) => request<ProjectTask>(`/tasks/${id}`),
+  /** 任务触发的运行历史（倒序，上限 50） */
+  listTaskRuns: (id: number) => request<CheckRun[]>(`/tasks/${id}/runs`),
+  /** 立即触发一次任务（手动触发不受 enabled 限制），返回启动的运行记录 */
+  runTask: (id: number) =>
+    request<CheckRun>(`/tasks/${id}/run`, { method: 'POST' }),
+  /** 平台设置：脚本目录与访问域名（只读） */
+  getSettings: () => request<Settings>('/settings'),
+  /** 更新脚本仓库：在脚本根目录执行 git pull，返回输出 */
+  pullScripts: () =>
+    request<{ output: string }>('/settings/scripts/pull', { method: 'POST' }),
 }

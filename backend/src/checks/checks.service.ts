@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  forwardRef,
+  Inject,
   Injectable,
   MessageEvent,
   NotFoundException,
@@ -14,6 +16,7 @@ import * as path from 'path';
 import { Observable } from 'rxjs';
 import { In, Repository } from 'typeorm';
 import { Project } from '../projects/project.entity';
+import { TasksService } from '../tasks/tasks.service';
 import { CheckRun, CheckRunItem } from './check-run.entity';
 import { Check } from './check.entity';
 
@@ -54,6 +57,8 @@ export class ChecksService {
     private readonly runs: Repository<CheckRun>,
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
+    @Inject(forwardRef(() => TasksService))
+    private readonly tasksService: TasksService,
     config: ConfigService,
   ) {
     this.scriptsDir = path.resolve(
@@ -156,8 +161,9 @@ export class ChecksService {
 
   async remove(id: number): Promise<void> {
     const check = await this.findOne(id);
-    // 应用层级联：先清运行记录再删登记（无物理外键）
+    // 应用层级联：先清运行记录与依赖该检查的任务，再删登记（无物理外键）
     await this.runs.delete({ checkId: check.id });
+    await this.tasksService.removeByCheck(check.id);
     await this.checks.remove(check);
   }
 
@@ -169,6 +175,9 @@ export class ChecksService {
     });
     if (checks.length > 0) {
       await this.runs.delete({ checkId: In(checks.map((c) => c.id)) });
+      for (const check of checks) {
+        await this.tasksService.removeByCheck(check.id);
+      }
     }
     await this.checks.delete({ projectId });
   }
@@ -176,12 +185,18 @@ export class ChecksService {
   /**
    * 启动一次脚本运行：先落 running 记录并立即返回，脚本在后台异步执行，
    * 运行中实时更新 total/current，结束后落完整结果（前端通过 SSE 实时获取进度）。
+   * taskId 标记触发来源（定时任务），手动运行为空。
    */
-  async startRun(checkId: number): Promise<CheckRun> {
+  async startRun(checkId: number, taskId?: number): Promise<CheckRun> {
     const check = await this.findOne(checkId);
     const absPath = await this.resolveScriptPath(check.scriptPath);
     const run = await this.runs.save(
-      this.runs.create({ checkId, status: 'running', startedAt: new Date() }),
+      this.runs.create({
+        checkId,
+        taskId: taskId ?? null,
+        status: 'running',
+        startedAt: new Date(),
+      }),
     );
     this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
     this.executeRun(run.id, absPath);
@@ -242,6 +257,15 @@ export class ChecksService {
   listRuns(checkId: number): Promise<CheckRun[]> {
     return this.runs.find({
       where: { checkId },
+      order: { id: 'DESC' },
+      take: MAX_RUNS,
+    });
+  }
+
+  /** 某次任务触发的运行历史（倒序，上限 50；任务详情页用） */
+  listRunsByTask(taskId: number): Promise<CheckRun[]> {
+    return this.runs.find({
+      where: { taskId },
       order: { id: 'DESC' },
       take: MAX_RUNS,
     });

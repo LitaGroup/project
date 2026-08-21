@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import { ProjectStatus, ProjectType } from '../common/enums';
 import { Check } from '../checks/check.entity';
+import { Task } from '../tasks/task.entity';
 import { Test } from '../tests/test.entity';
 import { Document } from '../documents/document.entity';
 
@@ -60,6 +61,9 @@ export class Project {
 
   @OneToMany(() => Test, (test) => test.project)
   tests: Test[];
+
+  @OneToMany(() => Task, (task) => task.project)
+  tasks: Task[];
 
   @CreateDateColumn()
   createdAt: Date;

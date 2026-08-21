@@ -10,9 +10,12 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   Sse,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { Observable } from 'rxjs';
+import { streamRunMarkdown } from '../common/run-markdown';
 import { TestRun } from './test-run.entity';
 import { Test } from './test.entity';
 import { TestsService } from './tests.service';
@@ -90,6 +93,30 @@ export class TestsController {
   @Post(':id/runs')
   startRun(@Param('id', ParseIntPipe) id: number): Promise<TestRun> {
     return this.testsService.startRun(id);
+  }
+
+  /**
+   * AI 用：启动一次运行并以 Markdown 流式返回结果（text/markdown）。
+   * 运行中逐行输出脚本原始输出，结束时附"结果"小节；用法见项目 .md 视图。
+   */
+  @Post(':id/run.md')
+  async runMarkdown(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    const test = await this.testsService.findOne(id);
+    const run = await this.testsService.startRun(id);
+    await streamRunMarkdown(
+      res,
+      [
+        `# 运行测试 \`${test.code}\``,
+        '',
+        `- 运行 ID：${run.id}`,
+        `- 脚本：${test.scriptPath}`,
+        `- 详情：/api/tests/runs/${run.id}`,
+      ],
+      this.testsService.streamRun(run.id),
+    );
   }
 
   /** 运行历史（倒序，上限 50；须声明在 :id 之前避免路由冲突） */
