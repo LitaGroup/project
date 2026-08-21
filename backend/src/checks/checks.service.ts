@@ -272,6 +272,45 @@ export class ChecksService {
     });
   }
 
+  /** 各任务的运行统计（任务列表"运行"列用）：fail 含 error，total 为全部运行数 */
+  async runStatsByTasks(
+    taskIds: number[],
+  ): Promise<Map<number, { success: number; fail: number; total: number }>> {
+    const map = new Map<
+      number,
+      { success: number; fail: number; total: number }
+    >();
+    if (taskIds.length === 0) return map;
+    const rows = await this.runs
+      .createQueryBuilder('r')
+      .select('r.taskId', 'taskId')
+      .addSelect(
+        `SUM(CASE WHEN r.status = 'success' THEN 1 ELSE 0 END)`,
+        'success',
+      )
+      .addSelect(
+        `SUM(CASE WHEN r.status IN ('fail', 'error') THEN 1 ELSE 0 END)`,
+        'fail',
+      )
+      .addSelect('COUNT(*)', 'total')
+      .where('r.taskId IN (:...taskIds)', { taskIds })
+      .groupBy('r.taskId')
+      .getRawMany<{
+        taskId: number;
+        success: string;
+        fail: string;
+        total: string;
+      }>();
+    for (const row of rows) {
+      map.set(Number(row.taskId), {
+        success: Number(row.success),
+        fail: Number(row.fail),
+        total: Number(row.total),
+      });
+    }
+    return map;
+  }
+
   async findRun(runId: number): Promise<CheckRun> {
     const run = await this.runs.findOne({ where: { id: runId } });
     if (!run) throw new NotFoundException(`Run ${runId} not found`);

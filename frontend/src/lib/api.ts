@@ -161,6 +161,8 @@ export interface ProjectTask {
   runCount: number
   /** 下次执行时间（由 cron 表达式实时计算；停用为 null）。经 /tasks 接口返回，项目详情的关系数据不含此字段 */
   nextRunAt?: string | null
+  /** 运行统计（成功/失败/总数；失败含 error）。经 /tasks 列表接口返回 */
+  runStats?: { success: number; fail: number; total: number }
   /** 未来 5 次执行时间（仅 GET /tasks/:id 返回；停用为 null） */
   nextRuns?: string[] | null
   updatedAt: string

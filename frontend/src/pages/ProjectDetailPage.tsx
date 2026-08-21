@@ -1274,7 +1274,11 @@ function TasksSection({ project }: { project: Project }) {
                     `#${t.checkId}`
                   )}
                 </TableCell>
-                <TableCell>{t.runCount} 次</TableCell>
+                <TableCell title="成功/失败/总运行次数（失败含异常）">
+                  {t.runStats
+                    ? `${t.runStats.success}/${t.runStats.fail}/${t.runStats.total}`
+                    : '—'}
+                </TableCell>
                 <TableCell className="text-center">
                   <div className="flex justify-center gap-2">
                     <TaskFormDialog

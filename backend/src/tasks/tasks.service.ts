@@ -29,8 +29,19 @@ export interface UpdateTaskInput {
   enabled?: boolean;
 }
 
-/** 任务视图：实体字段 + 由 cron 表达式实时计算的下次执行时间（不落库） */
-export type TaskView = Task & { nextRunAt: string | null };
+/** 任务的运行统计：fail 含 error，total 为全部运行数 */
+export interface TaskRunStats {
+  success: number;
+  fail: number;
+  total: number;
+}
+
+/** 任务视图：实体字段 + 由 cron 表达式实时计算的下次执行时间（不落库）；
+ * runStats 仅列表接口（findByProject）附带 */
+export type TaskView = Task & {
+  nextRunAt: string | null;
+  runStats?: TaskRunStats;
+};
 
 /** 任务详情视图：额外带未来 5 次执行时间（任务详情页"计划"用；停用为 null） */
 export type TaskDetailView = TaskView & { nextRuns: string[] | null };
@@ -56,13 +67,20 @@ export class TasksService implements OnModuleInit {
     }
   }
 
-  /** 按项目列出任务；不传 projectId 时返回全部（全局列表页用） */
+  /** 按项目列出任务；不传 projectId 时返回全部（全局列表页用）。附带各任务的运行统计 */
   async findByProject(projectId?: number): Promise<TaskView[]> {
     const tasks = await this.tasks.find({
       where: projectId === undefined ? {} : { projectId },
       order: { updatedAt: 'DESC' },
     });
-    return tasks.map((t) => this.withNextRun(t));
+    const stats = await this.checksService.runStatsByTasks(
+      tasks.map((t) => t.id),
+    );
+    const empty: TaskRunStats = { success: 0, fail: 0, total: 0 };
+    return tasks.map((t) => ({
+      ...this.withNextRun(t),
+      runStats: stats.get(t.id) ?? empty,
+    }));
   }
 
   async findOne(id: number): Promise<Task> {
