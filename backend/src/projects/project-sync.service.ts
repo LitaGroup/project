@@ -16,7 +16,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** 默认项目源：研发项目管理多维表格（可用 FEISHU_PROJECT_SOURCE_URL 覆盖） */
 const DEFAULT_SOURCE_URL =
-  'https://lita-group.feishu.cn/wiki/wikcn9hxHvxX55gXXH6g35AFknd?table=tblmfWA2DvqQ76Ri&view=vewSFy2jYo';
+  'https://lita-group.feishu.cn/wiki/wikcn9hxHvxX55gXXH6g35AFknd?table=tblmfWA2DvqQ76Ri&view=vewrCaS2Ym';
 
 export interface SyncProjectsResult {
   /** 窗口起点（ISO） */

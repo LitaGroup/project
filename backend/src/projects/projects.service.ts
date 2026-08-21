@@ -8,9 +8,13 @@ import * as path from 'path';
 import { Repository } from 'typeorm';
 import { ProjectStatus, ProjectType } from '../common/enums';
 import { ChecksService } from '../checks/checks.service';
+import { Check } from '../checks/check.entity';
 import { TestsService } from '../tests/tests.service';
+import { Test } from '../tests/test.entity';
 import { TasksService } from '../tasks/tasks.service';
+import { Task } from '../tasks/task.entity';
 import { DocumentsService } from '../documents/documents.service';
+import { Document } from '../documents/document.entity';
 import { Project } from './project.entity';
 
 export interface CreateProjectInput {
@@ -39,12 +43,25 @@ export class ProjectsService {
     return this.projects.find({ order: { createdAt: 'DESC' } });
   }
 
+  /**
+   * 项目 + 关联（文档/检查/测试/任务）。
+   * 不用 relations 巨型 LEFT JOIN：测试 RDS 上该 JOIN 要 ~2.5s，
+   * 拆成并行小查询仅 ~250ms（见 AGENTS.md 工作约定）。
+   */
   async findOne(id: number): Promise<Project> {
-    const project = await this.projects.findOne({
-      where: { id },
-      relations: { documents: true, checks: true, tests: true, tasks: true },
-    });
+    const project = await this.projects.findOne({ where: { id } });
     if (!project) throw new NotFoundException(`Project ${id} not found`);
+    const { manager } = this.projects;
+    const [documents, checks, tests, tasks] = await Promise.all([
+      manager.find(Document, { where: { projectId: id } }),
+      manager.find(Check, { where: { projectId: id } }),
+      manager.find(Test, { where: { projectId: id } }),
+      manager.find(Task, { where: { projectId: id } }),
+    ]);
+    project.documents = documents;
+    project.checks = checks;
+    project.tests = tests;
+    project.tasks = tasks;
     // 检查/测试按编号自然排序
     project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
     project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
