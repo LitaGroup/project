@@ -62,7 +62,7 @@ export class FeishuService implements OnModuleInit {
   constructor(private readonly config: ConfigService) {
     this.http = axios.create({
       baseURL: 'https://open.feishu.cn/open-apis',
-      timeout: 15_000,
+      timeout: 60_000,
     });
   }
 
