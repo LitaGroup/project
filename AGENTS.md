@@ -30,7 +30,7 @@ TypeORM `synchronize` 仅在非 production 开启，**上生产前必须改 migr
 
 - `docs/`：项目文档与资料（现有 `product-overview.md`）
 - `frontend/`：前端代码，入口 `src/main.tsx`（ThemeProvider）、路由 `src/App.tsx`（react-router v7）
-  - `src/components/Layout.tsx`：顶栏 + 左侧导航（概览/项目/用例/检查/缺陷(占位)/文档/脚本/任务/设置）+ 内容区布局；`StatusBadge.tsx`：状态 → Badge variant 映射；`ResourceListPage.tsx`：全局列表页骨架（名称 + 所属项目两列，项目名经 /projects 映射）
+  - `src/components/Layout.tsx`：顶栏 + 左侧导航（概览/项目/用例/检查/缺陷(占位)/文档/脚本/任务/设置）+ 内容区布局；`StatusBadge.tsx`：状态 → Badge variant 映射；`ResourceListPage.tsx`：全局列表页骨架（名称 + 所属项目两列，项目名经 /projects 映射）；`PageBreadcrumb.tsx`：页面顶部面包屑（全局列表 → 所属项目 → 当前页，详情页统一使用，替代原"返回项目详情"链接）
   - `src/pages/`：`OverviewPage`（/，AI 用法说明 + 进行中项目）、`ProjectsPage`（/projects，列表 + 新建/删除）、`ProjectDetailPage`（/projects/:id，项目信息 + 文档列表 + 检查列表 + 测试列表 + 任务列表）、`CheckRunPage`/`TestRunPage`（检查/测试运行详情）、`TaskDetailPage`（/projects/:id/tasks/:taskId，任务详情：任务信息 + 该任务触发的运行）、`TestsPage`/`ChecksPage`/`DocumentsPage`/`TasksPage`（/tests、/checks、/documents、/tasks 全局列表页：名称 + 所属项目）、`ScriptsPage`（/scripts，脚本根目录下全部 .check.ts/.test.ts，所属项目取登记了该脚本的检查/用例，未登记显示 —）、`SettingsPage`（/settings，设置：脚本目录 + 访问域名）。全局列表数据走 `GET /api/{checks,tests,documents,tasks}`（projectId 均可选，不传返回全部）
   - `src/lib/api.ts`：API 客户端与类型，枚举与后端 `common/enums.ts` 保持同步
 - `backend/`：后端代码，入口 `src/main.ts`（全局前缀 `/api`、CORS 全开）

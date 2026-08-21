@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Editor } from '@bytemd/react'
 import gfm from '@bytemd/plugin-gfm'
 import zhHans from 'bytemd/locales/zh_Hans.json'
@@ -19,12 +19,14 @@ import {
   AlertDialogClose,
 } from '@appica/ui-react/alert-dialog'
 import { api, type DocumentType, type ProjectDocument } from '../lib/api'
+import { PageBreadcrumb } from '../components/PageBreadcrumb'
 
 const plugins = [gfm()]
 
 export function DocumentDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [doc, setDoc] = useState<ProjectDocument | null>(null)
+  const [projectName, setProjectName] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [dirty, setDirty] = useState(false)
@@ -44,6 +46,15 @@ export function DocumentDetailPage() {
   }, [id])
 
   useEffect(reload, [reload])
+
+  // 面包屑的项目层级
+  useEffect(() => {
+    if (!doc?.projectId) return
+    api
+      .getProject(doc.projectId)
+      .then((p) => setProjectName(p.name))
+      .catch(() => setProjectName(null))
+  }, [doc?.projectId])
 
   // 飞书文档进入后默认切到「预览」页签（ByteMD 未提供默认页签 prop，
   // 模拟点击页签走内部状态，后续重渲染不会被重置）；非飞书文档保持默认「编辑」
@@ -88,17 +99,20 @@ export function DocumentDetailPage() {
     <div className="flex h-full flex-col gap-4">
       {/* 1. 文档属性信息：压缩为不超过 3 行的紧凑布局 */}
       <div className="flex flex-col gap-1.5">
-        <div>
-          {doc.projectId ? (
-            <Link to={`/projects/${doc.projectId}`} className="text-sm">
-              ← 返回项目
-            </Link>
-          ) : (
-            <Link to="/projects" className="text-sm">
-              ← 返回项目列表
-            </Link>
-          )}
-        </div>
+        <PageBreadcrumb
+          items={[
+            { label: '文档', to: '/documents' },
+            ...(doc.projectId
+              ? [
+                  {
+                    label: projectName ?? '…',
+                    to: `/projects/${doc.projectId}`,
+                  },
+                ]
+              : []),
+            { label: doc.title },
+          ]}
+        />
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xl font-semibold">{doc.title}</h1>
           {/* Markdown 视图：后端 .md URL 规范（GET /api/documents/:id.md） */}

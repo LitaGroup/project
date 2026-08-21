@@ -64,6 +64,7 @@ import {
   type ProjectTest,
 } from '../lib/api'
 import { StatusBadge } from '../components/StatusBadge'
+import { PageBreadcrumb } from '../components/PageBreadcrumb'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -87,11 +88,9 @@ export function ProjectDetailPage() {
     <div className="flex gap-6">
       {/* 左侧：内容区，从上到下平铺 */}
       <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <div>
-          <Link to="/projects" className="text-sm">
-            ← 返回项目列表
-          </Link>
-        </div>
+        <PageBreadcrumb
+          items={[{ label: '项目', to: '/projects' }, { label: project.name }]}
+        />
 
         <section>
           <div className="mb-3 flex items-center justify-between">
@@ -108,7 +107,7 @@ export function ProjectDetailPage() {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">检查</h2>
             <div className="flex items-center gap-2">
-              <ImportChecksButton projectId={project.id} onImported={reload} />
+              <ImportChecksButton projectId={project.id} scriptsPath={project.scriptsPath} onImported={reload} />
               <CheckFormDialog projectId={project.id} onSaved={reload} />
             </div>
           </div>
@@ -119,7 +118,7 @@ export function ProjectDetailPage() {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">测试</h2>
             <div className="flex items-center gap-2">
-              <ImportTestsButton projectId={project.id} onImported={reload} />
+              <ImportTestsButton projectId={project.id} scriptsPath={project.scriptsPath} onImported={reload} />
               <TestFormDialog projectId={project.id} onSaved={reload} />
             </div>
           </div>
@@ -415,15 +414,21 @@ function CheckFormDialog({
 function ImportChecksButton(
 {
   projectId,
+  scriptsPath,
   onImported,
 }: {
   projectId: number
+  scriptsPath: string | null
   onImported: () => void
 }) {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
   const run = () => {
+    if (!scriptsPath) {
+      setMessage('请先在右侧设置项目的脚本目录，再执行自动导入')
+      return
+    }
     setLoading(true)
     setMessage(null)
     api
@@ -1087,15 +1092,21 @@ function TestFormDialog({
 /** 自动导入测试：扫描项目脚本目录下全部 .test.ts，过滤已登记的全部导入 */
 function ImportTestsButton({
   projectId,
+  scriptsPath,
   onImported,
 }: {
   projectId: number
+  scriptsPath: string | null
   onImported: () => void
 }) {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
   const run = () => {
+    if (!scriptsPath) {
+      setMessage('请先在右侧设置项目的脚本目录，再执行自动导入')
+      return
+    }
     setLoading(true)
     setMessage(null)
     api

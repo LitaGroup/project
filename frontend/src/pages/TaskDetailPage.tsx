@@ -21,6 +21,7 @@ import {
   type ProjectTask,
 } from '../lib/api'
 import { DeleteTaskButton, TaskFormDialog } from './ProjectDetailPage'
+import { PageBreadcrumb } from '../components/PageBreadcrumb'
 
 const runStatusMeta: Record<
   CheckRun['status'],
@@ -107,6 +108,7 @@ export function TaskDetailPage() {
   const navigate = useNavigate()
 
   const [task, setTask] = useState<ProjectTask | null>(null)
+  const [projectName, setProjectName] = useState<string | null>(null)
   const [check, setCheck] = useState<ProjectCheck | null>(null)
   const [checks, setChecks] = useState<ProjectCheck[]>([])
   const [runs, setRuns] = useState<CheckRun[]>([])
@@ -141,6 +143,11 @@ export function TaskDetailPage() {
 
   useEffect(() => {
     loadTask()
+    // 面包屑的项目层级
+    api
+      .getProject(projectId)
+      .then((p) => setProjectName(p.name))
+      .catch(() => setProjectName(null))
     // 编辑表单的检查脚本选项
     api
       .listChecks(projectId)
@@ -204,11 +211,13 @@ export function TaskDetailPage() {
     <div className="flex h-full gap-6">
       {/* 左侧：终端输出（撑满剩余高度，底部与页面对齐） */}
       <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <div>
-          <Link to={`/projects/${projectId}`} className="text-sm">
-            ← 返回项目详情
-          </Link>
-        </div>
+        <PageBreadcrumb
+          items={[
+            { label: '任务', to: '/tasks' },
+            { label: projectName ?? '…', to: `/projects/${projectId}` },
+            { label: task?.title ?? '…' },
+          ]}
+        />
         <section className="flex min-h-0 flex-1 flex-col">
           <div className="mb-3 flex items-center justify-between">
             <div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import {
   Card,
   CardHeader,
@@ -15,6 +15,7 @@ import { Button } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
 import { Progress } from '@appica/ui-react/progress'
 import { api, type TestRun, type ProjectTest } from '../lib/api'
+import { PageBreadcrumb } from '../components/PageBreadcrumb'
 
 const runStatusMeta: Record<
   TestRun['status'],
@@ -99,6 +100,7 @@ export function TestRunPage() {
   const testIdNum = Number(testId)
 
   const [test, setTest] = useState<ProjectTest | null>(null)
+  const [projectName, setProjectName] = useState<string | null>(null)
   const [runs, setRuns] = useState<TestRun[]>([])
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null)
   const [runData, setRunData] = useState<TestRun | null>(null)
@@ -121,8 +123,13 @@ export function TestRunPage() {
       .getTest(testIdNum)
       .then(setTest)
       .catch((e: Error) => setError(e.message))
+    // 面包屑的项目层级
+    api
+      .getProject(projectId)
+      .then((p) => setProjectName(p.name))
+      .catch(() => setProjectName(null))
     loadHistory().catch((e: Error) => setError(e.message))
-  }, [testIdNum, loadHistory])
+  }, [testIdNum, projectId, loadHistory])
 
   // 通过 SSE 订阅选中的运行记录：实时推送进度，终态推送后服务端自动完成
   const loadHistoryRef = useRef(loadHistory)
@@ -179,11 +186,13 @@ export function TestRunPage() {
     <div className="flex h-full gap-6">
       {/* 左侧：终端输出（撑满剩余高度，底部与页面对齐） */}
       <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <div>
-          <Link to={`/projects/${projectId}`} className="text-sm">
-            ← 返回项目详情
-          </Link>
-        </div>
+        <PageBreadcrumb
+          items={[
+            { label: '测试', to: '/tests' },
+            { label: projectName ?? '…', to: `/projects/${projectId}` },
+            { label: test?.code ?? '…' },
+          ]}
+        />
         <section className="flex min-h-0 flex-1 flex-col">
           <div className="mb-3 flex items-center justify-between">
             <div>
