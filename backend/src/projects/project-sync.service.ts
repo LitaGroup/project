@@ -14,8 +14,9 @@ const FIRST_SYNC_WINDOW_DAYS = 15;
 const INCREMENTAL_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** 默认项目源：研发项目管理多维表格（可用 FEISHU_PROJECT_SOURCE_URL 覆盖） */
-const DEFAULT_SOURCE_URL =
+/** 默认项目源：研发项目管理多维表格（可用 FEISHU_PROJECT_SOURCE_URL 覆盖）。
+ *  导出供 settings 模块展示解析后的源地址，避免默认值漂移。 */
+export const DEFAULT_PROJECT_SOURCE_URL =
   'https://lita-group.feishu.cn/wiki/wikcn9hxHvxX55gXXH6g35AFknd?table=tblmfWA2DvqQ76Ri&view=vewrCaS2Ym';
 
 export interface SyncProjectsResult {
@@ -93,7 +94,7 @@ export class ProjectSyncService {
   async syncFromFeishu(): Promise<SyncProjectsResult> {
     const sourceUrl =
       this.config.get<string>('FEISHU_PROJECT_SOURCE_URL') ??
-      DEFAULT_SOURCE_URL;
+      DEFAULT_PROJECT_SOURCE_URL;
     const { appToken, tableId, viewId } = await this.parseSource(sourceUrl);
 
     const state = await this.syncStates.findOne({ where: { key: SYNC_KEY } });

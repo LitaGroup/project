@@ -203,14 +203,28 @@ export interface ProjectTask {
   updatedAt: string
 }
 
-/** 平台设置（只读，来源于后端配置文件） */
+/** 平台设置（只读，来源于后端配置文件，不含密钥） */
 export interface Settings {
+  /** 运行环境（NODE_ENV） */
+  environment: string
+  /** 服务端口（PORT） */
+  port: number
   /** 脚本根目录（CHECK_SCRIPTS_DIR） */
   scriptsDir: string
-  /** 浏览器访问地址 */
+  /** 图片根目录（DIR_IMAGE_WEBROOT，经 /images 静态对外） */
+  imageWebroot: string
+  /** 浏览器访问地址（APP_URL） */
   appUrl: string
-  /** 接口访问地址 */
+  /** 接口访问地址（API_URL） */
   apiUrl: string
+  /** Lita 平台 API 地址（LITA_API_HOST，飞书 token 服务） */
+  litaApiHost: string
+  /** 项目同步源多维表格地址（FEISHU_PROJECT_SOURCE_URL，未配置用内置默认） */
+  feishuProjectSourceUrl: string
+  /** 飞书 token 来源：lita（LITA_USER_TOKEN 已配置）/ app-credential（自建应用凭据兜底） */
+  feishuTokenSource: 'lita' | 'app-credential'
+  /** 兜底通知 webhook 是否已配置（不暴露 secret） */
+  feishuWebhookConfigured: boolean
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
