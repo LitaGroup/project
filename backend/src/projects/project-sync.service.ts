@@ -2,7 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ProjectType } from '../common/enums';
+import {
+  ProjectStatus,
+  ProjectType,
+} from '../common/enums';
 import { BitableRecord, FeishuService } from '../feishu/feishu.service';
 import { Project } from './project.entity';
 import { SyncState } from './sync-state.entity';
@@ -41,6 +44,19 @@ function toProjectType(value: unknown): ProjectType {
   if (TYPE_ALIAS[value]) return TYPE_ALIAS[value];
   const all = Object.values(ProjectType) as string[];
   return all.includes(value) ? (value as ProjectType) : ProjectType.OTHER;
+}
+
+/**
+ * 飞书单选"需求状态" → 平台项目状态：
+ * ✅ 已上线→已结束、正常→进行中、暂停→暂停；
+ * 有风险/Delay/空值/乱填（如日期）一律归"计划中"。
+ */
+function toProjectStatus(value: unknown): ProjectStatus {
+  if (typeof value !== 'string') return ProjectStatus.PLANNED;
+  if (value.includes('已上线')) return ProjectStatus.FINISHED;
+  if (value === '正常') return ProjectStatus.IN_PROGRESS;
+  if (value === '暂停') return ProjectStatus.PAUSED;
+  return ProjectStatus.PLANNED;
 }
 
 /** 文本字段：segment 数组（含 mention）→ 纯文本 */
@@ -90,8 +106,8 @@ export class ProjectSyncService {
     private readonly syncStates: Repository<SyncState>,
   ) {}
 
-  /** 从飞书多维表格增量同步项目 */
-  async syncFromFeishu(): Promise<SyncProjectsResult> {
+  /** 从飞书多维表格增量同步项目；full=true 时忽略时间窗口全量扫描 */
+  async syncFromFeishu(full = false): Promise<SyncProjectsResult> {
     const sourceUrl =
       this.config.get<string>('FEISHU_PROJECT_SOURCE_URL') ??
       DEFAULT_PROJECT_SOURCE_URL;
@@ -99,7 +115,7 @@ export class ProjectSyncService {
 
     const state = await this.syncStates.findOne({ where: { key: SYNC_KEY } });
     const windowDays = state ? INCREMENTAL_WINDOW_DAYS : FIRST_SYNC_WINDOW_DAYS;
-    const since = Date.now() - windowDays * DAY_MS;
+    const since = full ? 0 : Date.now() - windowDays * DAY_MS;
 
     const records = await this.feishu.searchBitableRecords(
       appToken,
@@ -127,7 +143,6 @@ export class ProjectSyncService {
   }
 
   // ---- 内部 ----
-
   private async upsert(record: BitableRecord): Promise<void> {
     const f = record.fields;
     const fullText = extractText(f['需求']);
@@ -144,6 +159,7 @@ export class ProjectSyncService {
     project.name = name;
     project.description = fullText !== name ? fullText : null;
     project.type = toProjectType(f['需求类型']);
+    project.status = toProjectStatus(f['需求状态']);
     project.priority = typeof f['优先级'] === 'string' ? f['优先级'] : null;
     project.expectedReleaseAt = extractDate(f['理想上线时间']);
     project.iterationCycle = typeof f['w'] === 'string' ? f['w'] : null;

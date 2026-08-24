@@ -2,7 +2,7 @@
 export const PROJECT_TYPES = ['活动', '功能', '游戏', '数据', '后台', '技术', '其它'] as const
 export type ProjectType = (typeof PROJECT_TYPES)[number]
 
-export const PROJECT_STATUSES = ['计划中', '进行中', '已结束'] as const
+export const PROJECT_STATUSES = ['计划中', '进行中', '已结束', '暂停'] as const
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
 
 /** 与后端 DefectStatus 对应，平台侧统一为这五个状态（飞书 new→open、close→closed，乱填→open） */

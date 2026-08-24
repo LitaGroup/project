@@ -33,6 +33,8 @@ export enum ProjectStatus {
   PLANNED = '计划中',
   IN_PROGRESS = '进行中',
   FINISHED = '已结束',
+  /** 飞书源表"需求状态"为「暂停」的项目（人工确认新增） */
+  PAUSED = '暂停',
 }
 
 /**

@@ -33,6 +33,11 @@ class UpdateProjectDto {
   defectBitableUrl?: string;
 }
 
+class SyncFeishuDto {
+  /** true 时忽略时间窗口，全量扫描同步 */
+  full?: boolean;
+}
+
 @Controller('projects')
 export class ProjectsController {
   constructor(
@@ -45,10 +50,10 @@ export class ProjectsController {
     return this.projectsService.findAll();
   }
 
-  /** 从飞书多维表格增量同步项目（首次取近 15 天更新，后续取近 7 天） */
+  /** 从飞书多维表格同步项目（默认增量：首次近 15 天、后续近 7 天；full=true 全量） */
   @Post('sync-feishu')
-  syncFromFeishu(): Promise<SyncProjectsResult> {
-    return this.projectSyncService.syncFromFeishu();
+  syncFromFeishu(@Body() dto?: SyncFeishuDto): Promise<SyncProjectsResult> {
+    return this.projectSyncService.syncFromFeishu(!!dto?.full);
   }
 
   /** Markdown 视图（须声明在 :id 之前，避免 :id 匹配到带 .md 后缀的路径） */
