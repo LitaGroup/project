@@ -27,6 +27,8 @@ class CreateProjectDto {
 class UpdateProjectDto {
   /** 脚本目录：相对 CHECK_SCRIPTS_DIR 的路径，空串清除 */
   scriptsPath?: string;
+  /** 飞书群机器人 webhook：任务运行结束后推送结果，空串清除 */
+  feishuWebhook?: string;
 }
 
 @Controller('projects')
@@ -69,7 +71,7 @@ export class ProjectsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateProjectDto,
   ): Promise<Project> {
-    return this.projectsService.updateScriptsPath(id, dto.scriptsPath ?? '');
+    return this.projectsService.update(id, dto);
   }
 
   @Delete(':id')

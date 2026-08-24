@@ -188,6 +188,15 @@ export function ProjectDetailPage() {
                 <EditScriptsPathDialog project={project} onSaved={reload} />
               </dd>
             </div>
+            <div className="flex items-center justify-between">
+              <dt>飞书通知</dt>
+              <dd className="flex items-center gap-1">
+                <span className="max-w-40 truncate" title={project.feishuWebhook ?? ''}>
+                  {project.feishuWebhook ?? '—'}
+                </span>
+                <EditWebhookDialog project={project} onSaved={reload} />
+              </dd>
+            </div>
             <div className="flex justify-between">
               <dt>资源</dt>
               <dd>—</dd>
@@ -581,6 +590,72 @@ function EditScriptsPathDialog({
                 value={scriptsPath}
                 onChange={(e) => setScriptsPath(e.target.value)}
                 placeholder="如 projects/active/pk"
+              />
+            </label>
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button onClick={submit}>保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 设置项目的飞书群机器人 webhook：任务运行结束后推送执行结果到该群 */
+function EditWebhookDialog({
+  project,
+  onSaved,
+}: {
+  project: Project
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [webhook, setWebhook] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setWebhook(project.feishuWebhook ?? '')
+      setError(null)
+    }
+  }
+
+  const submit = () => {
+    setError(null)
+    api
+      .updateProject(project.id, { feishuWebhook: webhook })
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        <Button variant="ghost" size="sm">
+          设置
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>设置飞书通知</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-sm">
+              群机器人 webhook（任务运行结束后推送结果，留空则走平台默认群）
+              <Input
+                value={webhook}
+                onChange={(e) => setWebhook(e.target.value)}
+                placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
               />
             </label>
             {error && <p className="text-sm">保存失败:{error}</p>}

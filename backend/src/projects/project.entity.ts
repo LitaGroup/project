@@ -53,6 +53,10 @@ export class Project {
   @Column({ type: 'varchar', length: 500, nullable: true })
   scriptsPath: string | null;
 
+  /** 飞书群机器人 webhook：任务触发的运行结束后推送结果到该群；空则回退 FEISHU_WEBHOOK_URL */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  feishuWebhook: string | null;
+
   @OneToMany(() => Document, (doc) => doc.project)
   documents: Document[];
 

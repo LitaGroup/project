@@ -135,6 +135,8 @@ export interface Project {
   description: string | null
   /** 脚本目录：相对脚本根目录的路径，登记检查时只在该子目录下扫描 */
   scriptsPath: string | null
+  /** 飞书群机器人 webhook：任务运行结束后推送结果到该群 */
+  feishuWebhook: string | null
   documents?: ProjectDocument[]
   checks?: ProjectCheck[]
   tests?: ProjectTest[]
@@ -202,7 +204,10 @@ export const api = {
   }) => request<Project>('/projects', { method: 'POST', body: JSON.stringify(input) }),
   deleteProject: (id: number) =>
     request<void>(`/projects/${id}`, { method: 'DELETE' }),
-  updateProject: (id: number, input: { scriptsPath?: string }) =>
+  updateProject: (
+    id: number,
+    input: { scriptsPath?: string; feishuWebhook?: string },
+  ) =>
     request<Project>(`/projects/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(input),

@@ -163,9 +163,23 @@ export class ProjectsService {
     ].join('\n');
   }
 
-  /** 设置脚本目录（相对 CHECK_SCRIPTS_DIR，空串清除）；登记检查时只在该子目录下扫描 */
-  async updateScriptsPath(id: number, scriptsPath: string): Promise<Project> {
+  /** 更新项目可编辑字段：脚本目录（scriptsPath）与飞书群机器人 webhook（feishuWebhook），空串清除 */
+  async update(
+    id: number,
+    input: { scriptsPath?: string; feishuWebhook?: string },
+  ): Promise<Project> {
     const project = await this.findOne(id);
+    if (input.scriptsPath !== undefined) {
+      project.scriptsPath = this.normalizeScriptsPath(input.scriptsPath);
+    }
+    if (input.feishuWebhook !== undefined) {
+      project.feishuWebhook = this.normalizeWebhook(input.feishuWebhook);
+    }
+    return this.projects.save(project);
+  }
+
+  /** 脚本目录：相对 CHECK_SCRIPTS_DIR（空串清除）；登记检查时只在该子目录下扫描 */
+  private normalizeScriptsPath(scriptsPath: string): string | null {
     const normalized = scriptsPath
       .trim()
       .replace(/\\/g, '/')
@@ -178,8 +192,19 @@ export class ProjectsService {
         '脚本目录必须是相对脚本根目录的路径，如 projects/active/pk',
       );
     }
-    project.scriptsPath = normalized || null;
-    return this.projects.save(project);
+    return normalized || null;
+  }
+
+  /** 飞书群机器人 webhook：http(s) 地址，空串清除 */
+  private normalizeWebhook(webhook: string): string | null {
+    const normalized = webhook.trim();
+    if (!normalized) return null;
+    if (!/^https?:\/\//.test(normalized)) {
+      throw new BadRequestException(
+        '飞书 webhook 必须是 http(s) 地址，如 https://open.feishu.cn/open-apis/bot/v2/hook/xxx',
+      );
+    }
+    return normalized;
   }
 
   /**

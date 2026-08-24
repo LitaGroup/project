@@ -15,6 +15,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { Observable } from 'rxjs';
 import { In, Repository } from 'typeorm';
+import { NotifyService } from '../notify/notify.service';
 import { Project } from '../projects/project.entity';
 import { TasksService } from '../tasks/tasks.service';
 import { CheckRun, CheckRunItem } from './check-run.entity';
@@ -59,6 +60,7 @@ export class ChecksService {
     private readonly projects: Repository<Project>,
     @Inject(forwardRef(() => TasksService))
     private readonly tasksService: TasksService,
+    private readonly notifyService: NotifyService,
     config: ConfigService,
   ) {
     this.scriptsDir = path.resolve(
@@ -200,7 +202,14 @@ export class ChecksService {
       }),
     );
     this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
-    this.executeRun(run.id, absPath);
+    // 任务触发的运行：执行前推送开始记录（含超时时间）
+    if (taskId !== undefined) {
+      void this.notifyService.notifyTaskRunStart(
+        { projectId: check.projectId, taskId, checkCode: check.code },
+        RUN_TIMEOUT_MS / 1000,
+      );
+    }
+    this.executeRun(run.id, absPath, check, taskId ?? null);
     return run;
   }
 
@@ -334,8 +343,14 @@ export class ChecksService {
   /**
    * 后台执行脚本：node 直跑 .check.ts（Node 24+ 原生类型擦除），以脚本根目录为 cwd，
    * 逐行解析 stdout 的行协议 `[{type}] {json}`，实时更新步数，进程结束后落最终结果。
+   * taskId 非空（定时/手动任务触发）时，终态向项目飞书群 webhook 推送结果。
    */
-  private executeRun(runId: number, absPath: string): void {
+  private executeRun(
+    runId: number,
+    absPath: string,
+    check: Check,
+    taskId: number | null,
+  ): void {
     const startedAt = Date.now();
     const items: CheckRunItem[] = [];
     const logs: string[] = [];
@@ -416,12 +431,14 @@ export class ChecksService {
           ? 'success'
           : 'fail'
         : 'error';
-      const message = done
+      let message = done
         ? (done.message as string) || null
         : stderr.trim().split('\n').slice(-5).join('\n') ||
-          (timedOut
-            ? `脚本执行超时（>${RUN_TIMEOUT_MS / 1000}s）`
-            : (errorMessage ?? '脚本异常退出，未输出 [done]'));
+          (errorMessage ?? '脚本异常退出，未输出 [done]');
+      // 超时场景无论是否有 stderr 输出，都明确标注超时（飞书通知依赖该描述）
+      if (!done && timedOut) {
+        message = `脚本执行超时（>${RUN_TIMEOUT_MS / 1000}s）${message ? `：${message}` : ''}`;
+      }
       const finalPatch: Partial<CheckRun> = {
         status,
         message,
@@ -443,11 +460,28 @@ export class ChecksService {
         .catch(() => undefined)
         .then(() => {
           const live = this.liveRuns.get(runId);
-          if (!live) return;
-          Object.assign(live.snapshot, finalPatch);
-          live.emitter.emit('update', { ...live.snapshot });
-          // 终态快照保留 TTL，供晚到的 SSE 订阅直接取结果
-          setTimeout(() => this.liveRuns.delete(runId), LIVE_SNAPSHOT_TTL_MS);
+          if (live) {
+            Object.assign(live.snapshot, finalPatch);
+            live.emitter.emit('update', { ...live.snapshot });
+            // 终态快照保留 TTL，供晚到的 SSE 订阅直接取结果
+            setTimeout(() => this.liveRuns.delete(runId), LIVE_SNAPSHOT_TTL_MS);
+          }
+          // 任务触发的运行：向项目飞书群 webhook 推送结果（含异常/超时）
+          if (taskId !== null) {
+            const countBy = (s: 'success' | 'fail' | 'skip') =>
+              items.filter((i) => i.status === s).length;
+            void this.notifyService.notifyTaskRun({
+              projectId: check.projectId,
+              taskId,
+              checkCode: check.code,
+              status: status,
+              // 异常结束时 [done] 计数缺失，按已解析的明细条数兜底
+              success: finalPatch.success ?? countBy('success'),
+              fail: finalPatch.fail ?? countBy('fail'),
+              skip: finalPatch.skip ?? countBy('skip'),
+              message: finalPatch.message ?? null,
+            });
+          }
         });
     };
 
