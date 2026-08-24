@@ -34,3 +34,16 @@ export enum ProjectStatus {
   IN_PROGRESS = '进行中',
   FINISHED = '已结束',
 }
+
+/**
+ * 缺陷状态：平台侧统一为 open/reopen/fixed/closed/invalid。
+ * 飞书侧对应选项为 new/fixed/close/reopen/invalid（new→open、close→closed），
+ * 同步时按别名映射，飞书侧乱填的选项统一映射为 open。
+ */
+export enum DefectStatus {
+  OPEN = 'open',
+  REOPEN = 'reopen',
+  FIXED = 'fixed',
+  CLOSED = 'closed',
+  INVALID = 'invalid',
+}

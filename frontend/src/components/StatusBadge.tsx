@@ -10,3 +10,21 @@ const variantByStatus: Record<ProjectStatus, 'info' | 'primary' | 'light'> = {
 export function StatusBadge({ status }: { status: ProjectStatus }) {
   return <Badge variant={variantByStatus[status] ?? 'light'}>{status}</Badge>
 }
+
+/** 缺陷状态 → Badge variant（乱填/未知状态兜底 light） */
+const defectVariantByStatus: Record<
+  string,
+  'info' | 'success' | 'light' | 'warning' | 'secondary'
+> = {
+  open: 'info',
+  reopen: 'warning',
+  fixed: 'success',
+  closed: 'light',
+  invalid: 'secondary',
+}
+
+export function DefectStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={defectVariantByStatus[status] ?? 'light'}>{status}</Badge>
+  )
+}

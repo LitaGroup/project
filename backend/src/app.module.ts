@@ -9,6 +9,7 @@ import { DocumentsModule } from './documents/documents.module';
 import { ChecksModule } from './checks/checks.module';
 import { TasksModule } from './tasks/tasks.module';
 import { TestsModule } from './tests/tests.module';
+import { DefectsModule } from './defects/defects.module';
 import { FeishuModule } from './feishu/feishu.module';
 import { SettingsModule } from './settings/settings.module';
 
@@ -35,6 +36,7 @@ import { SettingsModule } from './settings/settings.module';
     ChecksModule,
     TasksModule,
     TestsModule,
+    DefectsModule,
     FeishuModule,
     SettingsModule,
   ],

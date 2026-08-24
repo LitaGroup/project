@@ -76,6 +76,19 @@ export class TestsService {
     return test;
   }
 
+  /** 按脚本相对路径查找本项目已登记的测试（缺陷验证用），未登记返回 null */
+  findByScriptPath(
+    projectId: number,
+    scriptPath: string,
+  ): Promise<Test | null> {
+    return this.tests.findOne({ where: { projectId, scriptPath } });
+  }
+
+  /** 某测试最近一次运行（缺陷标记 fixed 的前置校验用），无运行记录返回 null */
+  findLatestRun(testId: number): Promise<TestRun | null> {
+    return this.runs.findOne({ where: { testId }, order: { id: 'DESC' } });
+  }
+
   async create(input: TestInput): Promise<Test> {
     await this.assertCodeAvailable(input.projectId, input.code);
     return this.tests.save(

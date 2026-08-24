@@ -29,6 +29,8 @@ class UpdateProjectDto {
   scriptsPath?: string;
   /** 飞书通知群：群机器人 webhook 的 secret（粘贴完整地址自动截取），空串清除 */
   feishuWebhook?: string;
+  /** 缺陷多维表格地址：带 table 参数的飞书 wiki/base 链接，空串清除 */
+  defectBitableUrl?: string;
 }
 
 @Controller('projects')

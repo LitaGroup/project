@@ -11,6 +11,7 @@ import { Check } from '../checks/check.entity';
 import { Task } from '../tasks/task.entity';
 import { Test } from '../tests/test.entity';
 import { Document } from '../documents/document.entity';
+import { Defect } from '../defects/defect.entity';
 
 @Entity('projects')
 export class Project {
@@ -57,6 +58,10 @@ export class Project {
   @Column({ type: 'varchar', length: 500, nullable: true })
   feishuWebhook: string | null;
 
+  /** 缺陷多维表格地址（飞书 wiki/base 链接，须带 table 参数，可带 view）；项目的缺陷与该表双向绑定 */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  defectBitableUrl: string | null;
+
   @OneToMany(() => Document, (doc) => doc.project)
   documents: Document[];
 
@@ -68,6 +73,9 @@ export class Project {
 
   @OneToMany(() => Task, (task) => task.project)
   tasks: Task[];
+
+  @OneToMany(() => Defect, (defect) => defect.project)
+  defects: Defect[];
 
   @CreateDateColumn()
   createdAt: Date;

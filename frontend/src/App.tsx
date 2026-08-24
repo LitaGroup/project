@@ -12,6 +12,8 @@ import { ChecksPage } from './pages/ChecksPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { ScriptsPage } from './pages/ScriptsPage'
 import { TasksPage } from './pages/TasksPage'
+import { DefectsPage } from './pages/DefectsPage'
+import { DefectDetailPage } from './pages/DefectDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function App() {
@@ -34,6 +36,11 @@ function App() {
             path="/projects/:id/tasks/:taskId"
             element={<TaskDetailPage />}
           />
+          <Route
+            path="/projects/:id/defects/:defectId"
+            element={<DefectDetailPage />}
+          />
+          <Route path="/defects" element={<DefectsPage />} />
           <Route path="/tests" element={<TestsPage />} />
           <Route path="/checks" element={<ChecksPage />} />
           <Route path="/documents" element={<DocumentsPage />} />

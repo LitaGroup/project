@@ -49,9 +49,10 @@ interface TenantTokenCache {
 }
 
 /**
- * 飞书开放平台只读客户端。
- * 仅实现"读取"（单向导入），不要在这里添加任何写操作。
- * 凭据：FEISHU_APP_ID / FEISHU_APP_SECRET（自建应用 tenant_access_token 模式）。
+ * 飞书开放平台客户端。
+ * 以只读为主（单向导入）；唯一的写操作是 updateBitableRecord——
+ * 缺陷模块的双向绑定需要把平台内的状态变更回写飞书多维表格（见 defects 模块）。
+ * 凭据：Lita 平台 token 服务（LITA_USER_TOKEN），兜底 FEISHU_APP_ID / FEISHU_APP_SECRET。
  */
 @Injectable()
 export class FeishuService implements OnModuleInit {
@@ -284,6 +285,36 @@ export class FeishuService implements OnModuleInit {
 
   // ---- 内部 ----
 
+  /**
+   * 更新多维表格单条记录（缺陷模块回写状态用，唯一的写操作）。
+   * fields 键为字段名，如 { 状态: 'fixed' }；单选字段直接传选项名（不存在会自动新建）。
+   */
+  async updateBitableRecord(
+    appToken: string,
+    tableId: string,
+    recordId: string,
+    fields: Record<string, unknown>,
+  ): Promise<void> {
+    await this.request(
+      'PUT',
+      `/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`,
+      { data: { fields } },
+    );
+  }
+
+  /** 下载附件素材（多维表格附件字段的 file_token），返回二进制内容 */
+  async downloadMedia(fileToken: string): Promise<Buffer> {
+    const token = await this.getTenantAccessToken();
+    const { data } = await this.http.get<ArrayBuffer>(
+      `/drive/v1/medias/${fileToken}/download`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'arraybuffer',
+      },
+    );
+    return Buffer.from(data);
+  }
+
   private async getTenantAccessToken(): Promise<string> {
     if (this.tokenCache && Date.now() < this.tokenCache.expireAt) {
       return this.tokenCache.token;
@@ -375,7 +406,7 @@ export class FeishuService implements OnModuleInit {
   }
 
   private async request<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     config?: { params?: Record<string, unknown>; data?: unknown },
   ): Promise<T> {

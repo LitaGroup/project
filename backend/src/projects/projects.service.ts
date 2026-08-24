@@ -18,6 +18,8 @@ import {
   DocumentsService,
 } from '../documents/documents.service';
 import { Document } from '../documents/document.entity';
+import { DEFECT_LIST_SELECT, DefectsService } from '../defects/defects.service';
+import { Defect } from '../defects/defect.entity';
 import { Project } from './project.entity';
 
 export interface CreateProjectInput {
@@ -40,6 +42,7 @@ export class ProjectsService {
     private readonly checksService: ChecksService,
     private readonly testsService: TestsService,
     private readonly tasksService: TasksService,
+    private readonly defectsService: DefectsService,
   ) {}
 
   findAll(): Promise<Project[]> {
@@ -47,7 +50,7 @@ export class ProjectsService {
   }
 
   /**
-   * 项目 + 关联（文档/检查/测试/任务）。
+   * 项目 + 关联（文档/检查/测试/任务/缺陷）。
    * 不用 relations 巨型 LEFT JOIN：测试 RDS 上该 JOIN 要 ~2.5s，
    * 拆成并行小查询仅 ~250ms（见 AGENTS.md 工作约定）。
    */
@@ -55,7 +58,7 @@ export class ProjectsService {
     const project = await this.projects.findOne({ where: { id } });
     if (!project) throw new NotFoundException(`Project ${id} not found`);
     const { manager } = this.projects;
-    const [documents, checks, tests, tasks] = await Promise.all([
+    const [documents, checks, tests, tasks, defects] = await Promise.all([
       // 文档列表不取 longtext 正文（列表展示只需元信息）
       manager.find(Document, {
         where: { projectId: id },
@@ -64,11 +67,18 @@ export class ProjectsService {
       manager.find(Check, { where: { projectId: id } }),
       manager.find(Test, { where: { projectId: id } }),
       manager.find(Task, { where: { projectId: id } }),
+      // 缺陷列表不取 description/images（详情经 GET /defects/:id 单独加载）
+      manager.find(Defect, {
+        where: { projectId: id },
+        select: DEFECT_LIST_SELECT,
+        order: { updatedAt: 'DESC' },
+      }),
     ]);
     project.documents = documents;
     project.checks = checks;
     project.tests = tests;
     project.tasks = tasks;
+    project.defects = defects;
     // 检查/测试按编号自然排序
     project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
     project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
@@ -125,6 +135,13 @@ export class ProjectsService {
       (t) =>
         `- **${t.title}**（cron：\`${t.cron}\`，检查：\`${checkName(t.checkId)}\`${t.enabled ? '' : '，已停用'}）`,
     );
+    const defects = project.defects.map((d) => {
+      const parts = [`**${d.status}** ${d.title}`];
+      if (d.platform) parts.push(`端：${d.platform}`);
+      if (d.assignee) parts.push(`人员：${d.assignee}`);
+      if (d.testScript) parts.push(`测试脚本：${d.testScript}`);
+      return `- ${parts.join(' — ')}`;
+    });
 
     return [
       `# ${project.name}`,
@@ -151,6 +168,10 @@ export class ProjectsService {
       '',
       ...(tasks.length > 0 ? tasks : ['（暂无）']),
       '',
+      `## 缺陷（${project.defects.length}）`,
+      '',
+      ...(defects.length > 0 ? defects : ['（暂无）']),
+      '',
       '## AI 操作',
       '',
       '运行检查/测试并流式获取结果（text/markdown，运行中逐行返回脚本输出，结束时附"结果"小节）：',
@@ -160,13 +181,24 @@ export class ProjectsService {
       'curl -N -X POST /api/tests/{testId}/run.md',
       '```',
       '',
+      '缺陷（与项目设置的飞书多维表格双向绑定）：',
+      '',
+      '```bash',
+      "curl -X POST /api/defects/sync -H 'Content-Type: application/json' -d '{\"projectId\": {id}}'  # 从飞书全量同步（覆盖本地）",
+      'curl -X PATCH /api/defects/{defectId} -H \'Content-Type: application/json\' -d \'{"status": "fixed"}\'  # 改状态（异步回写飞书；有测试脚本时须先验证通过）',
+      '```',
+      '',
     ].join('\n');
   }
 
-  /** 更新项目可编辑字段：脚本目录（scriptsPath）与飞书群机器人 webhook（feishuWebhook），空串清除 */
+  /** 更新项目可编辑字段：脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、缺陷多维表格地址（defectBitableUrl），空串清除 */
   async update(
     id: number,
-    input: { scriptsPath?: string; feishuWebhook?: string },
+    input: {
+      scriptsPath?: string;
+      feishuWebhook?: string;
+      defectBitableUrl?: string;
+    },
   ): Promise<Project> {
     const project = await this.findOne(id);
     if (input.scriptsPath !== undefined) {
@@ -175,7 +207,28 @@ export class ProjectsService {
     if (input.feishuWebhook !== undefined) {
       project.feishuWebhook = this.normalizeWebhook(input.feishuWebhook);
     }
+    if (input.defectBitableUrl !== undefined) {
+      project.defectBitableUrl = this.normalizeDefectBitableUrl(
+        input.defectBitableUrl,
+      );
+    }
     return this.projects.save(project);
+  }
+
+  /** 缺陷多维表格地址：飞书 wiki/base 链接且须带 table 参数；空串清除 */
+  private normalizeDefectBitableUrl(url: string): string | null {
+    const normalized = url.trim();
+    if (!normalized) return null;
+    const isFeishuTable =
+      /(?:feishu\.cn|larksuite\.com)\/(wiki|base)\/[A-Za-z0-9]+/.test(
+        normalized,
+      ) && /[?&]table=[A-Za-z0-9]+/.test(normalized);
+    if (!isFeishuTable) {
+      throw new BadRequestException(
+        '缺陷多维表格地址必须是带 table 参数的飞书 wiki/base 链接，如 https://xxx.feishu.cn/wiki/XXX?table=tblXXX&view=vewXXX',
+      );
+    }
+    return normalized;
   }
 
   /** 脚本目录：相对 CHECK_SCRIPTS_DIR（空串清除）；登记检查时只在该子目录下扫描 */
@@ -215,6 +268,7 @@ export class ProjectsService {
   async remove(id: number): Promise<void> {
     const project = await this.findOne(id);
     await this.documentsService.removeByProject(project.id);
+    await this.defectsService.removeByProject(project.id);
     // 任务先于检查清理（任务依赖检查脚本；检查删除时也会再兜底清理）
     await this.tasksService.removeByProject(project.id);
     await this.checksService.removeByProject(project.id);

@@ -56,6 +56,7 @@ import { Badge } from '@appica/ui-react/badge'
 import {
   api,
   DOCUMENT_TYPES,
+  type Defect,
   type DocumentType,
   type Project,
   type ProjectCheck,
@@ -63,7 +64,7 @@ import {
   type ProjectTask,
   type ProjectTest,
 } from '../lib/api'
-import { StatusBadge } from '../components/StatusBadge'
+import { DefectStatusBadge, StatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { RunStats } from '../components/RunStats'
 
@@ -124,6 +125,14 @@ export function ProjectDetailPage() {
             </div>
           </div>
           <TestsPanel project={project} onChanged={reload} />
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">缺陷</h2>
+            <SyncDefectsButton project={project} onSynced={reload} />
+          </div>
+          <DefectsPanel project={project} onChanged={reload} />
         </section>
 
         <section>
@@ -197,6 +206,25 @@ export function ProjectDetailPage() {
                 <EditWebhookDialog project={project} onSaved={reload} />
               </dd>
             </div>
+            <div className="flex items-center justify-between">
+              <dt>缺陷表格</dt>
+              <dd className="flex items-center gap-1">
+                {project.defectBitableUrl ? (
+                  <a
+                    href={project.defectBitableUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="max-w-40 truncate underline"
+                    title={project.defectBitableUrl}
+                  >
+                    飞书多维表格
+                  </a>
+                ) : (
+                  <span>—</span>
+                )}
+                <EditDefectBitableDialog project={project} onSaved={reload} />
+              </dd>
+            </div>
             <div className="flex justify-between">
               <dt>资源</dt>
               <dd>—</dd>
@@ -241,7 +269,6 @@ function ChecksPanel({
         <TableHeader>
           <TableRow>
             <TableHead className="w-32">编号</TableHead>
-            <TableHead>描述</TableHead>
             <TableHead>脚本</TableHead>
             <TableHead className="w-40 text-center">操作</TableHead>
           </TableRow>
@@ -256,9 +283,6 @@ function ChecksPanel({
                 >
                   {c.code}
                 </Link>
-              </TableCell>
-              <TableCell className="max-w-md truncate" title={c.description ?? ''}>
-                {c.description ?? '—'}
               </TableCell>
               <TableCell className="max-w-md truncate" title={c.scriptPath}>
                 {displayScriptPath(c.scriptPath)}
@@ -286,7 +310,7 @@ function ChecksPanel({
           ))}
           {checks.length === 0 && (
             <TableRow>
-              <TableCell colSpan={4}>暂无检查</TableCell>
+              <TableCell colSpan={3}>暂无检查</TableCell>
             </TableRow>
           )}
         </TableBody>
@@ -1547,5 +1571,218 @@ export function DeleteTaskButton({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+/** 缺陷板块：与项目设置的飞书多维表格双向绑定，列表随项目详情关系加载 */
+function DefectsPanel({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const defects = project.defects ?? []
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <>
+      {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>问题描述</TableHead>
+            <TableHead className="w-24 text-center">端</TableHead>
+            <TableHead className="w-24 text-center">状态</TableHead>
+            <TableHead className="w-32">人员</TableHead>
+            <TableHead className="w-24 text-center">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {defects.map((d) => (
+            <TableRow key={d.id}>
+              <TableCell className="max-w-md truncate" title={d.title}>
+                <Link
+                  to={`/projects/${project.id}/defects/${d.id}`}
+                  className="underline"
+                >
+                  {d.title}
+                </Link>
+              </TableCell>
+              <TableCell className="text-center">{d.platform ?? '—'}</TableCell>
+              <TableCell className="text-center">
+                <DefectStatusBadge status={d.status} />
+              </TableCell>
+              <TableCell className="max-w-32 truncate">
+                {d.assignee ?? '—'}
+              </TableCell>
+              <TableCell className="text-center">
+                <DeleteDefectButton
+                  defect={d}
+                  onDeleted={() =>
+                    api
+                      .deleteDefect(d.id)
+                      .then(onChanged)
+                      .catch((e: Error) => setError(e.message))
+                  }
+                />
+              </TableCell>
+            </TableRow>
+          ))}
+          {defects.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5}>
+                暂无缺陷，设置缺陷表格地址后点击「同步飞书」拉取
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </>
+  )
+}
+
+/** 同步飞书：从项目绑定的缺陷多维表格全量拉取并覆盖本地 */
+function SyncDefectsButton({
+  project,
+  onSynced,
+}: {
+  project: Project
+  onSynced: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const run = () => {
+    if (!project.defectBitableUrl) {
+      setMessage('请先在右侧设置缺陷表格地址，再执行同步')
+      return
+    }
+    setLoading(true)
+    setMessage(null)
+    api
+      .syncDefects(project.id)
+      .then((r) => {
+        setMessage(`已同步 ${r.created + r.updated} 条（新增 ${r.created}，更新 ${r.updated}）`)
+        onSynced()
+      })
+      .catch((e: Error) => setMessage(`同步失败:${e.message}`))
+      .finally(() => setLoading(false))
+  }
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={run}
+        disabled={loading}
+        title="从飞书多维表格全量拉取缺陷，覆盖本地（测试脚本等本地字段保留）"
+      >
+        {loading ? '同步中…' : '同步飞书'}
+      </Button>
+      {message && <span className="text-sm text-foreground-muted">{message}</span>}
+    </>
+  )
+}
+
+function DeleteDefectButton({
+  defect,
+  onDeleted,
+}: {
+  defect: Defect
+  onDeleted: () => void
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger>
+        <Button variant="outline" size="sm">
+          删除
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除缺陷</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除缺陷「{defect.title}」吗？只删除本地记录，不影响飞书多维表格（再次同步会重新拉取）。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </AlertDialogClose>
+          <AlertDialogClose>
+            <Button variant="destructive" onClick={onDeleted}>
+              确认删除
+            </Button>
+          </AlertDialogClose>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/** 设置项目的缺陷多维表格地址（飞书 wiki/base 链接，须带 table 参数），缺陷与该表双向绑定 */
+function EditDefectBitableDialog({
+  project,
+  onSaved,
+}: {
+  project: Project
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [url, setUrl] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setUrl(project.defectBitableUrl ?? '')
+      setError(null)
+    }
+  }
+
+  const submit = () => {
+    setError(null)
+    api
+      .updateProject(project.id, { defectBitableUrl: url })
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        <Button variant="ghost" size="sm">
+          设置
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>设置缺陷表格地址</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-sm">
+              飞书多维表格链接（须带 table 参数，可带 view，留空解除绑定）
+              <Input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="如 https://xxx.feishu.cn/wiki/XXX?table=tblXXX&view=vewXXX"
+              />
+            </label>
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button onClick={submit}>保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

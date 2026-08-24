@@ -5,6 +5,13 @@ export type ProjectType = (typeof PROJECT_TYPES)[number]
 export const PROJECT_STATUSES = ['计划中', '进行中', '已结束'] as const
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
 
+/** 与后端 DefectStatus 对应，平台侧统一为这五个状态（飞书 new→open、close→closed，乱填→open） */
+export const DEFECT_STATUSES = ['open', 'reopen', 'fixed', 'closed', 'invalid'] as const
+export type DefectStatus = (typeof DEFECT_STATUSES)[number]
+
+/** 缺陷端：只保留这四类，飞书侧其它值统一为"未知"（默认） */
+export const DEFECT_PLATFORMS = ['前端', '后端', 'APP端', '未知'] as const
+
 /** 与后端 DocumentType 对应 */
 export const DOCUMENT_TYPES = [
   '需求',
@@ -137,11 +144,37 @@ export interface Project {
   scriptsPath: string | null
   /** 飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送通知 */
   feishuWebhook: string | null
+  /** 缺陷多维表格地址：项目的缺陷与该表双向绑定 */
+  defectBitableUrl: string | null
   documents?: ProjectDocument[]
   checks?: ProjectCheck[]
   tests?: ProjectTest[]
   tasks?: ProjectTask[]
+  defects?: Defect[]
   createdAt: string
+  updatedAt: string
+}
+
+/** 缺陷：与项目设置的飞书多维表格双向绑定（拉取覆盖本地；本地状态/端变更异步回写飞书） */
+export interface Defect {
+  id: number
+  projectId: number
+  /** 问题描述（长文本截断至 500；全文在 description） */
+  title: string
+  /** 问题描述全文（仅详情接口返回；与 title 相同为 null） */
+  description?: string | null
+  /** 端（前端/后端/产品/IOS/Android…） */
+  platform: string | null
+  /** 状态：new/fixed/close/reopen/invalid（飞书侧乱填的选项原样保留） */
+  status: string
+  /** 人员（飞书同步） */
+  assignee: string | null
+  remark: string | null
+  /** 截图：相对图片根目录的路径数组，经 /images/{path} 访问（仅详情接口返回） */
+  images?: string[] | null
+  /** 测试脚本：相对脚本根目录的 .test.ts 路径；非空时标记 fixed 前须最近一次运行通过 */
+  testScript: string | null
+  feishuRecordId: string | null
   updatedAt: string
 }
 
@@ -206,7 +239,11 @@ export const api = {
     request<void>(`/projects/${id}`, { method: 'DELETE' }),
   updateProject: (
     id: number,
-    input: { scriptsPath?: string; feishuWebhook?: string },
+    input: {
+      scriptsPath?: string
+      feishuWebhook?: string
+      defectBitableUrl?: string
+    },
   ) =>
     request<Project>(`/projects/${id}`, {
       method: 'PATCH',
@@ -393,4 +430,35 @@ export const api = {
   /** 更新脚本仓库：在脚本根目录执行 git pull，返回输出 */
   pullScripts: () =>
     request<{ output: string }>('/settings/scripts/pull', { method: 'POST' }),
+  /** 缺陷列表：传 projectId 按项目过滤，不传返回全部。不含 description/images */
+  listDefects: (projectId?: number) =>
+    request<Defect[]>(
+      `/defects${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
+  getDefect: (id: number) => request<Defect>(`/defects/${id}`),
+  /** 从项目绑定的飞书多维表格全量同步缺陷（直接覆盖本地飞书侧字段） */
+  syncDefects: (projectId: number) =>
+    request<{ scanned: number; created: number; updated: number }>(
+      '/defects/sync',
+      { method: 'POST', body: JSON.stringify({ projectId }) },
+    ),
+  /** 更新缺陷（端/状态/测试脚本/备注）；状态或端变更后异步回写飞书 */
+  updateDefect: (
+    id: number,
+    input: Partial<{
+      platform: string
+      status: DefectStatus
+      testScript: string
+      remark: string
+    }>,
+  ) =>
+    request<Defect>(`/defects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  /** 运行验证：启动缺陷测试脚本的一次运行，返回 running 记录 */
+  verifyDefect: (id: number) =>
+    request<TestRun>(`/defects/${id}/verify`, { method: 'POST' }),
+  deleteDefect: (id: number) =>
+    request<void>(`/defects/${id}`, { method: 'DELETE' }),
 }
