@@ -189,7 +189,7 @@ export function ProjectDetailPage() {
               </dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt>飞书通知</dt>
+              <dt>飞书通知群</dt>
               <dd className="flex items-center gap-1">
                 <span className="max-w-40 truncate" title={project.feishuWebhook ?? ''}>
                   {project.feishuWebhook ?? '—'}
@@ -606,7 +606,7 @@ function EditScriptsPathDialog({
   )
 }
 
-/** 设置项目的飞书群机器人 webhook：任务运行结束后推送执行结果到该群 */
+/** 设置项目的飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送开始/结果通知 */
 function EditWebhookDialog({
   project,
   onSaved,
@@ -646,16 +646,16 @@ function EditWebhookDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>设置飞书通知</DialogTitle>
+          <DialogTitle>设置飞书通知群</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
             <label className="flex flex-col gap-1 text-sm">
-              群机器人 webhook（任务运行结束后推送结果，留空则走平台默认群）
+              群机器人 webhook 的 secret（hook 地址最后一段，留空则走平台默认群）
               <Input
                 value={webhook}
                 onChange={(e) => setWebhook(e.target.value)}
-                placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+                placeholder="如 e09e9672-1f50-4b65-a181-8750bae489fc"
               />
             </label>
             {error && <p className="text-sm">保存失败:{error}</p>}

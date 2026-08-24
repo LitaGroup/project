@@ -135,7 +135,7 @@ export interface Project {
   description: string | null
   /** 脚本目录：相对脚本根目录的路径，登记检查时只在该子目录下扫描 */
   scriptsPath: string | null
-  /** 飞书群机器人 webhook：任务运行结束后推送结果到该群 */
+  /** 飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送通知 */
   feishuWebhook: string | null
   documents?: ProjectDocument[]
   checks?: ProjectCheck[]

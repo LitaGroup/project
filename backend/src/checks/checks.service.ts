@@ -188,9 +188,14 @@ export class ChecksService {
   /**
    * 启动一次脚本运行：先落 running 记录并立即返回，脚本在后台异步执行，
    * 运行中实时更新 total/current，结束后落完整结果（前端通过 SSE 实时获取进度）。
-   * taskId 标记触发来源（定时任务），手动运行为空。
+   * taskId 标记触发来源（定时任务），手动运行为空；
+   * source 标记任务触发方式（schedule=到点调度 / manual=手动），仅用于飞书"开始执行"通知。
    */
-  async startRun(checkId: number, taskId?: number): Promise<CheckRun> {
+  async startRun(
+    checkId: number,
+    taskId?: number,
+    source: 'schedule' | 'manual' = 'manual',
+  ): Promise<CheckRun> {
     const check = await this.findOne(checkId);
     const absPath = await this.resolveScriptPath(check.scriptPath);
     const run = await this.runs.save(
@@ -202,14 +207,19 @@ export class ChecksService {
       }),
     );
     this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
-    // 任务触发的运行：执行前推送开始记录（含超时时间）
+    // 任务触发的运行：执行前推送"开始执行"卡片（含触发方式）
     if (taskId !== undefined) {
       void this.notifyService.notifyTaskRunStart(
-        { projectId: check.projectId, taskId, checkCode: check.code },
-        RUN_TIMEOUT_MS / 1000,
+        {
+          projectId: check.projectId,
+          taskId,
+          checkCode: check.code,
+          scriptPath: check.scriptPath,
+        },
+        source,
       );
     }
-    this.executeRun(run.id, absPath, check, taskId ?? null);
+    this.executeRun(run.id, absPath, check, taskId ?? null, source);
     return run;
   }
 
@@ -350,6 +360,7 @@ export class ChecksService {
     absPath: string,
     check: Check,
     taskId: number | null,
+    source: 'schedule' | 'manual',
   ): void {
     const startedAt = Date.now();
     const items: CheckRunItem[] = [];
@@ -466,19 +477,26 @@ export class ChecksService {
             // 终态快照保留 TTL，供晚到的 SSE 订阅直接取结果
             setTimeout(() => this.liveRuns.delete(runId), LIVE_SNAPSHOT_TTL_MS);
           }
-          // 任务触发的运行：向项目飞书群 webhook 推送结果（含异常/超时）
+          // 任务触发的运行：向项目飞书群 webhook 推送结果卡片（含异常/超时）
           if (taskId !== null) {
             const countBy = (s: 'success' | 'fail' | 'skip') =>
               items.filter((i) => i.status === s).length;
+            // 异常结束时 [done] 计数缺失，按已解析的明细条数兜底
+            const success = finalPatch.success ?? countBy('success');
+            const fail = finalPatch.fail ?? countBy('fail');
+            const skip = finalPatch.skip ?? countBy('skip');
             void this.notifyService.notifyTaskRun({
               projectId: check.projectId,
               taskId,
               checkCode: check.code,
+              scriptPath: check.scriptPath,
               status: status,
-              // 异常结束时 [done] 计数缺失，按已解析的明细条数兜底
-              success: finalPatch.success ?? countBy('success'),
-              fail: finalPatch.fail ?? countBy('fail'),
-              skip: finalPatch.skip ?? countBy('skip'),
+              source,
+              startedAt: new Date(startedAt),
+              total: finalPatch.total ?? success + fail + skip,
+              success,
+              fail,
+              skip,
               message: finalPatch.message ?? null,
             });
           }

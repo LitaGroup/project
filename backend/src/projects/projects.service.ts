@@ -195,13 +195,15 @@ export class ProjectsService {
     return normalized || null;
   }
 
-  /** 飞书群机器人 webhook：http(s) 地址，空串清除 */
+  /** 飞书通知群：只存 webhook 的 secret 部分；粘贴完整 hook 地址时自动截取，空串清除 */
   private normalizeWebhook(webhook: string): string | null {
-    const normalized = webhook.trim();
+    let normalized = webhook.trim();
     if (!normalized) return null;
-    if (!/^https?:\/\//.test(normalized)) {
+    const hookMatch = normalized.match(/\/hook\/([0-9a-z-]+)\/?$/i);
+    if (hookMatch) normalized = hookMatch[1];
+    if (!/^[0-9a-z-]+$/i.test(normalized)) {
       throw new BadRequestException(
-        '飞书 webhook 必须是 http(s) 地址，如 https://open.feishu.cn/open-apis/bot/v2/hook/xxx',
+        '飞书通知群只需填写 webhook 地址的 secret 部分，如 e09e9672-1f50-4b65-a181-8750bae489fc',
       );
     }
     return normalized;

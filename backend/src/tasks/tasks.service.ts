@@ -111,13 +111,17 @@ export class TasksService implements OnModuleInit {
     return this.checksService.listRunsByTask(id);
   }
 
-  /** 触发一次任务：运行绑定的检查脚本（结果落 check_runs 并标记 taskId），返回运行记录 */
-  async runNow(id: number): Promise<CheckRun> {
+  /** 触发一次任务：运行绑定的检查脚本（结果落 check_runs 并标记 taskId），返回运行记录。
+   * source 标记触发方式（schedule=到点调度 / manual=手动），用于飞书"开始执行"通知文案 */
+  async runNow(
+    id: number,
+    source: 'schedule' | 'manual' = 'manual',
+  ): Promise<CheckRun> {
     const task = await this.findOne(id);
     await this.tasks.update(id, { lastRunAt: new Date() });
     await this.tasks.increment({ id }, 'runCount', 1);
     try {
-      return await this.checksService.startRun(task.checkId, task.id);
+      return await this.checksService.startRun(task.checkId, task.id, source);
     } catch (e) {
       this.logger.error(`任务 ${id} 触发失败: ${(e as Error).message}`);
       throw e;
@@ -185,7 +189,7 @@ export class TasksService implements OnModuleInit {
   private trigger(taskId: number): void {
     void this.tasks.findOne({ where: { id: taskId } }).then((task) => {
       if (!task?.enabled) return;
-      this.runNow(taskId).catch(() => undefined);
+      this.runNow(taskId, 'schedule').catch(() => undefined);
     });
   }
 

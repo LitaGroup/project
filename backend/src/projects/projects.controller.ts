@@ -27,7 +27,7 @@ class CreateProjectDto {
 class UpdateProjectDto {
   /** 脚本目录：相对 CHECK_SCRIPTS_DIR 的路径，空串清除 */
   scriptsPath?: string;
-  /** 飞书群机器人 webhook：任务运行结束后推送结果，空串清除 */
+  /** 飞书通知群：群机器人 webhook 的 secret（粘贴完整地址自动截取），空串清除 */
   feishuWebhook?: string;
 }
 
