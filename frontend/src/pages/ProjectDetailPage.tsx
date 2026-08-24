@@ -42,7 +42,7 @@ import {
   AutocompleteList,
   AutocompleteItem,
 } from '@appica/ui-react/autocomplete'
-import { Button } from '@appica/ui-react/button'
+import { Button, buttonVariants } from '@appica/ui-react/button'
 import { Input } from '@appica/ui-react/input'
 import { Textarea } from '@appica/ui-react/textarea'
 import {
@@ -98,6 +98,12 @@ export function ProjectDetailPage() {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">文档</h2>
             <div className="flex gap-2">
+              <Link
+                to={`/documents?projectId=${project.id}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                查看全部
+              </Link>
               <CreateDocumentDialog projectId={project.id} onCreated={reload} />
               <ImportDocumentDialog projectId={project.id} onImported={reload} />
             </div>
@@ -109,6 +115,12 @@ export function ProjectDetailPage() {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">检查</h2>
             <div className="flex items-center gap-2">
+              <Link
+                to={`/checks?projectId=${project.id}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                查看全部
+              </Link>
               <ImportChecksButton projectId={project.id} scriptsPath={project.scriptsPath} onImported={reload} />
               <CheckFormDialog projectId={project.id} onSaved={reload} />
             </div>
@@ -120,6 +132,12 @@ export function ProjectDetailPage() {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">测试</h2>
             <div className="flex items-center gap-2">
+              <Link
+                to={`/tests?projectId=${project.id}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                查看全部
+              </Link>
               <ImportTestsButton projectId={project.id} scriptsPath={project.scriptsPath} onImported={reload} />
               <TestFormDialog projectId={project.id} onSaved={reload} />
             </div>
@@ -128,10 +146,6 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-xl font-semibold">缺陷</h2>
-            <SyncDefectsButton project={project} onSynced={reload} />
-          </div>
           <DefectsPanel project={project} onChanged={reload} />
         </section>
 
@@ -247,6 +261,63 @@ export function ProjectDetailPage() {
     </div>
   )
 }
+
+/** 栏目计数行：放在表格 TableBody 末尾，跨整行右对齐展示「总共 x 条，展示 y 条」；无数据时不渲染 */
+function CountRow({
+  colSpan,
+  total,
+  displayed,
+}: {
+  colSpan: number
+  total: number
+  displayed: number
+}) {
+  if (total === 0) return null
+  return (
+    <TableRow>
+      <TableCell
+        colSpan={colSpan}
+        className="text-right text-xs text-foreground-muted"
+      >
+        总共 {total} 条，展示 {displayed} 条
+      </TableCell>
+    </TableRow>
+  )
+}
+
+/**
+ * 缺陷快速筛选胶囊：未选中=对应语义浅色（warning/success-muted 深色字），选中=该色 intense 深色背景 + 浅色字。
+ * 颜色用 Appica 语义角色 token（非 hue 字面量），圆角沿用 Badge 的 rounded-full。
+ */
+function DefectFilterPill({
+  label,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string
+  tone: 'warning' | 'success'
+  active: boolean
+  onClick: () => void
+}) {
+  const tones = {
+    warning: active
+      ? 'bg-warning-intense text-foreground-inverse'
+      : 'bg-warning-muted text-warning-foreground',
+    success: active
+      ? 'bg-success-intense text-foreground-inverse'
+      : 'bg-success-muted text-success-foreground',
+  }[tone]
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex h-5 cursor-pointer items-center rounded-full px-2 text-xs transition-colors ${tones}`}
+    >
+      {label}
+    </button>
+  )
+}
 function ChecksPanel({
   project,
   onChanged,
@@ -254,7 +325,8 @@ function ChecksPanel({
   project: Project
   onChanged: () => void
 }) {
-  const checks = project.checks ?? []
+  const allChecks = project.checks ?? []
+  const checks = allChecks.slice(0, 10)
   const [error, setError] = useState<string | null>(null)
   // 脚本路径显示时去掉与项目脚本目录重叠的前缀（tooltip 仍展示完整路径）
   const dirPrefix = project.scriptsPath
@@ -313,6 +385,11 @@ function ChecksPanel({
               <TableCell colSpan={3}>暂无检查</TableCell>
             </TableRow>
           )}
+          <CountRow
+            colSpan={3}
+            total={allChecks.length}
+            displayed={checks.length}
+          />
         </TableBody>
       </Table>
     </>
@@ -703,8 +780,10 @@ function DocumentsPanel({
   project: Project
   onChanged: () => void
 }) {
-  const documents = project.documents ?? []
+  const allDocuments = project.documents ?? []
+  const documents = allDocuments.slice(0, 10)
   return (
+    <>
     <Table>
       <TableHeader>
         <TableRow>
@@ -757,10 +836,17 @@ function DocumentsPanel({
             <TableCell colSpan={5}>暂无文档</TableCell>
           </TableRow>
         )}
-      </TableBody>
-    </Table>
+        <CountRow
+          colSpan={5}
+          total={allDocuments.length}
+          displayed={documents.length}
+        />
+        </TableBody>
+      </Table>
+    </>
   )
 }
+
 
 /** 更新同步：按原始链接重新从飞书拉取（覆盖本地内容） */
 function ResyncDocumentButton({
@@ -995,7 +1081,8 @@ function TestsPanel({
   project: Project
   onChanged: () => void
 }) {
-  const tests = project.tests ?? []
+  const allTests = project.tests ?? []
+  const tests = allTests.slice(0, 10)
   const [error, setError] = useState<string | null>(null)
   // 脚本路径显示时去掉与项目脚本目录重叠的前缀（tooltip 仍展示完整路径）
   const dirPrefix = project.scriptsPath
@@ -1058,6 +1145,11 @@ function TestsPanel({
               <TableCell colSpan={4}>暂无测试</TableCell>
             </TableRow>
           )}
+          <CountRow
+            colSpan={4}
+            total={allTests.length}
+            displayed={tests.length}
+          />
         </TableBody>
       </Table>
     </>
@@ -1328,11 +1420,19 @@ function TasksSection({ project }: { project: Project }) {
     <>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-xl font-semibold">任务</h2>
-        <TaskFormDialog
-          projectId={project.id}
-          checks={project.checks ?? []}
-          onSaved={reload}
-        />
+        <div className="flex items-center gap-2">
+          <Link
+            to={`/tasks?projectId=${project.id}`}
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看全部
+          </Link>
+          <TaskFormDialog
+            projectId={project.id}
+            checks={project.checks ?? []}
+            onSaved={reload}
+          />
+        </div>
       </div>
       {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
       <Table>
@@ -1346,7 +1446,7 @@ function TasksSection({ project }: { project: Project }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(tasks ?? []).map((t) => {
+          {(tasks ?? []).slice(0, 10).map((t) => {
             const check = checkOf(t.checkId)
             return (
               <TableRow key={t.id}>
@@ -1404,6 +1504,11 @@ function TasksSection({ project }: { project: Project }) {
               <TableCell colSpan={5}>暂无任务</TableCell>
             </TableRow>
           )}
+          <CountRow
+            colSpan={5}
+            total={tasks?.length ?? 0}
+            displayed={Math.min(10, tasks?.length ?? 0)}
+          />
         </TableBody>
       </Table>
     </>
@@ -1574,7 +1679,7 @@ export function DeleteTaskButton({
   )
 }
 
-/** 缺陷板块：与项目设置的飞书多维表格双向绑定，列表随项目详情关系加载 */
+/** 缺陷板块：与项目设置的飞书多维表格双向绑定，列表随项目详情关系加载；标题栏含快速筛选（open/reopen、fixed） */
 function DefectsPanel({
   project,
   onChanged,
@@ -1582,10 +1687,53 @@ function DefectsPanel({
   project: Project
   onChanged: () => void
 }) {
-  const defects = project.defects ?? []
+  const [quickFilter, setQuickFilter] = useState<'all' | 'pending' | 'fixed'>(
+    'all',
+  )
   const [error, setError] = useState<string | null>(null)
+  const allDefects = project.defects ?? []
+  const filteredDefects =
+    quickFilter === 'all'
+      ? allDefects
+      : allDefects.filter((d) =>
+          quickFilter === 'pending'
+            ? d.status === 'open' || d.status === 'reopen'
+            : d.status === 'fixed',
+        )
+  const defects = filteredDefects.slice(0, 10)
   return (
     <>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-semibold">缺陷</h2>
+          {/* 快速筛选：未选中=对应语义浅色（open/reopen=warning、fixed=success），选中=深色背景浅色字体；再次点击当前项恢复全部 */}
+          <DefectFilterPill
+            label="open/reopen"
+            tone="warning"
+            active={quickFilter === 'pending'}
+            onClick={() =>
+              setQuickFilter((v) => (v === 'pending' ? 'all' : 'pending'))
+            }
+          />
+          <DefectFilterPill
+            label="fixed"
+            tone="success"
+            active={quickFilter === 'fixed'}
+            onClick={() =>
+              setQuickFilter((v) => (v === 'fixed' ? 'all' : 'fixed'))
+            }
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            to={`/defects?projectId=${project.id}`}
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看全部
+          </Link>
+          <SyncDefectsButton project={project} onSynced={onChanged} />
+        </div>
+      </div>
       {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
       <Table>
         <TableHeader>
@@ -1631,10 +1779,19 @@ function DefectsPanel({
           {defects.length === 0 && (
             <TableRow>
               <TableCell colSpan={5}>
-                暂无缺陷，设置缺陷表格地址后点击「同步飞书」拉取
+                {allDefects.length === 0
+                  ? '暂无缺陷，设置缺陷表格地址后点击「同步飞书」拉取'
+                  : quickFilter === 'all'
+                    ? '暂无缺陷'
+                    : '无符合筛选条件的缺陷'}
               </TableCell>
             </TableRow>
           )}
+          <CountRow
+            colSpan={5}
+            total={filteredDefects.length}
+            displayed={defects.length}
+          />
         </TableBody>
       </Table>
     </>

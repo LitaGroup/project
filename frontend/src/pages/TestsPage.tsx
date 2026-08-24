@@ -10,6 +10,8 @@ import {
 } from '@appica/ui-react/table'
 import { Input } from '@appica/ui-react/input'
 import { api, type Project, type ProjectTest } from '../lib/api'
+import { ProjectFilterSelect } from '../components/ProjectFilterSelect'
+import { useProjectIdParam } from '../components/useProjectIdParam'
 
 /** 用例全局列表：全部项目的测试用例（编号/描述/脚本/项目），支持编号、描述、脚本名模糊搜索 */
 export function TestsPage() {
@@ -17,6 +19,7 @@ export function TestsPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [keyword, setKeyword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [projectFilter, setProjectFilter] = useProjectIdParam()
 
   useEffect(() => {
     api
@@ -30,6 +33,7 @@ export function TestsPage() {
 
   const q = keyword.trim().toLowerCase()
   const filtered = (tests ?? []).filter((t) => {
+    if (projectFilter !== 'all' && String(t.projectId) !== projectFilter) return false
     if (!q) return true
     return (
       t.code.toLowerCase().includes(q) ||
@@ -45,6 +49,11 @@ export function TestsPage() {
       </div>
 
       <div className="mb-4 flex gap-2">
+        <ProjectFilterSelect
+          projects={projects}
+          value={projectFilter}
+          onChange={setProjectFilter}
+        />
         <Input
           className="w-64"
           placeholder="搜索编号 / 描述 / 脚本名…"

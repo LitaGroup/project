@@ -16,6 +16,8 @@ import {
   type ProjectTask,
 } from '../lib/api'
 import { RunStats } from '../components/RunStats'
+import { ProjectFilterSelect } from '../components/ProjectFilterSelect'
+import { useProjectIdParam } from '../components/useProjectIdParam'
 
 /** 任务全局列表：全部项目的定时任务（标题/计划/脚本/项目/运行），支持标题、脚本名模糊搜索 */
 export function TasksPage() {
@@ -24,6 +26,7 @@ export function TasksPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [keyword, setKeyword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [projectFilter, setProjectFilter] = useProjectIdParam()
 
   useEffect(() => {
     api
@@ -40,6 +43,7 @@ export function TasksPage() {
 
   const q = keyword.trim().toLowerCase()
   const filtered = (tasks ?? []).filter((t) => {
+    if (projectFilter !== 'all' && String(t.projectId) !== projectFilter) return false
     if (!q) return true
     const check = checkOf.get(t.checkId)
     return (
@@ -56,6 +60,11 @@ export function TasksPage() {
       </div>
 
       <div className="mb-4 flex gap-2">
+        <ProjectFilterSelect
+          projects={projects}
+          value={projectFilter}
+          onChange={setProjectFilter}
+        />
         <Input
           className="w-64"
           placeholder="搜索标题 / 脚本名…"

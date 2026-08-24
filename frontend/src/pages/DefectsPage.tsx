@@ -18,6 +18,8 @@ import {
 } from '@appica/ui-react/select'
 import { api, DEFECT_STATUSES, type Defect, type Project } from '../lib/api'
 import { DefectStatusBadge } from '../components/StatusBadge'
+import { ProjectFilterSelect } from '../components/ProjectFilterSelect'
+import { useProjectIdParam } from '../components/useProjectIdParam'
 
 /** 全局缺陷列表：描述/端/状态/人员/项目五列，支持描述模糊搜索 + 状态筛选 */
 export function DefectsPage() {
@@ -26,6 +28,7 @@ export function DefectsPage() {
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [error, setError] = useState<string | null>(null)
+  const [projectFilter, setProjectFilter] = useProjectIdParam()
 
   useEffect(() => {
     api.listDefects().then(setDefects).catch((e: Error) => setError(e.message))
@@ -36,6 +39,7 @@ export function DefectsPage() {
   const q = keyword.trim().toLowerCase()
   const filtered = (defects ?? []).filter(
     (d) =>
+      (projectFilter === 'all' || String(d.projectId) === projectFilter) &&
       (!q || d.title.toLowerCase().includes(q)) &&
       (statusFilter === 'all' || d.status === statusFilter),
   )
@@ -52,6 +56,11 @@ export function DefectsPage() {
         <h1 className="text-2xl font-semibold">缺陷</h1>
       </div>
       <div className="mb-4 flex gap-2">
+        <ProjectFilterSelect
+          projects={projects}
+          value={projectFilter}
+          onChange={setProjectFilter}
+        />
         <Input
           className="w-64"
           placeholder="搜索问题描述…"

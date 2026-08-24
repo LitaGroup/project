@@ -23,6 +23,8 @@ import {
   type Project,
   type ProjectDocument,
 } from '../lib/api'
+import { ProjectFilterSelect } from '../components/ProjectFilterSelect'
+import { useProjectIdParam } from '../components/useProjectIdParam'
 
 /** 文档来源取值（后端存储原文）：飞书同步 / 平台内直接编写 */
 const DOCUMENT_SOURCES = ['飞书', '-'] as const
@@ -35,6 +37,7 @@ export function DocumentsPage() {
   const [typeFilter, setTypeFilter] = useState('all')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [error, setError] = useState<string | null>(null)
+  const [projectFilter, setProjectFilter] = useProjectIdParam()
 
   useEffect(() => {
     api
@@ -51,6 +54,7 @@ export function DocumentsPage() {
     if (q && !d.title.toLowerCase().includes(q)) return false
     if (typeFilter !== 'all' && d.type !== typeFilter) return false
     if (sourceFilter !== 'all' && d.source !== sourceFilter) return false
+    if (projectFilter !== 'all' && String(d.projectId) !== projectFilter) return false
     return true
   })
 
@@ -61,6 +65,11 @@ export function DocumentsPage() {
       </div>
 
       <div className="mb-4 flex gap-2">
+        <ProjectFilterSelect
+          projects={projects}
+          value={projectFilter}
+          onChange={setProjectFilter}
+        />
         <Input
           className="w-64"
           placeholder="搜索标题…"
