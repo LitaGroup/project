@@ -9,6 +9,8 @@ export default defineConfig({
     proxy: {
       // 后端 NestJS，见 backend/src/main.ts（globalPrefix: 'api'）
       '/api': 'http://localhost:3000',
+      // 上传图片静态目录（DIR_IMAGE_WEBROOT，后端挂在 /images 下）
+      '/images': 'http://localhost:3000',
     },
   },
 })

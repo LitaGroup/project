@@ -10,3 +10,7 @@ cp backend/.env.example backend/.env   # 填 MySQL 与飞书凭据
 pnpm dev:backend    # http://localhost:3000/api
 pnpm dev:frontend   # http://localhost:5173
 ```
+
+## 部署待办
+
+- [ ] **生产 nginx 补充 `/images` 转发规则**：图片上传目录（生产 `DIR_IMAGE_WEBROOT=/home/ecs-user/work/webroot-images`）由后端静态挂载在 `/images` 下，但生产经 nginx（`project.cinta.team`）转发，若 nginx 只代理了 `/api`，需在服务器 nginx 配置中补充 `/images` 的转发（代理到后端 3000，或直接指向该目录），否则 `https://project.cinta.team/images/...` 会 404。

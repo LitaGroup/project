@@ -36,6 +36,7 @@ TypeORM `synchronize` 仅在非 production 开启，**上生产前必须改 migr
 - `backend/`：后端代码，入口 `src/main.ts`（全局前缀 `/api`、CORS 全开）
   - **`.md` URL 规范**：路径加 `.md` 后缀返回 Markdown 视图（`text/markdown`）。`GET /api/documents/:id.md`（文档元信息 + 正文）；`GET /api/projects/:id.md`（项目描述 + 文档/检查/测试/任务清单，文档条目链接到其 `.md`，检查/测试条目附运行端点，末尾"AI 操作"小节说明用法）。路由须声明在 `:id` 之前避免参数匹配冲突
   - `src/common/enums.ts`：领域枚举（见下，勿改名）
+  - `src/common/paths.ts`：`imageWebroot()` 读取全局变量 `DIR_IMAGE_WEBROOT`（图片上传后的本地根目录，默认 `<项目根>/images`）；`main.ts` 将该目录静态挂载到 `/images`（不走 `/api` 全局前缀），经 `http://{host}/images/{image-path}` 访问，前端 dev server 已代理 `/images`
   - `src/feishu/`：飞书只读客户端 + `GET /api/feishu/read?url=` 预览
   - `src/projects/` / `src/documents/`：实体与 CRUD，`POST /api/documents/sync-feishu` 为一键同步入口；文档列表查询（`GET /api/documents`、项目详情的关系数据）用 `DOCUMENT_LIST_SELECT` 排除 longtext 正文，正文仅经 `GET /api/documents/:id` 单独返回
   - `src/checks/`：检查（Check）登记管理，`GET /api/checks/scripts?q=` 扫描脚本目录供自动联想
