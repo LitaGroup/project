@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { Viewer } from '@bytemd/react'
 import gfm from '@bytemd/plugin-gfm'
 import 'bytemd/dist/index.css'
@@ -28,6 +28,7 @@ import {
   AutocompleteItem,
 } from '@appica/ui-react/autocomplete'
 import { Button } from '@appica/ui-react/button'
+import { Badge } from '@appica/ui-react/badge'
 import {
   Select,
   SelectTrigger,
@@ -42,11 +43,39 @@ import {
   type Defect,
   type DefectStatus,
   type ProjectTest,
+  type TestRun,
 } from '../lib/api'
 import { DefectStatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { Terminal } from '../components/Terminal'
 
 const plugins = [gfm()]
+
+const runStatusMeta: Record<
+  TestRun['status'],
+  { text: string; variant: 'info' | 'success' | 'error' | 'warning' }
+> = {
+  running: { text: '运行中', variant: 'info' },
+  success: { text: '通过', variant: 'success' },
+  fail: { text: '未通过', variant: 'error' },
+  error: { text: '异常', variant: 'warning' },
+}
+
+function RunStatusBadge({ status }: { status: TestRun['status'] }) {
+  const meta = runStatusMeta[status]
+  return <Badge variant={meta.variant}>{meta.text}</Badge>
+}
+
+/** 耗时展示：运行中按 startedAt 实时计算，结束后用落库的 durationMs */
+function formatDuration(run: TestRun, now: number): string {
+  const ms =
+    run.durationMs ??
+    (run.status === 'running'
+      ? now - new Date(run.startedAt).getTime()
+      : null)
+  if (ms === null) return '—'
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+}
 
 /** 缺陷详情：问题描述 + 截图 + 属性编辑（端/状态/测试脚本），状态/端变更后回写飞书 */
 export function DefectDetailPage() {
@@ -57,6 +86,21 @@ export function DefectDetailPage() {
   const [defect, setDefect] = useState<Defect | null>(null)
   const [projectName, setProjectName] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 测试运行结果：当前展示的运行（默认该测试最近一次），运行验证后实时订阅更新
+  const [run, setRun] = useState<TestRun | null>(null)
+  const [runId, setRunId] = useState<number | null>(null)
+  const [streamError, setStreamError] = useState<string | null>(null)
+  // 用例：按 testScript 匹配到的已登记测试（用于展示测试名称而非脚本路径）
+  const [test, setTest] = useState<ProjectTest | null>(null)
+  // 仅用于驱动运行中耗时每秒重渲染
+  const [now, setNow] = useState(() => Date.now())
+  // 最新缺陷快照（供 SSE 回调读取，避免闭包过期）
+  const defectRef = useRef<Defect | null>(defect)
+  useEffect(() => {
+    defectRef.current = defect
+  }, [defect])
+  // 本次"运行验证"是否由本页触发（自动标记 fixed 仅对本次触发的运行生效）
+  const verifyTriggeredRef = useRef(false)
 
   const reload = useCallback(() => {
     api
@@ -72,6 +116,77 @@ export function DefectDetailPage() {
       .then((p) => setProjectName(p.name))
       .catch(() => setProjectName(null))
   }, [projectId, reload])
+
+  const onVerifyStarted = useCallback((r: TestRun) => {
+    setRun(r)
+    setRunId(r.id)
+    setStreamError(null)
+    verifyTriggeredRef.current = true
+  }, [])
+
+  /** 运行通过且状态为 open/reopen 时自动标记 fixed（回写飞书由后端处理） */
+  const autoMarkFixed = useCallback(() => {
+    const d = defectRef.current
+    if (!d) return
+    if (d.status !== 'open' && d.status !== 'reopen') return
+    api
+      .updateDefect(d.id, { status: 'fixed' })
+      .then(reload)
+      .catch(() => {})
+  }, [reload])
+
+  const testScript = defect?.testScript ?? null
+  const defectProjectId = defect?.projectId ?? null
+
+  // 加载测试运行结果：按 defect.testScript 找到登记的测试，取其最近一次运行
+  useEffect(() => {
+    if (!testScript) return
+    api
+      .listTests(defectProjectId ?? undefined)
+      .then((tests) => tests.find((t) => t.scriptPath === testScript) ?? null)
+      .then((t) => {
+        setTest(t)
+        if (t) return api.listTestRuns(t.id)
+        return Promise.resolve<TestRun[]>([])
+      })
+      .then((runs) => {
+        const last = runs[0] ?? null
+        setRun(last)
+        setRunId(last?.id ?? null)
+      })
+      .catch(() => {
+        setRun(null)
+        setRunId(null)
+      })
+  }, [testScript, defectProjectId])
+
+  // SSE 实时订阅选中的运行记录：运行中逐条推送，终态推送后自动完成
+  useEffect(() => {
+    if (!testScript || runId === null) return
+    let finished = false
+    const es = new EventSource(`/api/tests/runs/${runId}/stream`)
+    es.onmessage = (e: MessageEvent<string>) => {
+      const r = JSON.parse(e.data) as TestRun
+      setRun(r)
+      setNow(Date.now())
+      if (r.status !== 'running') {
+        finished = true
+        es.close()
+        const triggered = verifyTriggeredRef.current
+        verifyTriggeredRef.current = false
+        if (r.status === 'success' && triggered) autoMarkFixed()
+      }
+    }
+    es.onerror = () => {
+      es.close()
+      if (!finished) setStreamError('实时连接中断，结果可能不完整')
+    }
+    const clock = setInterval(() => setNow(Date.now()), 1000)
+    return () => {
+      es.close()
+      clearInterval(clock)
+    }
+  }, [runId, testScript, autoMarkFixed])
 
   if (error && !defect) return <p>加载失败:{error}</p>
   if (!defect) return <p>加载中…</p>
@@ -126,6 +241,67 @@ export function DefectDetailPage() {
             <p className="whitespace-pre-wrap text-sm">{defect.remark}</p>
           </section>
         )}
+        <section>
+          <h2 className="mb-3 text-xl font-semibold">测试运行结果</h2>
+          {defect.testScript ? (
+            run ? (
+              <Card>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 pt-4 text-sm">
+                  <RunStatusBadge status={run.status} />
+                  <span>
+                    开始：{new Date(run.startedAt).toLocaleString()}
+                  </span>
+                  <span>耗时：{formatDuration(run, now)}</span>
+                  {run.total !== null && (
+                    <span>
+                      步骤：{run.current}/{run.total}
+                    </span>
+                  )}
+                  {run.success !== null && (
+                    <span>
+                      成功{' '}
+                      <span className="text-success-emphasis">{run.success}</span>
+                      /失败{' '}
+                      <span
+                        className={
+                          (run.fail ?? 0) > 0
+                            ? 'text-error-emphasis'
+                            : 'text-success-emphasis'
+                        }
+                      >
+                        {run.fail}
+                      </span>
+                      /跳过 {run.skip ?? 0}
+                    </span>
+                  )}
+                  {run.message && (
+                    <span className="w-full whitespace-pre-wrap text-foreground-muted">
+                      {run.message}
+                    </span>
+                  )}
+                </div>
+                {streamError && (
+                  <p className="px-6 pt-2 text-sm">{streamError}</p>
+                )}
+                <div className="flex h-72 flex-col p-4">
+                  <Terminal run={run} scriptPath={defect.testScript} />
+                </div>
+              </Card>
+            ) : (
+              <Card>
+                <p className="px-6 py-4 text-sm">
+                  该用例暂无运行记录，点击"运行验证"开始。
+                </p>
+              </Card>
+            )
+          ) : (
+            <Card>
+              <p className="px-6 py-4 text-sm">
+                未配置用例，暂无运行结果。
+              </p>
+            </Card>
+          )}
+        </section>
       </div>
 
       {/* 右侧：属性 */}
@@ -154,13 +330,13 @@ export function DefectDetailPage() {
               <dd>{defect.assignee ?? '—'}</dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt>测试脚本</dt>
+              <dt>用例</dt>
               <dd className="flex items-center gap-1">
                 <span
                   className="max-w-40 truncate"
                   title={defect.testScript ?? ''}
                 >
-                  {defect.testScript ?? '—'}
+                  {test?.code ?? defect.testScript ?? '—'}
                 </span>
                 <EditTestScriptDialog defect={defect} onSaved={reload} />
               </dd>
@@ -175,14 +351,18 @@ export function DefectDetailPage() {
             </div>
           </dl>
           <div className="px-6 pb-6">
-            <VerifyButton defect={defect} />
+            <VerifyButton
+              defect={defect}
+              running={run?.status === 'running'}
+              onStarted={onVerifyStarted}
+            />
             {defect.testScript ? (
               <p className="mt-2 text-xs text-foreground-muted">
-                标记 fixed 前需测试脚本最近一次运行通过
+                标记 fixed 前需用例最近一次运行通过
               </p>
             ) : (
               <p className="mt-2 text-xs text-foreground-muted">
-                未配置测试脚本，可手动标记 fixed
+                未配置用例，可手动标记 fixed
               </p>
             )}
           </div>
@@ -242,9 +422,17 @@ function StatusSelect({
   )
 }
 
-/** 运行验证：启动缺陷测试脚本的一次运行，跳转到测试运行页查看结果 */
-function VerifyButton({ defect }: { defect: Defect }) {
-  const navigate = useNavigate()
+/** 运行验证：启动缺陷测试脚本的一次运行，结果实时展示在"测试运行结果"板块。
+    按钮状态：运行验证(可点) → 启动中(禁用) → 运行中(禁用) → 运行验证(可点) */
+function VerifyButton({
+  defect,
+  running,
+  onStarted,
+}: {
+  defect: Defect
+  running: boolean
+  onStarted: (run: TestRun) => void
+}) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -255,14 +443,12 @@ function VerifyButton({ defect }: { defect: Defect }) {
     setError(null)
     api
       .verifyDefect(defect.id)
-      .then((r) =>
-        navigate(`/projects/${defect.projectId}/tests/${r.testId}`),
-      )
-      .catch((e: Error) => {
-        setError(e.message)
-        setLoading(false)
-      })
+      .then(onStarted)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
   }
+
+  const disabled = loading || running
 
   return (
     <>
@@ -270,10 +456,10 @@ function VerifyButton({ defect }: { defect: Defect }) {
         size="sm"
         className="w-full"
         onClick={run}
-        disabled={loading}
-        title={error ?? '运行测试脚本验证缺陷是否已修复'}
+        disabled={disabled}
+        title={error ?? '运行用例验证缺陷是否已修复'}
       >
-        {loading ? '启动中…' : '运行验证'}
+        {loading ? '启动中…' : running ? '运行中…' : '运行验证'}
       </Button>
       {error && <p className="mt-2 text-xs">操作失败:{error}</p>}
     </>
@@ -406,7 +592,7 @@ function EditTestScriptDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>编辑测试脚本</DialogTitle>
+          <DialogTitle>编辑用例</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
@@ -438,7 +624,7 @@ function EditTestScriptDialog({
               </Autocomplete>
             </label>
             <p className="text-xs text-foreground-muted">
-              配置后标记 fixed 前须该测试脚本最近一次运行通过
+              配置后标记 fixed 前须该用例最近一次运行通过
             </p>
             {error && <p className="text-sm">保存失败:{error}</p>}
           </div>
