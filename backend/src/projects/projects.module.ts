@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AppVersionsModule } from '../app-versions/app-versions.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { ChecksModule } from '../checks/checks.module';
 import { TasksModule } from '../tasks/tasks.module';
@@ -20,6 +21,7 @@ import { SyncState } from './sync-state.entity';
     TasksModule,
     TestsModule,
     DefectsModule,
+    AppVersionsModule,
     FeishuModule,
   ],
   controllers: [ProjectsController],

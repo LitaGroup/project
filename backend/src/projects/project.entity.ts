@@ -2,12 +2,14 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { ProjectStatus, ProjectType } from '../common/enums';
 import { Check } from '../checks/check.entity';
+import { AppVersion } from '../app-versions/app-version.entity';
 import { Task } from '../tasks/task.entity';
 import { Test } from '../tests/test.entity';
 import { Document } from '../documents/document.entity';
@@ -77,6 +79,11 @@ export class Project {
   @OneToMany(() => Defect, (defect) => defect.project)
   defects: Defect[];
 
+  @OneToMany(() => AppVersion, (appVersion) => appVersion.project)
+  appVersions: AppVersion[];
+
+  /** 列表按创建时间倒序展示，建索引避免全表 filesort */
+  @Index('IDX_projects_createdAt')
   @CreateDateColumn()
   createdAt: Date;
 

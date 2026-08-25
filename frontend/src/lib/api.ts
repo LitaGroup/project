@@ -12,6 +12,17 @@ export type DefectStatus = (typeof DEFECT_STATUSES)[number]
 /** 缺陷端：只保留这四类，飞书侧其它值统一为"未知"（默认） */
 export const DEFECT_PLATFORMS = ['前端', '后端', 'APP端', '未知'] as const
 
+/** APP 自动化测试目标应用（与后端 AppTarget 对应，app_versions 用） */
+export const APP_TARGETS = ['lita', 'lita lite'] as const
+export type AppTarget = (typeof APP_TARGETS)[number]
+
+/** APP 版本平台（app 包目标，android/ios） */
+export const APP_PLATFORMS = ['android', 'ios'] as const
+
+/** 脚本运行设备：server/h5 本地直跑；android/ios 走 appium-agent 远程 */
+export const DEVICES = ['server', 'h5', 'android', 'ios'] as const
+export type Device = (typeof DEVICES)[number]
+
 /** 与后端 DocumentType 对应 */
 export const DOCUMENT_TYPES = [
   '需求',
@@ -45,6 +56,8 @@ export interface ProjectCheck {
   description: string | null
   /** 脚本位置：相对脚本根目录的 .check.ts 路径 */
   scriptPath: string
+  /** 运行设备/目标：server/h5 本地直跑；android/ios 走 appium-agent 远程 */
+  device: string | null
   projectId?: number
   updatedAt: string
 }
@@ -67,8 +80,8 @@ export interface CheckRun {
   checkId: number
   /** 触发来源任务（定时任务触发时记录；手动运行为 null） */
   taskId?: number | null
-  /** running=执行中；success=全部通过；fail=有失败项；error=脚本异常 */
-  status: 'running' | 'success' | 'fail' | 'error'
+  /** queued=已入队待 appium-agent 执行；running=执行中；success=全部通过；fail=有失败项；error=脚本异常 */
+  status: 'queued' | 'running' | 'success' | 'fail' | 'error'
   /** 总步数（脚本 [start] 上报） */
   total: number | null
   /** 当前步数（运行中实时更新） */
@@ -98,7 +111,28 @@ export interface ProjectTest {
   description: string | null
   /** 脚本位置：相对脚本根目录的 .test.ts 路径 */
   scriptPath: string
+  /** 运行设备/目标：server/h5 本地直跑；android/ios 走 appium-agent 远程 */
+  device: string | null
   projectId?: number
+  updatedAt: string
+}
+
+/** APP 版本：每次 APP 测试运行使用的 app 包元信息（不含包内容，由 agent 下载缓存） */
+export interface AppVersion {
+  id: number
+  projectId: number
+  /** 平台：ios / android */
+  platform: string
+  /** 目标应用：lita / lita lite */
+  appTarget: string
+  /** 版本号（如 1.2.3） */
+  version: string
+  /** app 包下载地址 */
+  downloadUrl: string
+  /** app 包 md5 */
+  md5: string
+  remark: string | null
+  createdAt: string
   updatedAt: string
 }
 
@@ -106,8 +140,8 @@ export interface ProjectTest {
 export interface TestRun {
   id: number
   testId: number
-  /** running=执行中；success=全部通过；fail=有失败项；error=脚本异常 */
-  status: 'running' | 'success' | 'fail' | 'error'
+  /** queued=已入队待 appium-agent 执行；running=执行中；success=全部通过；fail=有失败项；error=脚本异常 */
+  status: 'queued' | 'running' | 'success' | 'fail' | 'error'
   /** 总步数（脚本 [start] 上报） */
   total: number | null
   /** 当前步数（运行中实时更新） */
@@ -124,6 +158,12 @@ export interface TestRun {
   logs: string[] | null
   /** 脚本原始输出行（终端展示用；运行中实时累积） */
   output: string[] | null
+  /** 入队时间（APP 测试远程执行 FIFO 排序用） */
+  queuedAt: string | null
+  /** 关联的 APP 版本（非 APP 测试为空） */
+  appVersionId: number | null
+  /** 执行机标识（APP 测试记录） */
+  agentName: string | null
   startedAt: string
   finishedAt: string | null
 }
@@ -136,16 +176,17 @@ export interface Project {
   expectedReleaseAt: string | null
   iterationCycle: string | null
   priority: string | null
-  resources: { frontend?: string; backend?: string; qa?: string } | null
+  /** 以下字段仅详情接口（GET /projects/:id）返回，列表接口（GET /projects）不包含 */
+  resources?: { frontend?: string; backend?: string; qa?: string } | null
   /** 飞书同步的项目有 record_id，可据此判断来源 */
-  feishuRecordId: string | null
-  description: string | null
+  feishuRecordId?: string | null
+  description?: string | null
   /** 脚本目录：相对脚本根目录的路径，登记检查时只在该子目录下扫描 */
-  scriptsPath: string | null
+  scriptsPath?: string | null
   /** 飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送通知 */
-  feishuWebhook: string | null
+  feishuWebhook?: string | null
   /** 缺陷多维表格地址：项目的缺陷与该表双向绑定 */
-  defectBitableUrl: string | null
+  defectBitableUrl?: string | null
   documents?: ProjectDocument[]
   checks?: ProjectCheck[]
   tests?: ProjectTest[]
@@ -203,6 +244,24 @@ export interface ProjectTask {
   updatedAt: string
 }
 
+export interface ProjectPage {
+  items: Project[]
+  total: number
+  iterations: string[]
+  priorities: string[]
+}
+
+/** 项目表格分页查询参数（与后端 ProjectPageQuery 对应，全为空时返回全部） */
+export interface ProjectPageParams {
+  page: number
+  pageSize?: number
+  q?: string
+  iteration?: string
+  status?: string
+  type?: string
+  priority?: string
+}
+
 /** 平台设置（只读，来源于后端配置文件，不含密钥） */
 export interface Settings {
   /** 运行环境（NODE_ENV） */
@@ -242,6 +301,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listProjects: () => request<Project[]>('/projects'),
+  /** 项目表格分页：只返回当前页 + total + 筛选值，避免全量拉回 */
+  listProjectPage: (params: ProjectPageParams) => {
+    const qs = new URLSearchParams()
+    qs.set('page', String(params.page))
+    if (params.pageSize) qs.set('pageSize', String(params.pageSize))
+    if (params.q) qs.set('q', params.q)
+    if (params.iteration) qs.set('iteration', params.iteration)
+    if (params.status) qs.set('status', params.status)
+    if (params.type) qs.set('type', params.type)
+    if (params.priority) qs.set('priority', params.priority)
+    return request<ProjectPage>(`/projects/page?${qs.toString()}`)
+  },
   getProject: (id: number) => request<Project>(`/projects/${id}`),
   createProject: (input: {
     name: string
@@ -321,6 +392,7 @@ export const api = {
     code: string
     description?: string
     scriptPath: string
+    device?: string | null
   }) =>
     request<ProjectCheck>('/checks', {
       method: 'POST',
@@ -328,7 +400,12 @@ export const api = {
     }),
   updateCheck: (
     id: number,
-    input: Partial<{ code: string; description: string; scriptPath: string }>,
+    input: Partial<{
+      code: string
+      description: string
+      scriptPath: string
+      device: string | null
+    }>,
   ) =>
     request<ProjectCheck>(`/checks/${id}`, {
       method: 'PATCH',
@@ -369,6 +446,7 @@ export const api = {
     code: string
     description?: string
     scriptPath: string
+    device?: string | null
   }) =>
     request<ProjectTest>('/tests', {
       method: 'POST',
@@ -376,7 +454,12 @@ export const api = {
     }),
   updateTest: (
     id: number,
-    input: Partial<{ code: string; description: string; scriptPath: string }>,
+    input: Partial<{
+      code: string
+      description: string
+      scriptPath: string
+      device: string | null
+    }>,
   ) =>
     request<ProjectTest>(`/tests/${id}`, {
       method: 'PATCH',
@@ -396,14 +479,37 @@ export const api = {
     request<ProjectTest[]>(
       `/tests${projectId === undefined ? '' : `?projectId=${projectId}`}`,
     ),
-  /** 启动一次测试脚本运行：立即返回 running 记录，脚本后台异步执行 */
-  startTestRun: (testId: number) =>
-    request<TestRun>(`/tests/${testId}/runs`, { method: 'POST' }),
+  /** 启动一次测试脚本运行：APP 测试传 appVersionId 指定 app 版本，立即返回 queued/running 记录 */
+  startTestRun: (testId: number, appVersionId?: number) =>
+    request<TestRun>(`/tests/${testId}/runs`, {
+      method: 'POST',
+      body: JSON.stringify(appVersionId ? { appVersionId } : {}),
+    }),
   /** 测试运行历史（倒序，上限 50） */
   listTestRuns: (testId: number) =>
     request<TestRun[]>(`/tests/${testId}/runs`),
   /** 单次测试运行详情（含实时进度，运行中轮询） */
   getTestRun: (runId: number) => request<TestRun>(`/tests/runs/${runId}`),
+  /** APP 版本列表：传 projectId 按项目过滤，不传返回全部 */
+  listAppVersions: (projectId?: number) =>
+    request<AppVersion[]>(
+      `/app-versions${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
+  createAppVersion: (input: {
+    projectId: number
+    platform: string
+    appTarget: string
+    version: string
+    downloadUrl: string
+    md5: string
+    remark?: string
+  }) =>
+    request<AppVersion>('/app-versions', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  deleteAppVersion: (id: number) =>
+    request<void>(`/app-versions/${id}`, { method: 'DELETE' }),
   listTasks: (projectId?: number) =>
     request<ProjectTask[]>(
       `/tasks${projectId === undefined ? '' : `?projectId=${projectId}`}`,

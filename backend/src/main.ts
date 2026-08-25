@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import * as express from 'express';
 import * as fs from 'fs';
+import { AgentGateway } from './agent/agent.gateway';
 import { AppModule } from './app.module';
 import { imageWebroot } from './common/paths';
 
@@ -16,5 +17,9 @@ async function bootstrap() {
   app.use('/images', express.static(webroot, { index: false }));
 
   await app.listen(process.env.PORT ?? 3000);
+
+  // WebSocket server（appium-agent 连接）：ws://host:port/ws?token=...（不走 /api 前缀）
+  const agentGateway = app.get(AgentGateway);
+  agentGateway.attachToServer(app.getHttpServer());
 }
 void bootstrap();

@@ -49,3 +49,20 @@ export enum DefectStatus {
   CLOSED = 'closed',
   INVALID = 'invalid',
 }
+
+/**
+ * 脚本运行设备/目标：决定运行位置。
+ * server/h5 → project 本地 node 直跑；android/ios → appium-agent 远程执行。
+ */
+export enum RunDevice {
+  H5 = 'h5',
+  ANDROID = 'android',
+  IOS = 'ios',
+  SERVER = 'server',
+}
+
+/** APP 自动化测试目标应用（app_versions 用） */
+export enum AppTarget {
+  LITA = 'lita',
+  LITA_LITE = 'lita lite',
+}

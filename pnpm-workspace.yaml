@@ -1,5 +1,6 @@
 packages:
   - frontend
   - backend
+  - appium-agent
 allowBuilds:
   unrs-resolver: true

@@ -50,45 +50,69 @@ import { StatusBadge } from '../components/StatusBadge'
 import { TypeBadge, PriorityBadge } from '../components/ProjectBadges'
 
 export function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>([])
+  const PAGE_SIZE = 20
+  const [items, setItems] = useState<Project[]>([])
+  const [total, setTotal] = useState(0)
+  const [iterations, setIterations] = useState<string[]>([])
+  const [priorities, setPriorities] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [iterationFilter, setIterationFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [keyword, setKeyword] = useState('')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [refresh, setRefresh] = useState(0)
 
-  const reload = useCallback(() => {
+  // 搜索输入防抖后再触发查询（300ms）
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(keyword.trim()), 300)
+    return () => clearTimeout(t)
+  }, [keyword])
+
+  // 分页/筛选/搜索变化时从接口拉取当前页（筛选全部交给后端）
+  useEffect(() => {
+    let cancelled = false
     api
-      .listProjects()
-      .then(setProjects)
-      .catch((e: Error) => setError(e.message))
-  }, [])
+      .listProjectPage({
+        page,
+        pageSize: PAGE_SIZE,
+        q: search || undefined,
+        iteration: iterationFilter === 'all' ? undefined : iterationFilter,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        type: typeFilter === 'all' ? undefined : typeFilter,
+        priority: priorityFilter === 'all' ? undefined : priorityFilter,
+      })
+      .then((r) => {
+        if (cancelled) return
+        const pageCount = Math.max(1, Math.ceil(r.total / PAGE_SIZE))
+        if (page > pageCount) {
+          setPage(pageCount)
+          return
+        }
+        setItems(r.items)
+        setTotal(r.total)
+        setIterations(r.iterations)
+        setPriorities(r.priorities)
+        setError(null)
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setError(e.message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [page, search, iterationFilter, statusFilter, typeFilter, priorityFilter, refresh])
 
-  useEffect(reload, [reload])
+  const reload = useCallback(() => setRefresh((r) => r + 1), [])
 
   const handleDelete = (id: number) => {
     api.deleteProject(id).then(reload).catch((e: Error) => setError(e.message))
   }
 
-  const iterations = [
-    ...new Set(
-      projects.map((p) => p.iterationCycle).filter((v): v is string => !!v),
-    ),
-  ]
-  const priorities = [
-    ...new Set(
-      projects.map((p) => p.priority).filter((v): v is string => !!v),
-    ),
-  ]
-  const filtered = projects.filter(
-    (p) =>
-      (iterationFilter === 'all' || p.iterationCycle === iterationFilter) &&
-      (statusFilter === 'all' || p.status === statusFilter) &&
-      (typeFilter === 'all' || p.type === typeFilter) &&
-      (priorityFilter === 'all' || p.priority === priorityFilter) &&
-      (!keyword || p.name.toLowerCase().includes(keyword.toLowerCase())),
-  )
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
 
   return (
     <div>
@@ -106,12 +130,21 @@ export function ProjectsPage() {
           placeholder="搜索标题…"
           clearable
           value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          onChange={(e) => {
+            setKeyword(e.target.value)
+            setPage(1)
+          }}
+          onClear={() => {
+            setKeyword('')
+            setPage(1)
+          }}
         />
         <Select
           value={iterationFilter}
-          onValueChange={(v) => setIterationFilter(v as string)}
+          onValueChange={(v) => {
+            setIterationFilter(v as string)
+            setPage(1)
+          }}
           items={{
             all: '不限迭代',
             ...Object.fromEntries(iterations.map((it) => [it, it])),
@@ -131,7 +164,10 @@ export function ProjectsPage() {
         </Select>
         <Select
           value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as string)}
+          onValueChange={(v) => {
+            setStatusFilter(v as string)
+            setPage(1)
+          }}
           items={{
             all: '不限状态',
             ...Object.fromEntries(PROJECT_STATUSES.map((s) => [s, s])),
@@ -151,7 +187,10 @@ export function ProjectsPage() {
         </Select>
         <Select
           value={typeFilter}
-          onValueChange={(v) => setTypeFilter(v as string)}
+          onValueChange={(v) => {
+            setTypeFilter(v as string)
+            setPage(1)
+          }}
           items={{
             all: '不限类型',
             ...Object.fromEntries(PROJECT_TYPES.map((t) => [t, t])),
@@ -171,7 +210,10 @@ export function ProjectsPage() {
         </Select>
         <Select
           value={priorityFilter}
-          onValueChange={(v) => setPriorityFilter(v as string)}
+          onValueChange={(v) => {
+            setPriorityFilter(v as string)
+            setPage(1)
+          }}
           items={{
             all: '不限优先级',
             ...Object.fromEntries(priorities.map((pr) => [pr, pr])),
@@ -207,7 +249,7 @@ export function ProjectsPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filtered.map((p) => (
+          {items.map((p) => (
             <TableRow key={p.id}>
               <TableCell>{p.id}</TableCell>
               <TableCell className="max-w-md truncate" title={p.name}>{p.name}</TableCell>
@@ -245,17 +287,41 @@ export function ProjectsPage() {
               </TableCell>
             </TableRow>
           ))}
-          {filtered.length === 0 && (
+          {items.length === 0 && (
             <TableRow>
               <TableCell colSpan={8}>
-                {projects.length === 0
-                  ? '暂无项目，点击右上角新建'
-                  : '没有符合筛选条件的项目'}
+                {total === 0 ? '暂无项目，点击右上角新建' : '没有符合筛选条件的项目'}
               </TableCell>
             </TableRow>
           )}
         </TableBody>
       </Table>
+
+      {total > 0 && (
+        <div className="mt-4 flex items-center justify-between">
+          <span className="text-sm text-foreground-muted">
+            共 {total} 条，第 {currentPage} / {pageCount} 页
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage <= 1}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              上一页
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={currentPage >= pageCount}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              下一页
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

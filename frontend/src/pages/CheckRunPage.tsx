@@ -22,6 +22,7 @@ const runStatusMeta: Record<
   CheckRun['status'],
   { text: string; variant: 'info' | 'success' | 'error' | 'warning' }
 > = {
+  queued: { text: '排队中', variant: 'info' },
   running: { text: '运行中', variant: 'info' },
   success: { text: '通过', variant: 'success' },
   fail: { text: '未通过', variant: 'error' },
@@ -94,7 +95,8 @@ export function CheckRunPage() {
       const r = JSON.parse(e.data) as CheckRun
       setRunData(r)
       setNow(Date.now())
-      if (r.status !== 'running') {
+      // queued（远程执行排队中）也是活跃状态，不能关闭流
+      if (r.status !== 'running' && r.status !== 'queued') {
         finished = true
         es.close()
         void loadHistoryRef.current()

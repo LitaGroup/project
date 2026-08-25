@@ -28,9 +28,9 @@ export class CheckRun {
   @PrimaryGeneratedColumn()
   id: number;
 
-  /** running=执行中；success=全部通过；fail=有失败项；error=脚本异常（未输出 [done]） */
+  /** queued=已入队待 appium-agent 执行；running=执行中；success=全部通过；fail=有失败项；error=脚本异常（未输出 [done]） */
   @Column({ length: 20, default: 'running' })
-  status: 'running' | 'success' | 'fail' | 'error';
+  status: 'queued' | 'running' | 'success' | 'fail' | 'error';
 
   /** 总步数（脚本 [start] 上报） */
   @Column({ type: 'int', nullable: true })
@@ -73,6 +73,18 @@ export class CheckRun {
 
   @Column({ type: 'datetime', nullable: true })
   finishedAt: Date | null;
+
+  /** 入队时间（远程执行 FIFO 排序用），本地运行为空 */
+  @Column({ type: 'datetime', nullable: true })
+  queuedAt: Date | null;
+
+  /** 关联的 APP 版本（app_versions.id），非 APP 测试为空 */
+  @Column({ type: 'int', nullable: true })
+  appVersionId: number | null;
+
+  /** 执行机标识（远程执行记录） */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  agentName: string | null;
 
   // 测试库账号无 REFERENCES 权限，暂不建物理外键（同 Check，见 AGENTS.md）
   @ManyToOne(() => Check, { createForeignKeyConstraints: false })

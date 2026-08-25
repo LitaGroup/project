@@ -29,6 +29,10 @@ export class Test {
   @Column({ length: 500 })
   scriptPath: string;
 
+  /** 运行设备/目标：server/h5 本地直跑；android/ios 走 appium-agent 远程 */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  device: string | null;
+
   // 测试库账号无 REFERENCES 权限，暂不建物理外键（同 Check，见 AGENTS.md）
   @ManyToOne(() => Project, (project) => project.tests, {
     createForeignKeyConstraints: false,

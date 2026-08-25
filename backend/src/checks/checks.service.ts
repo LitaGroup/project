@@ -6,6 +6,7 @@ import {
   Injectable,
   MessageEvent,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -17,6 +18,11 @@ import { Observable } from 'rxjs';
 import { In, Repository } from 'typeorm';
 import { NotifyService } from '../notify/notify.service';
 import { Project } from '../projects/project.entity';
+import {
+  type RemoteRunContext,
+  RemoteRunService,
+  isRemoteDevice,
+} from '../remote-run/remote-run.service';
 import { TasksService } from '../tasks/tasks.service';
 import { CheckRun, CheckRunItem } from './check-run.entity';
 import { Check } from './check.entity';
@@ -41,10 +47,12 @@ export interface CheckInput {
   code: string;
   description?: string;
   scriptPath: string;
+  /** 运行设备/目标：server/h5 本地直跑；android/ios 走 appium-agent 远程 */
+  device?: string | null;
 }
 
 @Injectable()
-export class ChecksService {
+export class ChecksService implements OnModuleInit {
   /** 检查脚本根目录（CHECK_SCRIPTS_DIR），.check.ts 文件以此为基准存相对路径 */
   private readonly scriptsDir: string;
 
@@ -61,12 +69,38 @@ export class ChecksService {
     @Inject(forwardRef(() => TasksService))
     private readonly tasksService: TasksService,
     private readonly notifyService: NotifyService,
+    private readonly remoteRun: RemoteRunService,
     config: ConfigService,
   ) {
     this.scriptsDir = path.resolve(
       config.get<string>('CHECK_SCRIPTS_DIR') ??
         path.resolve(process.cwd(), '../scripts'),
     );
+  }
+
+  onModuleInit(): void {
+    // 注册 appium-agent 远程执行回调（操作 check_runs + live 快照 + 飞书通知）
+    this.remoteRun.register('check', {
+      onActivate: (ctx, agentName) => {
+        const live = this.liveRuns.get(ctx.runId);
+        if (live) {
+          Object.assign(live.snapshot, { status: 'running', agentName });
+          live.emitter.emit('update', { ...live.snapshot });
+        }
+      },
+      onProgress: (ctx, patch) => {
+        const live = this.liveRuns.get(ctx.runId);
+        if (!live) return;
+        live.snapshot.output = ctx.output;
+        if (patch) {
+          Object.assign(live.snapshot, patch);
+          void this.runs.update(ctx.runId, patch).catch(() => undefined);
+        }
+        live.emitter.emit('update', { ...live.snapshot });
+      },
+      onFinalize: (ctx, patch) => this.applyRemoteFinal(ctx, patch),
+      onAbort: (ctx, patch) => this.applyRemoteFinal(ctx, patch),
+    });
   }
 
   /** 按项目列出检查；不传 projectId 时返回全部（全局列表页用） */
@@ -91,6 +125,7 @@ export class ChecksService {
         code: input.code,
         description: input.description || null,
         scriptPath: this.normalizeScriptPath(input.scriptPath),
+        device: this.normalizeDevice(input.device),
       }),
     );
   }
@@ -146,7 +181,9 @@ export class ChecksService {
 
   async update(
     id: number,
-    input: Partial<Pick<Check, 'code' | 'description' | 'scriptPath'>>,
+    input: Partial<
+      Pick<Check, 'code' | 'description' | 'scriptPath' | 'device'>
+    >,
   ): Promise<Check> {
     const check = await this.findOne(id);
     if (input.code !== undefined && input.code !== check.code) {
@@ -158,6 +195,9 @@ export class ChecksService {
     }
     if (input.scriptPath !== undefined) {
       check.scriptPath = this.normalizeScriptPath(input.scriptPath);
+    }
+    if (input.device !== undefined) {
+      check.device = this.normalizeDevice(input.device);
     }
     return this.checks.save(check);
   }
@@ -197,6 +237,9 @@ export class ChecksService {
     source: 'schedule' | 'manual' = 'manual',
   ): Promise<CheckRun> {
     const check = await this.findOne(checkId);
+    if (isRemoteDevice(check.device)) {
+      return this.enqueueRemoteRun(check, taskId, source);
+    }
     const absPath = await this.resolveScriptPath(check.scriptPath);
     const run = await this.runs.save(
       this.runs.create({
@@ -221,6 +264,88 @@ export class ChecksService {
     }
     this.executeRun(run.id, absPath, check, taskId ?? null, source);
     return run;
+  }
+
+  /** device=android/ios：创建 queued 记录入队，交给 RemoteRunService 派发 */
+  private async enqueueRemoteRun(
+    check: Check,
+    taskId: number | undefined,
+    source: 'schedule' | 'manual',
+  ): Promise<CheckRun> {
+    const now = new Date();
+    const run = await this.runs.save(
+      this.runs.create({
+        checkId: check.id,
+        taskId: taskId ?? null,
+        status: 'queued',
+        startedAt: now,
+        queuedAt: now,
+        appVersionId: null,
+      }),
+    );
+    this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
+    const runTitle = `检查：${check.code}`;
+    if (taskId !== undefined) {
+      void this.notifyService.notifyTaskRunStart(
+        {
+          projectId: check.projectId,
+          taskId,
+          runTitle,
+          checkCode: check.code,
+          scriptPath: check.scriptPath,
+        },
+        source,
+      );
+    }
+    this.remoteRun.enqueue('check', run.id, {
+      projectId: check.projectId,
+      runTitle,
+      checkCode: check.code,
+      scriptPath: check.scriptPath,
+      device: check.device!,
+      appVersion: null,
+      source,
+      taskId,
+    });
+    return run;
+  }
+
+  /** 远程终态/中断：落 patch + 推 SSE 终态 + 飞书结果卡片（仅 task 触发时通知） */
+  private applyRemoteFinal(
+    ctx: RemoteRunContext,
+    patch: Record<string, unknown>,
+  ): void {
+    void this.runs
+      .update(ctx.runId, patch)
+      .catch(() => undefined)
+      .then(() => {
+        const live = this.liveRuns.get(ctx.runId);
+        if (live) {
+          Object.assign(live.snapshot, patch);
+          live.emitter.emit('update', { ...live.snapshot });
+          setTimeout(
+            () => this.liveRuns.delete(ctx.runId),
+            LIVE_SNAPSHOT_TTL_MS,
+          );
+        }
+        if (ctx.meta.taskId !== undefined) {
+          void this.notifyService.notifyTaskRun({
+            projectId: ctx.meta.projectId,
+            taskId: ctx.meta.taskId,
+            runTitle: ctx.meta.runTitle,
+            checkCode: ctx.meta.checkCode,
+            scriptPath: ctx.meta.scriptPath,
+            status: (patch.status as 'success' | 'fail' | 'error') ?? 'error',
+            source: ctx.meta.source,
+            startedAt: new Date(ctx.startedAt),
+            total: (patch.total as number) ?? 0,
+            success: (patch.success as number) ?? 0,
+            fail: (patch.fail as number) ?? 0,
+            skip: (patch.skip as number) ?? 0,
+            message: (patch.message as string) ?? null,
+          });
+        }
+      });
   }
 
   /**
@@ -586,6 +711,13 @@ export class ChecksService {
       );
     }
     return normalized;
+  }
+
+  /** device 归一：空串/null → null，否则 trim */
+  private normalizeDevice(v: string | null | undefined): string | null {
+    if (v === undefined || v === null) return null;
+    const t = String(v).trim();
+    return t || null;
   }
 
   private async assertCodeAvailable(

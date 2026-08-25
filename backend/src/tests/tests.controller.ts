@@ -28,16 +28,24 @@ class CreateTestDto {
   description?: string;
   /** 脚本位置：相对脚本根目录的 .test.ts 路径 */
   scriptPath: string;
+  /** 运行设备/目标：server/h5 本地直跑；android/ios 走 appium-agent 远程 */
+  device?: string | null;
 }
 
 class UpdateTestDto {
   code?: string;
   description?: string;
   scriptPath?: string;
+  device?: string | null;
 }
 
 class ImportTestsDto {
   projectId: number;
+}
+
+/** 启动运行参数：APP 测试指定使用的 app 版本（app_versions.id） */
+class StartRunDto {
+  appVersionId?: number;
 }
 
 @Controller('tests')
@@ -90,10 +98,13 @@ export class TestsController {
     return this.testsService.update(id, dto);
   }
 
-  /** 启动一次脚本运行：立即返回 running 记录，脚本后台异步执行，前端通过 SSE 获取进度 */
+  /** 启动一次脚本运行：立即返回 running/queued 记录，脚本后台异步执行，前端通过 SSE 获取进度 */
   @Post(':id/runs')
-  startRun(@Param('id', ParseIntPipe) id: number): Promise<TestRun> {
-    return this.testsService.startRun(id);
+  startRun(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto?: StartRunDto,
+  ): Promise<TestRun> {
+    return this.testsService.startRun(id, dto?.appVersionId);
   }
 
   /**
@@ -103,10 +114,11 @@ export class TestsController {
   @Post(':id/run.md')
   async runMarkdown(
     @Param('id', ParseIntPipe) id: number,
+    @Body() dto: StartRunDto | undefined,
     @Res() res: Response,
   ): Promise<void> {
     const test = await this.testsService.findOne(id);
-    const run = await this.testsService.startRun(id);
+    const run = await this.testsService.startRun(id, dto?.appVersionId);
     await streamRunMarkdown(
       res,
       [
@@ -114,6 +126,7 @@ export class TestsController {
         '',
         `- 运行 ID：${run.id}`,
         `- 脚本：${test.scriptPath}`,
+        `- 状态：${run.status}`,
         `- 详情：/api/tests/runs/${run.id}`,
       ],
       this.testsService.streamRun(run.id),

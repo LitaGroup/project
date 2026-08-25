@@ -2,10 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {
-  ProjectStatus,
-  ProjectType,
-} from '../common/enums';
+import { ProjectStatus, ProjectType } from '../common/enums';
 import { BitableRecord, FeishuService } from '../feishu/feishu.service';
 import { Project } from './project.entity';
 import { SyncState } from './sync-state.entity';

@@ -1,0 +1,21 @@
+{
+  "name": "appium-agent",
+  "version": "0.0.1",
+  "description": "运行在测试机上的 appium 执行代理，与 project 中心服务经 WebSocket 通信",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "node --env-file=.env src/main.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.3"
+  }
+}

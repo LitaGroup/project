@@ -43,7 +43,7 @@ TypeORM `synchronize` 仅在非 production 开启，**上生产前必须改 migr
   - `src/tests/`：测试（Test），与检查结构一致（登记/自动导入/运行/SSE/历史），唯一区别是脚本后缀为 `.test.ts`，表为 `tests` / `test_runs`
   - `src/tasks/`：任务（Task），定时调度检查脚本（见领域模型"任务"）
   - `src/defects/`：缺陷（Defect），与项目设置的飞书多维表格双向绑定（见领域模型"缺陷"）
-  - `src/notify/`：运行结果通知。`NotifyService` 在任务触发的运行开始前推送"开始执行"卡片（`notifyTaskRunStart`，含触发方式）、终态时推送执行结果（`notifyTaskRun`）到飞书群机器人 webhook（webhook 取项目 `feishuWebhook`——只存群机器人 hook 地址的 secret 部分，发送时拼接完整地址；未配置回退 `FEISHU_WEBHOOK_URL` 环境变量，都为空则跳过；飞书业务失败可能返回 HTTP 200，需看响应体 `code`/`StatusCode`）
+  - `src/notify/`：运行结果通知。**仅任务（Task）触发的检查运行发通知**，测试与手动检查运行一律不发。`NotifyService` 在任务触发的运行开始前推送"开始执行"卡片（`notifyTaskRunStart`，含触发方式）、终态时推送执行结果（`notifyTaskRun`）到飞书群机器人 webhook（webhook 取项目 `feishuWebhook`——只存群机器人 hook 地址的 secret 部分，发送时拼接完整地址；未配置回退 `FEISHU_WEBHOOK_URL` 环境变量，都为空则跳过；飞书业务失败可能返回 HTTP 200，需看响应体 `code`/`StatusCode`）
   - `src/settings/`：平台设置。`GET /api/settings` 返回 `{scriptsDir, appUrl, apiUrl}`（scriptsDir 即 CHECK_SCRIPTS_DIR，appUrl/apiUrl 取 `APP_URL`/`API_URL` 环境变量，默认 `http://localhost:5173` / `http://localhost:{PORT}/api`）；`POST /api/settings/scripts/pull` 在脚本根目录执行 `git pull`（超时 60s），返回 `{output}`
 - `examples/`：调用案例（`feishu-api.md` 有 curl 示例与所需飞书权限清单）
 

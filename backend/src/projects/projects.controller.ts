@@ -9,11 +9,16 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ProjectStatus, ProjectType } from '../common/enums';
 import { Project } from './project.entity';
 import { ProjectSyncService, SyncProjectsResult } from './project-sync.service';
-import { ProjectsService } from './projects.service';
+import {
+  ProjectPage,
+  ProjectPageQuery,
+  ProjectsService,
+} from './projects.service';
 
 class CreateProjectDto {
   name: string;
@@ -48,6 +53,28 @@ export class ProjectsController {
   @Get()
   findAll(): Promise<Project[]> {
     return this.projectsService.findAll();
+  }
+
+  /** 项目表格分页（须声明在 :id 之前）：page/pageSize/q/iteration/status/type/priority */
+  @Get('page')
+  findPage(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('q') q?: string,
+    @Query('iteration') iteration?: string,
+    @Query('status') status?: ProjectStatus,
+    @Query('type') type?: ProjectType,
+    @Query('priority') priority?: string,
+  ): Promise<ProjectPage> {
+    const query: ProjectPageQuery = {};
+    if (page) query.page = +page;
+    if (pageSize) query.pageSize = +pageSize;
+    if (q) query.q = q;
+    if (iteration) query.iteration = iteration;
+    if (status) query.status = status;
+    if (type) query.type = type;
+    if (priority) query.priority = priority;
+    return this.projectsService.findPage(query);
   }
 
   /** 从飞书多维表格同步项目（默认增量：首次近 15 天、后续近 7 天；full=true 全量） */

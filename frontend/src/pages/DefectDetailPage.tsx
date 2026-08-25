@@ -55,6 +55,7 @@ const runStatusMeta: Record<
   TestRun['status'],
   { text: string; variant: 'info' | 'success' | 'error' | 'warning' }
 > = {
+  queued: { text: '排队中', variant: 'info' },
   running: { text: '运行中', variant: 'info' },
   success: { text: '通过', variant: 'success' },
   fail: { text: '未通过', variant: 'error' },
@@ -169,7 +170,8 @@ export function DefectDetailPage() {
       const r = JSON.parse(e.data) as TestRun
       setRun(r)
       setNow(Date.now())
-      if (r.status !== 'running') {
+      // queued（远程执行排队中）也是活跃状态，不能关闭流
+      if (r.status !== 'running' && r.status !== 'queued') {
         finished = true
         es.close()
         const triggered = verifyTriggeredRef.current
@@ -353,7 +355,7 @@ export function DefectDetailPage() {
           <div className="px-6 pb-6">
             <VerifyButton
               defect={defect}
-              running={run?.status === 'running'}
+              running={run?.status === 'running' || run?.status === 'queued'}
               onStarted={onVerifyStarted}
             />
             {defect.testScript ? (

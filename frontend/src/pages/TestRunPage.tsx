@@ -14,7 +14,14 @@ import {
 import { Button } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
 import { Progress } from '@appica/ui-react/progress'
-import { api, type TestRun, type ProjectTest } from '../lib/api'
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@appica/ui-react/select'
+import { api, type AppVersion, type TestRun, type ProjectTest } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { Terminal } from '../components/Terminal'
 
@@ -22,6 +29,7 @@ const runStatusMeta: Record<
   TestRun['status'],
   { text: string; variant: 'info' | 'success' | 'error' | 'warning' }
 > = {
+  queued: { text: '排队中', variant: 'info' },
   running: { text: '运行中', variant: 'info' },
   success: { text: '通过', variant: 'success' },
   fail: { text: '未通过', variant: 'error' },
@@ -56,6 +64,9 @@ export function TestRunPage() {
   const [runData, setRunData] = useState<TestRun | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  // APP 测试运行需选 app 版本
+  const [appVersions, setAppVersions] = useState<AppVersion[]>([])
+  const [appVersionId, setAppVersionId] = useState<number | null>(null)
   // 仅用于驱动运行中耗时每秒重渲染（轮询本身也会触发）
   const [now, setNow] = useState(() => Date.now())
 
@@ -71,7 +82,20 @@ export function TestRunPage() {
   useEffect(() => {
     api
       .getTest(testIdNum)
-      .then(setTest)
+      .then((t) => {
+        setTest(t)
+        // APP 测试（device=android/ios）：加载匹配的 app 版本列表，默认选最新一条
+        if (t.device === 'android' || t.device === 'ios') {
+          api
+            .listAppVersions(t.projectId ?? projectId)
+            .then((list) => {
+              const matched = list.filter((v) => v.platform === t.device)
+              setAppVersions(matched)
+              setAppVersionId(matched[0]?.id ?? null)
+            })
+            .catch(() => undefined)
+        }
+      })
       .catch((e: Error) => setError(e.message))
     // 面包屑的项目层级
     api
@@ -94,7 +118,8 @@ export function TestRunPage() {
       const r = JSON.parse(e.data) as TestRun
       setRunData(r)
       setNow(Date.now())
-      if (r.status !== 'running') {
+      // queued（远程执行排队中）也是活跃状态，不能关闭流
+      if (r.status !== 'running' && r.status !== 'queued') {
         finished = true
         es.close()
         void loadHistoryRef.current()
@@ -116,7 +141,12 @@ export function TestRunPage() {
     setStarting(true)
     setError(null)
     api
-      .startTestRun(testIdNum)
+      .startTestRun(
+        testIdNum,
+        test?.device === 'android' || test?.device === 'ios'
+          ? appVersionId ?? undefined
+          : undefined,
+      )
       .then((r) => {
         setSelectedRunId(r.id)
         return loadHistory()
@@ -155,9 +185,43 @@ export function TestRunPage() {
                 </p>
               )}
             </div>
-            <Button size="sm" onClick={startRun} disabled={starting}>
-              {starting ? '启动中…' : '运行'}
-            </Button>
+            <div className="flex items-center gap-2">
+              {test?.device !== 'h5' &&
+                test?.device !== 'server' &&
+                appVersions.length > 0 && (
+                <Select
+                  value={appVersionId !== null ? String(appVersionId) : ''}
+                  onValueChange={(v) =>
+                    setAppVersionId(v ? Number(v) : null)
+                  }
+                  items={Object.fromEntries(
+                    appVersions.map((v) => [
+                      String(v.id),
+                      `${v.appTarget} ${v.version}`,
+                    ]),
+                  )}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="选择 app 版本" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {appVersions.map((v) => (
+                      <SelectItem key={v.id} value={String(v.id)}>
+                        {v.appTarget} {v.version}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button
+                size="sm"
+                onClick={startRun}
+                // APP 测试可不选 app 版本（后端 appVersionId 可空：跳过装 app，依赖预装环境）
+                disabled={starting}
+              >
+                {starting ? '启动中…' : '运行'}
+              </Button>
+            </div>
           </div>
           {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
           {!run && <p className="text-sm">暂无运行记录，点击"运行"开始。</p>}

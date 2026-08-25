@@ -4,6 +4,7 @@ import {
   Injectable,
   MessageEvent,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -13,6 +14,12 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { Observable } from 'rxjs';
 import { In, Repository } from 'typeorm';
+import { AppVersion } from '../app-versions/app-version.entity';
+import {
+  type RemoteRunContext,
+  RemoteRunService,
+  isRemoteDevice,
+} from '../remote-run/remote-run.service';
 import { Project } from '../projects/project.entity';
 import { TestRun, TestRunItem } from './test-run.entity';
 import { Test } from './test.entity';
@@ -37,11 +44,12 @@ export interface TestInput {
   code: string;
   description?: string;
   scriptPath: string;
+  /** 运行设备/目标：server/h5 本地直跑；android/ios 走 appium-agent 远程 */
+  device?: string | null;
 }
 
 @Injectable()
-export class TestsService {
-  /** 测试脚本根目录（与检查共用 CHECK_SCRIPTS_DIR），.test.ts 文件以此为基准存相对路径 */
+export class TestsService implements OnModuleInit {
   private readonly scriptsDir: string;
 
   /** 运行中的实时状态（runId → 快照+事件），终态后保留 TTL 供 SSE 晚订阅 */
@@ -54,12 +62,40 @@ export class TestsService {
     private readonly runs: Repository<TestRun>,
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
+    @InjectRepository(AppVersion)
+    private readonly appVersions: Repository<AppVersion>,
+    private readonly remoteRun: RemoteRunService,
     config: ConfigService,
   ) {
     this.scriptsDir = path.resolve(
       config.get<string>('CHECK_SCRIPTS_DIR') ??
         path.resolve(process.cwd(), '../scripts'),
     );
+  }
+
+  onModuleInit(): void {
+    // 注册 appium-agent 远程执行回调（操作 test_runs + live 快照）
+    this.remoteRun.register('test', {
+      onActivate: (ctx, agentName) => {
+        const live = this.liveRuns.get(ctx.runId);
+        if (live) {
+          Object.assign(live.snapshot, { status: 'running', agentName });
+          live.emitter.emit('update', { ...live.snapshot });
+        }
+      },
+      onProgress: (ctx, patch) => {
+        const live = this.liveRuns.get(ctx.runId);
+        if (!live) return;
+        live.snapshot.output = ctx.output;
+        if (patch) {
+          Object.assign(live.snapshot, patch);
+          void this.runs.update(ctx.runId, patch).catch(() => undefined);
+        }
+        live.emitter.emit('update', { ...live.snapshot });
+      },
+      onFinalize: (ctx, patch) => this.applyRemoteFinal(ctx, patch),
+      onAbort: (ctx, patch) => this.applyRemoteFinal(ctx, patch),
+    });
   }
 
   /** 按项目列出测试；不传 projectId 时返回全部（全局列表页用） */
@@ -97,6 +133,7 @@ export class TestsService {
         code: input.code,
         description: input.description || null,
         scriptPath: this.normalizeScriptPath(input.scriptPath),
+        device: this.normalizeDevice(input.device),
       }),
     );
   }
@@ -152,7 +189,9 @@ export class TestsService {
 
   async update(
     id: number,
-    input: Partial<Pick<Test, 'code' | 'description' | 'scriptPath'>>,
+    input: Partial<
+      Pick<Test, 'code' | 'description' | 'scriptPath' | 'device'>
+    >,
   ): Promise<Test> {
     const test = await this.findOne(id);
     if (input.code !== undefined && input.code !== test.code) {
@@ -164,6 +203,9 @@ export class TestsService {
     }
     if (input.scriptPath !== undefined) {
       test.scriptPath = this.normalizeScriptPath(input.scriptPath);
+    }
+    if (input.device !== undefined) {
+      test.device = this.normalizeDevice(input.device);
     }
     return this.tests.save(test);
   }
@@ -188,11 +230,15 @@ export class TestsService {
   }
 
   /**
-   * 启动一次脚本运行：先落 running 记录并立即返回，脚本在后台异步执行，
-   * 运行中实时更新 total/current，结束后落完整结果（前端通过 SSE 实时获取进度）。
+   * 启动一次脚本运行：先落记录并立即返回。
+   * - device 为 android/ios → 入队等待 appium-agent 远程执行
+   * - 否则（server/h5/空）→ 落 running 记录，脚本在后台异步 spawn 执行
    */
-  async startRun(testId: number): Promise<TestRun> {
+  async startRun(testId: number, appVersionId?: number): Promise<TestRun> {
     const test = await this.findOne(testId);
+    if (isRemoteDevice(test.device)) {
+      return this.enqueueRemoteRun(test, appVersionId);
+    }
     const absPath = await this.resolveScriptPath(test.scriptPath);
     const run = await this.runs.save(
       this.runs.create({ testId, status: 'running', startedAt: new Date() }),
@@ -202,9 +248,75 @@ export class TestsService {
     return run;
   }
 
+  /** APP 测试（device=android/ios）：创建 queued 记录入队，交给 RemoteRunService 派发 */
+  private async enqueueRemoteRun(
+    test: Test,
+    appVersionId?: number,
+  ): Promise<TestRun> {
+    let appVersion: AppVersion | null = null;
+    if (appVersionId) {
+      appVersion = await this.appVersions.findOne({
+        where: { id: appVersionId },
+      });
+      if (!appVersion) {
+        throw new NotFoundException(`AppVersion ${appVersionId} not found`);
+      }
+    }
+    const now = new Date();
+    const run = await this.runs.save(
+      this.runs.create({
+        testId: test.id,
+        status: 'queued',
+        startedAt: now,
+        queuedAt: now,
+        appVersionId: appVersionId ?? null,
+      }),
+    );
+    this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
+    const runTitle = this.runTitle(test, appVersion);
+    this.remoteRun.enqueue('test', run.id, {
+      projectId: test.projectId,
+      runTitle,
+      checkCode: test.code,
+      scriptPath: test.scriptPath,
+      device: test.device!,
+      appVersion,
+      source: 'manual',
+    });
+    return run;
+  }
+
+  /** 运行卡片标题：测试编号 - 应用 版本 */
+  private runTitle(test: Test, appVersion: AppVersion | null): string {
+    const parts = [`测试：${test.code}`];
+    if (appVersion) parts.push(`${appVersion.appTarget} ${appVersion.version}`);
+    return parts.join(' - ');
+  }
+
+  /** 远程终态/中断：落 patch + 推 SSE 终态（测试运行不发飞书通知，仅任务触发的检查运行发） */
+  private applyRemoteFinal(
+    ctx: RemoteRunContext,
+    patch: Record<string, unknown>,
+  ): void {
+    void this.runs
+      .update(ctx.runId, patch)
+      .catch(() => undefined)
+      .then(() => {
+        const live = this.liveRuns.get(ctx.runId);
+        if (live) {
+          Object.assign(live.snapshot, patch);
+          live.emitter.emit('update', { ...live.snapshot });
+          setTimeout(
+            () => this.liveRuns.delete(ctx.runId),
+            LIVE_SNAPSHOT_TTL_MS,
+          );
+        }
+      });
+  }
+
   /**
    * 单次运行的 SSE 实时流：先推当前快照，运行中每次进度变化推送，终态推送后完成。
-   * 无实时句柄时（已结束/服务重启）读库，running 则低频兜底轮询直至结束。
+   * 无实时句柄时（已结束/服务重启）读库，running/queued 则低频兜底轮询直至结束。
    */
   streamRun(runId: number): Observable<MessageEvent> {
     return new Observable<MessageEvent>((subscriber) => {
@@ -212,7 +324,7 @@ export class TestsService {
       const push = (snapshot: TestRun) => {
         if (done) return;
         subscriber.next({ data: snapshot });
-        if (snapshot.status !== 'running') {
+        if (snapshot.status !== 'running' && snapshot.status !== 'queued') {
           done = true;
           subscriber.complete();
         }
@@ -220,7 +332,6 @@ export class TestsService {
 
       const live = this.liveRuns.get(runId);
       if (live) {
-        // 先挂监听再推快照，避免间隙漏事件；done 后的事件为 no-op
         const onUpdate = (s: TestRun) => push(s);
         live.emitter.on('update', onUpdate);
         push({ ...live.snapshot });
@@ -236,7 +347,10 @@ export class TestsService {
           .then((run) => {
             if (stopped) return;
             push(run);
-            if (!done && run.status === 'running') {
+            if (
+              !done &&
+              (run.status === 'running' || run.status === 'queued')
+            ) {
               timer = setTimeout(tick, 2000);
             }
           })
@@ -282,14 +396,15 @@ export class TestsService {
   }
 
   /**
-   * 后台执行脚本：node 直跑 .test.ts（Node 24+ 原生类型擦除），以脚本根目录为 cwd，
-   * 逐行解析 stdout 的行协议 `[{type}] {json}`（与检查相同），实时更新步数，进程结束后落最终结果。
+   * 后台执行脚本（本地，device=server/h5）：node 直跑 .test.ts（Node 24+ 原生类型擦除），
+   * 以脚本根目录为 cwd，逐行解析 stdout 的行协议 `[{type}] {json}`，
+   * 实时更新步数，进程结束后落最终结果（前端通过 SSE 实时获取进度）。
+   * device=android/ios 的远程执行由 enqueueRemoteRun + RemoteRunService 处理。
    */
   private executeRun(runId: number, absPath: string): void {
     const startedAt = Date.now();
     const items: TestRunItem[] = [];
     const logs: string[] = [];
-    /** 脚本原始输出行（终端展示用），实时挂到 live 快照上随 SSE 推送 */
     const output: string[] = [];
     let total: number | null = null;
     let done: Record<string, unknown> | null = null;
@@ -306,12 +421,10 @@ export class TestsService {
     const live = this.liveRuns.get(runId);
     if (live) live.snapshot.output = output;
 
-    /** 实时推送当前快照（每行一次） */
     const emitLive = () => {
       if (live) live.emitter.emit('update', { ...live.snapshot });
     };
 
-    /** 进度落库（fire-and-forget，失败不影响脚本消费） */
     const touch = (patch: Partial<TestRun>) => {
       if (live) Object.assign(live.snapshot, patch);
       void this.runs.update(runId, patch).catch(() => undefined);
@@ -379,7 +492,6 @@ export class TestsService {
         logs,
         output,
         total: (done?.total as number) ?? total,
-        // 最终步数一并落定，避免与运行中的进度更新乱序
         current: (done?.total as number) ?? items.length,
         success: (done?.success as number) ?? null,
         fail: (done?.fail as number) ?? null,
@@ -387,7 +499,6 @@ export class TestsService {
         durationMs: (done?.cost as number) ?? Date.now() - startedAt,
         finishedAt: new Date(),
       };
-      // 先落库再推终态快照，保证 SSE 晚订阅读库也能拿到最终结果
       void this.runs
         .update(runId, finalPatch)
         .catch(() => undefined)
@@ -396,7 +507,6 @@ export class TestsService {
           if (!live) return;
           Object.assign(live.snapshot, finalPatch);
           live.emitter.emit('update', { ...live.snapshot });
-          // 终态快照保留 TTL，供晚到的 SSE 订阅直接取结果
           setTimeout(() => this.liveRuns.delete(runId), LIVE_SNAPSHOT_TTL_MS);
         });
     };
@@ -458,7 +568,6 @@ export class TestsService {
       if (out.length >= MAX_SCRIPTS) return;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        // 跳过隐藏目录与依赖目录
         if (entry.name.startsWith('.') || entry.name === 'node_modules') {
           continue;
         }
@@ -484,6 +593,13 @@ export class TestsService {
       );
     }
     return normalized;
+  }
+
+  /** device 归一：空串/null → null，否则 trim */
+  private normalizeDevice(v: string | null | undefined): string | null {
+    if (v === undefined || v === null) return null;
+    const t = String(v).trim();
+    return t || null;
   }
 
   private async assertCodeAvailable(

@@ -55,7 +55,10 @@ import {
 import { Badge } from '@appica/ui-react/badge'
 import {
   api,
+  APP_PLATFORMS,
+  APP_TARGETS,
   DOCUMENT_TYPES,
+  type AppVersion,
   type Defect,
   type DocumentType,
   type Project,
@@ -121,7 +124,7 @@ export function ProjectDetailPage() {
               >
                 查看全部
               </Link>
-              <ImportChecksButton projectId={project.id} scriptsPath={project.scriptsPath} onImported={reload} />
+              <ImportChecksButton projectId={project.id} scriptsPath={project.scriptsPath ?? null} onImported={reload} />
               <CheckFormDialog projectId={project.id} onSaved={reload} />
             </div>
           </div>
@@ -138,11 +141,15 @@ export function ProjectDetailPage() {
               >
                 查看全部
               </Link>
-              <ImportTestsButton projectId={project.id} scriptsPath={project.scriptsPath} onImported={reload} />
+              <ImportTestsButton projectId={project.id} scriptsPath={project.scriptsPath ?? null} onImported={reload} />
               <TestFormDialog projectId={project.id} onSaved={reload} />
             </div>
           </div>
           <TestsPanel project={project} onChanged={reload} />
+        </section>
+
+        <section>
+          <AppVersionsPanel project={project} onChanged={reload} />
         </section>
 
         <section>
@@ -412,6 +419,8 @@ function CheckFormDialog({
   const [description, setDescription] = useState('')
   const [scriptPath, setScriptPath] = useState('')
   const [scripts, setScripts] = useState<string[]>([])
+  // 运行设备：server/h5 本地直跑；android/ios 走 appium-agent 远程
+  const [device, setDevice] = useState<string>('server')
   const [error, setError] = useState<string | null>(null)
 
   // 打开时初始化表单，并拉取脚本文件列表供自动联想
@@ -421,6 +430,7 @@ function CheckFormDialog({
       setCode(check?.code ?? '')
       setDescription(check?.description ?? '')
       setScriptPath(check?.scriptPath ?? '')
+      setDevice(check?.device ?? 'server')
       setError(null)
       api
         .listCheckScripts(undefined, projectId)
@@ -432,12 +442,13 @@ function CheckFormDialog({
   const submit = () => {
     setError(null)
     const saving = check
-      ? api.updateCheck(check.id, { code, description, scriptPath })
+      ? api.updateCheck(check.id, { code, description, scriptPath, device })
       : api.createCheck({
           projectId,
           code,
           description: description || undefined,
           scriptPath,
+          device,
         })
     saving
       .then(() => {
@@ -504,6 +515,31 @@ function CheckFormDialog({
                   </AutocompleteList>
                 </AutocompleteContent>
               </Autocomplete>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              运行设备（server/h5 本地直跑；android/ios 走 appium-agent 远程）
+              <Select
+                value={device}
+                onValueChange={(v) => setDevice(v as string)}
+                items={{
+                  server: 'server（后端/服务端）',
+                  h5: 'h5（前端页面）',
+                  android: 'Android（appium）',
+                  ios: 'iOS（appium）',
+                }}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="server">
+                    server（后端/服务端）
+                  </SelectItem>
+                  <SelectItem value="h5">h5（前端页面）</SelectItem>
+                  <SelectItem value="android">Android（appium）</SelectItem>
+                  <SelectItem value="ios">iOS（appium）</SelectItem>
+                </SelectContent>
+              </Select>
             </label>
             {error && <p className="text-sm">保存失败:{error}</p>}
           </div>
@@ -1172,6 +1208,8 @@ function TestFormDialog({
   const [description, setDescription] = useState('')
   const [scriptPath, setScriptPath] = useState('')
   const [scripts, setScripts] = useState<string[]>([])
+  // 运行设备：server/h5 本地直跑；android/ios 走 appium-agent 远程
+  const [device, setDevice] = useState<string>('server')
   const [error, setError] = useState<string | null>(null)
 
   // 打开时初始化表单，并拉取脚本文件列表供自动联想
@@ -1181,6 +1219,7 @@ function TestFormDialog({
       setCode(test?.code ?? '')
       setDescription(test?.description ?? '')
       setScriptPath(test?.scriptPath ?? '')
+      setDevice(test?.device ?? 'server')
       setError(null)
       api
         .listTestScripts(undefined, projectId)
@@ -1192,12 +1231,13 @@ function TestFormDialog({
   const submit = () => {
     setError(null)
     const saving = test
-      ? api.updateTest(test.id, { code, description, scriptPath })
+      ? api.updateTest(test.id, { code, description, scriptPath, device })
       : api.createTest({
           projectId,
           code,
           description: description || undefined,
           scriptPath,
+          device,
         })
     saving
       .then(() => {
@@ -1264,6 +1304,31 @@ function TestFormDialog({
                   </AutocompleteList>
                 </AutocompleteContent>
               </Autocomplete>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              运行设备（server/h5 本地直跑；android/ios 走 appium-agent 远程）
+              <Select
+                value={device}
+                onValueChange={(v) => setDevice(v as string)}
+                items={{
+                  server: 'server（后端/服务端）',
+                  h5: 'h5（前端页面）',
+                  android: 'Android（appium）',
+                  ios: 'iOS（appium）',
+                }}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="server">
+                    server（后端/服务端）
+                  </SelectItem>
+                  <SelectItem value="h5">h5（前端页面）</SelectItem>
+                  <SelectItem value="android">Android（appium）</SelectItem>
+                  <SelectItem value="ios">iOS（appium）</SelectItem>
+                </SelectContent>
+              </Select>
             </label>
             {error && <p className="text-sm">保存失败:{error}</p>}
           </div>
@@ -1938,6 +2003,254 @@ function EditDefectBitableDialog({
             <Button variant="outline" size="sm">取消</Button>
           </DialogClose>
           <Button onClick={submit}>保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** APP 版本板块：管理 APP 测试运行的 app 包元信息（版本/平台/应用/下载地址/md5） */
+function AppVersionsPanel({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const [versions, setVersions] = useState<AppVersion[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const load = useCallback(() => {
+    api
+      .listAppVersions(project.id)
+      .then(setVersions)
+      .catch((e: Error) => setError(e.message))
+  }, [project.id])
+  useEffect(() => {
+    load()
+  }, [load])
+
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xl font-semibold">APP 版本</h2>
+        <AppVersionFormDialog projectId={project.id} onSaved={onChanged} />
+      </div>
+      {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
+      <Table hoverableRows>
+        <TableHeader>
+          <TableRow>
+            <TableHead>版本</TableHead>
+            <TableHead className="w-24">平台</TableHead>
+            <TableHead className="w-32">应用</TableHead>
+            <TableHead>MD5</TableHead>
+            <TableHead className="w-24 text-center">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {versions.map((v) => (
+            <TableRow key={v.id}>
+              <TableCell>{v.version}</TableCell>
+              <TableCell>{v.platform === 'ios' ? 'iOS' : 'Android'}</TableCell>
+              <TableCell>{v.appTarget}</TableCell>
+              <TableCell
+                className="max-w-xs truncate font-mono text-xs"
+                title={v.md5}
+              >
+                {v.md5}
+              </TableCell>
+              <TableCell className="text-center">
+                <AlertDialog>
+                  <AlertDialogTrigger>
+                    <Button variant="ghost" size="sm">
+                      删除
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        删除 APP 版本 {v.version}？
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        此操作不可撤销。
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogClose>
+                        <Button variant="outline" size="sm">
+                          取消
+                        </Button>
+                      </AlertDialogClose>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          api
+                            .deleteAppVersion(v.id)
+                            .then(onChanged)
+                            .catch((e: Error) => setError(e.message))
+                        }}
+                      >
+                        删除
+                      </Button>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </TableCell>
+            </TableRow>
+          ))}
+          {versions.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5}>暂无 APP 版本</TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </>
+  )
+}
+
+/** 新建 APP 版本：录入版本号/平台/应用/下载地址/md5 */
+function AppVersionFormDialog({
+  projectId,
+  onSaved,
+}: {
+  projectId: number
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [version, setVersion] = useState('')
+  const [platform, setPlatform] = useState<string>(APP_PLATFORMS[0])
+  const [appTarget, setAppTarget] = useState<string>(APP_TARGETS[0])
+  const [downloadUrl, setDownloadUrl] = useState('')
+  const [md5, setMd5] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setVersion('')
+      setPlatform(APP_PLATFORMS[0])
+      setAppTarget(APP_TARGETS[0])
+      setDownloadUrl('')
+      setMd5('')
+      setError(null)
+    }
+  }
+
+  const submit = () => {
+    setError(null)
+    api
+      .createAppVersion({
+        projectId,
+        platform,
+        appTarget,
+        version,
+        downloadUrl,
+        md5,
+      })
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  const platformItems = Object.fromEntries(
+    APP_PLATFORMS.map((p) => [p, p === 'ios' ? 'iOS' : 'Android']),
+  )
+  const targetItems = Object.fromEntries(APP_TARGETS.map((t) => [t, t]))
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        <Button variant="outline" size="sm">添加 APP 版本</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>添加 APP 版本</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-sm">
+              版本号
+              <Input
+                value={version}
+                onChange={(e) => setVersion(e.target.value)}
+                placeholder="如 1.2.3"
+              />
+            </label>
+            <div className="flex gap-4">
+              <label className="flex flex-col gap-1 text-sm">
+                平台
+                <Select
+                  value={platform}
+                  onValueChange={(v) => setPlatform(v as string)}
+                  items={platformItems}
+                >
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {APP_PLATFORMS.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p === 'ios' ? 'iOS' : 'Android'}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                应用
+                <Select
+                  value={appTarget}
+                  onValueChange={(v) => setAppTarget(v as string)}
+                  items={targetItems}
+                >
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {APP_TARGETS.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            </div>
+            <label className="flex flex-col gap-1 text-sm">
+              下载地址
+              <Input
+                value={downloadUrl}
+                onChange={(e) => setDownloadUrl(e.target.value)}
+                placeholder="app 包下载 URL"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              MD5
+              <Input
+                value={md5}
+                onChange={(e) => setMd5(e.target.value)}
+                placeholder="app 包 md5（agent 校验）"
+              />
+            </label>
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={
+              !version.trim() || !downloadUrl.trim() || !md5.trim()
+            }
+          >
+            保存
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

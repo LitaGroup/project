@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as path from 'path';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Like, Repository } from 'typeorm';
 import { ProjectStatus, ProjectType } from '../common/enums';
 import { ChecksService } from '../checks/checks.service';
 import { Check } from '../checks/check.entity';
@@ -20,6 +20,7 @@ import {
 import { Document } from '../documents/document.entity';
 import { DEFECT_LIST_SELECT, DefectsService } from '../defects/defects.service';
 import { Defect } from '../defects/defect.entity';
+import { AppVersionsService } from '../app-versions/app-versions.service';
 import { Project } from './project.entity';
 
 export interface CreateProjectInput {
@@ -30,8 +31,43 @@ export interface CreateProjectInput {
   description?: string;
 }
 
+/** 项目表格分页查询参数（GET /projects/page） */
+export interface ProjectPageQuery {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+  iteration?: string;
+  status?: ProjectStatus;
+  type?: ProjectType;
+  priority?: string;
+}
+
+/** 项目表格分页响应（items 只含当前页，total/iterations/priorities 供分页与筛选用） */
+export interface ProjectPage {
+  items: Project[];
+  total: number;
+  iterations: string[];
+  priorities: string[];
+}
+
 /** 编号的自然排序（数字段按数值比较，如 check-2 < check-10） */
 const codeCollator = new Intl.Collator('zh-Hans', { numeric: true });
+
+/**
+ * 项目列表列（GET /projects 及全局列表的"项目"下拉都用它）：
+ * 排除 longtext description 与只在详情页用到的字段，缩少 3.6k 条记录的网络/序列化开销。
+ */
+const PROJECT_LIST_SELECT = {
+  id: true,
+  name: true,
+  type: true,
+  status: true,
+  expectedReleaseAt: true,
+  priority: true,
+  iterationCycle: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 @Injectable()
 export class ProjectsService {
@@ -43,10 +79,56 @@ export class ProjectsService {
     private readonly testsService: TestsService,
     private readonly tasksService: TasksService,
     private readonly defectsService: DefectsService,
+    private readonly appVersionsService: AppVersionsService,
   ) {}
 
   findAll(): Promise<Project[]> {
-    return this.projects.find({ order: { createdAt: 'DESC' } });
+    return this.projects.find({
+      select: PROJECT_LIST_SELECT,
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * 项目表格分页（GET /projects/page）：只返回当前页 + total + 筛选项取值。
+   * 避免一次把 3.6k 条项目全量拉回（远程 RDS 上全量扫描 ~1s+，分页 ~100ms）。
+   */
+  async findPage(query: ProjectPageQuery): Promise<ProjectPage> {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.min(200, Math.max(1, query.pageSize ?? 50));
+    const where: FindOptionsWhere<Project> = {};
+    if (query.q) where.name = Like(`%${query.q}%`);
+    if (query.iteration) where.iterationCycle = query.iteration;
+    if (query.status) where.status = query.status;
+    if (query.type) where.type = query.type;
+    if (query.priority) where.priority = query.priority;
+    const [items, total, iterations, priorities] = await Promise.all([
+      this.projects.find({
+        where,
+        select: PROJECT_LIST_SELECT,
+        order: { createdAt: 'DESC' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.projects.count({ where }),
+      this.distinctColumn('iterationCycle'),
+      this.distinctColumn('priority'),
+    ]);
+    return { items, total, iterations, priorities };
+  }
+
+  /** 某列的去重取值（供筛选下拉），仅返回非空值 */
+  private async distinctColumn(
+    column: 'iterationCycle' | 'priority',
+  ): Promise<string[]> {
+    const rows = await this.projects
+      .createQueryBuilder('p')
+      .select(`DISTINCT p.${column}`, 'v')
+      .where(`p.${column} IS NOT NULL`)
+      .andWhere(`p.${column} <> ''`)
+      .orderBy('v', 'ASC')
+      .getRawMany<{ v: string }>();
+    return rows.map((r) => r.v);
   }
 
   /**
@@ -273,6 +355,7 @@ export class ProjectsService {
     await this.tasksService.removeByProject(project.id);
     await this.checksService.removeByProject(project.id);
     await this.testsService.removeByProject(project.id);
+    await this.appVersionsService.removeByProject(project.id);
     await this.projects.remove(project);
   }
 }

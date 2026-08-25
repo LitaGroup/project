@@ -5,11 +5,14 @@ import { Repository } from 'typeorm';
 import { Project } from '../projects/project.entity';
 import { Task } from '../tasks/task.entity';
 
-/** 任务运行的通知上下文（开始/结束共用） */
+/** 运行通知上下文（开始/结束共用）。仅任务触发的运行会通知，taskId 用于查任务标题 */
 export interface TaskRunContext {
   projectId: number;
-  taskId: number;
-  /** 检查编号（code），用于群里识别脚本 */
+  /** 任务 id（用于查 task title） */
+  taskId?: number;
+  /** 展示用标题（查不到 task 时的 fallback） */
+  runTitle?: string;
+  /** 脚本编号（code），用于群里识别脚本 */
   checkCode: string;
   /** 脚本相对路径（"开始执行"通知展示用） */
   scriptPath?: string;
@@ -78,7 +81,7 @@ export class NotifyService {
               text: {
                 tag: 'lark_md',
                 content: [
-                  `**<font color='blue'>[执行]</font>** ${task?.title ?? `#${context.taskId}`} - ${trigger}`,
+                  `**<font color='blue'>[执行]</font>** ${task?.title ?? context.runTitle ?? `#${context.taskId ?? '?'}`} - ${trigger}`,
                   `**项目**：${project?.name ?? `#${context.projectId}`} 项目`,
                   `**脚本**：${context.scriptPath ?? context.checkCode} 脚本`,
                 ].join('\n'),
@@ -111,7 +114,7 @@ export class NotifyService {
               text: {
                 tag: 'lark_md',
                 content: [
-                  `**<font color='${ok ? 'green' : 'red'}'>[${ok ? '成功' : '失败'}]</font>** ${task?.title ?? `#${result.taskId}`} - ${trigger}`,
+                  `**<font color='${ok ? 'green' : 'red'}'>[${ok ? '成功' : '失败'}]</font>** ${task?.title ?? result.runTitle ?? `#${result.taskId ?? '?'}`} - ${trigger}`,
                   `**项目**：${project?.name ?? `#${result.projectId}`} 项目`,
                   `**脚本**：${result.scriptPath ?? result.checkCode} 脚本`,
                   `**详情**：共计**${result.total}**条，成功**${result.success}**条，失败**<font color='${result.fail > 0 ? 'red' : 'green'}'>${result.fail}</font>**条，跳过**${result.skip}**条`,
@@ -148,10 +151,14 @@ export class NotifyService {
           : FEISHU_HOOK_PREFIX + secret
         : this.fallbackWebhook;
       if (!webhook) return;
-      const task = await this.tasks.findOne({
-        where: { id: context.taskId },
-        select: { id: true, title: true },
-      });
+      // taskId 缺失时跳过 task 查询（标题走 runTitle fallback）
+      const task =
+        context.taskId !== undefined
+          ? await this.tasks.findOne({
+              where: { id: context.taskId },
+              select: { id: true, title: true },
+            })
+          : null;
       const res = await fetch(webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,12 +174,12 @@ export class NotifyService {
       const code = body?.code ?? body?.StatusCode ?? (res.ok ? 0 : -1);
       if (!res.ok || code !== 0) {
         this.logger.warn(
-          `飞书 webhook 推送失败（HTTP ${res.status}, code ${code}: ${body?.msg ?? body?.StatusMessage ?? '-'}）: task=${context.taskId}`,
+          `飞书 webhook 推送失败（HTTP ${res.status}, code ${code}: ${body?.msg ?? body?.StatusMessage ?? '-'}）: task=${context.taskId ?? '-'}`,
         );
       }
     } catch (e) {
       this.logger.warn(
-        `飞书 webhook 推送异常: ${(e as Error).message}（task=${context.taskId}）`,
+        `飞书 webhook 推送异常: ${(e as Error).message}（task=${context.taskId ?? '-'}）`,
       );
     }
   }

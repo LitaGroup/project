@@ -28,12 +28,15 @@ class CreateCheckDto {
   description?: string;
   /** 脚本位置：相对脚本根目录的 .check.ts 路径 */
   scriptPath: string;
+  /** 运行设备/目标：server/h5 本地直跑；android/ios 走 appium-agent 远程 */
+  device?: string | null;
 }
 
 class UpdateCheckDto {
   code?: string;
   description?: string;
   scriptPath?: string;
+  device?: string | null;
 }
 
 class ImportChecksDto {

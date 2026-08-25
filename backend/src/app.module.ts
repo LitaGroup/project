@@ -4,6 +4,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AppVersionsModule } from './app-versions/app-versions.module';
+import { AgentModule } from './agent/agent.module';
 import { ProjectsModule } from './projects/projects.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ChecksModule } from './checks/checks.module';
@@ -11,6 +13,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { TestsModule } from './tests/tests.module';
 import { DefectsModule } from './defects/defects.module';
 import { FeishuModule } from './feishu/feishu.module';
+import { ScriptsModule } from './scripts/scripts.module';
 import { SettingsModule } from './settings/settings.module';
 
 @Module({
@@ -37,6 +40,9 @@ import { SettingsModule } from './settings/settings.module';
     TasksModule,
     TestsModule,
     DefectsModule,
+    AppVersionsModule,
+    AgentModule,
+    ScriptsModule,
     FeishuModule,
     SettingsModule,
   ],
