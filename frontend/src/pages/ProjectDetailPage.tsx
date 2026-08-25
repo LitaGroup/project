@@ -53,6 +53,7 @@ import {
   SelectItem,
 } from '@appica/ui-react/select'
 import { Badge } from '@appica/ui-react/badge'
+import { Switch } from '@appica/ui-react/switch'
 import {
   api,
   APP_PLATFORMS,
@@ -293,10 +294,10 @@ function CountRow({
 }
 
 /**
- * 缺陷快速筛选胶囊：未选中=对应语义浅色（warning/success-muted 深色字），选中=该色 intense 深色背景 + 浅色字。
+ * 快速筛选胶囊：未选中=对应语义浅色（warning/success-muted 深色字），选中=该色 intense 深色背景 + 浅色字。
  * 颜色用 Appica 语义角色 token（非 hue 字面量），圆角沿用 Badge 的 rounded-full。
  */
-function DefectFilterPill({
+function FilterPill({
   label,
   tone,
   active,
@@ -1469,6 +1470,9 @@ function DeleteTestButton({
 function TasksSection({ project }: { project: Project }) {
   const [tasks, setTasks] = useState<ProjectTask[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [quickFilter, setQuickFilter] = useState<'all' | 'enabled' | 'disabled'>(
+    'all',
+  )
 
   const reload = useCallback(() => {
     api
@@ -1481,10 +1485,37 @@ function TasksSection({ project }: { project: Project }) {
 
   const checks = project.checks ?? []
   const checkOf = (checkId: number) => checks.find((c) => c.id === checkId)
+  const allTasks = tasks ?? []
+  const filteredTasks =
+    quickFilter === 'all'
+      ? allTasks
+      : allTasks.filter((t) =>
+          quickFilter === 'enabled' ? t.enabled : !t.enabled,
+        )
+  const displayedTasks = filteredTasks.slice(0, 10)
   return (
     <>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-xl font-semibold">任务</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl font-semibold">任务</h2>
+          {/* 快速筛选：未选中=对应语义浅色（启用=success、停用=warning），选中=深色背景浅色字体；再次点击当前项恢复全部 */}
+          <FilterPill
+            label="启用"
+            tone="success"
+            active={quickFilter === 'enabled'}
+            onClick={() =>
+              setQuickFilter((v) => (v === 'enabled' ? 'all' : 'enabled'))
+            }
+          />
+          <FilterPill
+            label="停用"
+            tone="warning"
+            active={quickFilter === 'disabled'}
+            onClick={() =>
+              setQuickFilter((v) => (v === 'disabled' ? 'all' : 'disabled'))
+            }
+          />
+        </div>
         <div className="flex items-center gap-2">
           <Link
             to={`/tasks?projectId=${project.id}`}
@@ -1507,11 +1538,12 @@ function TasksSection({ project }: { project: Project }) {
             <TableHead className="w-44">计划</TableHead>
             <TableHead>脚本</TableHead>
             <TableHead className="w-24">运行</TableHead>
+            <TableHead className="w-16 text-center">启用</TableHead>
             <TableHead className="w-40 text-center">操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(tasks ?? []).slice(0, 10).map((t) => {
+          {displayedTasks.map((t) => {
             const check = checkOf(t.checkId)
             return (
               <TableRow key={t.id}>
@@ -1543,6 +1575,23 @@ function TasksSection({ project }: { project: Project }) {
                   {t.runStats ? <RunStats stats={t.runStats} /> : '—'}
                 </TableCell>
                 <TableCell className="text-center">
+                  <Switch
+                    size="sm"
+                    checked={t.enabled}
+                    onCheckedChange={(checked) =>
+                      api
+                        .updateTask(t.id, { enabled: checked })
+                        .then(reload)
+                        .catch((e: Error) => setError(e.message))
+                    }
+                    title={
+                      t.enabled
+                        ? '已启用，到点正常执行；点击关闭后不再定时触发'
+                        : '已停用，不参与调度；点击打开恢复定时执行'
+                    }
+                  />
+                </TableCell>
+                <TableCell className="text-center">
                   <div className="flex justify-center gap-2">
                     <TaskFormDialog
                       projectId={project.id}
@@ -1564,15 +1613,21 @@ function TasksSection({ project }: { project: Project }) {
               </TableRow>
             )
           })}
-          {tasks !== null && tasks.length === 0 && (
+          {tasks !== null && filteredTasks.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5}>暂无任务</TableCell>
+              <TableCell colSpan={6}>
+                {allTasks.length === 0
+                  ? '暂无任务'
+                  : quickFilter === 'all'
+                    ? '暂无任务'
+                    : '无符合筛选条件的任务'}
+              </TableCell>
             </TableRow>
           )}
           <CountRow
-            colSpan={5}
-            total={tasks?.length ?? 0}
-            displayed={Math.min(10, tasks?.length ?? 0)}
+            colSpan={6}
+            total={filteredTasks.length}
+            displayed={displayedTasks.length}
           />
         </TableBody>
       </Table>
@@ -1772,7 +1827,7 @@ function DefectsPanel({
         <div className="flex items-center gap-2">
           <h2 className="text-xl font-semibold">缺陷</h2>
           {/* 快速筛选：未选中=对应语义浅色（open/reopen=warning、fixed=success），选中=深色背景浅色字体；再次点击当前项恢复全部 */}
-          <DefectFilterPill
+          <FilterPill
             label="open/reopen"
             tone="warning"
             active={quickFilter === 'pending'}
@@ -1780,7 +1835,7 @@ function DefectsPanel({
               setQuickFilter((v) => (v === 'pending' ? 'all' : 'pending'))
             }
           />
-          <DefectFilterPill
+          <FilterPill
             label="fixed"
             tone="success"
             active={quickFilter === 'fixed'}
