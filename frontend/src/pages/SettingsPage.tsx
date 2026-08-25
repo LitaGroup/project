@@ -117,6 +117,32 @@ export function SettingsPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Appium Agent</CardTitle>
+              <CardDescription>
+                APP 测试执行机的连接信息，实时来自 agent 上报，只读
+              </CardDescription>
+            </CardHeader>
+            <div className="flex flex-col gap-3 px-6 pb-6 group-data-inset/card:px-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm">连接状态</span>
+                <Badge variant={settings.agent.online ? 'success' : 'light'}>
+                  {settings.agent.online ? '在线' : '离线'}
+                </Badge>
+              </div>
+              <SettingRow
+                label="执行机"
+                value={settings.agent.name ?? '—'}
+              />
+              <SettingRow
+                label="Appium 内网地址"
+                value={settings.agent.appiumUrl ?? '—'}
+                hint="agent 本机 appium server 的内网地址，局域网内可直接访问"
+              />
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>图片与飞书集成</CardTitle>
               <CardDescription>
                 图片静态目录与飞书相关配置（不暴露密钥），只读

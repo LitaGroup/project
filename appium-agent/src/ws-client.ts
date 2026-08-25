@@ -47,6 +47,7 @@ export class WsClient {
         type: 'ready',
         name: this.config.agentName,
         capabilities: this.config.capabilities,
+        appiumUrl: this.config.appiumLanUrl,
       });
     });
     this.ws.on('message', (raw) => {

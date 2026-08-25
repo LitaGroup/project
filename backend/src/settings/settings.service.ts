@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { execFile } from 'child_process';
 import * as path from 'path';
+import { AgentGateway } from '../agent/agent.gateway';
 import { DEFAULT_PROJECT_SOURCE_URL } from '../projects/project-sync.service';
 
 /** git pull 超时时间（毫秒） */
@@ -28,6 +29,13 @@ export interface Settings {
   feishuTokenSource: 'lita' | 'app-credential';
   /** 兜底通知 webhook 是否已配置（不暴露 secret） */
   feishuWebhookConfigured: boolean;
+  /** appium-agent 连接信息（实时：离线时 name/appiumUrl 为 null） */
+  agent: {
+    online: boolean;
+    name: string | null;
+    /** agent 本机 appium server 的内网地址（回环地址已替换为内网 IP） */
+    appiumUrl: string | null;
+  };
 }
 
 export interface PullResult {
@@ -48,7 +56,10 @@ export class SettingsService {
   private readonly feishuTokenSource: 'lita' | 'app-credential';
   private readonly feishuWebhookConfigured: boolean;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly agentGateway: AgentGateway,
+  ) {
     this.environment = config.get<string>('NODE_ENV') ?? 'development';
     this.port = config.get<number>('PORT') ?? 3000;
     this.scriptsDir = path.resolve(
@@ -74,7 +85,7 @@ export class SettingsService {
     this.feishuWebhookConfigured = !!config.get<string>('FEISHU_WEBHOOK_URL');
   }
 
-  /** 平台配置概览：运行环境、脚本/图片目录、访问域名、飞书相关（均只读，不含密钥） */
+  /** 平台配置概览：运行环境、脚本/图片目录、访问域名、飞书相关、appium-agent 连接信息（均只读，不含密钥） */
   getSettings(): Settings {
     return {
       environment: this.environment,
@@ -87,6 +98,7 @@ export class SettingsService {
       feishuProjectSourceUrl: this.feishuProjectSourceUrl,
       feishuTokenSource: this.feishuTokenSource,
       feishuWebhookConfigured: this.feishuWebhookConfigured,
+      agent: this.agentGateway.getAgentInfo(),
     };
   }
 

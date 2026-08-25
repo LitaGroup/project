@@ -10,6 +10,8 @@ export type AgentMessage =
       type: 'ready';
       name: string;
       capabilities: { platform: string[]; appTarget: string[] };
+      /** agent 本机 appium server 的内网地址（回环地址已替换为内网 IP），设置页展示用 */
+      appiumUrl?: string;
     }
   | { type: 'progress'; runId: number; line: string }
   | {
@@ -55,6 +57,7 @@ export class AgentGateway {
   private readonly agentToken: string | null;
   private ws: WebSocket | null = null;
   private agentName: string | null = null;
+  private agentAppiumUrl: string | null = null;
   private ready = false;
   private lastSeenAt = 0;
   private readonly bus = new EventEmitter();
@@ -83,6 +86,19 @@ export class AgentGateway {
   /** 当前 agent 名称（记录执行机来源用） */
   getAgentName(): string | null {
     return this.agentName;
+  }
+
+  /** 当前 agent 连接信息（设置页展示用）：离线时 name/appiumUrl 为 null */
+  getAgentInfo(): {
+    online: boolean;
+    name: string | null;
+    appiumUrl: string | null;
+  } {
+    return {
+      online: this.isOnline(),
+      name: this.agentName,
+      appiumUrl: this.agentAppiumUrl,
+    };
   }
 
   /**
@@ -127,6 +143,7 @@ export class AgentGateway {
     this.ws = ws;
     this.ready = false;
     this.agentName = null;
+    this.agentAppiumUrl = null;
     this.lastSeenAt = Date.now();
   }
 
@@ -135,6 +152,7 @@ export class AgentGateway {
     const wasReady = this.ready;
     this.ws = null;
     this.agentName = null;
+    this.agentAppiumUrl = null;
     this.ready = false;
     if (wasReady) {
       this.logger.warn('agent 已断开');
@@ -150,6 +168,7 @@ export class AgentGateway {
     }
     if (msg.type === 'ready') {
       this.agentName = msg.name;
+      this.agentAppiumUrl = msg.appiumUrl ?? null;
       this.ready = true;
       this.lastSeenAt = Date.now();
       this.logger.log(`agent 已就绪: ${msg.name}`);

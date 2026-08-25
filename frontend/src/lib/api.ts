@@ -284,6 +284,13 @@ export interface Settings {
   feishuTokenSource: 'lita' | 'app-credential'
   /** 兜底通知 webhook 是否已配置（不暴露 secret） */
   feishuWebhookConfigured: boolean
+  /** appium-agent 连接信息（实时：离线时 name/appiumUrl 为 null） */
+  agent: {
+    online: boolean
+    name: string | null
+    /** agent 本机 appium server 的内网地址（回环地址已替换为内网 IP） */
+    appiumUrl: string | null
+  }
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
