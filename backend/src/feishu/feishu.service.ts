@@ -204,9 +204,17 @@ export class FeishuService implements OnModuleInit {
         sheetId ? `未找到指定的工作表: ${sheetId}` : '该表格没有任何工作表',
       );
     }
+    // valueRenderOption=ToString：按表格实际显示取值（公式返回计算结果而非公式文本）；
+    // dateTimeRenderOption=FormattedString：日期返回显示文本（如 8/17）而非序列号
     const values = await this.request<{ valueRange: { values: unknown[][] } }>(
       'GET',
       `/sheets/v2/spreadsheets/${spreadsheetToken}/values/${target.sheet_id}`,
+      {
+        params: {
+          valueRenderOption: 'ToString',
+          dateTimeRenderOption: 'FormattedString',
+        },
+      },
     );
     return {
       type: 'sheets',
