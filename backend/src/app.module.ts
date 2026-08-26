@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppVersionsModule } from './app-versions/app-versions.module';
 import { AgentModule } from './agent/agent.module';
+import { AgentAppsModule } from './agent/agent-apps.module';
 import { ProjectsModule } from './projects/projects.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ChecksModule } from './checks/checks.module';
@@ -42,6 +43,7 @@ import { SettingsModule } from './settings/settings.module';
     DefectsModule,
     AppVersionsModule,
     AgentModule,
+    AgentAppsModule,
     ScriptsModule,
     FeishuModule,
     SettingsModule,

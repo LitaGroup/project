@@ -61,6 +61,11 @@ createdAt, updatedAt
   "appVersion":"1.2.3", "downloadUrl":"...", "md5":"...", "timeout":600000 }
 // 取消（可选，后续）
 { "type":"cancel", "runId":12 }
+// APP 包操作（请求-响应模式，reqId 关联，见"APP 包管理"小节）
+{ "type":"app", "reqId":"uuid", "action":"list" }
+{ "type":"app", "reqId":"uuid", "action":"install", "file":"lita-1.2.3.apk" }
+{ "type":"app", "reqId":"uuid", "action":"uninstall", "packageId":"com.x", "platform":"android" }
+{ "type":"app", "reqId":"uuid", "action":"version", "packageId":"com.x", "platform":"android" }
 ```
 
 ### agent → project
@@ -77,6 +82,10 @@ createdAt, updatedAt
   "durationMs":12345,"message":"", "items":[...], "output":[...] }
 // 心跳
 { "type":"heartbeat" }
+// APP 包操作应答（与 app 指令 reqId 对应；ok=false 时 error 为失败原因）
+{ "type":"app-result", "reqId":"uuid", "ok":true,
+  "data":[{ "file":"lita.apk", "platform":"android", "size":123, "updatedAt":"...",
+            "packageId":"com.x", "version":"1.2.3", "installedVersion":"1.2.3" }] }
 ```
 
 project 收到 `progress` 后：把 `line` 追加到 `liveRun.output`、调 `handleLine` 更新 items/current/status、`emitLive()` 推 SSE——**完全复用现有 `tests.service` 的 live 快照机制**，前端 `TestRunPage` 零改动。
@@ -191,6 +200,8 @@ AGENT_TOKEN=...           # 与 backend 一致
 AGENT_NAME=mac-mini-1
 AGENT_SCRIPTS_DIR=...     # 本地脚本工作目录（含预装 node_modules）
 AGENT_APP_CACHE_DIR=...   # app 包缓存目录
+AGENT_APPS_DIR=...         # APP 包目录（人工放置安装包，平台远程安装/卸载/查询，见"十四"）
+# AGENT_ADB_SERIAL=...      # adb 目标设备序列号（多设备时指定）
 APPIUM_URL=...            # appium server 地址（开发 http://172.20.1.79:4723/，生产 http://127.0.0.1:4723/，可自定义）
 ```
 
@@ -201,3 +212,15 @@ APPIUM_URL=...            # appium server 地址（开发 http://172.20.1.79:472
 3. **app 版本 downloadUrl 来源**：downloadUrl 由人工录入 app_versions 表。若后续要对接构建系统自动拉取，是后续需求。
 4. **多机扩展**：当前单台不建 agent 实体。未来加第二台时，把 `agentState` 内存对象升级为 `agents` 表 + 按能力路由，改动可控。
 5. **队列优先级/取消**：当前纯 FIFO。如需插队/取消，后续加 `priority` 字段和 `cancel` 消息处理。
+
+## 十四、APP 包管理（已实现）
+
+agent 机器上配置一个 APP 包目录（`AGENT_APPS_DIR`，开发环境 `/Users/monkee/workplace/hufeng/files`），人工把安装包（.apk/.ipa）放进去，project 平台即可远程管理：
+
+- **列出包**：agent 扫描目录（仅顶层），apk 经 aapt（`ANDROID_HOME/build-tools` 最新版，兜底 PATH）解析包名与包版本，并实时查询对应模拟器内已装版本（android `adb shell dumpsys package`，ios `xcrun simctl get_app_container` + PlistBuddy）
+- **多模拟器**：`AGENT_SIMULATORS`（JSON 数组）声明受管模拟器 `{name, platform, product, serial, packageId}`（如 Android Lite / Android Lita / iOS Lita）。安装/卸载按**包名**（apk 解析）优先、**产品+平台**（文件名第一段 `{产品}.{环境}.*.apk`）兜底路由到对应设备（adb `-s serial` / simctl udid）；未匹配时落回默认设备（`AGENT_ADB_SERIAL` 或 adb 默认）
+- **环境判定**：只认平台安装记录——经平台安装时把文件名中的环境段与版本记入状态文件（`AGENT_STATE_FILE`，默认 `./install-state.json`），查询时已装版本与记录一致才展示环境，手动装/换包显示未知；卸载时清除记录
+- **project 端点**：`GET /api/agent/apps`（列表）、`GET /api/agent/apps/simulators`（各模拟器在线状态 + 已装环境/版本）、`POST /api/agent/apps/install {file}`、`POST /api/agent/apps/uninstall {packageId, platform}`、`GET /api/agent/apps/installed?packageId=&platform=`；实现为 WS 请求-响应（`AgentGateway.requestAppOp`，reqId 关联，默认超时 180s），agent 侧报错映射 502 透传错误信息
+- **互斥**：有远程任务在 agent 上执行时 APP 操作返回 409；APP 安装/卸载期间 RemoteRunService 暂停任务派发（`hasPendingAppOps`），完成后 `kickDispatch` 补一次派发
+- **agent 侧实现**：`src/apps.ts`（`listPackages`/`listSimulators`/`installPackage`/`uninstallPackage`/`installedVersion`），main.ts 处理 `app` 指令；任务运行中（busy）拒绝 APP 操作
+- **前端**：左侧导航"APP"（/apps）：包列表（APP/环境/平台/版本/文件/操作，产品/环境/平台筛选 + 版本搜索 + 文件名倒序）+ 安装/卸载；右侧受管模拟器面板（在线状态 + 已装环境/版本）

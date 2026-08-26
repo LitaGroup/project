@@ -7,3 +7,4 @@ dist/
 .env.*
 images/
 appium-agent/app-cache/
+install-state.json

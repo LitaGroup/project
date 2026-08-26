@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import type { Server } from 'http';
 import { EventEmitter } from 'events';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -24,9 +25,29 @@ export type AgentMessage =
       /** 异常描述（超时/agent 自身错误），正常结束时为 null */
       error?: string | null;
     }
+  | {
+      /** APP 包操作的响应（对应 project 下发的 app 指令，reqId 关联） */
+      type: 'app-result';
+      reqId: string;
+      ok: boolean;
+      /** 操作结果（list→AppPackageInfo[]，install→AppPackageInfo，version→{version}） */
+      data?: unknown;
+      error?: string;
+    }
   | { type: 'heartbeat' };
 
-/** project → appium-agent 的消息（下发任务/取消） */
+/** project → appium-agent 的 APP 包操作请求体（requestAppOp 入参，reqId 由网关生成） */
+export interface AppOpRequest {
+  action: 'list' | 'install' | 'uninstall' | 'version' | 'simulators';
+  /** install：包目录内的文件名 */
+  file?: string;
+  /** uninstall/version：应用包名 */
+  packageId?: string;
+  /** uninstall/version：android/ios */
+  platform?: string;
+}
+
+/** project → appium-agent 的消息（下发任务/取消/APP 包操作） */
 export type AgentCommand =
   | {
       type: 'task';
@@ -39,12 +60,15 @@ export type AgentCommand =
       md5?: string;
       timeout: number;
     }
-  | { type: 'cancel'; runId: number };
+  | { type: 'cancel'; runId: number }
+  | ({ type: 'app'; reqId: string } & AppOpRequest);
 
 /** 心跳超时阈值（毫秒），超过则判定 agent 离线 */
 const HEARTBEAT_TIMEOUT_MS = 30_000;
 /** 心跳检查间隔 */
 const HEARTBEAT_CHECK_MS = 10_000;
+/** APP 包操作默认超时（安装大包可能较慢） */
+export const APP_OP_TIMEOUT_MS = 180_000;
 
 /**
  * appium-agent 连接层：管理 WebSocket 连接、鉴权、心跳、消息收发。
@@ -62,6 +86,15 @@ export class AgentGateway {
   private lastSeenAt = 0;
   private readonly bus = new EventEmitter();
   private readonly heartbeatTimer: NodeJS.Timeout;
+  /** 在途的 APP 包操作请求（reqId → 应答处理） */
+  private readonly pendingAppOps = new Map<
+    string,
+    {
+      resolve: (data: unknown) => void;
+      reject: (err: Error) => void;
+      timer: NodeJS.Timeout;
+    }
+  >();
 
   constructor(config: ConfigService) {
     this.agentToken = config.get<string>('AGENT_TOKEN') || null;
@@ -147,23 +180,32 @@ export class AgentGateway {
     this.lastSeenAt = Date.now();
   }
 
-  /** 当前连接断开：清状态并通知上层处理在途任务 */
+  /** 当前连接断开：清状态、失败所有在途 APP 操作、通知上层处理在途任务 */
   private detachConnection(): void {
     const wasReady = this.ready;
     this.ws = null;
     this.agentName = null;
     this.agentAppiumUrl = null;
     this.ready = false;
+    for (const [reqId, p] of this.pendingAppOps) {
+      clearTimeout(p.timer);
+      p.reject(new Error('agent 连接已断开'));
+      this.pendingAppOps.delete(reqId);
+    }
     if (wasReady) {
       this.logger.warn('agent 已断开');
       this.bus.emit('disconnect');
     }
   }
 
-  /** 收到 agent 消息：心跳直接记，ready 记 name/capabilities，其余转发上层 */
+  /** 收到 agent 消息：心跳直接记，app-result 应答挂起的请求，ready 记 name/capabilities，其余转发上层 */
   private dispatchMessage(msg: AgentMessage): void {
     if (msg.type === 'heartbeat') {
       this.lastSeenAt = Date.now();
+      return;
+    }
+    if (msg.type === 'app-result') {
+      this.resolveAppOp(msg);
       return;
     }
     if (msg.type === 'ready') {
@@ -194,6 +236,61 @@ export class AgentGateway {
     return true;
   }
 
+  /** 是否有在途的 APP 包操作（任务派发需避让，见 RemoteRunService.dispatch） */
+  hasPendingAppOps(): boolean {
+    return this.pendingAppOps.size > 0;
+  }
+
+  /**
+   * 下发 APP 包操作并等待 agent 应答（请求-响应模式，reqId 关联）。
+   * agent 离线/发送失败/超时/断线都会 reject；agent 侧 ok=false 也 reject（message 为 agent 报错）。
+   */
+  requestAppOp<T>(
+    op: AppOpRequest,
+    timeoutMs: number = APP_OP_TIMEOUT_MS,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      if (!this.isOnline()) {
+        reject(new Error('appium-agent 离线'));
+        return;
+      }
+      const reqId = randomUUID();
+      const timer = setTimeout(() => {
+        this.pendingAppOps.delete(reqId);
+        reject(new Error(`agent 操作超时（>${timeoutMs / 1000}s）`));
+      }, timeoutMs);
+      this.pendingAppOps.set(reqId, {
+        resolve: (data) => resolve(data as T),
+        reject,
+        timer,
+      });
+      const sent = this.send({ type: 'app', reqId, ...op });
+      if (!sent) {
+        clearTimeout(timer);
+        this.pendingAppOps.delete(reqId);
+        reject(new Error('appium-agent 离线'));
+      }
+    });
+  }
+
+  /** agent 的 app-result 应答：按 reqId 找到挂起的请求并结算 */
+  private resolveAppOp(msg: {
+    reqId: string;
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+  }): void {
+    const p = this.pendingAppOps.get(msg.reqId);
+    if (!p) return;
+    clearTimeout(p.timer);
+    this.pendingAppOps.delete(msg.reqId);
+    if (msg.ok) {
+      p.resolve(msg.data);
+    } else {
+      p.reject(new Error(msg.error ?? 'agent 操作失败'));
+    }
+  }
+
   /** 订阅 agent 上报消息，返回退订函数 */
   onMessage(handler: (msg: AgentMessage) => void): () => void {
     this.bus.on('message', handler);
@@ -209,6 +306,8 @@ export class AgentGateway {
   /** 供测试/优雅关闭用 */
   destroy(): void {
     clearInterval(this.heartbeatTimer);
+    for (const p of this.pendingAppOps.values()) clearTimeout(p.timer);
+    this.pendingAppOps.clear();
     this.bus.removeAllListeners();
     if (this.ws) {
       this.ws.close();

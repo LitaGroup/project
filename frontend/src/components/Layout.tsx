@@ -17,6 +17,7 @@ const navItems = [
   { to: '/documents', label: '文档', ready: true },
   { to: '/scripts', label: '脚本', ready: true },
   { to: '/tasks', label: '任务', ready: true },
+  { to: '/apps', label: 'APP', ready: true },
   { to: '/settings', label: '设置', ready: true },
 ]
 

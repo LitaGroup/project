@@ -180,9 +180,11 @@ export class RemoteRunService implements OnModuleInit {
     return `${kind}:${runId}`;
   }
 
-  /** 派发：agent 在线且空闲时，取队首 queued run 下发 */
+  /** 派发：agent 在线且空闲（无在途任务/APP 包操作）时，取队首 queued run 下发 */
   private async dispatch(): Promise<void> {
     if (this.currentActive || !this.agentGateway.isOnline()) return;
+    // APP 包安装/卸载进行中：避让，操作完成后由 controller 调 kickDispatch 重试
+    if (this.agentGateway.hasPendingAppOps()) return;
     const next = await this.pickNextQueued();
     if (!next) return;
     const ctx = this.contexts.get(this.key(next.kind, next.runId));
@@ -238,6 +240,16 @@ export class RemoteRunService implements OnModuleInit {
     if (t) return { kind: 'test', runId: t.id, queuedAt: t.queuedAt! };
     if (c) return { kind: 'check', runId: c.id, queuedAt: c.queuedAt! };
     return null;
+  }
+
+  /** 是否有正在 agent 上执行的任务（APP 包操作需避让，见 AgentAppsController） */
+  hasActiveRun(): boolean {
+    return this.currentActive !== null;
+  }
+
+  /** APP 包操作完成后触发一次派发（此前因互斥跳过的 queued 任务得以执行） */
+  kickDispatch(): void {
+    void this.dispatch();
   }
 
   private async markRunning(

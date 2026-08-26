@@ -293,8 +293,45 @@ export interface Settings {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+/** appium-agent 包目录中的一个安装包（GET /agent/apps 实时扫描） */
+export interface AgentAppPackage {
+  /** 相对包目录的文件名 */
+  file: string
+  /** 目标平台（按扩展名推断） */
+  platform: 'android' | 'ios'
+  /** 文件大小（字节） */
+  size: number
+  /** 文件修改时间（ISO） */
+  updatedAt: string
+  /** 应用包名（apk 经 aapt 解析；ipa 为 null） */
+  packageId: string | null
+  /** 包自身版本 */
+  version: string | null
+  /** 模拟器内当前已装版本（未安装为 null） */
+  installedVersion: string | null
+  /** 路由到的模拟器名（未匹配为 null，安装时落回默认设备） */
+  simulator: string | null
+}
+
+/** 受管模拟器的实时状态（GET /agent/apps/simulators） */
+export interface AgentSimulator {
+  /** 展示名（如 Android Lite） */
+  name: string
+  /** 平台：android/ios */
+  platform: string
+  /** 产品：lita/lite */
+  product: string
+  /** 应用包名 */
+  packageId: string
+  /** 设备在线 */
+  online: boolean
+  /** 模拟器内当前已装版本（未安装/离线为 null） */
+  installedVersion: string | null
+  /** 已装包的环境（仅平台安装记录与已装版本一致时给出，否则 null） */
+  env: string | null
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {  const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
@@ -557,6 +594,23 @@ export const api = {
   /** 更新脚本仓库：在脚本根目录执行 git pull，返回输出 */
   pullScripts: () =>
     request<{ output: string }>('/settings/scripts/pull', { method: 'POST' }),
+  /** APP 包列表：扫描 appium-agent 包目录，含模拟器内已装版本（agent 离线 503） */
+  listAgentApps: () => request<AgentAppPackage[]>('/agent/apps'),
+  /** 受管模拟器实时状态：在线情况 + 已装环境/版本 */
+  listAgentSimulators: () =>
+    request<AgentSimulator[]>('/agent/apps/simulators'),
+  /** 安装包目录中的指定包到模拟器（file 为包目录内文件名） */
+  installAgentApp: (file: string) =>
+    request<AgentAppPackage>('/agent/apps/install', {
+      method: 'POST',
+      body: JSON.stringify({ file }),
+    }),
+  /** 从模拟器卸载指定包名的 app */
+  uninstallAgentApp: (packageId: string, platform: string) =>
+    request<{ ok: true }>('/agent/apps/uninstall', {
+      method: 'POST',
+      body: JSON.stringify({ packageId, platform }),
+    }),
   /** 缺陷列表：传 projectId 按项目过滤，不传返回全部。不含 description/images */
   listDefects: (projectId?: number) =>
     request<Defect[]>(

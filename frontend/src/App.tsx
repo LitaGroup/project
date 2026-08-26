@@ -15,6 +15,7 @@ import { TasksPage } from './pages/TasksPage'
 import { DefectsPage } from './pages/DefectsPage'
 import { DefectDetailPage } from './pages/DefectDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { AppsPage } from './pages/AppsPage'
 
 function App() {
   return (
@@ -47,6 +48,7 @@ function App() {
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/scripts" element={<ScriptsPage />} />
           <Route path="/tasks" element={<TasksPage />} />
+          <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>

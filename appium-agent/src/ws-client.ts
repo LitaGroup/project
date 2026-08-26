@@ -21,7 +21,23 @@ export interface CancelCommand {
   runId: number;
 }
 
-export type Command = TaskCommand | CancelCommand;
+/**
+ * project → agent 下发的 APP 包操作指令（请求-响应模式，reqId 关联）。
+ * 响应为 { type:'app-result', reqId, ok, data?, error? }。
+ */
+export interface AppCommand {
+  type: 'app';
+  reqId: string;
+  action: 'list' | 'install' | 'uninstall' | 'version' | 'simulators';
+  /** install：包目录内的文件名（如 lita-1.2.3.apk） */
+  file?: string;
+  /** uninstall/version：应用包名 */
+  packageId?: string;
+  /** uninstall/version：android/ios */
+  platform?: string;
+}
+
+export type Command = TaskCommand | CancelCommand | AppCommand;
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
