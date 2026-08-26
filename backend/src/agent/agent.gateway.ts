@@ -135,11 +135,12 @@ export class AgentGateway {
   }
 
   /**
-   * 把 WebSocket server 挂到 NestJS 的 http server 上（http upgrade，路径 /ws）。
-   * 不走 /api 全局前缀（同 /images），agent 直连 ws://host:port/ws?token=...
+   * 把 WebSocket server 挂到 NestJS 的 http server 上（http upgrade，路径 /api/ws）。
+   * 放在 /api 前缀下：生产反代只需一条 /api 转发规则即可覆盖（仍需开启 Upgrade 头），
+   * agent 直连 ws://host:port/api/ws?token=...
    */
   attachToServer(server: Server): void {
-    const wss = new WebSocketServer({ server, path: '/ws' });
+    const wss = new WebSocketServer({ server, path: '/api/ws' });
     wss.on('connection', (ws, req) => {
       const url = new URL(req.url ?? '', 'http://localhost');
       const token = url.searchParams.get('token');

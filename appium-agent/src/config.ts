@@ -93,11 +93,11 @@ export interface AgentConfig {
 export function loadConfig(): AgentConfig {
   const projectWsUrl = requireEnv('PROJECT_WS_URL');
   const agentToken = requireEnv('AGENT_TOKEN');
-  // ws://host:port/ws → http://host:port
+  // ws://host:port/api/ws → http://host:port（兼容旧的 /ws 路径）
   const projectApiBase = projectWsUrl
     .replace(/^wss:/, 'https:')
     .replace(/^ws:/, 'http:')
-    .replace(/\/ws\/?$/, '');
+    .replace(/\/(api\/)?ws\/?$/, '');
   const appiumUrl = process.env.APPIUM_URL ?? 'http://localhost:4723';
   return {
     projectWsUrl,

@@ -46,7 +46,7 @@ createdAt, updatedAt
 
 ## 三、通信协议（WebSocket）
 
-用 `ws` 库挂载到 NestJS http server 的 `/ws` 路径（http upgrade，单端口，像 `/images` 一样绕过 `/api` 前缀）。新增 `AgentGateway` service 管连接与消息分发。**不引入 `@nestjs/websockets`**（单 client 场景 overkill）。
+用 `ws` 库挂载到 NestJS http server 的 `/api/ws` 路径（http upgrade，单端口，挂在 `/api` 前缀下使生产反代一条 /api 规则即可覆盖，仍需支持 Upgrade 头）。新增 `AgentGateway` service 管连接与消息分发。**不引入 `@nestjs/websockets`**（单 client 场景 overkill）。
 
 - **鉴权**：agent 连接时带 `?token=...`，project 校验环境变量 `AGENT_TOKEN`，不匹配拒绝握手。
 - **心跳**：agent 每 10s 发 `{type:heartbeat}`，project 30s 无心跳标记离线、断线任务标 error。
@@ -151,10 +151,10 @@ appium-agent/
 | `tests/test.entity.ts` | 加 `appPlatform`/`appTarget` |
 | `tests/test-run.entity.ts` | 加 `appVersionId`/`queuedAt`/`agentName`；`status` 允许 `queued` |
 | `tests/tests.service.ts` | `startRun` 分支（本地 vs 入队）；新增 `enqueueRun`/`dispatchRun`；`executeRemoteRun` 消费 agent 上报（复用 `handleLine`/`emitLive`/`finalize`） |
-| 新建 `agent/agent.gateway.ts` + `agent.module.ts` | WebSocket server（`ws` 库，挂 `/ws`），管连接/鉴权/心跳/消息路由，调 `tests.service` 的远程执行方法 |
+| 新建 `agent/agent.gateway.ts` + `agent.module.ts` | WebSocket server（`ws` 库，挂 `/api/ws`），管连接/鉴权/心跳/消息路由，调 `tests.service` 的远程执行方法 |
 | 新建 `app-versions/` 模块 | `AppVersion` 实体 + CRUD controller/service |
 | `scripts/` 新模块或扩 `settings` | `GET /api/scripts?path=` 下载端点（带 token 鉴权） |
-| `main.ts` | 把 WebSocket server 挂到 http server 的 `/ws`（http upgrade） |
+| `main.ts` | 把 WebSocket server 挂到 http server 的 `/api/ws`（http upgrade） |
 | `app.module.ts` | 注册 `AgentModule`、`AppVersionsModule`、ScriptsModule |
 
 新增依赖：`ws` + `@types/ws`（backend）。`AGENT_TOKEN`、`AGENT_NAME`、`APP_CACHE_DIR` 等环境变量加到 `.env.example`。
@@ -195,7 +195,7 @@ project/
 # backend
 AGENT_TOKEN=...          # agent 连接鉴权 token
 # appium-agent
-PROJECT_WS_URL=ws://project-host:3000/ws
+PROJECT_WS_URL=ws://project-host:3000/api/ws
 AGENT_TOKEN=...           # 与 backend 一致
 AGENT_NAME=mac-mini-1
 AGENT_SCRIPTS_DIR=...     # 本地脚本工作目录（含预装 node_modules）

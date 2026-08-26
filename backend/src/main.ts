@@ -18,7 +18,8 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 
-  // WebSocket server（appium-agent 连接）：ws://host:port/ws?token=...（不走 /api 前缀）
+  // WebSocket server（appium-agent 连接）：ws://host:port/api/ws?token=...
+  // 放在 /api 前缀下，生产反代一条 /api 规则即可覆盖（仍需支持 Upgrade 头）
   const agentGateway = app.get(AgentGateway);
   agentGateway.attachToServer(app.getHttpServer());
 }
