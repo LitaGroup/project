@@ -11,8 +11,9 @@ import {
 import { Project } from '../projects/project.entity';
 
 /**
- * APP 版本：每次 APP 自动化测试运行所使用的 app 包元信息。
- * 不存包内容，包由 appium-agent 下载到测试机并按 md5 缓存。
+ * APP 版本：APP 自动化测试运行所针对的 app 版本元信息（平台/应用/版本号）。
+ * 不存包内容也不参与执行——APP 包的安装/卸载由 APP 包管理（agent 包目录）统一处理，
+ * 脚本运行前由 agent 前置校验模拟器内已装对应 APP。
  */
 @Entity('app_versions')
 @Index(['projectId', 'platform', 'version'])
@@ -34,14 +35,6 @@ export class AppVersion {
   /** 版本号（如 1.2.3） */
   @Column({ type: 'varchar', length: 100 })
   version: string;
-
-  /** app 包下载地址（agent 下载并用 md5 校验） */
-  @Column({ type: 'text' })
-  downloadUrl: string;
-
-  /** app 包 md5（agent 下载后校验，命中缓存则跳过下载） */
-  @Column({ type: 'varchar', length: 64 })
-  md5: string;
 
   @Column({ type: 'text', nullable: true })
   remark: string | null;

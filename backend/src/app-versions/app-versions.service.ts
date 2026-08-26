@@ -11,10 +11,6 @@ export interface AppVersionInput {
   appTarget: string;
   /** 版本号（如 1.2.3） */
   version: string;
-  /** app 包下载地址 */
-  downloadUrl: string;
-  /** app 包 md5 */
-  md5: string;
   remark?: string;
 }
 

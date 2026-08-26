@@ -9,9 +9,10 @@ export interface TaskCommand {
   scriptPath: string;
   /** 运行设备：android/ios */
   device: string;
+  /** 目标 APP：lita/lite 等（前置校验定位受管模拟器用；无则按 platform 匹配） */
+  appTarget?: string | null;
+  /** APP 版本号（注入脚本环境变量 APP_VERSION；包安装走 APP 包管理，任务不携带包） */
   appVersion?: string;
-  downloadUrl?: string;
-  md5?: string;
   timeout: number;
 }
 

@@ -74,6 +74,10 @@ function SimulatorPanel({
           </CardHeader>
           <dl className="flex flex-col gap-2 px-6 pb-6 text-sm group-data-inset/card:px-4">
             <div className="flex items-center justify-between">
+              <dt>机型</dt>
+              <dd>{s.online ? (s.model ?? '未知') : '—'}</dd>
+            </div>
+            <div className="flex items-center justify-between">
               <dt>环境</dt>
               <dd>{s.online ? <EnvBadge env={s.env} /> : '—'}</dd>
             </div>

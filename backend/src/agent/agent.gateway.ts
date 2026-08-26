@@ -55,9 +55,10 @@ export type AgentCommand =
       scriptPath: string;
       /** 运行设备：android/ios（远程执行必为这两者） */
       device: string;
+      /** 目标 APP：lita/lite 等，agent 前置校验/定位模拟器用；无则为 null */
+      appTarget?: string | null;
+      /** APP 版本号（展示/通知用；包安装走 APP 包管理，任务不携带包） */
       appVersion?: string;
-      downloadUrl?: string;
-      md5?: string;
       timeout: number;
     }
   | { type: 'cancel'; runId: number }

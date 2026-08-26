@@ -41,6 +41,8 @@ export interface SimulatorStatus {
   packageId: string;
   /** 设备在线（adb devices / simctl booted 可见） */
   online: boolean;
+  /** 机型（android ro.product.model / ios 设备名；离线或查询失败为 null） */
+  model: string | null;
   /** 模拟器内当前已装版本（未安装/离线为 null） */
   installedVersion: string | null;
   /** 已装包的环境（仅平台安装记录与已装版本一致时给出，否则 null） */
@@ -126,6 +128,50 @@ function findSimulator(
     );
   }
   return null;
+}
+
+// ---------- 运行前置校验 ----------
+
+/**
+ * 任务执行前置校验：按 platform + appTarget（产品）定位受管模拟器，
+ * 模拟器未启动 / APP 未安装时抛错（message 即失败原因，经 done 回传 project）。
+ * 返回命中的模拟器配置（可供调用方继续使用 serial/packageId）。
+ */
+export async function preflightRunTarget(
+  config: AgentConfig,
+  platform: string,
+  appTarget?: string | null,
+): Promise<SimulatorConfig> {
+  const sim =
+    (appTarget
+      ? config.simulators.find(
+          (s) => s.platform === platform && s.product === appTarget,
+        )
+      : null) ??
+    config.simulators.find((s) => s.platform === platform) ??
+    null;
+  if (!sim) {
+    throw new Error(
+      `未配置 ${platform}${appTarget ? `/${appTarget}` : ''} 的受管模拟器（AGENT_SIMULATORS）`,
+    );
+  }
+  if (!(await deviceOnline(sim))) {
+    throw new Error(
+      `模拟器未启动：${sim.name}（${sim.platform}，${sim.serial}），请先启动模拟器`,
+    );
+  }
+  const installed = await installedVersion(
+    config,
+    sim.packageId,
+    sim.platform,
+    sim.serial,
+  ).catch(() => null);
+  if (!installed) {
+    throw new Error(
+      `APP 未安装：${sim.packageId}（${sim.name}），请先在 APP 页安装`,
+    );
+  }
+  return sim;
 }
 
 // ---------- 平台安装记录（环境判定依据） ----------
@@ -230,6 +276,26 @@ async function deviceOnline(sim: SimulatorConfig): Promise<boolean> {
   }
 }
 
+/** 查询模拟器机型：android 读 ro.product.model；ios 取 simctl 设备名（即机型，如 iPhone 16 Pro）。查询失败返回 null */
+async function deviceModel(sim: SimulatorConfig): Promise<string | null> {
+  try {
+    if (sim.platform === 'android') {
+      const out = await run(
+        'adb',
+        ['-s', sim.serial, 'shell', 'getprop', 'ro.product.model'],
+        ADB_TIMEOUT_MS,
+      );
+      return out.trim() || null;
+    }
+    // ios：simctl 列表中按 udid 找到设备行，机型即设备名（如 "iPhone 16 Pro (UDID) (Booted)"）
+    const out = await run('xcrun', ['simctl', 'list', 'devices'], ADB_TIMEOUT_MS);
+    const line = out.split('\n').find((l) => l.includes(sim.serial));
+    return line?.match(/^\s*(.+?)\s+\(/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** 查询模拟器内已装 app 的版本；未安装返回 null，查询失败抛错 */
 export async function installedVersion(
   config: AgentConfig,
@@ -322,14 +388,18 @@ export async function listSimulators(
   return Promise.all(
     config.simulators.map(async (sim) => {
       const online = await deviceOnline(sim);
+      let model: string | null = null;
       let installed: string | null = null;
       if (online) {
-        installed = await installedVersion(
-          config,
-          sim.packageId,
-          sim.platform,
-          sim.serial,
-        ).catch(() => null);
+        [model, installed] = await Promise.all([
+          deviceModel(sim),
+          installedVersion(
+            config,
+            sim.packageId,
+            sim.platform,
+            sim.serial,
+          ).catch(() => null),
+        ]);
       }
       const record = state[`${sim.serial}:${sim.packageId}`];
       // 已装版本与平台安装记录一致时才认为环境可信（手动装/换包则未知）
@@ -343,6 +413,7 @@ export async function listSimulators(
         product: sim.product,
         packageId: sim.packageId,
         online,
+        model,
         installedVersion: installed,
         env,
       };

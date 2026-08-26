@@ -72,8 +72,6 @@ export interface AgentConfig {
   agentName: string;
   /** 脚本本地工作目录（下载的脚本放此，须预装 node_modules） */
   scriptsDir: string;
-  /** app 包缓存目录（按 md5 命名，downloadUrl 流程下载的缓存） */
-  appCacheDir: string;
   /** APP 包目录：人工放置的安装包（.apk/.ipa），供平台远程安装/卸载/查询 */
   appsDir: string;
   /** adb 目标设备序列号（多设备时用 -s 指定；为空用 adb 默认设备）。配置了 simulators 后仅作兜底 */
@@ -105,7 +103,6 @@ export function loadConfig(): AgentConfig {
     agentToken,
     agentName: process.env.AGENT_NAME ?? 'appium-agent',
     scriptsDir: process.env.AGENT_SCRIPTS_DIR ?? './scripts',
-    appCacheDir: process.env.AGENT_APP_CACHE_DIR ?? './app-cache',
     appsDir: process.env.AGENT_APPS_DIR ?? './apps',
     adbSerial: process.env.AGENT_ADB_SERIAL || null,
     simulators: optSimulators(),

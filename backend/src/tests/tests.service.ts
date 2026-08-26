@@ -280,6 +280,7 @@ export class TestsService implements OnModuleInit {
       checkCode: test.code,
       scriptPath: test.scriptPath,
       device: test.device!,
+      appTarget: appVersion?.appTarget ?? null,
       appVersion,
       source: 'manual',
     });

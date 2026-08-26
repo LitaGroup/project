@@ -33,6 +33,8 @@ export interface RunMeta {
   scriptPath: string;
   /** 运行设备：android/ios（远程必为这两者） */
   device: string;
+  /** 目标 APP：lita/lite 等（appVersion 的 appTarget；无 app 版本时为 null），agent 据此定位受管模拟器 */
+  appTarget: string | null;
   /** APP 版本（test 的 android/ios 可能带；check/android 无 app 版本时为 null） */
   appVersion: AppVersion | null;
   /** 触发方式（通知用） */
@@ -206,9 +208,8 @@ export class RemoteRunService implements OnModuleInit {
       runId: next.runId,
       scriptPath: m.scriptPath,
       device: m.device,
+      appTarget: m.appTarget,
       appVersion: m.appVersion?.version,
-      downloadUrl: m.appVersion?.downloadUrl,
-      md5: m.appVersion?.md5,
       timeout: this.appRunTimeoutMs,
     });
     if (!sent) {

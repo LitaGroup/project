@@ -44,6 +44,8 @@ export interface AgentSimulator {
   packageId: string;
   /** 设备在线 */
   online: boolean;
+  /** 机型（android ro.product.model / ios 设备名；离线或查询失败为 null） */
+  model: string | null;
   /** 模拟器内当前已装版本（未安装/离线为 null） */
   installedVersion: string | null;
   /** 已装包的环境（仅平台安装记录与已装版本一致时给出，否则 null） */

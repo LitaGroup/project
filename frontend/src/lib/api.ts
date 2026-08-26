@@ -117,7 +117,7 @@ export interface ProjectTest {
   updatedAt: string
 }
 
-/** APP 版本：每次 APP 测试运行使用的 app 包元信息（不含包内容，由 agent 下载缓存） */
+/** APP 版本：APP 测试运行所针对的 app 版本元信息（包安装走 APP 页，不随任务下发） */
 export interface AppVersion {
   id: number
   projectId: number
@@ -127,10 +127,6 @@ export interface AppVersion {
   appTarget: string
   /** 版本号（如 1.2.3） */
   version: string
-  /** app 包下载地址 */
-  downloadUrl: string
-  /** app 包 md5 */
-  md5: string
   remark: string | null
   createdAt: string
   updatedAt: string
@@ -325,6 +321,8 @@ export interface AgentSimulator {
   packageId: string
   /** 设备在线 */
   online: boolean
+  /** 机型（android ro.product.model / ios 设备名；离线或查询失败为 null） */
+  model: string | null
   /** 模拟器内当前已装版本（未安装/离线为 null） */
   installedVersion: string | null
   /** 已装包的环境（仅平台安装记录与已装版本一致时给出，否则 null） */
@@ -544,8 +542,6 @@ export const api = {
     platform: string
     appTarget: string
     version: string
-    downloadUrl: string
-    md5: string
     remark?: string
   }) =>
     request<AppVersion>('/app-versions', {

@@ -2064,7 +2064,7 @@ function EditDefectBitableDialog({
   )
 }
 
-/** APP 版本板块：管理 APP 测试运行的 app 包元信息（版本/平台/应用/下载地址/md5） */
+/** APP 版本板块：管理 APP 测试运行的 app 版本元信息（版本/平台/应用；包安装走 APP 页） */
 function AppVersionsPanel({
   project,
   onChanged,
@@ -2097,7 +2097,6 @@ function AppVersionsPanel({
             <TableHead>版本</TableHead>
             <TableHead className="w-24">平台</TableHead>
             <TableHead className="w-32">应用</TableHead>
-            <TableHead>MD5</TableHead>
             <TableHead className="w-24 text-center">操作</TableHead>
           </TableRow>
         </TableHeader>
@@ -2107,12 +2106,6 @@ function AppVersionsPanel({
               <TableCell>{v.version}</TableCell>
               <TableCell>{v.platform === 'ios' ? 'iOS' : 'Android'}</TableCell>
               <TableCell>{v.appTarget}</TableCell>
-              <TableCell
-                className="max-w-xs truncate font-mono text-xs"
-                title={v.md5}
-              >
-                {v.md5}
-              </TableCell>
               <TableCell className="text-center">
                 <AlertDialog>
                   <AlertDialogTrigger>
@@ -2155,7 +2148,7 @@ function AppVersionsPanel({
           ))}
           {versions.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5}>暂无 APP 版本</TableCell>
+              <TableCell colSpan={4}>暂无 APP 版本</TableCell>
             </TableRow>
           )}
         </TableBody>
@@ -2164,7 +2157,7 @@ function AppVersionsPanel({
   )
 }
 
-/** 新建 APP 版本：录入版本号/平台/应用/下载地址/md5 */
+/** 新建 APP 版本：录入版本号/平台/应用 */
 function AppVersionFormDialog({
   projectId,
   onSaved,
@@ -2176,8 +2169,6 @@ function AppVersionFormDialog({
   const [version, setVersion] = useState('')
   const [platform, setPlatform] = useState<string>(APP_PLATFORMS[0])
   const [appTarget, setAppTarget] = useState<string>(APP_TARGETS[0])
-  const [downloadUrl, setDownloadUrl] = useState('')
-  const [md5, setMd5] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const handleOpenChange = (next: boolean) => {
@@ -2186,8 +2177,6 @@ function AppVersionFormDialog({
       setVersion('')
       setPlatform(APP_PLATFORMS[0])
       setAppTarget(APP_TARGETS[0])
-      setDownloadUrl('')
-      setMd5('')
       setError(null)
     }
   }
@@ -2200,8 +2189,6 @@ function AppVersionFormDialog({
         platform,
         appTarget,
         version,
-        downloadUrl,
-        md5,
       })
       .then(() => {
         setOpen(false)
@@ -2274,22 +2261,6 @@ function AppVersionFormDialog({
                 </Select>
               </label>
             </div>
-            <label className="flex flex-col gap-1 text-sm">
-              下载地址
-              <Input
-                value={downloadUrl}
-                onChange={(e) => setDownloadUrl(e.target.value)}
-                placeholder="app 包下载 URL"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              MD5
-              <Input
-                value={md5}
-                onChange={(e) => setMd5(e.target.value)}
-                placeholder="app 包 md5（agent 校验）"
-              />
-            </label>
             {error && <p className="text-sm">保存失败:{error}</p>}
           </div>
         </DialogBody>
@@ -2300,9 +2271,7 @@ function AppVersionFormDialog({
           <Button
             size="sm"
             onClick={submit}
-            disabled={
-              !version.trim() || !downloadUrl.trim() || !md5.trim()
-            }
+            disabled={!version.trim()}
           >
             保存
           </Button>

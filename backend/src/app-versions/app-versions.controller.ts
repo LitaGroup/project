@@ -17,8 +17,6 @@ class CreateAppVersionDto implements AppVersionInput {
   platform: string;
   appTarget: string;
   version: string;
-  downloadUrl: string;
-  md5: string;
   remark?: string;
 }
 

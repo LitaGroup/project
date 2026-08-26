@@ -303,6 +303,7 @@ export class ChecksService implements OnModuleInit {
       checkCode: check.code,
       scriptPath: check.scriptPath,
       device: check.device!,
+      appTarget: null,
       appVersion: null,
       source,
       taskId,
