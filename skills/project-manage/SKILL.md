@@ -1,7 +1,7 @@
 ---
 name: project-manage
 description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/检查/用例/任务及运行信息）、运行检查/用例/任务并流式获取结果、查看系统设置与更新脚本仓库
-version: 1.0.0
+version: 1.1.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -19,10 +19,11 @@ tags:
 
 1. 按项目名称模糊搜索项目
 2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及检查/用例/任务的清单、运行命令、最近运行结果与运行记录
-3. 运行检查/用例/任务，流式读取脚本输出与结果
-4. 获取平台设置信息、更新脚本仓库
+3. 读取文档 Markdown 正文
+4. 运行检查/用例/任务，流式读取脚本输出与结果
+5. 获取平台设置信息、更新脚本仓库
 
-所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`。
+本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`。
 
 ## 基础地址
 
@@ -58,7 +59,15 @@ GET /api/projects/{id}.md
 
 典型流程：**搜索 → 取目标项目 id → 读项目详情 → 再决定运行什么**。
 
-### 3. 运行检查 / 用例 / 任务（流式）
+### 3. 读取文档正文
+
+```
+GET /api/documents/{docId}.md
+```
+
+返回文档元信息（标题 / 类型 / 来源 / 所属项目 / 更新时间等）+ Markdown 正文全文。
+
+### 4. 运行检查 / 用例 / 任务（流式）
 
 ```bash
 curl -N -X POST {BASE}/api/checks/{checkId}/run.md   # 运行一次检查
@@ -77,7 +86,7 @@ GET /api/tests/runs/{runId}.md    # 用例的运行详情
 
 （JSON 版详情与 SSE 实时流分别为 `GET .../runs/{runId}` 与 `GET .../runs/{runId}/stream`）
 
-### 4. 系统能力
+### 5. 系统能力
 
 ```
 GET /api/settings.md                  # 平台设置：环境 / 端口 / 脚本目录 / 图片目录 / 访问域名 / agent 在线状态等
@@ -85,6 +94,18 @@ curl -N -X POST {BASE}/api/settings/scripts/pull.md   # 更新脚本仓库（git
 ```
 
 脚本更新为流式响应："输出"小节逐行返回 git 输出，结束附"结果"小节（success / error + 消息）。超时 60 秒。
+
+### 6. 全局列表（JSON，非 .md）
+
+需要跨项目列举数据时使用常规 JSON 接口（`projectId` 均可选，不传返回全部）：
+
+```
+GET /api/checks[?projectId=]      # 检查列表
+GET /api/tests[?projectId=]       # 用例列表
+GET /api/documents[?projectId=]   # 文档列表（不含正文）
+GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运行统计）
+GET /api/defects[?projectId=]     # 缺陷列表
+```
 
 ## 工作约定
 
