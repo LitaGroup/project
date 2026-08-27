@@ -55,6 +55,13 @@ export class ProjectsController {
     return this.projectsService.findAll();
   }
 
+  /** Markdown 模糊搜索（须声明在 :id 之前）：按名称匹配 + 创建时间倒序，返回前 5 */
+  @Get('search.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  searchMarkdown(@Query('q') q?: string): Promise<string> {
+    return this.projectsService.searchMarkdown(q ?? '');
+  }
+
   /** 项目表格分页（须声明在 :id 之前）：page/pageSize/q/iteration/status/type/priority */
   @Get('page')
   findPage(

@@ -30,6 +30,9 @@ const MAX_SCRIPTS = 500;
 const RUN_TIMEOUT_MS = 120_000;
 /** 运行历史返回条数上限 */
 const MAX_RUNS = 50;
+
+/** 项目 .md 视图中每条测试展示的最近运行条数 */
+const DEFAULT_RECENT_RUNS = 3;
 /** 终态实时快照的保留时长（供晚到的 SSE 订阅直接取到结果） */
 const LIVE_SNAPSHOT_TTL_MS = 5 * 60_000;
 
@@ -374,6 +377,30 @@ export class TestsService implements OnModuleInit {
       order: { id: 'DESC' },
       take: MAX_RUNS,
     });
+  }
+
+  /**
+   * 各测试最近几次运行（项目 .md 视图用）：Map<testId, TestRun[]>。
+   * 项目内测试数量不大，按 id 并行小查询（避免巨型 JOIN/分组窗口查询）。
+   */
+  async recentRunsByTestIds(
+    testIds: number[],
+    take = DEFAULT_RECENT_RUNS,
+  ): Promise<Map<number, TestRun[]>> {
+    const map = new Map<number, TestRun[]>();
+    await Promise.all(
+      testIds.map(async (id) =>
+        map.set(
+          id,
+          await this.runs.find({
+            where: { testId: id },
+            order: { id: 'DESC' },
+            take,
+          }),
+        ),
+      ),
+    );
+    return map;
   }
 
   async findRun(runId: number): Promise<TestRun> {

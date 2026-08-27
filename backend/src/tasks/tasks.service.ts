@@ -7,9 +7,11 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import type { MessageEvent } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CronJob } from 'cron';
+import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
 import { CheckRun } from '../checks/check-run.entity';
 import { ChecksService } from '../checks/checks.service';
@@ -109,6 +111,11 @@ export class TasksService implements OnModuleInit {
   async listRuns(id: number): Promise<CheckRun[]> {
     await this.findOne(id);
     return this.checksService.listRunsByTask(id);
+  }
+
+  /** 某次运行的实时流透传（POST /api/tasks/:id/run.md 流式返回结果用） */
+  streamRun(runId: number): Observable<MessageEvent> {
+    return this.checksService.streamRun(runId);
   }
 
   /** 触发一次任务：运行绑定的检查脚本（结果落 check_runs 并标记 taskId），返回运行记录。

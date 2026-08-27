@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   MessageEvent,
   Param,
@@ -15,7 +16,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { Observable } from 'rxjs';
-import { streamRunMarkdown } from '../common/run-markdown';
+import { streamRunMarkdown, renderRunMarkdown } from '../common/run-markdown';
 import { TestRun } from './test-run.entity';
 import { Test } from './test.entity';
 import { TestsService } from './tests.service';
@@ -137,6 +138,27 @@ export class TestsController {
   @Get(':id/runs')
   listRuns(@Param('id', ParseIntPipe) id: number): Promise<TestRun[]> {
     return this.testsService.listRuns(id);
+  }
+
+  /** 单次运行详情 Markdown 视图（须声明在 JSON 版之前避免路由冲突） */
+  @Get('runs/:runId.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async findRunMarkdown(
+    @Param('runId', ParseIntPipe) runId: number,
+  ): Promise<string> {
+    const run = await this.testsService.findRun(runId);
+    // test 可能已被删除，运行记录仍可单独展示
+    const test = await this.testsService.findOne(run.testId).catch(() => null);
+    return renderRunMarkdown(
+      `测试运行 #${run.id}`,
+      [
+        ...(test
+          ? [`- 测试：\`${test.code}\`（脚本：${test.scriptPath}）`]
+          : [`- 测试：#${run.testId}（已删除）`]),
+        `- 详情（JSON）：/api/tests/runs/${run.id}`,
+      ],
+      run,
+    );
   }
 
   /** 单次运行详情（含实时进度与完整结果；须声明在 :id 之前） */

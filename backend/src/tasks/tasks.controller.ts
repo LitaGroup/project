@@ -9,8 +9,11 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { CheckRun } from '../checks/check-run.entity';
+import { streamRunMarkdown } from '../common/run-markdown';
 import { Task } from './task.entity';
 import { TaskDetailView, TasksService, TaskView } from './tasks.service';
 
@@ -53,6 +56,30 @@ export class TasksController {
   @Post(':id/run')
   runNow(@Param('id', ParseIntPipe) id: number): Promise<CheckRun> {
     return this.tasksService.runNow(id);
+  }
+
+  /**
+   * AI 用：手动触发任务并以 Markdown 流式返回结果（text/markdown）。
+   * 运行中逐行输出脚本原始输出，结束时附"结果"小节。
+   */
+  @Post(':id/run.md')
+  async runMarkdown(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    const task = await this.tasksService.findOne(id);
+    const run = await this.tasksService.runNow(id);
+    await streamRunMarkdown(
+      res,
+      [
+        `# 运行任务 \`${task.title}\``,
+        '',
+        `- 运行 ID：${run.id}`,
+        `- 触发方式：手动`,
+        `- 详情：/api/checks/runs/${run.id}.md`,
+      ],
+      this.tasksService.streamRun(run.id),
+    );
   }
 
   @Get(':id')

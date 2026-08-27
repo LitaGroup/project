@@ -33,6 +33,9 @@ const MAX_SCRIPTS = 500;
 const RUN_TIMEOUT_MS = 120_000;
 /** 运行历史返回条数上限 */
 const MAX_RUNS = 50;
+
+/** 项目 .md 视图中每条检查/任务展示的最近运行条数 */
+const DEFAULT_RECENT_RUNS = 3;
 /** 终态实时快照的保留时长（供晚到的 SSE 订阅直接取到结果） */
 const LIVE_SNAPSHOT_TTL_MS = 5 * 60_000;
 
@@ -406,6 +409,46 @@ export class ChecksService implements OnModuleInit {
       order: { id: 'DESC' },
       take: MAX_RUNS,
     });
+  }
+
+  /**
+   * 各检查最近几次运行（项目 .md 视图用）：Map<checkId, CheckRun[]>。
+   * 项目内检查数量不大，按 id 并行小查询（避免巨型 JOIN/分组窗口查询）。
+   */
+  async recentRunsByCheckIds(
+    checkIds: number[],
+    take = DEFAULT_RECENT_RUNS,
+  ): Promise<Map<number, CheckRun[]>> {
+    return this.recentRunsBy('checkId', checkIds, take);
+  }
+
+  /** 各任务最近几次运行（项目 .md 的任务板块用）：Map<taskId, CheckRun[]> */
+  async recentRunsByTaskIds(
+    taskIds: number[],
+    take = DEFAULT_RECENT_RUNS,
+  ): Promise<Map<number, CheckRun[]>> {
+    return this.recentRunsBy('taskId', taskIds, take);
+  }
+
+  private async recentRunsBy(
+    key: 'checkId' | 'taskId',
+    ids: number[],
+    take: number,
+  ): Promise<Map<number, CheckRun[]>> {
+    const map = new Map<number, CheckRun[]>();
+    await Promise.all(
+      ids.map(async (id) =>
+        map.set(
+          id,
+          await this.runs.find({
+            where: { [key]: id },
+            order: { id: 'DESC' },
+            take,
+          }),
+        ),
+      ),
+    );
+    return map;
   }
 
   /** 某次任务触发的运行历史（倒序，上限 50；任务详情页用） */

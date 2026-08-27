@@ -1,12 +1,22 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
 import * as path from 'path';
 import { AgentGateway } from '../agent/agent.gateway';
 import { DEFAULT_PROJECT_SOURCE_URL } from '../projects/project-sync.service';
 
 /** git pull 超时时间（毫秒） */
 const PULL_TIMEOUT_MS = 60_000;
+
+/** git pull 失败（非零退出/超时/进程错误），携带已收集的输出供流式返回 */
+export class PullError extends Error {
+  constructor(
+    message: string,
+    readonly output: string[],
+  ) {
+    super(message);
+  }
+}
 
 export interface Settings {
   /** 运行环境（NODE_ENV） */
@@ -102,28 +112,76 @@ export class SettingsService {
     };
   }
 
-  /** 在脚本根目录执行 git pull，返回合并后的输出 */
-  pullScripts(): Promise<PullResult> {
+  /** 在脚本根目录执行 git pull，返回合并后的输出（前端 JSON 接口用） */
+  async pullScripts(): Promise<PullResult> {
+    const lines: string[] = [];
+    try {
+      await this.spawnPull((line) => lines.push(line));
+    } catch (e) {
+      if (e instanceof PullError) {
+        throw new InternalServerErrorException(
+          e.output.join('\n') || e.message,
+        );
+      }
+      throw e;
+    }
+    return { output: lines.join('\n') || '已是最新' };
+  }
+
+  /**
+   * 在脚本根目录执行 git pull（spawn 流式）：onLine 逐行回调 stdout/stderr。
+   * 成功 resolve；失败/超时 reject PullError（携带已收集的输出，流式接口仍可展示过程）。
+   */
+  spawnPull(onLine: (line: string) => void): Promise<void> {
     return new Promise((resolve, reject) => {
-      execFile(
-        'git',
-        ['pull'],
-        { cwd: this.scriptsDir, timeout: PULL_TIMEOUT_MS },
-        (error, stdout, stderr) => {
-          const output = [stdout, stderr]
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .join('\n');
-          if (error) {
-            reject(
-              new InternalServerErrorException(
-                output || `git pull 失败: ${error.message}`,
-              ),
-            );
-            return;
-          }
-          resolve({ output: output || '已是最新' });
-        },
+      const lines: string[] = [];
+      let timedOut = false;
+      let settled = false;
+      // 兼容 CRLF 与无换行结尾的最后一段
+      let buffer = '';
+      const feed = (chunk: Buffer) => {
+        buffer += chunk.toString();
+        let idx = buffer.indexOf('\n');
+        while (idx >= 0) {
+          dispatch(buffer.slice(0, idx));
+          buffer = buffer.slice(idx + 1);
+          idx = buffer.indexOf('\n');
+        }
+      };
+      const dispatch = (raw: string) => {
+        const line = raw.trim();
+        if (!line) return;
+        lines.push(line);
+        onLine(line);
+      };
+
+      const child = spawn('git', ['pull'], { cwd: this.scriptsDir });
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGTERM');
+      }, PULL_TIMEOUT_MS);
+
+      const finalize = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (buffer.trim()) dispatch(buffer);
+        if (timedOut) {
+          reject(
+            new PullError(`脚本更新超时（>${PULL_TIMEOUT_MS / 1000}s）`, lines),
+          );
+        } else if (error) {
+          reject(new PullError(`git pull 失败: ${error.message}`, lines));
+        } else {
+          resolve();
+        }
+      };
+
+      child.stdout.on('data', feed);
+      child.stderr.on('data', feed);
+      child.on('error', (e) => finalize(e));
+      child.on('close', (code) =>
+        finalize(code === 0 ? undefined : new Error(`exit ${code}`)),
       );
     });
   }

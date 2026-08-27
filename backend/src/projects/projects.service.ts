@@ -21,6 +21,7 @@ import { Document } from '../documents/document.entity';
 import { DEFECT_LIST_SELECT, DefectsService } from '../defects/defects.service';
 import { Defect } from '../defects/defect.entity';
 import { AppVersionsService } from '../app-versions/app-versions.service';
+import { runSummaryLine, RunDetailLike } from '../common/run-markdown';
 import { Project } from './project.entity';
 
 export interface CreateProjectInput {
@@ -171,9 +172,65 @@ export class ProjectsService {
     return this.projects.save(this.projects.create(input));
   }
 
-  /** Markdown 视图（GET /projects/:id.md）：项目描述 + 文档/检查/测试/任务清单 */
+  /**
+   * 项目 Markdown 模糊搜索（GET /projects/search.md）：
+   * LIKE 捞候选后在应用层按匹配度分级排序（精确 > 前缀 > 包含），同级创建时间倒序，取前 5。
+   */
+  async searchMarkdown(query: string): Promise<string> {
+    const q = query.trim();
+    if (!q) {
+      return [
+        '# 项目搜索',
+        '',
+        '缺少查询参数 `q`，用法：`GET /api/projects/search.md?q={项目名称关键词}`',
+        '',
+      ].join('\n');
+    }
+    const candidates = await this.projects.find({
+      select: PROJECT_LIST_SELECT,
+      where: { name: Like(`%${q}%`) },
+      order: { createdAt: 'DESC' },
+      take: 100,
+    });
+    const lower = q.toLowerCase();
+    const rank = (name: string): number => {
+      const n = name.toLowerCase();
+      if (n === lower) return 0;
+      if (n.startsWith(lower)) return 1;
+      return 2;
+    };
+    const matched = candidates
+      .map((p) => ({ p, r: rank(p.name) }))
+      .sort(
+        (a, b) =>
+          a.r - b.r || b.p.createdAt.getTime() - a.p.createdAt.getTime(),
+      )
+      .slice(0, 5)
+      .map(({ p }) => p);
+    const items = matched.map(
+      (p) =>
+        `- **${p.name}**（${p.type} / ${p.status}）— id：${p.id}，更新：${p.updatedAt.toISOString()} — [详情](/api/projects/${p.id}.md)`,
+    );
+    return [
+      `# 项目搜索：${q}`,
+      '',
+      `共 ${candidates.length} 个命中（按匹配度 + 创建时间倒序），返回前 ${items.length} 个：`,
+      '',
+      ...(items.length > 0 ? items : ['（无命中）']),
+      '',
+    ].join('\n');
+  }
+
+  /** Markdown 视图（GET /projects/:id.md）：项目描述 + 文档/检查/测试/任务清单（含运行信息） */
   async findOneMarkdown(id: number): Promise<string> {
     const project = await this.findOne(id);
+    // 并行补齐运行信息：各检查/测试/任务的最近几次运行 + 任务视图（下次执行时间）
+    const [checkRuns, testRuns, taskRuns, taskViews] = await Promise.all([
+      this.checksService.recentRunsByCheckIds(project.checks.map((c) => c.id)),
+      this.testsService.recentRunsByTestIds(project.tests.map((t) => t.id)),
+      this.checksService.recentRunsByTaskIds(project.tasks.map((t) => t.id)),
+      this.tasksService.findByProject(project.id),
+    ]);
     const meta = [`- 类型：${project.type}`, `- 状态：${project.status}`];
     if (project.priority) meta.push(`- 优先级：${project.priority}`);
     if (project.expectedReleaseAt) {
@@ -199,24 +256,62 @@ export class ProjectsService {
       if (d.remark) parts.push(`备注：${d.remark}`);
       return `- ${parts.join(' — ')}`;
     });
-    const checks = project.checks.map((c) => {
-      const parts = [`\`${c.code}\`（脚本：${c.scriptPath}）`];
-      if (c.description) parts.push(c.description);
-      parts.push(`运行：\`POST /api/checks/${c.id}/run.md\``);
-      return `- ${parts.join(' — ')}`;
-    });
-    const tests = project.tests.map((t) => {
-      const parts = [`\`${t.code}\`（脚本：${t.scriptPath}）`];
-      if (t.description) parts.push(t.description);
-      parts.push(`运行：\`POST /api/tests/${t.id}/run.md\``);
-      return `- ${parts.join(' — ')}`;
-    });
+    /** 检查/测试条目：编号、描述、运行命令、最近结果、最近记录（多行列表项，用换行连接） */
+    const runEntry = (
+      kind: 'checks' | 'tests',
+      item: {
+        id: number;
+        code: string;
+        scriptPath: string;
+        description: string | null;
+      },
+      runs: Pick<
+        RunDetailLike,
+        'id' | 'status' | 'success' | 'fail' | 'skip'
+      >[],
+    ): string => {
+      const head = `- \`${item.code}\`（脚本：${item.scriptPath}）`;
+      const lines = [item.description ? `${head}— ${item.description}` : head];
+      lines.push(`  - 运行命令：\`POST /api/${kind}/${item.id}/run.md\``);
+      if (runs.length > 0) {
+        const [latest, ...rest] = runs;
+        lines.push(
+          `  - 最近一次：#${latest.id} ${runSummaryLine(latest)} — 详情：\`GET /api/${kind}/runs/${latest.id}.md\``,
+        );
+        if (rest.length > 0) {
+          lines.push(
+            `  - 最近记录：${rest.map((r) => `#${r.id} ${runSummaryLine(r)}`).join('、')}`,
+          );
+        }
+      }
+      lines.push(`  - 运行历史：\`GET /api/${kind}/${item.id}/runs\``);
+      return lines.join('\n');
+    };
+    const checks = project.checks.map((c) =>
+      runEntry('checks', c, checkRuns.get(c.id) ?? []),
+    );
+    const tests = project.tests.map((t) =>
+      runEntry('tests', t, testRuns.get(t.id) ?? []),
+    );
     const checkName = (checkId: number) =>
       project.checks.find((c) => c.id === checkId)?.code ?? `#${checkId}`;
-    const tasks = project.tasks.map(
-      (t) =>
+    const tasks = project.tasks.map((t) => {
+      const view = taskViews.find((v) => v.id === t.id);
+      const lines = [
         `- **${t.title}**（cron：\`${t.cron}\`，检查：\`${checkName(t.checkId)}\`${t.enabled ? '' : '，已停用'}）`,
-    );
+        `  - 上次执行：${t.lastRunAt ? new Date(t.lastRunAt).toISOString() : '未执行过'}；下次执行：${view?.nextRunAt ?? '-'}`,
+      ];
+      const lastRun = (taskRuns.get(t.id) ?? [])[0];
+      if (lastRun) {
+        lines.push(
+          `  - 上次结果：#${lastRun.id} ${runSummaryLine(lastRun)} — 详情：\`GET /api/checks/runs/${lastRun.id}.md\``,
+        );
+      }
+      lines.push(
+        `  - 执行地址：\`POST /api/tasks/${t.id}/run.md\`；运行记录：\`GET /api/tasks/${t.id}/runs\``,
+      );
+      return lines.join('\n');
+    });
     const defects = project.defects.map((d) => {
       const parts = [`**${d.status}** ${d.title}`];
       if (d.platform) parts.push(`端：${d.platform}`);
@@ -256,11 +351,22 @@ export class ProjectsService {
       '',
       '## AI 操作',
       '',
-      '运行检查/测试并流式获取结果（text/markdown，运行中逐行返回脚本输出，结束时附"结果"小节）：',
+      '搜索项目：`GET /api/projects/search.md?q={名称关键词}`（匹配度 + 创建时间倒序，前 5）',
+      '',
+      '运行检查/测试/任务并流式获取结果（text/markdown，运行中逐行返回脚本输出，结束时附"结果"小节）：',
       '',
       '```bash',
       'curl -N -X POST /api/checks/{checkId}/run.md',
       'curl -N -X POST /api/tests/{testId}/run.md',
+      'curl -N -X POST /api/tasks/{taskId}/run.md',
+      '```',
+      '',
+      '运行详情（Markdown 视图）与系统设置：',
+      '',
+      '```bash',
+      'curl /api/checks/runs/{runId}.md   # 检查/任务运行的详情（Test 同理：/api/tests/runs/{runId}.md）',
+      'curl /api/settings.md              # 平台设置（环境、目录、域名、agent 状态等）',
+      'curl -N -X POST /api/settings/scripts/pull.md  # 更新脚本仓库（流式返回 git 输出与结果）',
       '```',
       '',
       '缺陷（与项目设置的飞书多维表格双向绑定）：',
