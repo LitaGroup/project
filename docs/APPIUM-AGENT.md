@@ -20,7 +20,7 @@ appium-agent ──► appium-server（单进程，常驻 4723）──► 模�
 - 一台测试机上：**1 个 appium-agent + 1 个 appium-server 进程 + 多个模拟器**。appium-server 是脚本执行的唯一入口（脚本经 appium REST API 建 session、执行指令）；APP 安装/卸载不经过 appium，由 agent 直接走 adb/simctl（见"十四"）。
 - 实际部署**两个模拟器常驻**：一个 Android、一个 iOS。
 - **运行到哪个模拟器由脚本内的配置决定**：脚本自带 capabilities（platformName / automationName / udid 等，如 `super('android', 'lite')` 基类注入），appium-server 按 platformName + driver 把 session 路由到对应平台的模拟器；agent 不感知具体设备。
-- agent 的 **APP 安装/卸载**（APP 包管理）按 `platform` 参数区分目标虚拟机：android 走 adb、ios 走 `xcrun simctl`；每平台只有一台模拟器时 platform 即可定位设备，多设备时再由 `AGENT_SIMULATORS` 的 serial 细化（见"十四"）。
+- agent 的 **APP 安装/卸载**（APP 包管理）按 `platform` 参数区分目标虚拟机：android 走 adb、ios 走 `xcrun simctl`；模拟器由 agent 经系统命令动态发现（每平台一台，platform 即可定位设备，见"十四"）。
 
 **关键复用**：APP 测试就是 Test 的一种。`tests` 表加 `appPlatform`/`appTarget` 区分本地 node 直跑（空）vs 远程 appium 跑（非空）。`TestRunPage`、SSE、`run.md`、`Terminal`、行协议 `[type] {json}`、`NotifyService` 全链路复用——agent 只需把 stdout 行通过 WebSocket 回传，project 端把它喂进现有 `executeRun` 的行解析逻辑即可。
 
@@ -143,12 +143,12 @@ appium-agent/
     ws-client.ts      # WebSocket client + 心跳 + 重连
     runner.ts         # 前置校验、下载脚本、spawn node、逐行上报
     apps.ts           # APP 包管理 + 受管模拟器状态 + 运行前置校验（preflightRunTarget）
-    config.ts         # 读 env: PROJECT_WS_URL, AGENT_TOKEN, SCRIPTS_DIR, APPS_DIR, SIMULATORS
+    config.ts         # 读 env: PROJECT_WS_URL, AGENT_TOKEN, SCRIPTS_DIR, APPS_DIR, PACKAGES
 ```
 
 关键约定：
 
-- **执行前置校验**（`apps.ts` 的 `preflightRunTarget`，runTask 最先执行）：按 task 的 `device`（platform）+ `appTarget`（产品，对应 `AGENT_SIMULATORS` 的 product）定位受管模拟器——① 未配置对应模拟器 / 模拟器未启动（adb devices / simctl booted 不可见）→ 直接回错误"模拟器未启动：…"；② 模拟器在线但 APP（simulator 声明的 packageId）未安装 → 直接回错误"APP 未安装：…，请先在 APP 页安装"。校验失败经 `done{status:error, message}` 回传 project，project 落 error 终态（原因即 message），不进入脚本执行
+- **执行前置校验**（`apps.ts` 的 `preflightRunTarget`，runTask 最先执行）：按 task 的 `device`（platform）定位在线模拟器（系统命令动态发现：android `adb devices`、ios `xcrun simctl list devices booted`，每平台一台），按 platform + `appTarget`（产品）在 `AGENT_PACKAGES` 中找应用包名——① 对应平台无在线模拟器 → 直接回错误"模拟器未启动：…"；② 模拟器在线但 APP（包名映射）未安装 → 直接回错误"APP 未安装：…，请先在 APP 页安装"。校验失败经 `done{status:error, message}` 回传 project，project 落 error 终态（原因即 message），不进入脚本执行
 - **任务不携带 APP 包**：脚本执行与 APP 包无关，agent 不下载包、不建 appium session；APP 的安装/卸载统一走"十四"的 APP 包管理（agent 包目录 + 平台远程操作）
 - **模拟器/appium 拓扑**：**1 个 appium-server 进程（常驻，agent 启动时拉起或开机自启）管全部模拟器**；实际常驻两个模拟器（一个 Android、一个 iOS）。**具体跑到哪台模拟器由脚本内 capabilities 决定**（platformName/automationName 路由到对应平台的模拟器，必要时 udid 指定具体设备），agent 本身不做设备选择
 - **appium 地址可配置**：由环境变量 `APPIUM_URL` 指定（默认 `http://localhost:4723`），开发机常用 `http://172.20.1.79:4723/`、生产机 `http://127.0.0.1:4723/`，可按实际机器自定义。agent 把 `APPIUM_URL`（及 `APP_PLATFORM`/`APP_VERSION`/`TEST_RUN_ID`）注入到被执行脚本的环境变量，脚本用 appium client 自行创建 session 执行用例
@@ -212,7 +212,8 @@ AGENT_TOKEN=...           # 与 backend 一致
 AGENT_NAME=mac-mini-1
 AGENT_SCRIPTS_DIR=...     # 本地脚本工作目录（含预装 node_modules）
 AGENT_APPS_DIR=...         # APP 包目录（人工放置安装包，平台远程安装/卸载/查询，见"十四"）
-# AGENT_ADB_SERIAL=...      # adb 目标设备序列号（多设备时指定）
+# AGENT_ADB_SERIAL=...      # adb 目标设备序列号（多台 android 设备时指定；留空自动取发现的在线设备）
+# AGENT_PACKAGES=...        # 受管应用包（JSON 数组 [{platform,product,packageId}]，平台+产品→包名映射）
 APPIUM_URL=...            # appium server 地址（开发 http://172.20.1.79:4723/，生产 http://127.0.0.1:4723/，可自定义）
 ```
 
@@ -229,9 +230,9 @@ APPIUM_URL=...            # appium server 地址（开发 http://172.20.1.79:472
 agent 机器上配置一个 APP 包目录（`AGENT_APPS_DIR`，开发环境 `/Users/monkee/workplace/hufeng/files`），人工把安装包（.apk/.ipa）放进去，project 平台即可远程管理：
 
 - **列出包**：agent 扫描目录（仅顶层），apk 经 aapt（`ANDROID_HOME/build-tools` 最新版，兜底 PATH）解析包名与包版本，并实时查询对应模拟器内已装版本（android `adb shell dumpsys package`，ios `xcrun simctl get_app_container` + PlistBuddy）
-- **多模拟器**：安装/卸载先按 **`platform` 参数区分目标虚拟机**——android 走 adb、ios 走 `xcrun simctl`（实际每平台一台模拟器，platform 即可定位设备）。同一平台有多台设备时，`AGENT_SIMULATORS`（JSON 数组）声明受管模拟器 `{name, platform, product, serial, packageId}`（如 Android Lite / Android Lita / iOS Lita），按**包名**（apk 解析）优先、**产品+平台**（文件名第一段 `{产品}.{环境}.*.apk`）兜底路由到具体设备（adb `-s serial` / simctl udid）；未匹配时落回默认设备（`AGENT_ADB_SERIAL` 或 adb 默认）
-- **环境判定**：只认平台安装记录——经平台安装时把文件名中的环境段与版本记入状态文件（`AGENT_STATE_FILE`，默认 `./install-state.json`），查询时已装版本与记录一致才展示环境，手动装/换包显示未知；卸载时清除记录
-- **project 端点**：`GET /api/agent/apps`（列表）、`GET /api/agent/apps/simulators`（各模拟器在线状态 + 已装环境/版本）、`POST /api/agent/apps/install {file}`、`POST /api/agent/apps/uninstall {packageId, platform}`、`GET /api/agent/apps/installed?packageId=&platform=`；实现为 WS 请求-响应（`AgentGateway.requestAppOp`，reqId 关联，默认超时 180s），agent 侧报错映射 502 透传错误信息
+- **模拟器发现**：不再静态声明设备——agent 经系统命令动态发现当前在线模拟器（android：`adb devices` 中 device 状态的设备；ios：`xcrun simctl list devices booted`）。实际常驻两台模拟器（一个 Android、一个 iOS），**platform 即可定位设备**：android 走 adb（`-s` 发现的 serial，多台时可用 `AGENT_ADB_SERIAL` 指定）、ios 走 `xcrun simctl <udid>`（兜底 booted）。`AGENT_PACKAGES`（JSON 数组）声明受管应用包 `{platform, product, packageId}`（如 android lite / android lita / ios lita），用于前置校验的已安装检查、已装版本查询与环境判定
+- **环境判定**：只认平台安装记录——经平台安装时把文件名中的环境段与版本按 `平台:包名` 记入状态文件（`AGENT_STATE_FILE`，默认 `./install-state.json`），查询时已装版本与记录一致才展示环境，手动装/换包显示未知；卸载时清除记录
+- **project 端点**：`GET /api/agent/apps`（列表）、`GET /api/agent/apps/simulators`（当前在线模拟器 × 受管包：机型 + 已装环境/版本）、`POST /api/agent/apps/install {file}`、`POST /api/agent/apps/uninstall {packageId, platform}`、`GET /api/agent/apps/installed?packageId=&platform=`；实现为 WS 请求-响应（`AgentGateway.requestAppOp`，reqId 关联，默认超时 180s），agent 侧报错映射 502 透传错误信息
 - **互斥**：有远程任务在 agent 上执行时 APP 操作返回 409；APP 安装/卸载期间 RemoteRunService 暂停任务派发（`hasPendingAppOps`），完成后 `kickDispatch` 补一次派发
 - **agent 侧实现**：`src/apps.ts`（`listPackages`/`listSimulators`/`installPackage`/`uninstallPackage`/`installedVersion`），main.ts 处理 `app` 指令；任务运行中（busy）拒绝 APP 操作
 - **前端**：左侧导航"APP"（/apps）：包列表（APP/环境/平台/版本/文件/操作，产品/环境/平台筛选 + 版本搜索 + 文件名倒序）+ 安装/卸载；右侧受管模拟器面板（在线状态 + 已装环境/版本）

@@ -3,15 +3,17 @@
  * 经 adb（android）/ xcrun simctl（ios 模拟器）对模拟器做安装/卸载/版本查询。
  * android 包名与包版本经 aapt（Android SDK build-tools）解析 apk 获得。
  *
- * 多模拟器：AGENT_SIMULATORS 声明受管模拟器（名称/平台/产品/序列号/包名），
- * 安装/卸载按包名（apk 解析）或产品+平台（文件名第一段）路由到对应设备；
- * 经平台安装的来源环境（文件名第二段 prod/test…）记入状态文件（AGENT_STATE_FILE），
- * 仅当已装版本与记录一致时才展示环境（手动装/换包显示未知）。
+ * 模拟器发现：不再静态声明设备，运行时经系统命令动态发现当前在线模拟器
+ * （android：adb devices；ios：xcrun simctl list devices booted），
+ * 实际部署每平台一台模拟器（一个 Android、一个 iOS），platform 即可定位设备。
+ * 受管应用包（AGENT_PACKAGES 声明 平台+产品 → 包名）用于前置校验的已安装检查、
+ * 已装版本查询与环境判定；经平台安装的来源环境（文件名第二段 prod/test…）记入
+ * 状态文件（AGENT_STATE_FILE，按 平台:包名 记录），仅当已装版本与记录一致时才展示环境。
  */
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import type { AgentConfig, SimulatorConfig } from './config.js';
+import type { AgentConfig, AppPackageConfig } from './config.js';
 
 /** 包目录中的一个安装包 */
 export interface AppPackageInfo {
@@ -29,24 +31,33 @@ export interface AppPackageInfo {
   version: string | null;
   /** 对应模拟器内当前已装版本（未安装或查询失败为 null） */
   installedVersion: string | null;
-  /** 路由到的模拟器名（未匹配为 null，安装时落回默认设备） */
+  /** 路由到的模拟器名（对应平台无在线设备为 null，安装时落回默认设备） */
   simulator: string | null;
 }
 
-/** 受管模拟器的实时状态（右侧模拟器面板） */
+/** 受管模拟器的实时状态（右侧模拟器面板；一台设备按受管包逐个展示） */
 export interface SimulatorStatus {
   name: string;
   platform: string;
   product: string;
   packageId: string;
-  /** 设备在线（adb devices / simctl booted 可见） */
+  /** 设备在线（动态发现即在线；无在线设备不产生条目） */
   online: boolean;
-  /** 机型（android ro.product.model / ios 设备名；离线或查询失败为 null） */
+  /** 机型（android ro.product.model / ios 设备名；查询失败为 null） */
   model: string | null;
-  /** 模拟器内当前已装版本（未安装/离线为 null） */
+  /** 模拟器内当前已装版本（未安装为 null） */
   installedVersion: string | null;
   /** 已装包的环境（仅平台安装记录与已装版本一致时给出，否则 null） */
   env: string | null;
+}
+
+/** 动态发现的一台在线模拟器 */
+interface DeviceInfo {
+  platform: 'android' | 'ios';
+  /** android adb serial / ios 模拟器 udid */
+  serial: string;
+  /** 展示名（android 为 serial，机型另查；ios 为模拟器名） */
+  name: string;
 }
 
 const ADB_TIMEOUT_MS = 15_000;
@@ -97,6 +108,20 @@ function platformOf(file: string): 'android' | 'ios' | null {
   return null;
 }
 
+function platformLabel(platform: string): string {
+  if (platform === 'android') return 'Android';
+  if (platform === 'ios') return 'iOS';
+  return platform;
+}
+
+/** 面板展示名：Android Lite / iOS Lita 等 */
+function packageLabel(pkg: AppPackageConfig): string {
+  const product = pkg.product
+    ? pkg.product[0].toUpperCase() + pkg.product.slice(1)
+    : '';
+  return `${platformLabel(pkg.platform)}${product ? ` ${product}` : ''}`;
+}
+
 /**
  * 从包文件名解析产品与环境（约定 {产品}.{环境}.{...}.apk，如 lita.prod.2_285_1.apk）。
  * 无环境段时 env 为 null。
@@ -111,72 +136,144 @@ export function parsePackageFileName(file: string): {
   return { product: segs[0], env: segs[1] };
 }
 
-/** 路由：优先按包名匹配模拟器，其次按产品+平台；都不中返回 null（落默认设备） */
-function findSimulator(
+// ---------- 模拟器动态发现 ----------
+
+/**
+ * 经系统命令发现当前在线模拟器：
+ * android 取 `adb devices` 中 device 状态的设备；ios 取 `xcrun simctl list devices booted`。
+ * 查询失败的平台返回空数组（不抛错）。
+ */
+export async function discoverDevices(config: AgentConfig): Promise<DeviceInfo[]> {
+  const [android, ios] = await Promise.all([
+    discoverAndroidDevices(config).catch(() => [] as DeviceInfo[]),
+    discoverIosDevices().catch(() => [] as DeviceInfo[]),
+  ]);
+  return [...android, ...ios];
+}
+
+/** android 在线设备（adb devices 中 device 状态；配置 AGENT_ADB_SERIAL 时只认该设备） */
+async function discoverAndroidDevices(config: AgentConfig): Promise<DeviceInfo[]> {
+  const out = await run('adb', ['devices'], ADB_TIMEOUT_MS);
+  return out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.endsWith('\tdevice') || l.endsWith(' device'))
+    .map((l) => l.split(/\s+/)[0])
+    .filter((serial) => serial && (!config.adbSerial || serial === config.adbSerial))
+    .map((serial) => ({ platform: 'android' as const, serial, name: serial }));
+}
+
+/** ios 在线模拟器（simctl booted 列表；JSON 输出按运行时分组） */
+async function discoverIosDevices(): Promise<DeviceInfo[]> {
+  const out = await run(
+    'xcrun',
+    ['simctl', 'list', 'devices', 'booted', '-j'],
+    ADB_TIMEOUT_MS,
+  );
+  const parsed = JSON.parse(out) as {
+    devices?: Record<string, { udid?: string; name?: string; state?: string }[]>;
+  };
+  const result: DeviceInfo[] = [];
+  for (const list of Object.values(parsed.devices ?? {})) {
+    for (const d of list) {
+      if (d.udid && d.state === 'Booted') {
+        result.push({
+          platform: 'ios',
+          serial: d.udid,
+          name: d.name ?? d.udid,
+        });
+      }
+    }
+  }
+  return result;
+}
+
+/** 定位平台对应的在线设备（每平台一台；无则 null） */
+async function resolveDevice(
   config: AgentConfig,
-  hint: { packageId?: string | null; product?: string; platform?: string },
-): SimulatorConfig | null {
-  if (hint.packageId) {
-    const byPkg = config.simulators.find((s) => s.packageId === hint.packageId);
-    if (byPkg) return byPkg;
-  }
-  if (hint.product && hint.platform) {
-    return (
-      config.simulators.find(
-        (s) => s.product === hint.product && s.platform === hint.platform,
-      ) ?? null
+  platform: string,
+): Promise<DeviceInfo | null> {
+  const devices = await discoverDevices(config);
+  return devices.find((d) => d.platform === platform) ?? null;
+}
+
+/** 查询模拟器机型：android 读 ro.product.model；ios 设备名即机型。查询失败返回 null */
+async function deviceModel(
+  config: AgentConfig,
+  device: DeviceInfo,
+): Promise<string | null> {
+  if (device.platform === 'ios') return device.name;
+  try {
+    const out = await run(
+      'adb',
+      adbArgs(config, ['shell', 'getprop', 'ro.product.model'], device.serial),
+      ADB_TIMEOUT_MS,
     );
+    return out.trim() || null;
+  } catch {
+    return null;
   }
-  return null;
+}
+
+// ---------- 受管应用包 ----------
+
+/** 按 平台+产品（可选） 找受管包声明；产品为空时取该平台第一个 */
+function findPackage(
+  config: AgentConfig,
+  platform: string,
+  product?: string | null,
+): AppPackageConfig | null {
+  if (product) {
+    const hit = config.packages.find(
+      (p) => p.platform === platform && p.product === product,
+    );
+    if (hit) return hit;
+  }
+  return config.packages.find((p) => p.platform === platform) ?? null;
 }
 
 // ---------- 运行前置校验 ----------
 
 /**
- * 任务执行前置校验：按 platform + appTarget（产品）定位受管模拟器，
- * 模拟器未启动 / APP 未安装时抛错（message 即失败原因，经 done 回传 project）。
- * 返回命中的模拟器配置（可供调用方继续使用 serial/packageId）。
+ * 任务执行前置校验：按 platform 定位在线模拟器，按 platform + appTarget（产品）
+ * 定位受管包——模拟器未启动 / APP 未安装时抛错（message 即失败原因，经 done 回传 project）。
  */
 export async function preflightRunTarget(
   config: AgentConfig,
   platform: string,
   appTarget?: string | null,
-): Promise<SimulatorConfig> {
-  const sim =
-    (appTarget
-      ? config.simulators.find(
-          (s) => s.platform === platform && s.product === appTarget,
-        )
-      : null) ??
-    config.simulators.find((s) => s.platform === platform) ??
-    null;
-  if (!sim) {
+): Promise<void> {
+  const device = await resolveDevice(config, platform);
+  if (!device) {
     throw new Error(
-      `未配置 ${platform}${appTarget ? `/${appTarget}` : ''} 的受管模拟器（AGENT_SIMULATORS）`,
+      `模拟器未启动：未发现在线的 ${platformLabel(platform)} 模拟器（adb devices / simctl booted 不可见），请先启动模拟器`,
     );
   }
-  if (!(await deviceOnline(sim))) {
-    throw new Error(
-      `模拟器未启动：${sim.name}（${sim.platform}，${sim.serial}），请先启动模拟器`,
-    );
+  const pkg = findPackage(config, platform, appTarget);
+  if (!pkg) {
+    if (appTarget) {
+      throw new Error(
+        `未配置 ${platform}/${appTarget} 的应用包名（AGENT_PACKAGES）`,
+      );
+    }
+    return; // 无包名映射且未指定产品：跳过已安装检查
   }
   const installed = await installedVersion(
     config,
-    sim.packageId,
-    sim.platform,
-    sim.serial,
+    pkg.packageId,
+    platform,
+    device.serial,
   ).catch(() => null);
   if (!installed) {
     throw new Error(
-      `APP 未安装：${sim.packageId}（${sim.name}），请先在 APP 页安装`,
+      `APP 未安装：${pkg.packageId}（${device.name}），请先在 APP 页安装`,
     );
   }
-  return sim;
 }
 
 // ---------- 平台安装记录（环境判定依据） ----------
 
-/** stateFile 内容：{ "<serial>:<packageId>": { env, version, file, at } } */
+/** stateFile 内容：{ "<platform>:<packageId>": { env, version, file, at } } */
 type InstallState = Record<
   string,
   { env: string | null; version: string | null; file: string; at: string }
@@ -254,47 +351,7 @@ async function parseApk(
   }
 }
 
-// ---------- 设备与已装版本查询 ----------
-
-/** 设备是否在线（android：adb devices 可见且为 device 状态；ios：simctl booted 列表含该 udid） */
-async function deviceOnline(sim: SimulatorConfig): Promise<boolean> {
-  try {
-    if (sim.platform === 'android') {
-      const out = await run('adb', ['devices'], ADB_TIMEOUT_MS);
-      return out
-        .split('\n')
-        .some((l) => l.startsWith(sim.serial) && l.includes('device'));
-    }
-    const out = await run(
-      'xcrun',
-      ['simctl', 'list', 'devices', 'booted'],
-      ADB_TIMEOUT_MS,
-    );
-    return out.includes(sim.serial);
-  } catch {
-    return false;
-  }
-}
-
-/** 查询模拟器机型：android 读 ro.product.model；ios 取 simctl 设备名（即机型，如 iPhone 16 Pro）。查询失败返回 null */
-async function deviceModel(sim: SimulatorConfig): Promise<string | null> {
-  try {
-    if (sim.platform === 'android') {
-      const out = await run(
-        'adb',
-        ['-s', sim.serial, 'shell', 'getprop', 'ro.product.model'],
-        ADB_TIMEOUT_MS,
-      );
-      return out.trim() || null;
-    }
-    // ios：simctl 列表中按 udid 找到设备行，机型即设备名（如 "iPhone 16 Pro (UDID) (Booted)"）
-    const out = await run('xcrun', ['simctl', 'list', 'devices'], ADB_TIMEOUT_MS);
-    const line = out.split('\n').find((l) => l.includes(sim.serial));
-    return line?.match(/^\s*(.+?)\s+\(/)?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
+// ---------- 已装版本查询 ----------
 
 /** 查询模拟器内已装 app 的版本；未安装返回 null，查询失败抛错 */
 export async function installedVersion(
@@ -340,6 +397,7 @@ export async function listPackages(
   } catch {
     return []; // 目录不存在视为空
   }
+  const devices = await discoverDevices(config);
   const result: AppPackageInfo[] = [];
   for (const e of entries) {
     if (!e.isFile()) continue;
@@ -347,20 +405,19 @@ export async function listPackages(
     if (!platform) continue;
     const full = path.join(config.appsDir, e.name);
     const stat = await fs.stat(full);
-    const { product } = parsePackageFileName(e.name);
     let packageId: string | null = null;
     let version: string | null = null;
     if (platform === 'android') {
       ({ packageId, version } = await parseApk(full));
     }
-    const sim = findSimulator(config, { packageId, product, platform });
+    const device = devices.find((d) => d.platform === platform) ?? null;
     let installed: string | null = null;
     if (packageId) {
       installed = await installedVersion(
         config,
         packageId,
         platform,
-        sim?.serial,
+        device?.serial,
       ).catch(() => null);
     }
     result.push({
@@ -371,7 +428,7 @@ export async function listPackages(
       packageId,
       version,
       installedVersion: installed,
-      simulator: sim?.name ?? null,
+      simulator: device ? platformLabel(platform) : null,
     });
   }
   result.sort((a, b) => a.file.localeCompare(b.file));
@@ -380,50 +437,60 @@ export async function listPackages(
 
 // ---------- 模拟器状态 ----------
 
-/** 受管模拟器实时状态：在线情况 + 已装版本 + 环境（仅平台安装记录一致时） */
+/**
+ * 受管模拟器实时状态：动态发现当前在线模拟器（每平台一台），
+ * 每台按 AGENT_PACKAGES 的受管包逐个给出已装版本 + 环境（仅平台安装记录一致时）。
+ */
 export async function listSimulators(
   config: AgentConfig,
 ): Promise<SimulatorStatus[]> {
   const state = await loadState(config);
-  return Promise.all(
-    config.simulators.map(async (sim) => {
-      const online = await deviceOnline(sim);
-      let model: string | null = null;
-      let installed: string | null = null;
-      if (online) {
-        [model, installed] = await Promise.all([
-          deviceModel(sim),
-          installedVersion(
+  const devices = await discoverDevices(config);
+  const result: SimulatorStatus[] = [];
+  for (const device of devices) {
+    const model = await deviceModel(config, device);
+    const packages = config.packages.filter(
+      (p) => p.platform === device.platform,
+    );
+    // 该平台未配置受管包时仍展示设备本身
+    const rows: (AppPackageConfig | null)[] = packages.length
+      ? packages
+      : [null];
+    for (const pkg of rows) {
+      const installed = pkg
+        ? await installedVersion(
             config,
-            sim.packageId,
-            sim.platform,
-            sim.serial,
-          ).catch(() => null),
-        ]);
-      }
-      const record = state[`${sim.serial}:${sim.packageId}`];
+            pkg.packageId,
+            device.platform,
+            device.serial,
+          ).catch(() => null)
+        : null;
+      const record = pkg
+        ? state[`${device.platform}:${pkg.packageId}`]
+        : undefined;
       // 已装版本与平台安装记录一致时才认为环境可信（手动装/换包则未知）
       const env =
         installed && record && record.version === installed
           ? record.env
           : null;
-      return {
-        name: sim.name,
-        platform: sim.platform,
-        product: sim.product,
-        packageId: sim.packageId,
-        online,
+      result.push({
+        name: pkg ? packageLabel(pkg) : platformLabel(device.platform),
+        platform: device.platform,
+        product: pkg?.product ?? '',
+        packageId: pkg?.packageId ?? '',
+        online: true,
         model,
         installedVersion: installed,
         env,
-      };
-    }),
-  );
+      });
+    }
+  }
+  return result;
 }
 
 // ---------- 安装 / 卸载 ----------
 
-/** 安装包目录中的指定包到对应模拟器（按包名/产品路由），并记录来源环境 */
+/** 安装包目录中的指定包到对应平台的在线模拟器，并记录来源环境 */
 export async function installPackage(
   config: AgentConfig,
   file: string,
@@ -432,13 +499,13 @@ export async function installPackage(
   if (!platform) throw new Error(`无法识别的安装包类型: ${file}`);
   const full = resolveInDir(config.appsDir, file);
   await fs.access(full); // 不存在则抛错
-  const { product, env } = parsePackageFileName(file);
+  const { env } = parsePackageFileName(file);
   const { packageId, version } =
     platform === 'android'
       ? await parseApk(full)
       : { packageId: null, version: null };
-  const sim = findSimulator(config, { packageId, product, platform });
-  const serial = sim?.serial ?? null;
+  const device = await resolveDevice(config, platform);
+  const serial = device?.serial ?? null;
   if (platform === 'android') {
     const out = await run(
       'adb',
@@ -461,9 +528,9 @@ export async function installPackage(
       )
     : null;
   // 记录平台安装的来源环境（卸载/重装会覆盖）
-  if (serial && packageId) {
+  if (packageId) {
     const state = await loadState(config);
-    state[`${serial}:${packageId}`] = {
+    state[`${platform}:${packageId}`] = {
       env,
       version: installed ?? version,
       file,
@@ -480,18 +547,18 @@ export async function installPackage(
     packageId,
     version,
     installedVersion: installed,
-    simulator: sim?.name ?? null,
+    simulator: device ? platformLabel(platform) : null,
   };
 }
 
-/** 从对应模拟器卸载指定包名的 app，并清除平台安装记录 */
+/** 从对应平台的在线模拟器卸载指定包名的 app，并清除平台安装记录 */
 export async function uninstallPackage(
   config: AgentConfig,
   packageId: string,
   platform: string,
 ): Promise<void> {
-  const sim = findSimulator(config, { packageId, platform });
-  const serial = sim?.serial ?? null;
+  const device = await resolveDevice(config, platform);
+  const serial = device?.serial ?? null;
   if (platform === 'android') {
     const out = await run(
       'adb',
@@ -508,9 +575,7 @@ export async function uninstallPackage(
       INSTALL_TIMEOUT_MS,
     );
   }
-  if (serial) {
-    const state = await loadState(config);
-    delete state[`${serial}:${packageId}`];
-    await saveState(config, state).catch(() => undefined);
-  }
+  const state = await loadState(config);
+  delete state[`${platform}:${packageId}`];
+  await saveState(config, state).catch(() => undefined);
 }

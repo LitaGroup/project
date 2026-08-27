@@ -32,31 +32,25 @@ function optList(name: string): string[] {
     .filter(Boolean);
 }
 
-/** 受管模拟器声明（AGENT_SIMULATORS，JSON 数组）：安装/卸载按包名路由到对应设备 */
-export interface SimulatorConfig {
-  /** 展示名（如 Android Lite） */
-  name: string;
+/** 受管应用包声明（AGENT_PACKAGES，JSON 数组）：按平台+产品映射应用包名，前置校验/版本查询/环境判定用 */
+export interface AppPackageConfig {
   /** 平台：android/ios */
   platform: string;
-  /** 产品（包文件名第一段，路由兜底用）：lita/lite */
+  /** 产品（包文件名第一段）：lita/lite */
   product: string;
-  /** 设备序列号（android adb serial / ios 模拟器 udid） */
-  serial: string;
-  /** 应用包名（路由与已装版本查询用） */
+  /** 应用包名（android package / ios bundleId） */
   packageId: string;
 }
 
-/** 解析 AGENT_SIMULATORS（JSON 数组），非法时报错并视为未配置 */
-function optSimulators(): SimulatorConfig[] {
-  const raw = process.env.AGENT_SIMULATORS;
+/** 解析 AGENT_PACKAGES（JSON 数组），非法时报错并视为未配置 */
+function optPackages(): AppPackageConfig[] {
+  const raw = process.env.AGENT_PACKAGES;
   if (!raw) return [];
   try {
-    const list = JSON.parse(raw) as SimulatorConfig[];
-    return list.filter(
-      (s) => s.name && s.platform && s.serial && s.packageId,
-    );
+    const list = JSON.parse(raw) as AppPackageConfig[];
+    return list.filter((p) => p.platform && p.packageId);
   } catch (e) {
-    console.error(`AGENT_SIMULATORS 解析失败（须为 JSON 数组）: ${(e as Error).message}`);
+    console.error(`AGENT_PACKAGES 解析失败（须为 JSON 数组）: ${(e as Error).message}`);
     return [];
   }
 }
@@ -74,10 +68,10 @@ export interface AgentConfig {
   scriptsDir: string;
   /** APP 包目录：人工放置的安装包（.apk/.ipa），供平台远程安装/卸载/查询 */
   appsDir: string;
-  /** adb 目标设备序列号（多设备时用 -s 指定；为空用 adb 默认设备）。配置了 simulators 后仅作兜底 */
+  /** adb 目标设备序列号（多设备时用 -s 指定；为空自动取 adb devices 发现的在线设备） */
   adbSerial: string | null;
-  /** 受管模拟器列表（AGENT_SIMULATORS） */
-  simulators: SimulatorConfig[];
+  /** 受管应用包列表（AGENT_PACKAGES）：平台+产品 → 包名映射 */
+  packages: AppPackageConfig[];
   /** 平台安装记录状态文件（记录每台模拟器经平台安装的环境/版本） */
   stateFile: string;
   /** 能力上报 */
@@ -105,7 +99,7 @@ export function loadConfig(): AgentConfig {
     scriptsDir: process.env.AGENT_SCRIPTS_DIR ?? './scripts',
     appsDir: process.env.AGENT_APPS_DIR ?? './apps',
     adbSerial: process.env.AGENT_ADB_SERIAL || null,
-    simulators: optSimulators(),
+    packages: optPackages(),
     stateFile: process.env.AGENT_STATE_FILE ?? './install-state.json',
     capabilities: {
       platform: optList('AGENT_CAPABILITIES_PLATFORM'),

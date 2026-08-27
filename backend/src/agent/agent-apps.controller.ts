@@ -106,7 +106,7 @@ export class AgentAppsController {
     return this.call<AgentAppPackage[]>({ action: 'list' }, 30_000);
   }
 
-  /** 受管模拟器实时状态：在线情况 + 已装环境/版本（AGENT_SIMULATORS 声明） */
+  /** 受管模拟器实时状态：agent 系统命令动态发现的在线模拟器 × AGENT_PACKAGES 受管包（机型 + 已装环境/版本） */
   @Get('simulators')
   simulators(): Promise<AgentSimulator[]> {
     if (!this.agentGateway.isOnline()) {
