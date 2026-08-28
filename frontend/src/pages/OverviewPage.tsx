@@ -62,51 +62,44 @@ const usageCards: InfoCard[] = [
   },
 ]
 
-const ruleCards: InfoCard[] = [
+const featureCards: InfoCard[] = [
   {
-    title: '检查 / 测试',
+    title: '文档中心',
     description:
-      '本质是脚本的登记信息（编号 + 描述 + 脚本路径）。检查用 .check.ts，测试用 .test.ts，结构与接口一一对应。',
+      '项目的知识库：同步飞书文档为统一 Markdown，也可在平台内直接编写，供人与 AI 共同阅读。',
     points: [
-      '自动导入：POST /api/{checks,tests}/import 扫描项目脚本目录，按 scriptPath 过滤已登记',
-      '运行：node 直跑脚本（以脚本根目录为 cwd，超时 120s SIGTERM），解析 stdout 行协议 [{type}] {json}',
-      '运行状态：running / success / fail / error',
-      '删除检查/项目时应用层级联删运行记录',
+      '飞书文档同步：支持 docx / sheets / bitable / wiki，单向导入（飞书 → 平台），统一转 Markdown',
+      'Markdown 文档：来源「手写」，平台内直接编写与维护',
+      '类型：需求 / 功能 / 测试 / 技术 / 接口 / 配置；备注 remark 供 AI 阅读，任何来源都可编辑',
     ],
   },
   {
-    title: '任务（定时调度）',
+    title: '脚本调度',
     description:
-      '按 crontab 表达式定时运行一个已登记的检查脚本，结果落 check_runs（taskId 标记触发来源）。',
+      '脚本即检查与测试：登记脚本路径后即可运行，实时流式获取执行过程与结果。',
     points: [
-      'cron 5 段（分时日月周）或 6 段（前置秒），不支持年；用 cron 包校验，非法 400',
-      'checkId 须为本项目已登记检查；enabled 停用不参与调度',
-      '手动触发 POST /api/tasks/:id/run 不受 enabled 限制',
-      '运行开始 / 终态向项目飞书群推送通知卡片（webhook 取项目 feishuWebhook）',
-      '删除任务保留已产生的运行记录',
+      '检查用 .check.ts、测试用 .test.ts，覆盖 H5、后端、APP 三端',
+      '脚本仓库：https://github.com/litaGroup/scripts',
+      '支持自动导入脚本目录、实时进度（SSE）、运行历史与原始输出回放',
     ],
   },
   {
-    title: '缺陷（与飞书双向绑定）',
-    description:
-      '与项目设置的飞书多维表格双向绑定。这是飞书同步中唯一的回写场景，其余模块均为单向导入。',
+    title: '定时任务',
+    description: '按 crontab 定时执行检查脚本，运行结果自动推送到项目飞书群。',
     points: [
-      '飞书 → 平台：POST /api/defects/sync 全量覆盖（按 feishuRecordId upsert，本地 testScript 保留）',
-      '平台 → 飞书：PATCH /api/defects/:id 状态 / 端变更异步回写（失败仅记日志不阻断）',
-      '状态：open / reopen / fixed / closed / invalid（飞书 new→open、close→closed，乱填→open）',
-      '端：前端 / 后端 / APP端 / 未知（其余归「未知」，回写只写真实端）',
-      'fixed 前置：有 testScript 须已登记且最近一次运行 success；POST /api/defects/:id/verify 验证',
+      'crontab 表达式调度（5 段或 6 段），支持启停与手动触发',
+      '运行开始 / 终态向项目飞书群推送通知卡片（成功 / 失败 / 异常 / 超时）',
+      '运行统计（success / fail / total）一目了然',
     ],
   },
   {
-    title: '文档 / 飞书同步',
+    title: '缺陷流程',
     description:
-      '文档单向导入（飞书 → 平台），统一转 Markdown。飞书 token 统一从 Lita 平台 API 获取，每 30 分钟刷新。',
+      '与项目设置的飞书多维表格双向绑定，缺陷从同步、修复到验证闭环管理。',
     points: [
-      '类型：需求 / 功能 / 测试 / 技术 / 接口 / 配置；来源：飞书 / -',
-      '飞书导入的文档不允许本地改正文（403），只能「更新同步」覆盖；备注 remark 任何来源都可编辑',
-      '支持 docx / sheets / bitable / wiki；判重 key 含子标识（同一表格不同 sheet 互不覆盖）',
-      '项目同步：POST /api/projects/sync-feishu 增量同步（首次取近 15 天，后续取近 7 天）',
+      '飞书 → 平台：一键全量同步（含描述 / 端 / 人员 / 截图）',
+      '平台 → 飞书：状态 / 端变更异步回写飞书表格',
+      '关联测试脚本，fixed 前须最近一次运行 success，支持一键「运行验证」',
     ],
   },
 ]
@@ -223,9 +216,9 @@ export function OverviewPage() {
       </section>
 
       <section>
-        <h2 className="mb-4 text-xl font-semibold">核心逻辑与规则</h2>
+        <h2 className="mb-4 text-xl font-semibold">核心功能</h2>
         <div className="grid gap-4 md:grid-cols-2">
-          {ruleCards.map((card) => (
+          {featureCards.map((card) => (
             <InfoCardItem key={card.title} card={card} />
           ))}
         </div>
