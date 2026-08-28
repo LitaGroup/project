@@ -367,6 +367,12 @@ export const api = {
   updateProject: (
     id: number,
     input: {
+      type?: ProjectType
+      status?: ProjectStatus
+      priority?: string
+      iterationCycle?: string
+      /** YYYY-MM-DD，空串清除 */
+      expectedReleaseAt?: string
       scriptsPath?: string
       feishuWebhook?: string
       defectBitableUrl?: string

@@ -379,16 +379,50 @@ export class ProjectsService {
     ].join('\n');
   }
 
-  /** 更新项目可编辑字段：脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、缺陷多维表格地址（defectBitableUrl），空串清除 */
+  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、缺陷多维表格地址（defectBitableUrl），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布）会在下次同步时被飞书侧覆盖 */
   async update(
     id: number,
     input: {
+      type?: ProjectType;
+      status?: ProjectStatus;
+      priority?: string;
+      iterationCycle?: string;
+      expectedReleaseAt?: string;
       scriptsPath?: string;
       feishuWebhook?: string;
       defectBitableUrl?: string;
     },
   ): Promise<Project> {
     const project = await this.findOne(id);
+    if (input.type !== undefined) {
+      if (!Object.values(ProjectType).includes(input.type)) {
+        throw new BadRequestException(`非法的项目类型：${input.type}`);
+      }
+      project.type = input.type;
+    }
+    if (input.status !== undefined) {
+      if (!Object.values(ProjectStatus).includes(input.status)) {
+        throw new BadRequestException(`非法的项目状态：${input.status}`);
+      }
+      project.status = input.status;
+    }
+    if (input.priority !== undefined) {
+      project.priority = this.normalizeShortText(input.priority, 20, '优先级');
+    }
+    if (input.iterationCycle !== undefined) {
+      project.iterationCycle = this.normalizeShortText(
+        input.iterationCycle,
+        50,
+        '迭代周期',
+      );
+    }
+    if (input.expectedReleaseAt !== undefined) {
+      const v = input.expectedReleaseAt.trim();
+      if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+        throw new BadRequestException('预期发布时间须为 YYYY-MM-DD 格式');
+      }
+      project.expectedReleaseAt = v || null;
+    }
     if (input.scriptsPath !== undefined) {
       project.scriptsPath = this.normalizeScriptsPath(input.scriptsPath);
     }
@@ -401,6 +435,20 @@ export class ProjectsService {
       );
     }
     return this.projects.save(project);
+  }
+
+  /** 短文本字段（优先级/迭代周期）：trim，空串清除，超长拒绝 */
+  private normalizeShortText(
+    value: string,
+    max: number,
+    label: string,
+  ): string | null {
+    const normalized = value.trim();
+    if (!normalized) return null;
+    if (normalized.length > max) {
+      throw new BadRequestException(`${label}长度不能超过 ${max} 个字符`);
+    }
+    return normalized;
   }
 
   /** 缺陷多维表格地址：飞书 wiki/base 链接且须带 table 参数；空串清除 */

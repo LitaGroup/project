@@ -30,6 +30,16 @@ class CreateProjectDto {
 }
 
 class UpdateProjectDto {
+  /** 项目类型 */
+  type?: ProjectType;
+  /** 项目状态 */
+  status?: ProjectStatus;
+  /** 优先级（如 S0/P0），空串清除 */
+  priority?: string;
+  /** 迭代周期（如 "w281：08/19 - 08/25"），空串清除 */
+  iterationCycle?: string;
+  /** 预期发布时间（YYYY-MM-DD），空串清除 */
+  expectedReleaseAt?: string;
   /** 脚本目录：相对 CHECK_SCRIPTS_DIR 的路径，空串清除 */
   scriptsPath?: string;
   /** 飞书通知群：群机器人 webhook 的 secret（粘贴完整地址自动截取），空串清除 */

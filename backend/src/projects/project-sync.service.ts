@@ -92,6 +92,22 @@ function extractDate(value: unknown): string | null {
   return parts;
 }
 
+/**
+ * 飞书"迭代"（w 字段）→ 平台迭代周期，统一为 `w{n}: {MM/DD}-{MM/DD}`：
+ * - 大小写 W、全角/半角冒号、冒号后缺空格、横杠两侧空格等变体都归一化（如 `W158:01/16-01/22`、`w186：08/20-08/26`、`w113: 02/28 - 03/06`）；
+ * - 日期区间后的后缀直接过滤（如 `w142: 09/26-09/28 & 10/06-10/09`、`w155:01/03-01/08 (少一天)`）；
+ * - 需求池/待排期/Archive/纯 w 编号等无法识别的一律归 '-'。
+ */
+export function toIterationCycle(value: unknown): string {
+  if (typeof value !== 'string') return '-';
+  const m = value.match(
+    /[wW]\s*(\d+)\s*[:：]?\s*(\d{1,2})\/(\d{1,2})\s*[-–—~]\s*(\d{1,2})\/(\d{1,2})/,
+  );
+  if (!m) return '-';
+  const pad = (s: string) => s.padStart(2, '0');
+  return `w${m[1]}: ${pad(m[2])}/${pad(m[3])}-${pad(m[4])}/${pad(m[5])}`;
+}
+
 @Injectable()
 export class ProjectSyncService {
   constructor(
@@ -159,7 +175,7 @@ export class ProjectSyncService {
     project.status = toProjectStatus(f['需求状态']);
     project.priority = typeof f['优先级'] === 'string' ? f['优先级'] : null;
     project.expectedReleaseAt = extractDate(f['理想上线时间']);
-    project.iterationCycle = typeof f['w'] === 'string' ? f['w'] : null;
+    project.iterationCycle = toIterationCycle(f['w']);
     const resources = {
       frontend: extractPeople(f['前端人员']),
       backend: extractPeople(f['后端人员']),

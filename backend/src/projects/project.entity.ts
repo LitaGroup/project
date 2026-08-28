@@ -37,7 +37,7 @@ export class Project {
   @Column({ type: 'varchar', length: 20, nullable: true })
   priority: string | null;
 
-  /** 迭代周期（飞书字段 w，如 "w281：08/19 - 08/25"） */
+  /** 迭代周期（飞书字段 w，同步时归一化为 "w281: 08/19-08/25"，无法识别的一律为 "-"） */
   @Column({ type: 'varchar', length: 50, nullable: true })
   iterationCycle: string | null;
 

@@ -252,7 +252,11 @@ export function ProjectsPage() {
           {items.map((p) => (
             <TableRow key={p.id}>
               <TableCell>{p.id}</TableCell>
-              <TableCell className="max-w-md truncate" title={p.name}>{p.name}</TableCell>
+              <TableCell className="max-w-md truncate" title={p.name}>
+                <Link to={`/projects/${p.id}`} className="underline">
+                  {p.name}
+                </Link>
+              </TableCell>
               <TableCell className="text-center">
                 <TypeBadge type={p.type} />
               </TableCell>

@@ -59,14 +59,18 @@ import {
   APP_PLATFORMS,
   APP_TARGETS,
   DOCUMENT_TYPES,
+  PROJECT_STATUSES,
+  PROJECT_TYPES,
   type AppVersion,
   type Defect,
   type DocumentType,
   type Project,
   type ProjectCheck,
   type ProjectDocument,
+  type ProjectStatus,
   type ProjectTask,
   type ProjectTest,
+  type ProjectType,
 } from '../lib/api'
 import { DefectStatusBadge, StatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
@@ -76,6 +80,8 @@ export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [project, setProject] = useState<Project | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 右侧详情卡的编辑模式：默认仅展示，点「编辑」后才出现编辑控件
+  const [editing, setEditing] = useState(false)
 
   const reload = useCallback(() => {
     if (!id) return
@@ -162,49 +168,99 @@ export function ProjectDetailPage() {
         </section>
       </div>
 
-      {/* 右侧：项目详情 */}
+      {/* 右侧：项目详情（默认仅展示，点「编辑」进入编辑模式） */}
       <aside className="w-80 shrink-0">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-2">
               <span className="truncate">{project.name}</span>
-              {/* Markdown 视图：后端 .md URL 规范（GET /api/projects/:id.md） */}
-              <a
-                href={`/api/projects/${project.id}.md`}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 text-sm font-normal underline"
-                title="Markdown 视图"
-              >
-                MD
-              </a>
+              <span className="flex shrink-0 items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setEditing((v) => !v)}
+                >
+                  {editing ? '完成' : '编辑'}
+                </Button>
+                {/* Markdown 视图：后端 .md URL 规范（GET /api/projects/:id.md） */}
+                <a
+                  href={`/api/projects/${project.id}.md`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm font-normal underline"
+                  title="Markdown 视图"
+                >
+                  MD
+                </a>
+              </span>
             </CardTitle>
             <CardDescription>{project.description ?? '暂无描述'}</CardDescription>
           </CardHeader>
           <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between">
               <dt>类型</dt>
               <dd>
-                <Badge variant="secondary">{project.type}</Badge>
+                {editing ? (
+                  <ProjectTypeSelect project={project} onChanged={reload} />
+                ) : (
+                  <Badge variant="secondary">{project.type}</Badge>
+                )}
               </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between">
               <dt>状态</dt>
               <dd>
-                <StatusBadge status={project.status} />
+                {editing ? (
+                  <ProjectStatusSelect project={project} onChanged={reload} />
+                ) : (
+                  <StatusBadge status={project.status} />
+                )}
               </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between">
               <dt>预期发布</dt>
-              <dd>{project.expectedReleaseAt ?? '未定'}</dd>
+              <dd>
+                {editing ? (
+                  <ExpectedReleaseInput project={project} onChanged={reload} />
+                ) : (
+                  (project.expectedReleaseAt ?? '未定')
+                )}
+              </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between">
               <dt>迭代</dt>
-              <dd>{project.iterationCycle ?? '—'}</dd>
+              <dd>
+                {editing ? (
+                  <ProjectDictSelect
+                    project={project}
+                    field="iterationCycle"
+                    suggestionsKey="iterations"
+                    onChanged={reload}
+                  />
+                ) : (
+                  <span
+                    className="block max-w-40 truncate"
+                    title={project.iterationCycle ?? ''}
+                  >
+                    {project.iterationCycle ?? '—'}
+                  </span>
+                )}
+              </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between">
               <dt>优先级</dt>
-              <dd>{project.priority ?? '—'}</dd>
+              <dd>
+                {editing ? (
+                  <ProjectDictSelect
+                    project={project}
+                    field="priority"
+                    suggestionsKey="priorities"
+                    onChanged={reload}
+                  />
+                ) : (
+                  (project.priority ?? '—')
+                )}
+              </dd>
             </div>
             <div className="flex justify-between">
               <dt>来源</dt>
@@ -216,7 +272,9 @@ export function ProjectDetailPage() {
                 <span className="max-w-40 truncate" title={project.scriptsPath ?? ''}>
                   {project.scriptsPath ?? '—'}
                 </span>
-                <EditScriptsPathDialog project={project} onSaved={reload} />
+                {editing && (
+                  <EditScriptsPathDialog project={project} onSaved={reload} />
+                )}
               </dd>
             </div>
             <div className="flex items-center justify-between">
@@ -225,7 +283,9 @@ export function ProjectDetailPage() {
                 <span className="max-w-40 truncate" title={project.feishuWebhook ?? ''}>
                   {project.feishuWebhook ?? '—'}
                 </span>
-                <EditWebhookDialog project={project} onSaved={reload} />
+                {editing && (
+                  <EditWebhookDialog project={project} onSaved={reload} />
+                )}
               </dd>
             </div>
             <div className="flex items-center justify-between">
@@ -244,7 +304,9 @@ export function ProjectDetailPage() {
                 ) : (
                   <span>—</span>
                 )}
-                <EditDefectBitableDialog project={project} onSaved={reload} />
+                {editing && (
+                  <EditDefectBitableDialog project={project} onSaved={reload} />
+                )}
               </dd>
             </div>
             <div className="flex justify-between">
@@ -675,6 +737,190 @@ function DeleteCheckButton({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+/** 修改项目类型：下拉选择后立即保存（飞书同步项目下次同步会被飞书侧覆盖） */
+function ProjectTypeSelect({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+
+  const change = (type: string) => {
+    if (type === project.type) return
+    setError(null)
+    api
+      .updateProject(project.id, { type: type as ProjectType })
+      .then(onChanged)
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Select
+        value={project.type}
+        onValueChange={(v) => change(v as string)}
+        items={Object.fromEntries(PROJECT_TYPES.map((t) => [t, t]))}
+      >
+        <SelectTrigger className="w-28">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PROJECT_TYPES.map((t) => (
+            <SelectItem key={t} value={t}>
+              {t}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {error && <span className="text-xs">{error}</span>}
+    </span>
+  )
+}
+
+/** 修改项目状态：下拉选择后立即保存（飞书同步项目下次同步会被飞书侧覆盖） */
+function ProjectStatusSelect({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+
+  const change = (status: string) => {
+    if (status === project.status) return
+    setError(null)
+    api
+      .updateProject(project.id, { status: status as ProjectStatus })
+      .then(onChanged)
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Select
+        value={project.status}
+        onValueChange={(v) => change(v as string)}
+        items={Object.fromEntries(PROJECT_STATUSES.map((s) => [s, s]))}
+      >
+        <SelectTrigger className="w-28">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PROJECT_STATUSES.map((s) => (
+            <SelectItem key={s} value={s}>
+              {s}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {error && <span className="text-xs">{error}</span>}
+    </span>
+  )
+}
+
+/** 修改预期发布时间：日期选择后立即保存，清空则置为未定 */
+function ExpectedReleaseInput({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+
+  const change = (value: string) => {
+    if (value === (project.expectedReleaseAt ?? '')) return
+    setError(null)
+    api
+      .updateProject(project.id, { expectedReleaseAt: value })
+      .then(onChanged)
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Input
+        type="date"
+        className="w-36"
+        value={project.expectedReleaseAt ?? ''}
+        onChange={(e) => change(e.target.value)}
+        title={error ?? '选择日期后立即保存；清空则置为未定'}
+      />
+      {error && <span className="text-xs">{error}</span>}
+    </span>
+  )
+}
+
+/** 修改迭代/优先级：下拉选择全平台已有取值（取自 /projects/page 的去重值），选中后立即保存，选"未设置"清除 */
+function ProjectDictSelect({
+  project,
+  field,
+  suggestionsKey,
+  onChanged,
+}: {
+  project: Project
+  field: 'iterationCycle' | 'priority'
+  /** /projects/page 返回中的去重取值列表字段 */
+  suggestionsKey: 'iterations' | 'priorities'
+  onChanged: () => void
+}) {
+  const CLEAR = '__clear__'
+  const [options, setOptions] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  // 仅在编辑模式挂载，进入时拉取全平台已有取值
+  useEffect(() => {
+    api
+      .listProjectPage({ page: 1, pageSize: 1 })
+      .then((r) => setOptions(r[suggestionsKey]))
+      .catch(() => setOptions([]))
+  }, [suggestionsKey])
+
+  const current = project[field] ?? ''
+  // 当前值不在已有取值中时补进选项，避免触发器显示异常
+  const allOptions =
+    current && !options.includes(current) ? [current, ...options] : options
+
+  const change = (v: string) => {
+    const next = v === CLEAR ? '' : v
+    if (next === current) return
+    setError(null)
+    api
+      .updateProject(project.id, { [field]: next })
+      .then(onChanged)
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Select
+        value={current || CLEAR}
+        onValueChange={(v) => change(v as string)}
+        items={{
+          [CLEAR]: '（未设置）',
+          ...Object.fromEntries(allOptions.map((o) => [o, o])),
+        }}
+      >
+        <SelectTrigger className="w-44">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={CLEAR}>（未设置）</SelectItem>
+          {allOptions.map((o) => (
+            <SelectItem key={o} value={o}>
+              {o}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {error && <span className="text-xs">{error}</span>}
+    </span>
   )
 }
 

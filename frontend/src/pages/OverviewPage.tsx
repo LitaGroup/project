@@ -17,45 +17,47 @@ interface InfoCard {
   points: string[]
 }
 
-const aiCards: InfoCard[] = [
+const usageCards: InfoCard[] = [
   {
-    title: 'REST API 全量暴露',
+    title: '搜索项目 → 项目详情',
     description:
-      '所有能力都通过 /api 暴露，AI 可直接读写项目、文档、检查、测试、任务、缺陷。接口约定见根目录 AGENTS.md。',
+      '典型流程：先按名称搜索拿到项目 id，再读项目详情（含文档/检查/用例/任务清单与可执行命令），最后决定运行什么。',
     points: [
-      '项目 / 文档 / 检查 / 测试 / 任务 / 缺陷 全量增删改查',
-      '飞书预览（不落库）：GET /api/feishu/read?url=',
-      '全局列表 GET /api/{checks,tests,documents,tasks,defects}（projectId 可选）',
+      'GET /api/projects/search.md?q={名称关键词}（模糊匹配，前 5 条，含详情链接）',
+      'GET /api/projects/{id}.md（项目信息 + 文档/检查/用例/任务清单 + 最近运行结果 + 末尾 AI 操作小节）',
+      'GET /api/documents/{docId}.md（文档元信息 + Markdown 正文全文）',
+      '原则：用户没给 id 时先搜索，不要猜 id',
     ],
   },
   {
-    title: '.md Markdown 视图',
+    title: '运行检查 / 用例 / 任务（流式）',
     description:
-      '给资源加 .md 后缀即返回 text/markdown，agent 可直接读取结构化内容，末尾附带可执行的 curl。',
+      'POST 启动一次运行并以 text/markdown 流式返回：先头部信息，运行中逐行追加脚本原始输出，终态附「结果」小节后结束。客户端断开自动退订。',
     points: [
-      'GET /api/projects/:id.md（项目 + 文档/检查/测试/任务/缺陷清单 + AI 操作）',
-      'GET /api/documents/:id.md（文档元信息 + 正文）',
-      '路由声明在 :id 之前避免参数匹配冲突',
+      'curl -N -X POST {BASE}/api/checks/{checkId}/run.md',
+      'curl -N -X POST {BASE}/api/tests/{testId}/run.md',
+      'curl -N -X POST {BASE}/api/tasks/{taskId}/run.md（手动触发，不受 enabled 限制）',
+      '必须带 -N 禁用缓冲逐行读取，无需轮询；长耗时操作直接等流结束',
     ],
   },
   {
-    title: '一步式运行（流式 Markdown）',
+    title: '查看运行结果',
     description:
-      'POST 启动一次脚本运行，并以 text/markdown 流式返回：先头部，运行中逐行输出脚本原始输出，终态附「结果」小节。客户端断开自动退订。',
+      '判断「上次运行是否正常」时，优先读项目详情中已汇总的最近结果；需要完整过程再取单次运行详情。',
     points: [
-      'POST /api/checks/:id/run.md',
-      'POST /api/tests/:id/run.md',
-      '实现见 backend/src/common/run-markdown.ts',
+      'GET /api/checks/runs/{runId}.md（检查 / 任务的运行详情：元信息 + 结果 + 输出全文）',
+      'GET /api/tests/runs/{runId}.md（用例的运行详情）',
+      'JSON 兜底 GET .../runs/{runId}；SSE 实时流 GET .../runs/{runId}/stream',
     ],
   },
   {
-    title: 'SSE 实时进度',
+    title: '全局列表 / 设置 / 脚本更新',
     description:
-      '前端订阅实时进度，agent 也可用。先推当前快照，进度变化逐条推送，终态推送后自动完成；终态快照保留 5min 供晚订阅。',
+      '跨项目列举数据走常规 JSON 接口（projectId 可选，不传返回全部）；设置与脚本仓库更新走 .md 视图。',
     points: [
-      'GET /api/checks/runs/:runId/stream',
-      'GET /api/tests/runs/:runId/stream',
-      'REST 兜底：GET /api/{checks,tests}/runs/:runId（无 live 句柄读库，running 则 2s 轮询）',
+      'GET /api/{checks,tests,documents,tasks,defects}[?projectId=]',
+      'GET /api/settings.md（环境 / 脚本目录 / 访问域名 / agent 在线状态）',
+      'curl -N -X POST {BASE}/api/settings/scripts/pull.md（脚本仓库 git pull，流式返回）',
     ],
   },
 ]
@@ -131,6 +133,61 @@ function InfoCardItem({ card }: { card: InfoCard }) {
   )
 }
 
+/** 命令行片段块（可复制） */
+function CommandBlock({ command }: { command: string }) {
+  return (
+    <pre className="overflow-x-auto rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm whitespace-pre-wrap">
+      <code>{command}</code>
+    </pre>
+  )
+}
+
+function SkillInstallSection() {
+  const origin = window.location.origin
+  const skillUrl = `${origin}/SKILL.md`
+  const installCmd = `mkdir -p ~/.opencode/skills/project-manage && curl -fsSL ${skillUrl} -o ~/.opencode/skills/project-manage/SKILL.md`
+
+  return (
+    <section>
+      <h2 className="mb-4 text-xl font-semibold">安装 SKILL（让 Agent 学会操作本平台）</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle>project-manage 技能</CardTitle>
+          <CardDescription>
+            技能说明随平台代码维护，涵盖：搜索项目、读取项目详情与文档正文、运行检查/用例/任务并流式获取结果、查看设置与更新脚本仓库。安装后 Agent 会话可直接按技能说明操作本平台。
+          </CardDescription>
+        </CardHeader>
+        <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">1. 在线地址（SKILL 文件本体）</p>
+            <a
+              href={skillUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="w-fit text-sm text-foreground-intense underline"
+            >
+              {skillUrl}
+            </a>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">2. 安装到 opencode（推荐）</p>
+            <CommandBlock command={installCmd} />
+            <p className="text-sm text-foreground-muted">
+              安装后重启会话即可生效；SKILL 随平台迭代，需要更新时重新执行上面的命令覆盖即可。
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">3. 免安装直接使用</p>
+            <p className="text-sm text-foreground-muted">
+              也可以不安装，直接告诉 Agent：「读取 {skillUrl}，按说明操作项目管理平台」。
+            </p>
+          </div>
+        </div>
+      </Card>
+    </section>
+  )
+}
+
 export function OverviewPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -143,6 +200,7 @@ export function OverviewPage() {
   }, [])
 
   const inProgress = projects.filter((p) => p.status === '进行中')
+  const displayed = inProgress.slice(0, 10)
 
   return (
     <div className="flex flex-col gap-8">
@@ -153,10 +211,12 @@ export function OverviewPage() {
         </p>
       </section>
 
+      <SkillInstallSection />
+
       <section>
-        <h2 className="mb-4 text-xl font-semibold">AI Agent 用法</h2>
+        <h2 className="mb-4 text-xl font-semibold">常用使用方法</h2>
         <div className="grid gap-4 md:grid-cols-2">
-          {aiCards.map((card) => (
+          {usageCards.map((card) => (
             <InfoCardItem key={card.title} card={card} />
           ))}
         </div>
@@ -181,7 +241,7 @@ export function OverviewPage() {
           <p className="text-sm">暂无进行中的项目</p>
         )}
         <div className="grid gap-4 md:grid-cols-2">
-          {inProgress.map((p) => (
+          {displayed.map((p) => (
             <Card key={p.id}>
               <CardHeader>
                 <CardTitle>
