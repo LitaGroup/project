@@ -1,15 +1,4 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardFooter,
-} from '@appica/ui-react/card'
-import { Badge } from '@appica/ui-react/badge'
-import { api, type Project } from '../lib/api'
-import { StatusBadge } from '../components/StatusBadge'
+import { Card, CardHeader, CardTitle, CardDescription } from '@appica/ui-react/card'
 
 interface InfoCard {
   title: string
@@ -182,19 +171,6 @@ function SkillInstallSection() {
 }
 
 export function OverviewPage() {
-  const [projects, setProjects] = useState<Project[]>([])
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .listProjects()
-      .then(setProjects)
-      .catch((e: Error) => setError(e.message))
-  }, [])
-
-  const inProgress = projects.filter((p) => p.status === '进行中')
-  const displayed = inProgress.slice(0, 10)
-
   return (
     <div className="flex flex-col gap-8">
       <section>
@@ -220,34 +196,6 @@ export function OverviewPage() {
         <div className="grid gap-4 md:grid-cols-2">
           {featureCards.map((card) => (
             <InfoCardItem key={card.title} card={card} />
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <div className="mb-4 flex items-center gap-2">
-          <h2 className="text-xl font-semibold">进行中的项目</h2>
-          <Badge variant="primary">{inProgress.length}</Badge>
-        </div>
-        {error && <p className="text-sm">加载失败：{error}</p>}
-        {!error && inProgress.length === 0 && (
-          <p className="text-sm">暂无进行中的项目</p>
-        )}
-        <div className="grid gap-4 md:grid-cols-2">
-          {displayed.map((p) => (
-            <Card key={p.id}>
-              <CardHeader>
-                <CardTitle>
-                  <Link to={`/projects/${p.id}`}>{p.name}</Link>
-                </CardTitle>
-                <CardDescription>
-                  {p.type} · 预期发布 {p.expectedReleaseAt ?? '未定'}
-                </CardDescription>
-              </CardHeader>
-              <CardFooter>
-                <StatusBadge status={p.status} />
-              </CardFooter>
-            </Card>
           ))}
         </div>
       </section>
