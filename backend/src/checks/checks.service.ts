@@ -29,6 +29,11 @@ import { Check } from './check.entity';
 
 /** 扫描结果上限，防止脚本目录过大时拖垮接口 */
 const MAX_SCRIPTS = 500;
+/** 检查脚本文件名匹配 */
+const isCheckScriptFile = (name: string) => name.endsWith('.check.ts');
+/** 检查/测试脚本文件名匹配（.check.ts / .test.ts） */
+const isScriptFile = (name: string) =>
+  isCheckScriptFile(name) || name.endsWith('.test.ts');
 /** 单次脚本执行的超时时间（毫秒） */
 const RUN_TIMEOUT_MS = 120_000;
 /** 运行历史返回条数上限 */
@@ -717,13 +722,14 @@ export class ChecksService implements OnModuleInit {
   }
 
   /**
-   * 脚本目录联想：由 .check.ts 扫描结果推导包含脚本的目录（含各层父目录，
+   * 脚本目录联想：由 .check.ts/.test.ts 扫描结果推导包含脚本的目录（含各层父目录，
    * 相对脚本根目录），供设置项目 scriptsPath 时自动联想。
    */
   async listScriptDirs(keyword?: string): Promise<string[]> {
-    const scripts = await this.listScripts();
+    const all: string[] = [];
+    await this.walk(this.scriptsDir, all, isScriptFile);
     const dirs = new Set<string>();
-    for (const p of scripts) {
+    for (const p of all) {
       const parts = p.split('/').slice(0, -1);
       for (let i = 1; i <= parts.length; i++) {
         dirs.add(parts.slice(0, i).join('/'));
@@ -736,8 +742,13 @@ export class ChecksService implements OnModuleInit {
       .slice(0, MAX_SCRIPTS);
   }
 
-  /** 递归收集 .check.ts 相对路径；目录不存在时返回空（未配置脚本目录不视为错误） */
-  private async walk(dir: string, out: string[]): Promise<void> {    if (out.length >= MAX_SCRIPTS) return;
+  /** 递归收集匹配脚本文件的相对路径；目录不存在时返回空（未配置脚本目录不视为错误） */
+  private async walk(
+    dir: string,
+    out: string[],
+    match: (name: string) => boolean = isCheckScriptFile,
+  ): Promise<void> {
+    if (out.length >= MAX_SCRIPTS) return;
     let entries;
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
@@ -752,8 +763,8 @@ export class ChecksService implements OnModuleInit {
         if (entry.name.startsWith('.') || entry.name === 'node_modules') {
           continue;
         }
-        await this.walk(full, out);
-      } else if (entry.isFile() && entry.name.endsWith('.check.ts')) {
+        await this.walk(full, out, match);
+      } else if (entry.isFile() && match(entry.name)) {
         out.push(
           path.relative(this.scriptsDir, full).split(path.sep).join('/'),
         );

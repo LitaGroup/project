@@ -39,7 +39,7 @@ TypeORM `synchronize` 仅在非 production 开启，**上生产前必须改 migr
   - `src/common/paths.ts`：`imageWebroot()` 读取全局变量 `DIR_IMAGE_WEBROOT`（图片上传后的本地根目录，默认 `<项目根>/images`）；`main.ts` 将该目录静态挂载到 `/images`（不走 `/api` 全局前缀），经 `http://{host}/images/{image-path}` 访问，前端 dev server 已代理 `/images`
   - `src/feishu/`：飞书只读客户端 + `GET /api/feishu/read?url=` 预览
   - `src/projects/` / `src/documents/`：实体与 CRUD，`POST /api/documents/sync-feishu` 为一键同步入口；文档列表查询（`GET /api/documents`、项目详情的关系数据）用 `DOCUMENT_LIST_SELECT` 排除 longtext 正文，正文仅经 `GET /api/documents/:id` 单独返回
-  - `src/checks/`：检查（Check）登记管理，`GET /api/checks/scripts?q=` 扫描脚本目录供自动联想；`GET /api/checks/script-dirs?q=` 返回含脚本的目录（含父目录，供 scriptsPath 联想）
+  - `src/checks/`：检查（Check）登记管理，`GET /api/checks/scripts?q=` 扫描脚本目录供自动联想；`GET /api/checks/script-dirs?q=` 返回含 `.check.ts`/`.test.ts` 的目录（含父目录，供 scriptsPath 联想）
   - `src/tests/`：测试（Test），与检查结构一致（登记/自动导入/运行/SSE/历史），唯一区别是脚本后缀为 `.test.ts`，表为 `tests` / `test_runs`
   - `src/tasks/`：任务（Task），定时调度检查脚本（见领域模型"任务"）
   - `src/defects/`：缺陷（Defect），与项目设置的飞书多维表格双向绑定（见领域模型"缺陷"）
