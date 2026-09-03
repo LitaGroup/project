@@ -376,6 +376,8 @@ export const api = {
       scriptsPath?: string
       feishuWebhook?: string
       defectBitableUrl?: string
+      /** 项目描述（Markdown），空串清除 */
+      description?: string
     },
   ) =>
     request<Project>(`/projects/${id}`, {
@@ -435,6 +437,11 @@ export const api = {
     const qs = params.toString()
     return request<string[]>(`/checks/scripts${qs ? `?${qs}` : ''}`)
   },
+  /** 脚本目录自动联想：包含 .check.ts 的目录（含父目录，相对脚本根目录） */
+  listScriptDirs: (keyword?: string) =>
+    request<string[]>(
+      `/checks/script-dirs${keyword ? `?q=${encodeURIComponent(keyword)}` : ''}`,
+    ),
   createCheck: (input: {
     projectId: number
     code: string

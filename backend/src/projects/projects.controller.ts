@@ -46,6 +46,8 @@ class UpdateProjectDto {
   feishuWebhook?: string;
   /** 缺陷多维表格地址：带 table 参数的飞书 wiki/base 链接，空串清除 */
   defectBitableUrl?: string;
+  /** 项目描述（Markdown），空串清除 */
+  description?: string;
 }
 
 class SyncFeishuDto {

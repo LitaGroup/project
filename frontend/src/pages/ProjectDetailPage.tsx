@@ -56,12 +56,9 @@ import { Badge } from '@appica/ui-react/badge'
 import { Switch } from '@appica/ui-react/switch'
 import {
   api,
-  APP_PLATFORMS,
-  APP_TARGETS,
   DOCUMENT_TYPES,
   PROJECT_STATUSES,
   PROJECT_TYPES,
-  type AppVersion,
   type Defect,
   type DocumentType,
   type Project,
@@ -156,10 +153,6 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <AppVersionsPanel project={project} onChanged={reload} />
-        </section>
-
-        <section>
           <DefectsPanel project={project} onChanged={reload} />
         </section>
 
@@ -194,7 +187,14 @@ export function ProjectDetailPage() {
                 </a>
               </span>
             </CardTitle>
-            <CardDescription>{project.description ?? '暂无描述'}</CardDescription>
+            <CardDescription className="flex items-start justify-between gap-2">
+              <span className="whitespace-pre-wrap">
+                {project.description ?? '暂无描述'}
+              </span>
+              {editing && (
+                <EditDescriptionDialog project={project} onSaved={reload} />
+              )}
+            </CardDescription>
           </CardHeader>
           <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
             <div className="flex items-center justify-between">
@@ -934,13 +934,19 @@ function EditScriptsPathDialog({
 }) {
   const [open, setOpen] = useState(false)
   const [scriptsPath, setScriptsPath] = useState('')
+  const [dirs, setDirs] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  // 打开时初始化表单，并拉取脚本目录列表供自动联想
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
     if (next) {
       setScriptsPath(project.scriptsPath ?? '')
       setError(null)
+      api
+        .listScriptDirs()
+        .then(setDirs)
+        .catch(() => setDirs([]))
     }
   }
 
@@ -970,10 +976,93 @@ function EditScriptsPathDialog({
           <div className="flex flex-col gap-4">
             <label className="flex flex-col gap-1 text-sm">
               脚本目录（相对脚本根目录，留空则扫描整个根目录）
-              <Input
+              <Autocomplete
+                items={dirs}
                 value={scriptsPath}
-                onChange={(e) => setScriptsPath(e.target.value)}
-                placeholder="如 projects/active/pk"
+                onValueChange={(v) => setScriptsPath(v as string)}
+                clearable
+              >
+                <AutocompleteInput
+                  placeholder="如 projects/active/pk"
+                  aria-label="脚本目录"
+                />
+                <AutocompleteContent>
+                  <AutocompleteEmpty>未找到匹配的目录</AutocompleteEmpty>
+                  <AutocompleteList>
+                    {(item: string) => (
+                      <AutocompleteItem key={item} value={item}>
+                        {item}
+                      </AutocompleteItem>
+                    )}
+                  </AutocompleteList>
+                </AutocompleteContent>
+              </Autocomplete>
+            </label>
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button onClick={submit}>保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 编辑项目描述（Markdown，空串清除） */
+function EditDescriptionDialog({
+  project,
+  onSaved,
+}: {
+  project: Project
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [description, setDescription] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setDescription(project.description ?? '')
+      setError(null)
+    }
+  }
+
+  const submit = () => {
+    setError(null)
+    api
+      .updateProject(project.id, { description })
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        <Button variant="ghost" size="sm">
+          编辑
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>编辑项目描述</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-sm">
+              项目描述（Markdown，留空清除）
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="项目背景、目标、链接…"
+                rows={8}
               />
             </label>
             {error && <p className="text-sm">保存失败:{error}</p>}
@@ -2304,223 +2393,6 @@ function EditDefectBitableDialog({
             <Button variant="outline" size="sm">取消</Button>
           </DialogClose>
           <Button onClick={submit}>保存</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/** APP 版本板块：管理 APP 测试运行的 app 版本元信息（版本/平台/应用；包安装走 APP 页） */
-function AppVersionsPanel({
-  project,
-  onChanged,
-}: {
-  project: Project
-  onChanged: () => void
-}) {
-  const [versions, setVersions] = useState<AppVersion[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const load = useCallback(() => {
-    api
-      .listAppVersions(project.id)
-      .then(setVersions)
-      .catch((e: Error) => setError(e.message))
-  }, [project.id])
-  useEffect(() => {
-    load()
-  }, [load])
-
-  return (
-    <>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-xl font-semibold">APP 版本</h2>
-        <AppVersionFormDialog projectId={project.id} onSaved={onChanged} />
-      </div>
-      {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
-      <Table hoverableRows>
-        <TableHeader>
-          <TableRow>
-            <TableHead>版本</TableHead>
-            <TableHead className="w-24">平台</TableHead>
-            <TableHead className="w-32">应用</TableHead>
-            <TableHead className="w-24 text-center">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {versions.map((v) => (
-            <TableRow key={v.id}>
-              <TableCell>{v.version}</TableCell>
-              <TableCell>{v.platform === 'ios' ? 'iOS' : 'Android'}</TableCell>
-              <TableCell>{v.appTarget}</TableCell>
-              <TableCell className="text-center">
-                <AlertDialog>
-                  <AlertDialogTrigger>
-                    <Button variant="ghost" size="sm">
-                      删除
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        删除 APP 版本 {v.version}？
-                      </AlertDialogTitle>
-                      <AlertDialogDescription>
-                        此操作不可撤销。
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogClose>
-                        <Button variant="outline" size="sm">
-                          取消
-                        </Button>
-                      </AlertDialogClose>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => {
-                          api
-                            .deleteAppVersion(v.id)
-                            .then(onChanged)
-                            .catch((e: Error) => setError(e.message))
-                        }}
-                      >
-                        删除
-                      </Button>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </TableCell>
-            </TableRow>
-          ))}
-          {versions.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={4}>暂无 APP 版本</TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </>
-  )
-}
-
-/** 新建 APP 版本：录入版本号/平台/应用 */
-function AppVersionFormDialog({
-  projectId,
-  onSaved,
-}: {
-  projectId: number
-  onSaved: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [version, setVersion] = useState('')
-  const [platform, setPlatform] = useState<string>(APP_PLATFORMS[0])
-  const [appTarget, setAppTarget] = useState<string>(APP_TARGETS[0])
-  const [error, setError] = useState<string | null>(null)
-
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next)
-    if (next) {
-      setVersion('')
-      setPlatform(APP_PLATFORMS[0])
-      setAppTarget(APP_TARGETS[0])
-      setError(null)
-    }
-  }
-
-  const submit = () => {
-    setError(null)
-    api
-      .createAppVersion({
-        projectId,
-        platform,
-        appTarget,
-        version,
-      })
-      .then(() => {
-        setOpen(false)
-        onSaved()
-      })
-      .catch((e: Error) => setError(e.message))
-  }
-
-  const platformItems = Object.fromEntries(
-    APP_PLATFORMS.map((p) => [p, p === 'ios' ? 'iOS' : 'Android']),
-  )
-  const targetItems = Object.fromEntries(APP_TARGETS.map((t) => [t, t]))
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        <Button variant="outline" size="sm">添加 APP 版本</Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>添加 APP 版本</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1 text-sm">
-              版本号
-              <Input
-                value={version}
-                onChange={(e) => setVersion(e.target.value)}
-                placeholder="如 1.2.3"
-              />
-            </label>
-            <div className="flex gap-4">
-              <label className="flex flex-col gap-1 text-sm">
-                平台
-                <Select
-                  value={platform}
-                  onValueChange={(v) => setPlatform(v as string)}
-                  items={platformItems}
-                >
-                  <SelectTrigger className="w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {APP_PLATFORMS.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {p === 'ios' ? 'iOS' : 'Android'}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                应用
-                <Select
-                  value={appTarget}
-                  onValueChange={(v) => setAppTarget(v as string)}
-                  items={targetItems}
-                >
-                  <SelectTrigger className="w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {APP_TARGETS.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-            </div>
-            {error && <p className="text-sm">保存失败:{error}</p>}
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">取消</Button>
-          </DialogClose>
-          <Button
-            size="sm"
-            onClick={submit}
-            disabled={!version.trim()}
-          >
-            保存
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

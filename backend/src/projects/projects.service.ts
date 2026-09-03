@@ -379,7 +379,7 @@ export class ProjectsService {
     ].join('\n');
   }
 
-  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、缺陷多维表格地址（defectBitableUrl），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布）会在下次同步时被飞书侧覆盖 */
+  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、缺陷多维表格地址（defectBitableUrl）、描述（description），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布）会在下次同步时被飞书侧覆盖 */
   async update(
     id: number,
     input: {
@@ -391,6 +391,7 @@ export class ProjectsService {
       scriptsPath?: string;
       feishuWebhook?: string;
       defectBitableUrl?: string;
+      description?: string;
     },
   ): Promise<Project> {
     const project = await this.findOne(id);
@@ -433,6 +434,9 @@ export class ProjectsService {
       project.defectBitableUrl = this.normalizeDefectBitableUrl(
         input.defectBitableUrl,
       );
+    }
+    if (input.description !== undefined) {
+      project.description = input.description.trim() || null;
     }
     return this.projects.save(project);
   }

@@ -60,6 +60,12 @@ export class ChecksController {
     );
   }
 
+  /** 脚本目录自动联想：包含 .check.ts 的目录（含父目录，相对脚本根目录），供设置项目 scriptsPath（须声明在 :id 之前） */
+  @Get('script-dirs')
+  listScriptDirs(@Query('q') keyword?: string): Promise<string[]> {
+    return this.checksService.listScriptDirs(keyword);
+  }
+
   /** 检查列表：传 projectId 按项目过滤，不传返回全部 */
   @Get()
   findByProject(@Query('projectId') projectId?: string): Promise<Check[]> {

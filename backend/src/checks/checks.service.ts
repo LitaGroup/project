@@ -716,9 +716,28 @@ export class ChecksService implements OnModuleInit {
       .slice(0, MAX_SCRIPTS);
   }
 
+  /**
+   * 脚本目录联想：由 .check.ts 扫描结果推导包含脚本的目录（含各层父目录，
+   * 相对脚本根目录），供设置项目 scriptsPath 时自动联想。
+   */
+  async listScriptDirs(keyword?: string): Promise<string[]> {
+    const scripts = await this.listScripts();
+    const dirs = new Set<string>();
+    for (const p of scripts) {
+      const parts = p.split('/').slice(0, -1);
+      for (let i = 1; i <= parts.length; i++) {
+        dirs.add(parts.slice(0, i).join('/'));
+      }
+    }
+    const kw = keyword?.trim().toLowerCase();
+    return [...dirs]
+      .filter((d) => !kw || d.toLowerCase().includes(kw))
+      .sort()
+      .slice(0, MAX_SCRIPTS);
+  }
+
   /** 递归收集 .check.ts 相对路径；目录不存在时返回空（未配置脚本目录不视为错误） */
-  private async walk(dir: string, out: string[]): Promise<void> {
-    if (out.length >= MAX_SCRIPTS) return;
+  private async walk(dir: string, out: string[]): Promise<void> {    if (out.length >= MAX_SCRIPTS) return;
     let entries;
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
