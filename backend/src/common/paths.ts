@@ -10,3 +10,16 @@ export function imageWebroot(): string {
     process.env.DIR_IMAGE_WEBROOT ?? path.resolve(process.cwd(), '../images'),
   );
 }
+
+/**
+ * 导出产物的本地根目录：环境变量 DIR_EXPORT_WEBROOT，默认 <项目根>/export-files。
+ * 每次运行的输出目录为 {exportId}/{runId}/（经脚本参数 --output-dir 传入），
+ * 目录经 main.ts 静态挂载，通过 http://{host}/export-files/{exportId}/{runId}/{file} 对外访问。
+ * 注意：需在 ConfigModule 加载 .env 之后调用（bootstrap / Nest 服务内均可）。
+ */
+export function exportWebroot(): string {
+  return path.resolve(
+    process.env.DIR_EXPORT_WEBROOT ??
+      path.resolve(process.cwd(), '../export-files'),
+  );
+}

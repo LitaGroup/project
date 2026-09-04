@@ -14,14 +14,14 @@ import { api, type Project } from '../lib/api'
 
 interface ScriptRow {
   path: string
-  kind: '检查' | '用例'
+  kind: '检查' | '用例' | '导出'
   /** 登记了该脚本的项目 id 列表（空表示未登记） */
   projectIds: number[]
 }
 
 /**
- * 脚本全局列表：扫描脚本根目录下全部 .check.ts / .test.ts（脚本/类型/项目），
- * 所属项目取登记了该脚本的检查/用例（未登记显示 —），支持脚本路径模糊搜索。
+ * 脚本全局列表：扫描脚本根目录下全部 .check.ts / .test.ts / .export.ts（脚本/类型/项目），
+ * 所属项目取登记了该脚本的检查/用例/导出（未登记显示 —），支持脚本路径模糊搜索。
  */
 export function ScriptsPage() {
   const [rows, setRows] = useState<ScriptRow[] | null>(null)
@@ -34,10 +34,12 @@ export function ScriptsPage() {
     Promise.all([
       api.listCheckScripts(),
       api.listTestScripts(),
+      api.listExportScripts(),
       api.listChecks(),
       api.listTests(),
+      api.listExports(),
     ])
-      .then(([checkScripts, testScripts, checks, tests]) => {
+      .then(([checkScripts, testScripts, exportScripts, checks, tests, exports]) => {
         // scriptPath → 登记它的项目 id 集合
         const owners = new Map<string, Set<number>>()
         const register = (scriptPath: string, projectId?: number) => {
@@ -48,8 +50,9 @@ export function ScriptsPage() {
         }
         checks.forEach((c) => register(c.scriptPath, c.projectId))
         tests.forEach((t) => register(t.scriptPath, t.projectId))
+        exports.forEach((e) => register(e.scriptPath, e.projectId))
 
-        const toRow = (path: string, kind: '检查' | '用例'): ScriptRow => ({
+        const toRow = (path: string, kind: '检查' | '用例' | '导出'): ScriptRow => ({
           path,
           kind,
           projectIds: [...(owners.get(path) ?? [])],
@@ -57,6 +60,7 @@ export function ScriptsPage() {
         setRows([
           ...checkScripts.map((p) => toRow(p, '检查')),
           ...testScripts.map((p) => toRow(p, '用例')),
+          ...exportScripts.map((p) => toRow(p, '导出')),
         ])
       })
       .catch((e: Error) => setError(e.message))
@@ -126,7 +130,7 @@ export function ScriptsPage() {
             <TableRow>
               <TableCell colSpan={3}>
                 {rows.length === 0
-                  ? '脚本目录下暂无 .check.ts / .test.ts 脚本'
+                  ? '脚本目录下暂无 .check.ts / .test.ts / .export.ts 脚本'
                   : '无匹配的脚本'}
               </TableCell>
             </TableRow>

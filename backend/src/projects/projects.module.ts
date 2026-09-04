@@ -5,6 +5,7 @@ import { DocumentsModule } from '../documents/documents.module';
 import { ChecksModule } from '../checks/checks.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { TestsModule } from '../tests/tests.module';
+import { ExportsModule } from '../exports/exports.module';
 import { DefectsModule } from '../defects/defects.module';
 import { FeishuModule } from '../feishu/feishu.module';
 import { Project } from './project.entity';
@@ -20,6 +21,7 @@ import { SyncState } from './sync-state.entity';
     ChecksModule,
     TasksModule,
     TestsModule,
+    ExportsModule,
     DefectsModule,
     AppVersionsModule,
     FeishuModule,

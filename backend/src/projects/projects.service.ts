@@ -11,6 +11,8 @@ import { ChecksService } from '../checks/checks.service';
 import { Check } from '../checks/check.entity';
 import { TestsService } from '../tests/tests.service';
 import { Test } from '../tests/test.entity';
+import { ExportsService } from '../exports/exports.service';
+import { Export } from '../exports/export.entity';
 import { TasksService } from '../tasks/tasks.service';
 import { Task } from '../tasks/task.entity';
 import {
@@ -78,6 +80,7 @@ export class ProjectsService {
     private readonly documentsService: DocumentsService,
     private readonly checksService: ChecksService,
     private readonly testsService: TestsService,
+    private readonly exportsService: ExportsService,
     private readonly tasksService: TasksService,
     private readonly defectsService: DefectsService,
     private readonly appVersionsService: AppVersionsService,
@@ -133,7 +136,7 @@ export class ProjectsService {
   }
 
   /**
-   * 项目 + 关联（文档/检查/测试/任务/缺陷）。
+   * 项目 + 关联（文档/检查/测试/导出/任务/缺陷）。
    * 不用 relations 巨型 LEFT JOIN：测试 RDS 上该 JOIN 要 ~2.5s，
    * 拆成并行小查询仅 ~250ms（见 AGENTS.md 工作约定）。
    */
@@ -141,30 +144,34 @@ export class ProjectsService {
     const project = await this.projects.findOne({ where: { id } });
     if (!project) throw new NotFoundException(`Project ${id} not found`);
     const { manager } = this.projects;
-    const [documents, checks, tests, tasks, defects] = await Promise.all([
-      // 文档列表不取 longtext 正文（列表展示只需元信息）
-      manager.find(Document, {
-        where: { projectId: id },
-        select: DOCUMENT_LIST_SELECT,
-      }),
-      manager.find(Check, { where: { projectId: id } }),
-      manager.find(Test, { where: { projectId: id } }),
-      manager.find(Task, { where: { projectId: id } }),
-      // 缺陷列表不取 description/images（详情经 GET /defects/:id 单独加载）
-      manager.find(Defect, {
-        where: { projectId: id },
-        select: DEFECT_LIST_SELECT,
-        order: { updatedAt: 'DESC' },
-      }),
-    ]);
+    const [documents, checks, tests, exportList, tasks, defects] =
+      await Promise.all([
+        // 文档列表不取 longtext 正文（列表展示只需元信息）
+        manager.find(Document, {
+          where: { projectId: id },
+          select: DOCUMENT_LIST_SELECT,
+        }),
+        manager.find(Check, { where: { projectId: id } }),
+        manager.find(Test, { where: { projectId: id } }),
+        manager.find(Export, { where: { projectId: id } }),
+        manager.find(Task, { where: { projectId: id } }),
+        // 缺陷列表不取 description/images（详情经 GET /defects/:id 单独加载）
+        manager.find(Defect, {
+          where: { projectId: id },
+          select: DEFECT_LIST_SELECT,
+          order: { updatedAt: 'DESC' },
+        }),
+      ]);
     project.documents = documents;
     project.checks = checks;
     project.tests = tests;
+    project.exports = exportList;
     project.tasks = tasks;
     project.defects = defects;
-    // 检查/测试按编号自然排序
+    // 检查/测试/导出按编号自然排序
     project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
     project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
+    project.exports.sort((a, b) => codeCollator.compare(a.code, b.code));
     return project;
   }
 
@@ -221,16 +228,22 @@ export class ProjectsService {
     ].join('\n');
   }
 
-  /** Markdown 视图（GET /projects/:id.md）：项目描述 + 文档/检查/测试/任务清单（含运行信息） */
+  /** Markdown 视图（GET /projects/:id.md）：项目描述 + 文档/检查/测试/导出/任务清单（含运行信息） */
   async findOneMarkdown(id: number): Promise<string> {
     const project = await this.findOne(id);
-    // 并行补齐运行信息：各检查/测试/任务的最近几次运行 + 任务视图（下次执行时间）
-    const [checkRuns, testRuns, taskRuns, taskViews] = await Promise.all([
-      this.checksService.recentRunsByCheckIds(project.checks.map((c) => c.id)),
-      this.testsService.recentRunsByTestIds(project.tests.map((t) => t.id)),
-      this.checksService.recentRunsByTaskIds(project.tasks.map((t) => t.id)),
-      this.tasksService.findByProject(project.id),
-    ]);
+    // 并行补齐运行信息：各检查/测试/导出/任务的最近几次运行 + 任务视图（下次执行时间）
+    const [checkRuns, testRuns, exportRuns, taskRuns, taskViews] =
+      await Promise.all([
+        this.checksService.recentRunsByCheckIds(
+          project.checks.map((c) => c.id),
+        ),
+        this.testsService.recentRunsByTestIds(project.tests.map((t) => t.id)),
+        this.exportsService.recentRunsByExportIds(
+          project.exports.map((e) => e.id),
+        ),
+        this.checksService.recentRunsByTaskIds(project.tasks.map((t) => t.id)),
+        this.tasksService.findByProject(project.id),
+      ]);
     const meta = [`- 类型：${project.type}`, `- 状态：${project.status}`];
     if (project.priority) meta.push(`- 优先级：${project.priority}`);
     if (project.expectedReleaseAt) {
@@ -256,9 +269,9 @@ export class ProjectsService {
       if (d.remark) parts.push(`备注：${d.remark}`);
       return `- ${parts.join(' — ')}`;
     });
-    /** 检查/测试条目：编号、描述、运行命令、最近结果、最近记录（多行列表项，用换行连接） */
+    /** 检查/测试/导出条目：编号、描述、运行命令、最近结果、最近记录（多行列表项，用换行连接） */
     const runEntry = (
-      kind: 'checks' | 'tests',
+      kind: 'checks' | 'tests' | 'exports',
       item: {
         id: number;
         code: string;
@@ -292,6 +305,9 @@ export class ProjectsService {
     );
     const tests = project.tests.map((t) =>
       runEntry('tests', t, testRuns.get(t.id) ?? []),
+    );
+    const exports = project.exports.map((e) =>
+      runEntry('exports', e, exportRuns.get(e.id) ?? []),
     );
     const checkName = (checkId: number) =>
       project.checks.find((c) => c.id === checkId)?.code ?? `#${checkId}`;
@@ -341,6 +357,10 @@ export class ProjectsService {
       '',
       ...(tests.length > 0 ? tests : ['（暂无）']),
       '',
+      `## 导出（${project.exports.length}）`,
+      '',
+      ...(exports.length > 0 ? exports : ['（暂无）']),
+      '',
       `## 任务（${project.tasks.length}）`,
       '',
       ...(tasks.length > 0 ? tasks : ['（暂无）']),
@@ -353,11 +373,12 @@ export class ProjectsService {
       '',
       '搜索项目：`GET /api/projects/search.md?q={名称关键词}`（匹配度 + 创建时间倒序，前 5）',
       '',
-      '运行检查/测试/任务并流式获取结果（text/markdown，运行中逐行返回脚本输出，结束时附"结果"小节）：',
+      '运行检查/测试/导出/任务并流式获取结果（text/markdown，运行中逐行返回脚本输出，结束时附"结果"小节）：',
       '',
       '```bash',
       'curl -N -X POST /api/checks/{checkId}/run.md',
       'curl -N -X POST /api/tests/{testId}/run.md',
+      'curl -N -X POST /api/exports/{exportId}/run.md',
       'curl -N -X POST /api/tasks/{taskId}/run.md',
       '```',
       '',
@@ -365,6 +386,7 @@ export class ProjectsService {
       '',
       '```bash',
       'curl /api/checks/runs/{runId}.md   # 检查/任务运行的详情（Test 同理：/api/tests/runs/{runId}.md）',
+      'curl /api/exports/runs/{runId}.md  # 导出运行的详情（含产物文件下载链接）',
       'curl /api/settings.md              # 平台设置（环境、目录、域名、agent 状态等）',
       'curl -N -X POST /api/settings/scripts/pull.md  # 更新脚本仓库（流式返回 git 输出与结果）',
       '```',
@@ -503,7 +525,7 @@ export class ProjectsService {
   }
 
   /**
-   * 删除项目。测试库无物理外键（见 AGENTS.md），文档/检查/测试/任务需在应用层先清理。
+   * 删除项目。测试库无物理外键（见 AGENTS.md），文档/检查/测试/导出/任务需在应用层先清理。
    */
   async remove(id: number): Promise<void> {
     const project = await this.findOne(id);
@@ -513,6 +535,7 @@ export class ProjectsService {
     await this.tasksService.removeByProject(project.id);
     await this.checksService.removeByProject(project.id);
     await this.testsService.removeByProject(project.id);
+    await this.exportsService.removeByProject(project.id);
     await this.appVersionsService.removeByProject(project.id);
     await this.projects.remove(project);
   }

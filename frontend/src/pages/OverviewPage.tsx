@@ -19,12 +19,13 @@ const usageCards: InfoCard[] = [
     ],
   },
   {
-    title: '运行检查 / 用例 / 任务（流式）',
+    title: '运行检查 / 用例 / 导出 / 任务（流式）',
     description:
       'POST 启动一次运行并以 text/markdown 流式返回：先头部信息，运行中逐行追加脚本原始输出，终态附「结果」小节后结束。客户端断开自动退订。',
     points: [
       'curl -N -X POST {BASE}/api/checks/{checkId}/run.md',
       'curl -N -X POST {BASE}/api/tests/{testId}/run.md',
+      'curl -N -X POST {BASE}/api/exports/{exportId}/run.md',
       'curl -N -X POST {BASE}/api/tasks/{taskId}/run.md（手动触发，不受 enabled 限制）',
       '必须带 -N 禁用缓冲逐行读取，无需轮询；长耗时操作直接等流结束',
     ],
@@ -36,6 +37,7 @@ const usageCards: InfoCard[] = [
     points: [
       'GET /api/checks/runs/{runId}.md（检查 / 任务的运行详情：元信息 + 结果 + 输出全文）',
       'GET /api/tests/runs/{runId}.md（用例的运行详情）',
+      'GET /api/exports/runs/{runId}.md（导出的运行详情，含产物文件下载链接）',
       'JSON 兜底 GET .../runs/{runId}；SSE 实时流 GET .../runs/{runId}/stream',
     ],
   },
@@ -44,7 +46,7 @@ const usageCards: InfoCard[] = [
     description:
       '跨项目列举数据走常规 JSON 接口（projectId 可选，不传返回全部）；设置与脚本仓库更新走 .md 视图。',
     points: [
-      'GET /api/{checks,tests,documents,tasks,defects}[?projectId=]',
+      'GET /api/{checks,tests,exports,documents,tasks,defects}[?projectId=]',
       'GET /api/settings.md（环境 / 脚本目录 / 访问域名 / agent 在线状态）',
       'curl -N -X POST {BASE}/api/settings/scripts/pull.md（脚本仓库 git pull，流式返回）',
     ],
@@ -65,11 +67,12 @@ const featureCards: InfoCard[] = [
   {
     title: '脚本调度',
     description:
-      '脚本即检查与测试：登记脚本路径后即可运行，实时流式获取执行过程与结果。',
+      '脚本即检查、测试与导出：登记脚本路径后即可运行，实时流式获取执行过程与结果。',
     points: [
-      '检查用 .check.ts、测试用 .test.ts，覆盖 H5、后端、APP 三端',
+      '检查用 .check.ts、测试用 .test.ts，覆盖 H5、后端、APP 三端；导出用 .export.ts（位于脚本目录 exports 子目录）',
       '脚本仓库：https://github.com/litaGroup/scripts',
       '支持自动导入脚本目录、实时进度（SSE）、运行历史与原始输出回放',
+      '导出脚本经 --output-dir 获取输出目录，产物文件（[files] 协议上报）在运行详情页点击下载',
     ],
   },
   {
@@ -136,7 +139,7 @@ function SkillInstallSection() {
         <CardHeader>
           <CardTitle>project-manage 技能</CardTitle>
           <CardDescription>
-            技能说明随平台代码维护，涵盖：搜索项目、读取项目详情与文档正文、运行检查/用例/任务并流式获取结果、查看设置与更新脚本仓库。安装后 Agent 会话可直接按技能说明操作本平台。
+            技能说明随平台代码维护，涵盖：搜索项目、读取项目详情与文档正文、运行检查/用例/导出/任务并流式获取结果、查看设置与更新脚本仓库。安装后 Agent 会话可直接按技能说明操作本平台。
           </CardDescription>
         </CardHeader>
         <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">

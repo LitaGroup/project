@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/检查/用例/任务及运行信息）、运行检查/用例/任务并流式获取结果、查看系统设置与更新脚本仓库
-version: 1.1.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、查看系统设置与更新脚本仓库
+version: 1.2.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -18,9 +18,9 @@ tags:
 对接项目管理平台（以 AI 为中心的项目管理与脚本运行平台），供 Agent 完成以下工作：
 
 1. 按项目名称模糊搜索项目
-2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及检查/用例/任务的清单、运行命令、最近运行结果与运行记录
+2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及检查/用例/导出/任务的清单、运行命令、最近运行结果与运行记录
 3. 读取文档 Markdown 正文
-4. 运行检查/用例/任务，流式读取脚本输出与结果
+4. 运行检查/用例/导出/任务，流式读取脚本输出与结果（导出运行详情含产物文件下载链接）
 5. 获取平台设置信息、更新脚本仓库
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`。
@@ -54,6 +54,7 @@ GET /api/projects/{id}.md
 - 文档清单：类型 + 标题 + 链接 `GET /api/documents/{docId}.md`（该链接即文档正文）
 - 检查清单：每条含编号、描述、脚本路径、运行命令 `POST /api/checks/{checkId}/run.md`、最近一次运行结果摘要 + 详情链接 `GET /api/checks/runs/{runId}.md`、运行历史地址
 - 用例（测试）清单：结构同检查（base 为 `/api/tests`）
+- 导出清单：结构同检查（base 为 `/api/exports`）；导出运行详情的 Markdown 视图含产物文件下载链接（`/export-files/{exportId}/{runId}/{file}`）
 - 任务清单：标题、cron、绑定的检查编号、开关状态、上次执行时间、下次执行时间、上次执行结果 + 详情链接、执行命令 `POST /api/tasks/{taskId}/run.md`、运行记录地址 `GET /api/tasks/{taskId}/runs`
 - 末尾"AI 操作"小节列出全部可用端点
 
@@ -67,11 +68,12 @@ GET /api/documents/{docId}.md
 
 返回文档元信息（标题 / 类型 / 来源 / 所属项目 / 更新时间等）+ Markdown 正文全文。
 
-### 4. 运行检查 / 用例 / 任务（流式）
+### 4. 运行检查 / 用例 / 导出 / 任务（流式）
 
 ```bash
 curl -N -X POST {BASE}/api/checks/{checkId}/run.md   # 运行一次检查
 curl -N -X POST {BASE}/api/tests/{testId}/run.md     # 运行一次用例
+curl -N -X POST {BASE}/api/exports/{exportId}/run.md # 运行一次导出
 curl -N -X POST {BASE}/api/tasks/{taskId}/run.md     # 手动触发一次任务
 ```
 
@@ -82,6 +84,7 @@ curl -N -X POST {BASE}/api/tasks/{taskId}/run.md     # 手动触发一次任务
 ```
 GET /api/checks/runs/{runId}.md   # 检查 / 任务的运行详情
 GET /api/tests/runs/{runId}.md    # 用例的运行详情
+GET /api/exports/runs/{runId}.md  # 导出的运行详情（含产物文件下载链接）
 ```
 
 （JSON 版详情与 SSE 实时流分别为 `GET .../runs/{runId}` 与 `GET .../runs/{runId}/stream`）
@@ -102,6 +105,7 @@ curl -N -X POST {BASE}/api/settings/scripts/pull.md   # 更新脚本仓库（git
 ```
 GET /api/checks[?projectId=]      # 检查列表
 GET /api/tests[?projectId=]       # 用例列表
+GET /api/exports[?projectId=]     # 导出列表
 GET /api/documents[?projectId=]   # 文档列表（不含正文）
 GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运行统计）
 GET /api/defects[?projectId=]     # 缺陷列表

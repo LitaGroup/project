@@ -12,6 +12,7 @@ import { Check } from '../checks/check.entity';
 import { AppVersion } from '../app-versions/app-version.entity';
 import { Task } from '../tasks/task.entity';
 import { Test } from '../tests/test.entity';
+import { Export } from '../exports/export.entity';
 import { Document } from '../documents/document.entity';
 import { Defect } from '../defects/defect.entity';
 
@@ -72,6 +73,9 @@ export class Project {
 
   @OneToMany(() => Test, (test) => test.project)
   tests: Test[];
+
+  @OneToMany(() => Export, (exportItem) => exportItem.project)
+  exports: Export[];
 
   @OneToMany(() => Task, (task) => task.project)
   tasks: Task[];

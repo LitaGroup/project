@@ -31,9 +31,11 @@ import { Check } from './check.entity';
 const MAX_SCRIPTS = 500;
 /** 检查脚本文件名匹配 */
 const isCheckScriptFile = (name: string) => name.endsWith('.check.ts');
-/** 检查/测试脚本文件名匹配（.check.ts / .test.ts） */
+/** 检查/测试/导出脚本文件名匹配（.check.ts / .test.ts / .export.ts） */
 const isScriptFile = (name: string) =>
-  isCheckScriptFile(name) || name.endsWith('.test.ts');
+  isCheckScriptFile(name) ||
+  name.endsWith('.test.ts') ||
+  name.endsWith('.export.ts');
 /** 单次脚本执行的超时时间（毫秒） */
 const RUN_TIMEOUT_MS = 120_000;
 /** 运行历史返回条数上限 */

@@ -117,6 +117,56 @@ export interface ProjectTest {
   updatedAt: string
 }
 
+/** 导出：本质是一个脚本（.export.ts），登记其元信息（编号/描述/脚本位置），脚本位于项目脚本目录的 exports 子目录 */
+export interface ProjectExport {
+  id: number
+  /** 编号（手工定义，项目内唯一） */
+  code: string
+  /** 描述：脚本导出的内容 */
+  description: string | null
+  /** 脚本位置：相对脚本根目录的 .export.ts 路径 */
+  scriptPath: string
+  projectId?: number
+  updatedAt: string
+}
+
+/** 脚本 [files] 协议上报的产出文件（file 相对本次运行的输出目录） */
+export interface ExportRunFile {
+  title: string
+  file: string
+}
+
+/**
+ * 导出的一次脚本运行记录（字段与检查运行类似，脚本输出协议一致，另有 [files] 产物清单）。
+ * 产物文件经 /export-files/{exportId}/{runId}/{file} 下载。
+ */
+export interface ExportRun {
+  id: number
+  exportId: number
+  /** running=执行中；success=全部通过；fail=有失败项；error=脚本异常 */
+  status: 'running' | 'success' | 'fail' | 'error'
+  /** 总步数（脚本 [start] 上报） */
+  total: number | null
+  /** 当前步数（运行中实时更新） */
+  current: number
+  success: number | null
+  fail: number | null
+  skip: number | null
+  message: string | null
+  /** 耗时（毫秒），结束时写入 */
+  durationMs: number | null
+  /** 逐项明细（结束时写入） */
+  items: CheckRunItem[] | null
+  /** 日志行（结束时写入） */
+  logs: string[] | null
+  /** 脚本原始输出行（终端展示用；运行中实时累积） */
+  output: string[] | null
+  /** 产出文件清单（脚本 [files] 协议上报） */
+  files: ExportRunFile[] | null
+  startedAt: string
+  finishedAt: string | null
+}
+
 /** APP 版本：APP 测试运行所针对的 app 版本元信息（包安装走 APP 页，不随任务下发） */
 export interface AppVersion {
   id: number
@@ -186,6 +236,7 @@ export interface Project {
   documents?: ProjectDocument[]
   checks?: ProjectCheck[]
   tests?: ProjectTest[]
+  exports?: ProjectExport[]
   tasks?: ProjectTask[]
   defects?: Defect[]
   createdAt: string
@@ -545,6 +596,58 @@ export const api = {
     request<TestRun[]>(`/tests/${testId}/runs`),
   /** 单次测试运行详情（含实时进度，运行中轮询） */
   getTestRun: (runId: number) => request<TestRun>(`/tests/runs/${runId}`),
+  /** 导出脚本自动联想：扫描项目脚本目录 exports 子目录下的 .export.ts 文件；传 projectId 时限定该项目 */
+  listExportScripts: (keyword?: string, projectId?: number) => {
+    const params = new URLSearchParams()
+    if (keyword) params.set('q', keyword)
+    if (projectId !== undefined) params.set('projectId', String(projectId))
+    const qs = params.toString()
+    return request<string[]>(`/exports/scripts${qs ? `?${qs}` : ''}`)
+  },
+  createExport: (input: {
+    projectId: number
+    code: string
+    description?: string
+    scriptPath: string
+  }) =>
+    request<ProjectExport>('/exports', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateExport: (
+    id: number,
+    input: Partial<{
+      code: string
+      description: string
+      scriptPath: string
+    }>,
+  ) =>
+    request<ProjectExport>(`/exports/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteExport: (id: number) =>
+    request<void>(`/exports/${id}`, { method: 'DELETE' }),
+  /** 自动导入：扫描项目脚本目录 exports 子目录下所有 .export.ts，过滤已登记的，其余全部导入 */
+  importExports: (projectId: number) =>
+    request<{ created: ProjectExport[]; skipped: number }>('/exports/import', {
+      method: 'POST',
+      body: JSON.stringify({ projectId }),
+    }),
+  getExport: (id: number) => request<ProjectExport>(`/exports/${id}`),
+  /** 导出列表：传 projectId 按项目过滤，不传返回全部 */
+  listExports: (projectId?: number) =>
+    request<ProjectExport[]>(
+      `/exports${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
+  /** 启动一次导出脚本运行：立即返回 running 记录，脚本后台异步执行 */
+  startExportRun: (exportId: number) =>
+    request<ExportRun>(`/exports/${exportId}/runs`, { method: 'POST' }),
+  /** 导出运行历史（倒序，上限 50） */
+  listExportRuns: (exportId: number) =>
+    request<ExportRun[]>(`/exports/${exportId}/runs`),
+  /** 单次导出运行详情（含实时进度与产物文件清单） */
+  getExportRun: (runId: number) => request<ExportRun>(`/exports/runs/${runId}`),
   /** APP 版本列表：传 projectId 按项目过滤，不传返回全部 */
   listAppVersions: (projectId?: number) =>
     request<AppVersion[]>(

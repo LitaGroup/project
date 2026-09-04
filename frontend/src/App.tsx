@@ -6,9 +6,11 @@ import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { DocumentDetailPage } from './pages/DocumentDetailPage'
 import { CheckRunPage } from './pages/CheckRunPage'
 import { TestRunPage } from './pages/TestRunPage'
+import { ExportRunPage } from './pages/ExportRunPage'
 import { TaskDetailPage } from './pages/TaskDetailPage'
 import { TestsPage } from './pages/TestsPage'
 import { ChecksPage } from './pages/ChecksPage'
+import { ExportsPage } from './pages/ExportsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { ScriptsPage } from './pages/ScriptsPage'
 import { TasksPage } from './pages/TasksPage'
@@ -34,6 +36,10 @@ function App() {
             element={<TestRunPage />}
           />
           <Route
+            path="/projects/:id/exports/:exportId"
+            element={<ExportRunPage />}
+          />
+          <Route
             path="/projects/:id/tasks/:taskId"
             element={<TaskDetailPage />}
           />
@@ -44,6 +50,7 @@ function App() {
           <Route path="/defects" element={<DefectsPage />} />
           <Route path="/tests" element={<TestsPage />} />
           <Route path="/checks" element={<ChecksPage />} />
+          <Route path="/exports" element={<ExportsPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/scripts" element={<ScriptsPage />} />

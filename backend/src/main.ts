@@ -4,7 +4,7 @@ import * as express from 'express';
 import * as fs from 'fs';
 import { AgentGateway } from './agent/agent.gateway';
 import { AppModule } from './app.module';
-import { imageWebroot } from './common/paths';
+import { imageWebroot, exportWebroot } from './common/paths';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -15,6 +15,11 @@ async function bootstrap() {
   const webroot = imageWebroot();
   fs.mkdirSync(webroot, { recursive: true });
   app.use('/images', express.static(webroot, { index: false }));
+
+  // 导出产物静态资源：http://{host}/export-files/{exportId}/{runId}/{file} → DIR_EXPORT_WEBROOT（不走 /api 前缀）
+  const exportsRoot = exportWebroot();
+  fs.mkdirSync(exportsRoot, { recursive: true });
+  app.use('/export-files', express.static(exportsRoot, { index: false }));
 
   await app.listen(process.env.PORT ?? 3000);
 

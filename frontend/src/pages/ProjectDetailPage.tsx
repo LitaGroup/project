@@ -64,6 +64,7 @@ import {
   type Project,
   type ProjectCheck,
   type ProjectDocument,
+  type ProjectExport,
   type ProjectStatus,
   type ProjectTask,
   type ProjectTest,
@@ -150,6 +151,23 @@ export function ProjectDetailPage() {
             </div>
           </div>
           <TestsPanel project={project} onChanged={reload} />
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">导出</h2>
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/exports?projectId=${project.id}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                查看全部
+              </Link>
+              <ImportExportsButton projectId={project.id} scriptsPath={project.scriptsPath ?? null} onImported={reload} />
+              <ExportFormDialog projectId={project.id} onSaved={reload} />
+            </div>
+          </div>
+          <ExportsPanel project={project} onChanged={reload} />
         </section>
 
         <section>
@@ -1784,6 +1802,332 @@ function DeleteTestButton({
           <AlertDialogTitle>删除测试</AlertDialogTitle>
           <AlertDialogDescription>
             确定删除测试「{test.code}」吗？只删除登记信息，不影响脚本文件本身。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </AlertDialogClose>
+          <AlertDialogClose>
+            <Button variant="destructive" onClick={onDeleted}>
+              确认删除
+            </Button>
+          </AlertDialogClose>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+function ExportsPanel({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const allExports = project.exports ?? []
+  const exports = allExports.slice(0, 10)
+  const [error, setError] = useState<string | null>(null)
+  // 脚本路径显示时去掉与项目脚本目录重叠的前缀（tooltip 仍展示完整路径）
+  const dirPrefix = project.scriptsPath
+    ? `${project.scriptsPath.replace(/\/+$/, '')}/`
+    : ''
+  const displayScriptPath = (p: string) =>
+    dirPrefix && p.startsWith(dirPrefix) ? p.slice(dirPrefix.length) : p
+  return (
+    <>
+      {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-32">编号</TableHead>
+            <TableHead>描述</TableHead>
+            <TableHead>脚本</TableHead>
+            <TableHead className="w-40 text-center">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {exports.map((e) => (
+            <TableRow key={e.id}>
+              <TableCell>
+                <Link
+                  to={`/projects/${project.id}/exports/${e.id}`}
+                  className="underline"
+                >
+                  {e.code}
+                </Link>
+              </TableCell>
+              <TableCell className="max-w-md truncate" title={e.description ?? ''}>
+                {e.description ?? '—'}
+              </TableCell>
+              <TableCell className="max-w-md truncate" title={e.scriptPath}>
+                {displayScriptPath(e.scriptPath)}
+              </TableCell>
+              <TableCell className="text-center">
+                <div className="flex justify-center gap-2">
+                  <RunExportButton exportItem={e} projectId={project.id} />
+                  <ExportFormDialog
+                    projectId={project.id}
+                    exportItem={e}
+                    onSaved={onChanged}
+                  />
+                  <DeleteExportButton
+                    exportItem={e}
+                    onDeleted={() =>
+                      api
+                        .deleteExport(e.id)
+                        .then(onChanged)
+                        .catch((err: Error) => setError(err.message))
+                    }
+                  />
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+          {exports.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={4}>暂无导出</TableCell>
+            </TableRow>
+          )}
+          <CountRow
+            colSpan={4}
+            total={allExports.length}
+            displayed={exports.length}
+          />
+        </TableBody>
+      </Table>
+    </>
+  )
+}
+
+/** 新建/编辑导出：脚本位置支持从项目脚本目录 exports 子目录的 .export.ts 文件中自动联想、搜索 */
+function ExportFormDialog({
+  projectId,
+  exportItem,
+  onSaved,
+}: {
+  projectId: number
+  /** 传入则为编辑，否则为新建 */
+  exportItem?: ProjectExport
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [code, setCode] = useState('')
+  const [description, setDescription] = useState('')
+  const [scriptPath, setScriptPath] = useState('')
+  const [scripts, setScripts] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  // 打开时初始化表单，并拉取脚本文件列表供自动联想
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setCode(exportItem?.code ?? '')
+      setDescription(exportItem?.description ?? '')
+      setScriptPath(exportItem?.scriptPath ?? '')
+      setError(null)
+      api
+        .listExportScripts(undefined, projectId)
+        .then(setScripts)
+        .catch(() => setScripts([]))
+    }
+  }
+
+  const submit = () => {
+    setError(null)
+    const saving = exportItem
+      ? api.updateExport(exportItem.id, { code, description, scriptPath })
+      : api.createExport({
+          projectId,
+          code,
+          description: description || undefined,
+          scriptPath,
+        })
+    saving
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        {exportItem ? (
+          <Button variant="outline" size="sm">
+            编辑
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">添加导出</Button>
+        )}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{exportItem ? '编辑导出' : '添加导出'}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-sm">
+              编号（手工定义，项目内唯一）
+              <Input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="如 EXPORT-001"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              描述（脚本导出的内容）
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="这个脚本导出什么…"
+                rows={3}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              脚本（输入关键字自动联想 exports 目录下的 .export.ts 文件）
+              <Autocomplete
+                items={scripts}
+                value={scriptPath}
+                onValueChange={(v) => setScriptPath(v as string)}
+                clearable
+              >
+                <AutocompleteInput
+                  placeholder="如 projects/active/pk/exports/xxx.export.ts"
+                  aria-label="脚本"
+                />
+                <AutocompleteContent>
+                  <AutocompleteEmpty>未找到匹配的脚本</AutocompleteEmpty>
+                  <AutocompleteList>
+                    {(item: string) => (
+                      <AutocompleteItem key={item} value={item}>
+                        {item}
+                      </AutocompleteItem>
+                    )}
+                  </AutocompleteList>
+                </AutocompleteContent>
+              </Autocomplete>
+            </label>
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button size="sm" onClick={submit} disabled={!code.trim() || !scriptPath.trim()}>
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 自动导入导出：扫描项目脚本目录 exports 子目录下全部 .export.ts，过滤已登记的全部导入 */
+function ImportExportsButton({
+  projectId,
+  scriptsPath,
+  onImported,
+}: {
+  projectId: number
+  scriptsPath: string | null
+  onImported: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const run = () => {
+    if (!scriptsPath) {
+      setMessage('请先在右侧设置项目的脚本目录，再执行自动导入')
+      return
+    }
+    setLoading(true)
+    setMessage(null)
+    api
+      .importExports(projectId)
+      .then((r) => {
+        setMessage(`已导入 ${r.created.length} 个，跳过 ${r.skipped} 个`)
+        onImported()
+      })
+      .catch((e: Error) => setMessage(`导入失败:${e.message}`))
+      .finally(() => setLoading(false))
+  }
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={run}
+        disabled={loading}
+        title="扫描脚本目录 exports 子目录下的 .export.ts，未登记的全部导入（编号按文件名生成，描述待补充）"
+      >
+        {loading ? '导入中…' : '自动导入'}
+      </Button>
+      {message && <span className="text-sm text-foreground-muted">{message}</span>}
+    </>
+  )
+}
+
+/** 运行导出脚本：启动一次运行并跳转到运行详情页（实时进度/产物文件/历史记录） */
+function RunExportButton({
+  exportItem,
+  projectId,
+}: {
+  exportItem: ProjectExport
+  projectId: number
+}) {
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = () => {
+    setLoading(true)
+    setError(null)
+    api
+      .startExportRun(exportItem.id)
+      .then(() => navigate(`/projects/${projectId}/exports/${exportItem.id}`))
+      .catch((e: Error) => {
+        setError(e.message)
+        setLoading(false)
+      })
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={run}
+      disabled={loading}
+      title={error ?? '启动一次脚本运行'}
+    >
+      {loading ? '启动中…' : '运行'}
+    </Button>
+  )
+}
+
+function DeleteExportButton({
+  exportItem,
+  onDeleted,
+}: {
+  exportItem: ProjectExport
+  onDeleted: () => void
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger>
+        <Button variant="outline" size="sm">
+          删除
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除导出</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除导出「{exportItem.code}」吗？会一并删除运行记录与已生成的产物文件，不影响脚本文件本身。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

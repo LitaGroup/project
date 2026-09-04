@@ -13,6 +13,7 @@ const navItems = [
   { to: '/projects', label: '项目', ready: true },
   { to: '/tests', label: '用例', ready: true },
   { to: '/checks', label: '检查', ready: true },
+  { to: '/exports', label: '导出', ready: true },
   { to: '/defects', label: '缺陷', ready: true },
   { to: '/documents', label: '文档', ready: true },
   { to: '/scripts', label: '脚本', ready: true },
