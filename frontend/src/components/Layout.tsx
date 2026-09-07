@@ -47,7 +47,7 @@ export function Layout() {
                   >
                     <span className="flex w-full items-center justify-between">
                       {item.label}
-                      {!item.ready && <Badge variant="light">待补充</Badge>}
+                      {!item.ready && <Badge variant="soft">待补充</Badge>}
                     </span>
                   </NavigationLink>
                 </NavigationItem>

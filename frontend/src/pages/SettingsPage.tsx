@@ -125,7 +125,7 @@ export function SettingsPage() {
             <div className="flex flex-col gap-3 px-6 pb-6 group-data-inset/card:px-4">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm">连接状态</span>
-                <Badge variant={settings.agent.online ? 'success' : 'light'}>
+                <Badge variant={settings.agent.online ? 'success' : 'soft'}>
                   {settings.agent.online ? '在线' : '离线'}
                 </Badge>
               </div>
@@ -167,7 +167,7 @@ export function SettingsPage() {
               />
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm">飞书 token 来源</span>
-                <Badge variant={settings.feishuTokenSource === 'lita' ? 'primary' : 'light'}>
+                <Badge variant={settings.feishuTokenSource === 'lita' ? 'primary' : 'soft'}>
                   {settings.feishuTokenSource === 'lita'
                     ? 'Lita 平台（推荐）'
                     : '自建应用凭据（兜底）'}
@@ -175,7 +175,7 @@ export function SettingsPage() {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm">兜底通知 webhook</span>
-                <Badge variant={settings.feishuWebhookConfigured ? 'success' : 'light'}>
+                <Badge variant={settings.feishuWebhookConfigured ? 'success' : 'soft'}>
                   {settings.feishuWebhookConfigured ? '已配置' : '未配置'}
                 </Badge>
               </div>

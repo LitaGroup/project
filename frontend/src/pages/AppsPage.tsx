@@ -67,7 +67,7 @@ function SimulatorPanel({
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-2 text-base">
               <span className="truncate">{s.name}</span>
-              <Badge variant={s.online ? 'success' : 'light'}>
+              <Badge variant={s.online ? 'success' : 'soft'}>
                 {s.online ? '在线' : '离线'}
               </Badge>
             </CardTitle>

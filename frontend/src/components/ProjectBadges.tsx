@@ -8,7 +8,7 @@ type BadgeVariant =
   | 'success'
   | 'warning'
   | 'info'
-  | 'light'
+  | 'soft'
 
 const variantByType: Record<ProjectType, BadgeVariant> = {
   活动: 'primary',
@@ -17,11 +17,11 @@ const variantByType: Record<ProjectType, BadgeVariant> = {
   数据: 'info',
   后台: 'secondary',
   技术: 'error',
-  其它: 'light',
+  其它: 'soft',
 }
 
 export function TypeBadge({ type }: { type: ProjectType }) {
-  return <Badge variant={variantByType[type] ?? 'light'}>{type}</Badge>
+  return <Badge variant={variantByType[type] ?? 'soft'}>{type}</Badge>
 }
 
 /** 优先级取值仅 S0/P0/P1/P2/- */
