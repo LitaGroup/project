@@ -217,56 +217,22 @@ async function deviceModel(
 
 // ---------- 受管应用包 ----------
 
-/** 按 平台+产品（可选） 找受管包声明；产品为空时取该平台第一个 */
-function findPackage(
-  config: AgentConfig,
-  platform: string,
-  product?: string | null,
-): AppPackageConfig | null {
-  if (product) {
-    const hit = config.packages.find(
-      (p) => p.platform === platform && p.product === product,
-    );
-    if (hit) return hit;
-  }
-  return config.packages.find((p) => p.platform === platform) ?? null;
-}
-
 // ---------- 运行前置校验 ----------
 
 /**
- * 任务执行前置校验：按 platform 定位在线模拟器，按 platform + appTarget（产品）
- * 定位受管包——模拟器未启动 / APP 未安装时抛错（message 即失败原因，经 done 回传 project）。
+ * 任务执行前置校验：只检查目标平台有在线模拟器且已启动。
+ * APP 是否安装由脚本内自行检查（agent 不再按 AGENT_PACKAGES 做已安装门禁，
+ * 避免包映射漂移/缺失造成误拦；排队与快失败后续再优化）。
  */
 export async function preflightRunTarget(
   config: AgentConfig,
   platform: string,
-  appTarget?: string | null,
+  _appTarget?: string | null,
 ): Promise<void> {
   const device = await resolveDevice(config, platform);
   if (!device) {
     throw new Error(
       `模拟器未启动：未发现在线的 ${platformLabel(platform)} 模拟器（adb devices / simctl booted 不可见），请先启动模拟器`,
-    );
-  }
-  const pkg = findPackage(config, platform, appTarget);
-  if (!pkg) {
-    if (appTarget) {
-      throw new Error(
-        `未配置 ${platform}/${appTarget} 的应用包名（AGENT_PACKAGES）`,
-      );
-    }
-    return; // 无包名映射且未指定产品：跳过已安装检查
-  }
-  const installed = await installedVersion(
-    config,
-    pkg.packageId,
-    platform,
-    device.serial,
-  ).catch(() => null);
-  if (!installed) {
-    throw new Error(
-      `APP 未安装：${pkg.packageId}（${device.name}），请先在 APP 页安装`,
     );
   }
 }
