@@ -5,8 +5,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as path from 'path';
-import { FindOptionsWhere, Like, Repository } from 'typeorm';
-import { ProjectStatus, ProjectType } from '../common/enums';
+import { FindOptionsWhere, Like, Not, Repository } from 'typeorm';
+import {
+  ProjectStatus,
+  ProjectType,
+  ResourceType,
+  ResourceStatus,
+} from '../common/enums';
 import { ChecksService } from '../checks/checks.service';
 import { Check } from '../checks/check.entity';
 import { TestsService } from '../tests/tests.service';
@@ -22,6 +27,11 @@ import {
 import { Document } from '../documents/document.entity';
 import { DEFECT_LIST_SELECT, DefectsService } from '../defects/defects.service';
 import { Defect } from '../defects/defect.entity';
+import {
+  RESOURCE_LIST_SELECT,
+  ResourcesService,
+} from '../resources/resources.service';
+import { Resource } from '../resources/resource.entity';
 import { AppVersionsService } from '../app-versions/app-versions.service';
 import { runSummaryLine, RunDetailLike } from '../common/run-markdown';
 import { Project } from './project.entity';
@@ -83,6 +93,7 @@ export class ProjectsService {
     private readonly exportsService: ExportsService,
     private readonly tasksService: TasksService,
     private readonly defectsService: DefectsService,
+    private readonly resourcesService: ResourcesService,
     private readonly appVersionsService: AppVersionsService,
   ) {}
 
@@ -136,7 +147,7 @@ export class ProjectsService {
   }
 
   /**
-   * 项目 + 关联（文档/检查/测试/导出/任务/缺陷）。
+   * 项目 + 关联（文档/检查/测试/导出/任务/缺陷/资源）。
    * 不用 relations 巨型 LEFT JOIN：测试 RDS 上该 JOIN 要 ~2.5s，
    * 拆成并行小查询仅 ~250ms（见 AGENTS.md 工作约定）。
    */
@@ -144,7 +155,7 @@ export class ProjectsService {
     const project = await this.projects.findOne({ where: { id } });
     if (!project) throw new NotFoundException(`Project ${id} not found`);
     const { manager } = this.projects;
-    const [documents, checks, tests, exportList, tasks, defects] =
+    const [documents, checks, tests, exportList, tasks, defects, resources] =
       await Promise.all([
         // 文档列表不取 longtext 正文（列表展示只需元信息）
         manager.find(Document, {
@@ -161,6 +172,12 @@ export class ProjectsService {
           select: DEFECT_LIST_SELECT,
           order: { updatedAt: 'DESC' },
         }),
+        // 资源不取多语言缓存正文，且隐藏软删除（详情经 GET /resources/:id 单独加载）
+        manager.find(Resource, {
+          where: { projectId: id, status: Not(ResourceStatus.DISCARDED) },
+          select: RESOURCE_LIST_SELECT,
+          order: { updatedAt: 'DESC' },
+        }),
       ]);
     project.documents = documents;
     project.checks = checks;
@@ -168,6 +185,7 @@ export class ProjectsService {
     project.exports = exportList;
     project.tasks = tasks;
     project.defects = defects;
+    project.projectResources = resources;
     // 检查/测试/导出按编号自然排序
     project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
     project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
@@ -256,7 +274,7 @@ export class ProjectsService {
       const { frontend, backend, qa } = project.resources;
       if (frontend || backend || qa) {
         meta.push(
-          `- 资源：前端 ${frontend ?? '-'} / 后端 ${backend ?? '-'} / 测试 ${qa ?? '-'}`,
+          `- 人员：前端 ${frontend ?? '-'} / 后端 ${backend ?? '-'} / 测试 ${qa ?? '-'}`,
         );
       }
     }
@@ -335,6 +353,16 @@ export class ProjectsService {
       if (d.testScript) parts.push(`测试脚本：${d.testScript}`);
       return `- ${parts.join(' — ')}`;
     });
+    const resourceLines = project.projectResources.map((r) => {
+      const parts = [
+        `**${r.status}** [${r.title}](/api/resources/${r.id}.md)（${r.type}）`,
+      ];
+      if (r.type === ResourceType.I18N && r.prefix)
+        parts.push(`前缀 \`${r.prefix}\``);
+      else if (r.url) parts.push(r.url);
+      if (r.description) parts.push(r.description);
+      return `- ${parts.join(' — ')}`;
+    });
 
     return [
       `# ${project.name}`,
@@ -348,6 +376,10 @@ export class ProjectsService {
       `## 文档（${project.documents.length}）`,
       '',
       ...(documents.length > 0 ? documents : ['（暂无）']),
+      '',
+      `## 资源（${project.projectResources.length}）`,
+      '',
+      ...(resourceLines.length > 0 ? resourceLines : ['（暂无）']),
       '',
       `## 检查（${project.checks.length}）`,
       '',
@@ -531,6 +563,8 @@ export class ProjectsService {
     const project = await this.findOne(id);
     await this.documentsService.removeByProject(project.id);
     await this.defectsService.removeByProject(project.id);
+    // 资源仅摘除登记，不级联删除绑定的文档（文档可独立存在）
+    await this.resourcesService.removeByProject(project.id);
     // 任务先于检查清理（任务依赖检查脚本；检查删除时也会再兜底清理）
     await this.tasksService.removeByProject(project.id);
     await this.checksService.removeByProject(project.id);

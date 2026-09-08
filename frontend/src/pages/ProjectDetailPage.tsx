@@ -59,18 +59,25 @@ import {
   DOCUMENT_TYPES,
   PROJECT_STATUSES,
   PROJECT_TYPES,
+  RESOURCE_STATUSES,
+  RESOURCE_TYPE_OPTIONS,
   type Defect,
   type DocumentType,
   type Project,
   type ProjectCheck,
   type ProjectDocument,
   type ProjectExport,
+  type ProjectResource,
   type ProjectStatus,
   type ProjectTask,
   type ProjectTest,
   type ProjectType,
 } from '../lib/api'
-import { DefectStatusBadge, StatusBadge } from '../components/StatusBadge'
+import {
+  DefectStatusBadge,
+  ResourceStatusBadge,
+  StatusBadge,
+} from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { RunStats } from '../components/RunStats'
 
@@ -117,6 +124,22 @@ export function ProjectDetailPage() {
             </div>
           </div>
           <DocumentsPanel project={project} onChanged={reload} />
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">资源</h2>
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/resources?projectId=${project.id}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                查看全部
+              </Link>
+              <ResourceFormDialog projectId={project.id} onSaved={reload} />
+            </div>
+          </div>
+          <ResourcesPanel project={project} onChanged={reload} />
         </section>
 
         <section>
@@ -2740,5 +2763,423 @@ function EditDefectBitableDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** 资源板块：需求方提供的素材/信息（配置/多语言/文件资源/其它），软删除默认隐藏 */
+function ResourcesPanel({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const allResources = project.projectResources ?? []
+  const resources = allResources.slice(0, 10)
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <>
+      {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>标题</TableHead>
+            <TableHead className="w-24 text-center">类型</TableHead>
+            <TableHead className="w-28 text-center">状态</TableHead>
+            <TableHead>链接 / 前缀</TableHead>
+            <TableHead className="w-56 text-center">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {resources.map((r) => (
+            <TableRow key={r.id}>
+              <TableCell className="max-w-md truncate" title={r.title}>
+                {r.type === '配置' && r.documentId ? (
+                  <Link to={`/documents/${r.documentId}`} className="underline">
+                    {r.title}
+                  </Link>
+                ) : (
+                  r.title
+                )}
+              </TableCell>
+              <TableCell className="text-center">{r.type}</TableCell>
+              <TableCell className="text-center">
+                <ResourceStatusBadge status={r.status} />
+              </TableCell>
+              <TableCell
+                className="max-w-64 truncate"
+                title={r.type === '多语言' ? (r.prefix ?? undefined) : (r.url ?? undefined)}
+              >
+                {r.type === '多语言' ? (
+                  r.prefix ?? '—'
+                ) : r.url ? (
+                  <a
+                    href={r.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline"
+                  >
+                    {r.url}
+                  </a>
+                ) : (
+                  '—'
+                )}
+              </TableCell>
+              <TableCell className="text-center">
+                <div className="flex justify-center gap-2">
+                  {(r.type === '配置' || r.type === '多语言') && (
+                    <SyncResourceButton resource={r} onSynced={onChanged} />
+                  )}
+                  <ResourceFormDialog
+                    projectId={project.id}
+                    resource={r}
+                    onSaved={onChanged}
+                  />
+                  <DeleteResourceButton
+                    resource={r}
+                    onDeleted={() =>
+                      api
+                        .deleteResource(r.id)
+                        .then(onChanged)
+                        .catch((e: Error) => setError(e.message))
+                    }
+                  />
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+          {resources.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5}>
+                暂无资源，点击「添加资源」登记需求方提供的配置/多语言/文件
+              </TableCell>
+            </TableRow>
+          )}
+          <CountRow
+            colSpan={5}
+            total={allResources.length}
+            displayed={resources.length}
+          />
+        </TableBody>
+      </Table>
+    </>
+  )
+}
+
+/** 同步：配置类型重新拉取绑定文档（仅飞书链接）；多语言类型按前缀拉取 Lita word/sheet 接口缓存文案 */
+function SyncResourceButton({
+  resource,
+  onSynced,
+}: {
+  resource: ProjectResource
+  onSynced: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = () => {
+    setLoading(true)
+    setError(null)
+    api
+      .syncResource(resource.id)
+      .then(onSynced)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={run}
+      disabled={loading}
+      title={
+        error ??
+        (resource.type === '配置'
+          ? '重新拉取绑定的飞书文档并更新'
+          : '按前缀从多语言接口拉取文案并缓存')
+      }
+    >
+      {loading ? '同步中…' : '同步'}
+    </Button>
+  )
+}
+
+/** 新建/编辑资源：类型决定表单字段；配置类型按 URL 自动绑定/新建文档；多语言按命名空间前缀；状态仅在此弹窗修改（无凭据[URL/前缀]时只能选 缺失/废弃） */
+function ResourceFormDialog({
+  projectId,
+  resource,
+  onSaved,
+}: {
+  projectId: number
+  /** 传入则为编辑，否则为新建（编辑不可改类型） */
+  resource?: ProjectResource
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [type, setType] = useState<string>('配置')
+  const [status, setStatus] = useState<string>('缺失')
+  const [title, setTitle] = useState('')
+  const [url, setUrl] = useState('')
+  const [prefix, setPrefix] = useState('')
+  const [description, setDescription] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setType(resource?.type ?? '配置')
+      setStatus(resource?.status ?? '缺失')
+      setTitle(resource?.title ?? '')
+      setUrl(resource?.url ?? '')
+      setPrefix(resource?.prefix ?? '')
+      setDescription(resource?.description ?? '')
+      setError(null)
+    }
+  }
+
+  // 交付凭据：多语言=前缀，其余=URL；无凭据时状态仅可选 缺失/废弃（与后端校验一致）
+  const i18n = type === '多语言'
+  const credentialEmpty = i18n ? prefix.trim() === '' : url.trim() === ''
+  const allowedStatuses: string[] = credentialEmpty
+    ? ['缺失', '废弃']
+    : [...RESOURCE_STATUSES]
+  const formStatus = allowedStatuses.includes(status) ? status : '缺失'
+
+  const canSave = resource
+    ? title.trim() !== ''
+    : i18n
+      ? title.trim() !== '' || prefix.trim() !== ''
+      : type === '文件资源' || type === 'UI'
+        ? url.trim() !== ''
+        : title.trim() !== ''
+
+  const submit = () => {
+    setError(null)
+    const saving = resource
+      ? api.updateResource(resource.id, {
+          title,
+          status: formStatus,
+          description,
+          ...(i18n ? { prefix } : { url }),
+        })
+      : api.createResource({
+          projectId,
+          type,
+          status: formStatus,
+          title: title.trim() || undefined,
+          url: url.trim() || undefined,
+          description: description.trim() || undefined,
+          prefix: i18n ? prefix.trim() || undefined : undefined,
+        })
+    saving
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        {resource ? (
+          <Button variant="outline" size="sm">
+            编辑
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">添加资源</Button>
+        )}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{resource ? '编辑资源' : '添加资源'}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            {resource ? (
+              <p className="text-sm">
+                类型：
+                <Badge variant="soft">{resource.type}</Badge>
+              </p>
+            ) : (
+              <label className="flex flex-col gap-1 text-sm">
+                类型
+                <Select
+                  value={type}
+                  onValueChange={(v) => setType(v as string)}
+                  items={Object.fromEntries(
+                    RESOURCE_TYPE_OPTIONS.map((t) => [t, t]),
+                  )}
+                >
+                  <SelectTrigger className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RESOURCE_TYPE_OPTIONS.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            )}
+            <label className="flex flex-col gap-1 text-sm">
+              状态{resource ? '' : '（初始，默认"缺失"）'}
+              <Select
+                value={formStatus}
+                onValueChange={(v) => setStatus(v as string)}
+                items={Object.fromEntries(allowedStatuses.map((s) => [s, s]))}
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {allowedStatuses.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {credentialEmpty && (
+                <span className="text-xs text-foreground-muted">
+                  {i18n
+                    ? '未填写前缀，状态只能为「缺失」（废弃不受限）'
+                    : '未填写 URL 链接，状态只能为「缺失」（废弃不受限）'}
+                </span>
+              )}
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              标题
+              {type === '文件资源' || type === 'UI'
+                ? '（可留空，自动取 URL）'
+                : type === '多语言'
+                  ? '（有前缀时可留空，自动取前缀）'
+                  : '（必填）'}
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="如 首页改版配置项"
+              />
+            </label>
+            {type === '配置' && (
+              <label className="flex flex-col gap-1 text-sm">
+                文档 URL（选填，状态"缺失"时可暂不提供；填写后自动绑定/导入——飞书链接同步导入，项目内已有相同 URL 的配置文档则直接绑定）
+                <Input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://xxx.feishu.cn/docx/…"
+                />
+              </label>
+            )}
+            {type === '多语言' && (
+              <>
+                <p className="text-sm text-foreground-muted">
+                  多语言来源为固定的多语言表，按命名空间前缀定位：
+                  {'{SHEET}$NAMESPACE'}——SHEET 可选 Activity / Frontend / FE /
+                  Backend（省略时默认 Activity，如直接填 `$xxx`）；NAMESPACE 以 $
+                  开头、可省略（如只填 Activity）。文案可「同步」拉取缓存。
+                </p>
+                <label className="flex flex-col gap-1 text-sm">
+                  前缀（命名空间 KEY，留空表示「缺失」）
+                  <Input
+                    value={prefix}
+                    onChange={(e) => setPrefix(e.target.value)}
+                    placeholder="如 Activity$anniversary6th-recharge 或 $anniversary6th-recharge"
+                  />
+                </label>
+              </>
+            )}
+            {type === '文件资源' && (
+              <label className="flex flex-col gap-1 text-sm">
+                文件 URL（图片/视频等，仅登记链接）
+                <Input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://…/banner.png"
+                />
+              </label>
+            )}
+            {type === 'UI' && (
+              <label className="flex flex-col gap-1 text-sm">
+                蓝湖地址（仅原样保存链接，不做任何处理）
+                <Input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://lanhuapp.com/web/#/item/project/stage?pid=…&tid=…"
+                />
+              </label>
+            )}
+            {type === '其它' && (
+              <label className="flex flex-col gap-1 text-sm">
+                URL（选填参考链接，填写后方可进入「草稿/确认」）
+                <Input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://…"
+                />
+              </label>
+            )}
+            <label className="flex flex-col gap-1 text-sm">
+              描述{type === '其它' ? '（资源内容说明）' : '（选填）'}
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="需要需求方提供什么…"
+                rows={3}
+              />
+            </label>
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button size="sm" onClick={submit} disabled={!canSave}>
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 硬删除资源：永久移除记录（不删除绑定的文档）；软删除请把状态改为「删除」 */
+function DeleteResourceButton({
+  resource,
+  onDeleted,
+}: {
+  resource: ProjectResource
+  onDeleted: () => void
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger>
+        <Button variant="outline" size="sm">
+          删除
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除资源</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定永久删除资源「{resource.title}」吗？不影响绑定的文档；若只想隐藏，可把状态改为「废弃」（软删除）。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </AlertDialogClose>
+          <AlertDialogClose>
+            <Button variant="destructive" onClick={onDeleted}>
+              确认删除
+            </Button>
+          </AlertDialogClose>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

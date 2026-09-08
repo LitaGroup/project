@@ -14,6 +14,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { TestsModule } from './tests/tests.module';
 import { ExportsModule } from './exports/exports.module';
 import { DefectsModule } from './defects/defects.module';
+import { ResourcesModule } from './resources/resources.module';
 import { FeishuModule } from './feishu/feishu.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { SettingsModule } from './settings/settings.module';
@@ -43,6 +44,7 @@ import { SettingsModule } from './settings/settings.module';
     TestsModule,
     ExportsModule,
     DefectsModule,
+    ResourcesModule,
     AppVersionsModule,
     AgentModule,
     AgentAppsModule,

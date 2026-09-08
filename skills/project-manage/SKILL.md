@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、查看系统设置与更新脚本仓库
-version: 1.2.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、查看系统设置与更新脚本仓库
+version: 1.3.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -49,9 +49,10 @@ GET /api/projects/{id}.md
 
 返回内容：
 
-- 项目元信息：类型 / 状态 / 优先级 / 预期发布时间 / 迭代周期 / 资源 / 脚本目录
+- 项目元信息：类型 / 状态 / 优先级 / 预期发布时间 / 迭代周期 / 人员 / 脚本目录
 - 描述正文
 - 文档清单：类型 + 标题 + 链接 `GET /api/documents/{docId}.md`（该链接即文档正文）
+- 资源清单（需求方提供的素材/信息，已隐藏软删除）：状态 + 标题 + 链接 `GET /api/resources/{id}.md` + 类型 + 来源 URL
 - 检查清单：每条含编号、描述、脚本路径、运行命令 `POST /api/checks/{checkId}/run.md`、最近一次运行结果摘要 + 详情链接 `GET /api/checks/runs/{runId}.md`、运行历史地址
 - 用例（测试）清单：结构同检查（base 为 `/api/tests`）
 - 导出清单：结构同检查（base 为 `/api/exports`）；导出运行详情的 Markdown 视图含产物文件下载链接（`/export-files/{exportId}/{runId}/{file}`）
@@ -67,6 +68,14 @@ GET /api/documents/{docId}.md
 ```
 
 返回文档元信息（标题 / 类型 / 来源 / 所属项目 / 更新时间等）+ Markdown 正文全文。
+
+### 3.1 读取资源详情
+
+```
+GET /api/resources/{id}.md
+```
+
+返回资源元信息（标题 / 类型 / 状态 / 链接 / 前缀 / 绑定文档 / 描述 / 更新时间）+ 正文：配置类型=绑定文档的 Markdown 内容（亦可经 `/api/documents/{documentId}.md` 直接读文档）；多语言=已同步的文案 Markdown 表格缓存（未同步时提示先调 `POST /api/resources/{id}/sync`，同步按前缀拉取 Lita word/sheet 接口）；其它=描述。资源类型枚举：配置/多语言/文件资源/UI/其它（UI=蓝湖地址，仅存链接；文件资源/其它 暂未开放创建）；多语言以前缀 `{SHEET}$NAMESPACE` 标识（SHEET=Activity/Frontend/FE/Backend，省略默认 Activity）；状态枚举：缺失/草稿/确认/废弃（废弃为软删除，列表默认隐藏；无凭据[URL/多语言前缀]时状态只能为 缺失/废弃）。
 
 ### 4. 运行检查 / 用例 / 导出 / 任务（流式）
 
@@ -109,6 +118,7 @@ GET /api/exports[?projectId=]     # 导出列表
 GET /api/documents[?projectId=]   # 文档列表（不含正文）
 GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运行统计）
 GET /api/defects[?projectId=]     # 缺陷列表
+GET /api/resources[?projectId=&includeDeleted=]  # 资源列表（不含多语言缓存正文；includeDeleted=true 含软删除）
 ```
 
 ## 工作约定

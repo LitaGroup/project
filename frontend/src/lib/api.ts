@@ -34,6 +34,21 @@ export const DOCUMENT_TYPES = [
 ] as const
 export type DocumentType = (typeof DOCUMENT_TYPES)[number]
 
+/** 与后端 ResourceType 对应：配置=飞书配置文档（绑定文档模块）；多语言=固定多语言表的命名空间前缀（Activity/Frontend/FE/Backend 四类 SHEET）；文件资源=文件链接；UI=蓝湖设计稿地址（仅存链接不处理）；其它=自由登记 */
+export const RESOURCE_TYPES = ['配置', '多语言', '文件资源', 'UI', '其它'] as const
+export type ResourceType = (typeof RESOURCE_TYPES)[number]
+
+/** 临时禁用的资源类型（与后端 DISABLED_CREATE_TYPES 同步；恢复时清空此列表） */
+export const DISABLED_RESOURCE_TYPES = ['文件资源', '其它'] as const
+/** 表单可选的资源类型 */
+export const RESOURCE_TYPE_OPTIONS = RESOURCE_TYPES.filter(
+  (t) => !(DISABLED_RESOURCE_TYPES as readonly string[]).includes(t),
+)
+
+/** 与后端 ResourceStatus 对应：缺失 → 草稿 → 确认；废弃为软删除终态（列表默认隐藏，仍可硬删） */
+export const RESOURCE_STATUSES = ['缺失', '草稿', '确认', '废弃'] as const
+export type ResourceStatus = (typeof RESOURCE_STATUSES)[number]
+
 export interface ProjectDocument {
   id: number
   title: string
@@ -239,6 +254,8 @@ export interface Project {
   exports?: ProjectExport[]
   tasks?: ProjectTask[]
   defects?: Defect[]
+  /** 资源列表（不含多语言缓存正文、隐藏软删除；键名避开上方人员 resources） */
+  projectResources?: ProjectResource[]
   createdAt: string
   updatedAt: string
 }
@@ -263,6 +280,28 @@ export interface Defect {
   /** 测试脚本：相对脚本根目录的 .test.ts 路径；非空时标记 fixed 前须最近一次运行通过 */
   testScript: string | null
   feishuRecordId: string | null
+  updatedAt: string
+}
+
+/** 资源：项目完成需要需求方提供的素材/信息（配置/多语言/文件资源/UI/其它）。"废弃"为软删除，列表默认隐藏 */
+export interface ProjectResource {
+  id: number
+  projectId: number
+  /** 类型：配置/多语言/文件资源/UI/其它 */
+  type: string
+  title: string
+  /** 状态：缺失/草稿/确认/废弃 */
+  status: string
+  description: string | null
+  /** 链接：配置=飞书文档 URL（可空，"缺失"表示尚未提供）；文件资源=文件 URL；UI=蓝湖地址 */
+  url: string | null
+  /** 配置类型绑定的文档 ID */
+  documentId: number | null
+  /** 多语言：命名空间前缀 {SHEET}$NAMESPACE（SHEET=Activity/Frontend/FE/Backend，省略默认 Activity）；空=缺失 */
+  prefix: string | null
+  remark: string | null
+  /** 多语言文案缓存（word/sheet 同步的 Markdown 表格；仅详情接口返回） */
+  content?: string | null
   updatedAt: string
 }
 
@@ -754,4 +793,53 @@ export const api = {
     request<TestRun>(`/defects/${id}/verify`, { method: 'POST' }),
   deleteDefect: (id: number) =>
     request<void>(`/defects/${id}`, { method: 'DELETE' }),
+  /** 资源列表：传 projectId 按项目过滤，不传返回全部；默认隐藏软删除（includeDeleted 含全部） */
+  listResources: (projectId?: number, includeDeleted = false) => {
+    const params = new URLSearchParams()
+    if (projectId !== undefined) params.set('projectId', String(projectId))
+    if (includeDeleted) params.set('includeDeleted', 'true')
+    const qs = params.toString()
+    return request<ProjectResource[]>(`/resources${qs ? `?${qs}` : ''}`)
+  },
+  getResource: (id: number) => request<ProjectResource>(`/resources/${id}`),
+  /** 创建资源；配置类型按 URL 自动绑定项目内同 URL 配置文档，否则新建文档 */
+  createResource: (input: {
+    projectId: number
+    type: ResourceType | string
+    title?: string
+    /** 初始状态：缺失/草稿/确认/废弃，缺省为"缺失" */
+    status?: string
+    url?: string
+    description?: string
+    /** 多语言：命名空间前缀 {SHEET}$NAMESPACE（省略 SHEET 默认 Activity），空=缺失 */
+    prefix?: string
+    remark?: string
+  }) =>
+    request<ProjectResource>('/resources', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 更新资源（标题/状态/链接/描述/工作表/备注）；status=废弃 为软删除 */
+  updateResource: (
+    id: number,
+    input: Partial<{
+      title: string
+      status: ResourceStatus | string
+      url: string
+      description: string
+      /** 多语言：命名空间前缀（规范化存储），空串清除 */
+      prefix: string
+      remark: string
+    }>,
+  ) =>
+    request<ProjectResource>(`/resources/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  /** 同步：配置类型重拉绑定文档（仅飞书链接）；多语言类型按前缀拉取 Lita word/sheet 接口缓存文案 */
+  syncResource: (id: number) =>
+    request<ProjectResource>(`/resources/${id}/sync`, { method: 'POST' }),
+  /** 硬删除（永久移除；软删除走 updateResource status=废弃） */
+  deleteResource: (id: number) =>
+    request<void>(`/resources/${id}`, { method: 'DELETE' }),
 }

@@ -15,6 +15,7 @@ import { Test } from '../tests/test.entity';
 import { Export } from '../exports/export.entity';
 import { Document } from '../documents/document.entity';
 import { Defect } from '../defects/defect.entity';
+import { Resource } from '../resources/resource.entity';
 
 @Entity('projects')
 export class Project {
@@ -85,6 +86,10 @@ export class Project {
 
   @OneToMany(() => AppVersion, (appVersion) => appVersion.project)
   appVersions: AppVersion[];
+
+  /** 资源（需求方提供的素材/信息）。命名避开上方人员 resources 列 */
+  @OneToMany(() => Resource, (resource) => resource.project)
+  projectResources: Resource[];
 
   /** 列表按创建时间倒序展示，建索引避免全表 filesort */
   @Index('IDX_projects_createdAt')

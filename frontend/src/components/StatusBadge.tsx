@@ -29,3 +29,20 @@ export function DefectStatusBadge({ status }: { status: string }) {
     <Badge variant={defectVariantByStatus[status] ?? 'soft'}>{status}</Badge>
   )
 }
+
+/** 资源状态 → Badge variant：缺失红 / 草稿黄 / 确认绿 / 废弃淡（未知兜底 soft） */
+const resourceVariantByStatus: Record<
+  string,
+  'error' | 'success' | 'soft' | 'warning' | 'secondary'
+> = {
+  缺失: 'error',
+  草稿: 'warning',
+  确认: 'success',
+  废弃: 'secondary',
+}
+
+export function ResourceStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={resourceVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+  )
+}

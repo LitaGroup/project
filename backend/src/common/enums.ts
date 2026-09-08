@@ -66,3 +66,35 @@ export enum AppTarget {
   LITA = 'lita',
   LITA_LITE = 'lita lite',
 }
+
+/**
+ * 资源类型：项目完成需要需求方提供的素材/信息。
+ * 配置=飞书配置文档（绑定文档模块）；多语言=固定 Google Sheet 内的命名空间前缀；
+ * 文件资源=图片/视频等文件的链接；UI=蓝湖设计稿地址（仅原样保存链接，不做任何处理）；其它=自由登记。
+ */
+export enum ResourceType {
+  CONFIG = '配置',
+  I18N = '多语言',
+  FILE = '文件资源',
+  UI = 'UI',
+  OTHER = '其它',
+}
+
+/** 多语言前缀的 SHEET 段（对应固定 Google Sheet 的工作表名），Activity 为默认值 */
+export enum I18nSheet {
+  ACTIVITY = 'Activity',
+  FRONTEND = 'Frontend',
+  FE = 'FE',
+  BACKEND = 'Backend',
+}
+
+/**
+ * 资源状态流转：缺失 → 草稿 → 确认；废弃为软删除终态（列表默认隐藏，仍可硬删）。
+ * 状态间不强制单向流转（需求方可能返工回草稿）。
+ */
+export enum ResourceStatus {
+  MISSING = '缺失',
+  DRAFT = '草稿',
+  CONFIRMED = '确认',
+  DISCARDED = '废弃',
+}
