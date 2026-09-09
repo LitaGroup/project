@@ -96,10 +96,10 @@ Content-Type: application/json
 
 | 文档 | fileName | type |
 | --- | --- | --- |
-| 技术设计文档 | `tech-design.md` | 技术 |
-| 接口文档 | `api-docs.md` | 接口 |
-| 配置脚本（Yaml/Json） | `config.md` | 配置 |
-| SQL脚本 | `sql.md` | 技术 |
+| 技术设计文档 | `TECHNICAL_DESIGN.md` | 技术 |
+| 接口文档 | `API.md` 或 `SWAGGER.json` | 接口 |
+| 配置脚本（Yaml/Json） | `xxxxx-xxxx.yaml`（按项目命名） | 配置 |
+| SQL脚本 | `init.sql` | 技术 |
 
 ### 4. 运行检查 / 用例 / 导出 / 任务（流式）
 
