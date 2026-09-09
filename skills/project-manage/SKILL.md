@@ -92,6 +92,15 @@ Content-Type: application/json
 - 响应为 text/markdown：创建/更新结果 + 文档 ID + 阅读地址 `GET /api/documents/{docId}.md`
 - 若 fileName 命中飞书导入的文档会返回 403（飞书文档只能从源同步更新）
 
+**建议每个项目沉淀以下文档**（fileName 固定，便于重复 upsert；正文为 Markdown，脚本类内容用 ```` ```yaml ```` / ```` ```json ```` / ```` ```sql ```` 代码块包裹）：
+
+| 文档 | fileName | type |
+| --- | --- | --- |
+| 技术设计文档 | `tech-design.md` | 技术 |
+| 接口文档 | `api-docs.md` | 接口 |
+| 配置脚本（Yaml/Json） | `config.md` | 配置 |
+| SQL脚本 | `sql.md` | 技术 |
+
 ### 4. 运行检查 / 用例 / 导出 / 任务（流式）
 
 ```bash
