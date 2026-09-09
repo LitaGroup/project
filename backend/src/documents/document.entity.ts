@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -11,12 +12,18 @@ import { DocumentSource, DocumentType } from '../common/enums';
 import { Project } from '../projects/project.entity';
 
 @Entity('documents')
+// fileName 为 AI 写入文档的判重标识：同一项目下唯一（NULL 不参与唯一约束，存量文档不受影响）
+@Index(['projectId', 'fileName'], { unique: true })
 export class Document {
   @PrimaryGeneratedColumn()
   id: number;
 
   @Column({ length: 200 })
   title: string;
+
+  /** AI 写入文档的唯一标识（如 'deploy-guide.md'），项目内唯一；飞书导入/手工创建的文档为 null */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  fileName: string | null;
 
   @Column({ type: 'enum', enum: DocumentType })
   type: DocumentType;

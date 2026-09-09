@@ -1,6 +1,6 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、查看系统设置与更新脚本仓库
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、查看系统设置与更新脚本仓库
 version: 1.3.0
 author: Lita R&D Team
 tags:
@@ -19,7 +19,7 @@ tags:
 
 1. 按项目名称模糊搜索项目
 2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及检查/用例/导出/任务的清单、运行命令、最近运行结果与运行记录
-3. 读取文档 Markdown 正文
+3. 读取文档 Markdown 正文；写入/更新项目文档（按 fileName upsert）
 4. 运行检查/用例/导出/任务，流式读取脚本输出与结果（导出运行详情含产物文件下载链接）
 5. 获取平台设置信息、更新脚本仓库
 
@@ -77,6 +77,21 @@ GET /api/resources/{id}.md
 
 返回资源元信息（标题 / 类型 / 状态 / 链接 / 前缀 / 绑定文档 / 描述 / 更新时间）+ 正文：配置类型=绑定文档的 Markdown 内容（亦可经 `/api/documents/{documentId}.md` 直接读文档）；多语言=已同步的文案 Markdown 表格缓存（未同步时提示先调 `POST /api/resources/{id}/sync`，同步按前缀拉取 Lita word/sheet 接口）；其它=描述。资源类型枚举：配置/多语言/文件资源/UI/其它（UI=蓝湖地址，仅存链接；文件资源/其它 暂未开放创建）；多语言以前缀 `{SHEET}$NAMESPACE` 标识（SHEET=Activity/Frontend/FE/Backend，省略默认 Activity）；状态枚举：缺失/草稿/确认/废弃（废弃为软删除，列表默认隐藏；无凭据[URL/多语言前缀]时状态只能为 缺失/废弃）。
 
+### 3.2 写入项目文档（upsert）
+
+```
+POST /api/documents/upsert.md
+Content-Type: application/json
+
+{"projectId": 123, "fileName": "deploy-guide.md", "title": "部署指引", "type": "技术", "content": "# 正文 Markdown", "description": "可选描述"}
+```
+
+- 按 `(projectId, fileName)` 判重：**`fileName` 是稳定唯一标识**（同一项目下唯一），与展示用 `title` 解耦——同一 fileName 重复调用即更新，不会新建
+- 已存在 → 覆盖正文（`title`/`type`/`description` 提供了才更新，不填保持原样）；不存在 → 新建（`title` 缺省取 fileName、`type` 缺省"技术"）
+- `type` 可选：需求/功能/测试/技术/接口/配置
+- 响应为 text/markdown：创建/更新结果 + 文档 ID + 阅读地址 `GET /api/documents/{docId}.md`
+- 若 fileName 命中飞书导入的文档会返回 403（飞书文档只能从源同步更新）
+
 ### 4. 运行检查 / 用例 / 导出 / 任务（流式）
 
 ```bash
@@ -126,4 +141,4 @@ GET /api/resources[?projectId=&includeDeleted=]  # 资源列表（不含多语�
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）

@@ -54,6 +54,8 @@ export interface ProjectDocument {
   title: string
   type: string
   source: string
+  /** AI 写入文档的判重标识，项目内唯一（飞书/手工创建的文档为 null） */
+  fileName?: string | null
   feishuUrl: string | null
   description: string | null
   remark: string | null

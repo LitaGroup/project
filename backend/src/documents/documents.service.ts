@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -18,6 +19,7 @@ export const DOCUMENT_LIST_SELECT: FindOptionsSelect<Document> = {
   title: true,
   type: true,
   source: true,
+  fileName: true,
   description: true,
   remark: true,
   feishuUrl: true,
@@ -109,6 +111,60 @@ export class DocumentsService {
       entity.description = input.description || null;
     }
     return this.documents.save(entity);
+  }
+
+  /**
+   * AI 文档 upsert（POST /api/documents/upsert.md）：按 (projectId, fileName) 判重。
+   * 已存在 → 更新正文（title/type/description 提供了才更新）；不存在 → 新建（source 为 '-'）。
+   * 命中飞书导入的文档时拒绝写入（飞书文档只允许源同步更新）。
+   */
+  async upsert(input: {
+    projectId: number;
+    fileName: string;
+    title?: string;
+    type?: DocumentType;
+    content: string;
+    description?: string;
+  }): Promise<{ doc: Document; created: boolean }> {
+    const fileName = input.fileName?.trim();
+    if (!fileName) throw new BadRequestException('fileName 不能为空');
+    if (
+      input.type !== undefined &&
+      !Object.values(DocumentType).includes(input.type)
+    ) {
+      throw new BadRequestException(
+        `非法文档类型：${input.type}（可选：${Object.values(DocumentType).join('/')}）`,
+      );
+    }
+    const existing = await this.documents.findOne({
+      where: { projectId: input.projectId, fileName },
+    });
+    if (existing) {
+      if (existing.source === DocumentSource.FEISHU) {
+        throw new ForbiddenException(
+          '飞书导入的文档不允许本地修改，请使用更新同步',
+        );
+      }
+      if (input.title !== undefined) existing.title = input.title;
+      if (input.type !== undefined) existing.type = input.type;
+      if (input.description !== undefined) {
+        existing.description = input.description || null;
+      }
+      existing.content = input.content;
+      return { doc: await this.documents.save(existing), created: false };
+    }
+    const doc = await this.documents.save(
+      this.documents.create({
+        projectId: input.projectId,
+        fileName,
+        title: input.title?.trim() || fileName,
+        type: input.type ?? DocumentType.TECH,
+        source: DocumentSource.MARKDOWN,
+        content: input.content,
+        description: input.description || null,
+      }),
+    );
+    return { doc, created: true };
   }
 
   /** 本地修改正文：仅允许 Markdown 编写的文档；飞书导入的文档只允许源同步更新 */

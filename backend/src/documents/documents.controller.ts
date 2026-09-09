@@ -30,6 +30,19 @@ class SyncFeishuDocumentDto {
   description?: string;
 }
 
+class UpsertDocumentDto {
+  projectId: number;
+  /** AI 写入文档的判重标识，项目内唯一（如 'deploy-guide.md'） */
+  fileName: string;
+  /** 展示标题；新建时不填默认取 fileName，更新时不填保持原样 */
+  title?: string;
+  /** 新建时不填默认"技术"，更新时不填保持原样 */
+  type?: DocumentType;
+  content: string;
+  /** 文档描述，可不填（更新时不填保持原样） */
+  description?: string;
+}
+
 @Controller('documents')
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
@@ -63,6 +76,27 @@ export class DocumentsController {
   @Post('sync-feishu')
   syncFromFeishu(@Body() dto: SyncFeishuDocumentDto): Promise<Document> {
     return this.documentsService.syncFromFeishu(dto);
+  }
+
+  /**
+   * AI 文档 upsert：按 (projectId, fileName) 判重，存在则更新正文、不存在则新建。
+   * text/markdown 返回结果（含文档阅读地址）。
+   */
+  @Post('upsert.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async upsert(@Body() dto: UpsertDocumentDto): Promise<string> {
+    const { doc, created } = await this.documentsService.upsert(dto);
+    return [
+      `# 文档已${created ? '创建' : '更新'}`,
+      '',
+      `- ID：${doc.id}`,
+      `- 项目：${doc.projectId}`,
+      `- fileName：${doc.fileName}`,
+      `- 标题：${doc.title}`,
+      `- 类型：${doc.type}`,
+      `- 阅读地址：GET /api/documents/${doc.id}.md`,
+      '',
+    ].join('\n');
   }
 
   @Patch(':id/content')
