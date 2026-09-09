@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as path from 'path';
 import { FindOptionsWhere, Like, Not, Repository } from 'typeorm';
 import {
+  MilestoneAchieved,
   ProjectStatus,
   ProjectType,
   ResourceType,
@@ -32,6 +33,8 @@ import {
   ResourcesService,
 } from '../resources/resources.service';
 import { Resource } from '../resources/resource.entity';
+import { MilestonesService } from '../milestones/milestones.service';
+import { deriveMilestoneStatus } from '../milestones/milestones.service';
 import { AppVersionsService } from '../app-versions/app-versions.service';
 import { runSummaryLine, RunDetailLike } from '../common/run-markdown';
 import { Project } from './project.entity';
@@ -94,6 +97,7 @@ export class ProjectsService {
     private readonly tasksService: TasksService,
     private readonly defectsService: DefectsService,
     private readonly resourcesService: ResourcesService,
+    private readonly milestonesService: MilestonesService,
     private readonly appVersionsService: AppVersionsService,
   ) {}
 
@@ -147,7 +151,7 @@ export class ProjectsService {
   }
 
   /**
-   * 项目 + 关联（文档/检查/测试/导出/任务/缺陷/资源）。
+   * 项目 + 关联（文档/检查/测试/导出/任务/缺陷/资源/节点）。
    * 不用 relations 巨型 LEFT JOIN：测试 RDS 上该 JOIN 要 ~2.5s，
    * 拆成并行小查询仅 ~250ms（见 AGENTS.md 工作约定）。
    */
@@ -155,30 +159,40 @@ export class ProjectsService {
     const project = await this.projects.findOne({ where: { id } });
     if (!project) throw new NotFoundException(`Project ${id} not found`);
     const { manager } = this.projects;
-    const [documents, checks, tests, exportList, tasks, defects, resources] =
-      await Promise.all([
-        // 文档列表不取 longtext 正文（列表展示只需元信息）
-        manager.find(Document, {
-          where: { projectId: id },
-          select: DOCUMENT_LIST_SELECT,
-        }),
-        manager.find(Check, { where: { projectId: id } }),
-        manager.find(Test, { where: { projectId: id } }),
-        manager.find(Export, { where: { projectId: id } }),
-        manager.find(Task, { where: { projectId: id } }),
-        // 缺陷列表不取 description/images（详情经 GET /defects/:id 单独加载）
-        manager.find(Defect, {
-          where: { projectId: id },
-          select: DEFECT_LIST_SELECT,
-          order: { updatedAt: 'DESC' },
-        }),
-        // 资源不取多语言缓存正文，且隐藏软删除（详情经 GET /resources/:id 单独加载）
-        manager.find(Resource, {
-          where: { projectId: id, status: Not(ResourceStatus.DISCARDED) },
-          select: RESOURCE_LIST_SELECT,
-          order: { updatedAt: 'DESC' },
-        }),
-      ]);
+    const [
+      documents,
+      checks,
+      tests,
+      exportList,
+      tasks,
+      defects,
+      resources,
+      milestones,
+    ] = await Promise.all([
+      // 文档列表不取 longtext 正文（列表展示只需元信息）
+      manager.find(Document, {
+        where: { projectId: id },
+        select: DOCUMENT_LIST_SELECT,
+      }),
+      manager.find(Check, { where: { projectId: id } }),
+      manager.find(Test, { where: { projectId: id } }),
+      manager.find(Export, { where: { projectId: id } }),
+      manager.find(Task, { where: { projectId: id } }),
+      // 缺陷列表不取 description/images（详情经 GET /defects/:id 单独加载）
+      manager.find(Defect, {
+        where: { projectId: id },
+        select: DEFECT_LIST_SELECT,
+        order: { updatedAt: 'DESC' },
+      }),
+      // 资源不取多语言缓存正文，且隐藏软删除（详情经 GET /resources/:id 单独加载）
+      manager.find(Resource, {
+        where: { projectId: id, status: Not(ResourceStatus.DISCARDED) },
+        select: RESOURCE_LIST_SELECT,
+        order: { updatedAt: 'DESC' },
+      }),
+      // 节点按日期升序，状态由服务层推导
+      this.milestonesService.findByProject(id),
+    ]);
     project.documents = documents;
     project.checks = checks;
     project.tests = tests;
@@ -186,6 +200,7 @@ export class ProjectsService {
     project.tasks = tasks;
     project.defects = defects;
     project.projectResources = resources;
+    project.milestones = milestones;
     // 检查/测试/导出按编号自然排序
     project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
     project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
@@ -363,6 +378,18 @@ export class ProjectsService {
       if (r.description) parts.push(r.description);
       return `- ${parts.join(' — ')}`;
     });
+    const milestoneLines = project.milestones.map((m) => {
+      // findOne 经 MilestonesService 查询已附带推导状态，此处重新推导以满足实体类型
+      const status = deriveMilestoneStatus(m);
+      const parts = [`**${status}** ${m.date} — ${m.content}（id：${m.id}）`];
+      if (m.achieved === MilestoneAchieved.YES && m.achievedAt) {
+        parts.push(`实际达成：${m.achievedAt}`);
+      }
+      if (m.deliverer) parts.push(`交付人：${m.deliverer}`);
+      if (m.acceptor) parts.push(`验收人：${m.acceptor}`);
+      if (m.remark) parts.push(`备注：${m.remark}`);
+      return `- ${parts.join(' — ')}`;
+    });
 
     return [
       `# ${project.name}`,
@@ -380,6 +407,10 @@ export class ProjectsService {
       `## 资源（${project.projectResources.length}）`,
       '',
       ...(resourceLines.length > 0 ? resourceLines : ['（暂无）']),
+      '',
+      `## 节点（${project.milestones.length}）`,
+      '',
+      ...(milestoneLines.length > 0 ? milestoneLines : ['（暂无）']),
       '',
       `## 检查（${project.checks.length}）`,
       '',
@@ -443,6 +474,14 @@ export class ProjectsService {
       '```bash',
       "curl -X POST /api/defects/sync -H 'Content-Type: application/json' -d '{\"projectId\": {id}}'  # 从飞书全量同步（覆盖本地）",
       'curl -X PATCH /api/defects/{defectId} -H \'Content-Type: application/json\' -d \'{"status": "fixed"}\'  # 改状态（异步回写飞书；有测试脚本时须先验证通过）',
+      '```',
+      '',
+      '节点（某个时间点需完成的事项；状态由 达成+实际达成日期+日期 推导：准备中/提前达成/达成/延期/取消）：',
+      '',
+      '```bash',
+      `curl '/api/milestones?projectId=${project.id}'  # 节点列表（按日期升序，附推导状态）`,
+      `curl -X POST /api/milestones -H 'Content-Type: application/json' -d '{"projectId": ${project.id}, "date": "2026-10-01", "content": "完成联调", "deliverer": "张三", "acceptor": "李四"}'  # 新建（deliverer/acceptor 可空）`,
+      'curl -X PATCH /api/milestones/{milestoneId} -H \'Content-Type: application/json\' -d \'{"achieved": "yes"}\'  # 研发验收后标记达成（自动记录北京时间当天为实际达成日期）；no 撤销、cancel 取消节点',
       '```',
       '',
     ].join('\n');
@@ -580,6 +619,7 @@ export class ProjectsService {
     await this.defectsService.removeByProject(project.id);
     // 资源仅摘除登记，不级联删除绑定的文档（文档可独立存在）
     await this.resourcesService.removeByProject(project.id);
+    await this.milestonesService.removeByProject(project.id);
     // 任务先于检查清理（任务依赖检查脚本；检查删除时也会再兜底清理）
     await this.tasksService.removeByProject(project.id);
     await this.checksService.removeByProject(project.id);

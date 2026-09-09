@@ -16,6 +16,7 @@ import { Export } from '../exports/export.entity';
 import { Document } from '../documents/document.entity';
 import { Defect } from '../defects/defect.entity';
 import { Resource } from '../resources/resource.entity';
+import { Milestone } from '../milestones/milestone.entity';
 
 @Entity('projects')
 export class Project {
@@ -90,6 +91,10 @@ export class Project {
   /** 资源（需求方提供的素材/信息）。命名避开上方人员 resources 列 */
   @OneToMany(() => Resource, (resource) => resource.project)
   projectResources: Resource[];
+
+  /** 节点：项目在某个时间点需要完成的事项（状态由服务层推导，不落库） */
+  @OneToMany(() => Milestone, (milestone) => milestone.project)
+  milestones: Milestone[];
 
   /** 列表按创建时间倒序展示，建索引避免全表 filesort */
   @Index('IDX_projects_createdAt')

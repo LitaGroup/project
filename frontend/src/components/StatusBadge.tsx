@@ -46,3 +46,21 @@ export function ResourceStatusBadge({ status }: { status: string }) {
     <Badge variant={resourceVariantByStatus[status] ?? 'soft'}>{status}</Badge>
   )
 }
+
+/** 节点状态 → Badge variant：准备中蓝 / 提前达成、达成绿 / 延期红 / 取消淡（未知兜底 soft） */
+const milestoneVariantByStatus: Record<
+  string,
+  'info' | 'success' | 'error' | 'soft'
+> = {
+  准备中: 'info',
+  提前达成: 'success',
+  达成: 'success',
+  延期: 'error',
+  取消: 'soft',
+}
+
+export function MilestoneStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={milestoneVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+  )
+}

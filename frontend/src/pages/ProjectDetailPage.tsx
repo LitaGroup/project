@@ -57,12 +57,15 @@ import { Switch } from '@appica/ui-react/switch'
 import {
   api,
   DOCUMENT_TYPES,
+  MILESTONE_ACHIEVED,
   PROJECT_STATUSES,
   PROJECT_TYPES,
   RESOURCE_STATUSES,
   RESOURCE_TYPE_OPTIONS,
   type Defect,
   type DocumentType,
+  type Milestone,
+  type MilestoneAchieved,
   type Project,
   type ProjectCheck,
   type ProjectDocument,
@@ -75,6 +78,7 @@ import {
 } from '../lib/api'
 import {
   DefectStatusBadge,
+  MilestoneStatusBadge,
   ResourceStatusBadge,
   StatusBadge,
 } from '../components/StatusBadge'
@@ -140,6 +144,22 @@ export function ProjectDetailPage() {
             </div>
           </div>
           <ResourcesPanel project={project} onChanged={reload} />
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">节点</h2>
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/milestones?projectId=${project.id}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                查看全部
+              </Link>
+              <MilestoneFormDialog projectId={project.id} onSaved={reload} />
+            </div>
+          </div>
+          <MilestonesPanel project={project} onChanged={reload} />
         </section>
 
         <section>
@@ -3167,6 +3187,322 @@ function DeleteResourceButton({
           <AlertDialogTitle>删除资源</AlertDialogTitle>
           <AlertDialogDescription>
             确定永久删除资源「{resource.title}」吗？不影响绑定的文档；若只想隐藏，可把状态改为「废弃」（软删除）。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </AlertDialogClose>
+          <AlertDialogClose>
+            <Button variant="destructive" onClick={onDeleted}>
+              确认删除
+            </Button>
+          </AlertDialogClose>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/** 节点达成标记 → 展示文案（value 与文案不一致，Select 需传 items 映射） */
+const ACHIEVED_LABELS: Record<MilestoneAchieved, string> = {
+  no: '未达成',
+  yes: '已达成（研发验收）',
+  cancel: '取消',
+}
+
+/** 节点板块：某个时间点需完成的事项（日期=北京时间当日 23:59:59 前）；状态由后端推导 */
+function MilestonesPanel({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const allMilestones = project.milestones ?? []
+  const milestones = allMilestones.slice(0, 10)
+  const [error, setError] = useState<string | null>(null)
+
+  const markAchieved = (m: Milestone, achieved: MilestoneAchieved) => {
+    setError(null)
+    api
+      .updateMilestone(m.id, { achieved })
+      .then(onChanged)
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <>
+      {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-28">日期</TableHead>
+            <TableHead>内容</TableHead>
+            <TableHead className="w-24 text-center">状态</TableHead>
+            <TableHead className="w-28 text-center">达成日期</TableHead>
+            <TableHead className="w-24">交付人</TableHead>
+            <TableHead className="w-24">验收人</TableHead>
+            <TableHead className="w-56 text-center">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {milestones.map((m) => (
+            <TableRow key={m.id}>
+              <TableCell>{m.date}</TableCell>
+              <TableCell
+                className="max-w-md truncate"
+                title={m.remark ? `${m.content}\n备注：${m.remark}` : m.content}
+              >
+                {m.content}
+              </TableCell>
+              <TableCell className="text-center">
+                <MilestoneStatusBadge status={m.status} />
+              </TableCell>
+              <TableCell className="text-center">
+                {m.achieved === 'yes' ? (m.achievedAt ?? '—') : '—'}
+              </TableCell>
+              <TableCell className="max-w-24 truncate" title={m.deliverer ?? ''}>
+                {m.deliverer ?? '—'}
+              </TableCell>
+              <TableCell className="max-w-24 truncate" title={m.acceptor ?? ''}>
+                {m.acceptor ?? '—'}
+              </TableCell>
+              <TableCell className="text-center">
+                <div className="flex justify-center gap-2">
+                  {m.achieved === 'no' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      title="研发验收后标记达成（自动记录今天为实际达成日期）"
+                      onClick={() => markAchieved(m, 'yes')}
+                    >
+                      验收达成
+                    </Button>
+                  )}
+                  {m.achieved === 'yes' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      title="撤销达成标记（清除实际达成日期）"
+                      onClick={() => markAchieved(m, 'no')}
+                    >
+                      撤销达成
+                    </Button>
+                  )}
+                  <MilestoneFormDialog
+                    projectId={project.id}
+                    milestone={m}
+                    onSaved={onChanged}
+                  />
+                  <DeleteMilestoneButton
+                    milestone={m}
+                    onDeleted={() =>
+                      api
+                        .deleteMilestone(m.id)
+                        .then(onChanged)
+                        .catch((e: Error) => setError(e.message))
+                    }
+                  />
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+          {milestones.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={7}>
+                暂无节点，点击「添加节点」登记时间点事项
+              </TableCell>
+            </TableRow>
+          )}
+          <CountRow
+            colSpan={7}
+            total={allMilestones.length}
+            displayed={milestones.length}
+          />
+        </TableBody>
+      </Table>
+    </>
+  )
+}
+
+/** 新建/编辑节点：日期 + 内容必填；编辑时可改达成标记（yes 即研发验收，自动记录今天为实际达成日期） */
+function MilestoneFormDialog({
+  projectId,
+  milestone,
+  onSaved,
+}: {
+  projectId: number
+  /** 传入则为编辑，否则为新建 */
+  milestone?: Milestone
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [date, setDate] = useState('')
+  const [content, setContent] = useState('')
+  const [achieved, setAchieved] = useState<MilestoneAchieved>('no')
+  const [deliverer, setDeliverer] = useState('')
+  const [acceptor, setAcceptor] = useState('')
+  const [remark, setRemark] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setDate(milestone?.date ?? '')
+      setContent(milestone?.content ?? '')
+      setAchieved(milestone?.achieved ?? 'no')
+      setDeliverer(milestone?.deliverer ?? '')
+      setAcceptor(milestone?.acceptor ?? '')
+      setRemark(milestone?.remark ?? '')
+      setError(null)
+    }
+  }
+
+  const canSave = date.trim() !== '' && content.trim() !== ''
+
+  const submit = () => {
+    setError(null)
+    const saving = milestone
+      ? api.updateMilestone(milestone.id, {
+          date,
+          content,
+          achieved,
+          deliverer,
+          acceptor,
+          remark,
+        })
+      : api.createMilestone({
+          projectId,
+          date,
+          content,
+          deliverer: deliverer.trim() || undefined,
+          acceptor: acceptor.trim() || undefined,
+          remark: remark.trim() || undefined,
+        })
+    saving
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        {milestone ? (
+          <Button variant="outline" size="sm">
+            编辑
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">添加节点</Button>
+        )}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{milestone ? '编辑节点' : '添加节点'}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-sm">
+              日期（北京时间当日 23:59:59 前需完成）
+              <Input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              内容（该节点要完成的事项）
+              <Textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="如 完成前后端联调"
+                rows={3}
+              />
+            </label>
+            {milestone && (
+              <label className="flex flex-col gap-1 text-sm">
+                达成（是否达成需研发验收后才能判定：标记「已达成」自动记录今天为实际达成日期）
+                <Select
+                  value={achieved}
+                  onValueChange={(v) => setAchieved(v as MilestoneAchieved)}
+                  items={ACHIEVED_LABELS}
+                >
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MILESTONE_ACHIEVED.map((a) => (
+                      <SelectItem key={a} value={a}>
+                        {ACHIEVED_LABELS[a]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+            )}
+            <div className="flex gap-4">
+              <label className="flex flex-1 flex-col gap-1 text-sm">
+                交付人（选填）
+                <Input
+                  value={deliverer}
+                  onChange={(e) => setDeliverer(e.target.value)}
+                />
+              </label>
+              <label className="flex flex-1 flex-col gap-1 text-sm">
+                验收人（选填）
+                <Input
+                  value={acceptor}
+                  onChange={(e) => setAcceptor(e.target.value)}
+                />
+              </label>
+            </div>
+            <label className="flex flex-col gap-1 text-sm">
+              备注（选填）
+              <Textarea
+                value={remark}
+                onChange={(e) => setRemark(e.target.value)}
+                rows={2}
+              />
+            </label>
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button size="sm" onClick={submit} disabled={!canSave}>
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 删除节点 */
+function DeleteMilestoneButton({
+  milestone,
+  onDeleted,
+}: {
+  milestone: Milestone
+  onDeleted: () => void
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger>
+        <Button variant="outline" size="sm">
+          删除
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除节点</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除节点「{milestone.date} {milestone.content}」吗？
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

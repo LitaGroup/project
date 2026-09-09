@@ -8,6 +8,7 @@ import { TestsModule } from '../tests/tests.module';
 import { ExportsModule } from '../exports/exports.module';
 import { DefectsModule } from '../defects/defects.module';
 import { ResourcesModule } from '../resources/resources.module';
+import { MilestonesModule } from '../milestones/milestones.module';
 import { FeishuModule } from '../feishu/feishu.module';
 import { Project } from './project.entity';
 import { ProjectSyncService } from './project-sync.service';
@@ -25,6 +26,7 @@ import { SyncState } from './sync-state.entity';
     ExportsModule,
     DefectsModule,
     ResourcesModule,
+    MilestonesModule,
     AppVersionsModule,
     FeishuModule,
   ],

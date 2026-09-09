@@ -49,6 +49,42 @@ export const RESOURCE_TYPE_OPTIONS = RESOURCE_TYPES.filter(
 export const RESOURCE_STATUSES = ['缺失', '草稿', '确认', '废弃'] as const
 export type ResourceStatus = (typeof RESOURCE_STATUSES)[number]
 
+/** 与后端 MilestoneAchieved 对应：no（默认）/yes/cancel；yes 须研发验收后标记 */
+export const MILESTONE_ACHIEVED = ['no', 'yes', 'cancel'] as const
+export type MilestoneAchieved = (typeof MILESTONE_ACHIEVED)[number]
+
+/** 与后端 MilestoneStatus 对应（推导状态，不落库） */
+export const MILESTONE_STATUSES = [
+  '准备中',
+  '提前达成',
+  '达成',
+  '延期',
+  '取消',
+] as const
+export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number]
+
+/** 节点：项目在某个时间点需要完成的事项（日期=北京时间当日 23:59:59 前）；状态由后端推导 */
+export interface Milestone {
+  id: number
+  projectId: number
+  /** 应完成日期（YYYY-MM-DD） */
+  date: string
+  /** 达成标记：no（默认）/yes/cancel */
+  achieved: MilestoneAchieved
+  /** 实际达成日期（标记 yes 时自动取北京时间当天；no/cancel 为 null） */
+  achievedAt: string | null
+  /** 推导状态：准备中/提前达成/达成/延期/取消 */
+  status: MilestoneStatus
+  /** 内容：该节点要完成的事项 */
+  content: string
+  remark: string | null
+  /** 交付人（可空） */
+  deliverer: string | null
+  /** 验收人（可空） */
+  acceptor: string | null
+  updatedAt: string
+}
+
 export interface ProjectDocument {
   id: number
   title: string
@@ -258,6 +294,8 @@ export interface Project {
   defects?: Defect[]
   /** 资源列表（不含多语言缓存正文、隐藏软删除；键名避开上方人员 resources） */
   projectResources?: ProjectResource[]
+  /** 节点列表（按日期升序，含推导状态） */
+  milestones?: Milestone[]
   createdAt: string
   updatedAt: string
 }
@@ -844,4 +882,40 @@ export const api = {
   /** 硬删除（永久移除；软删除走 updateResource status=废弃） */
   deleteResource: (id: number) =>
     request<void>(`/resources/${id}`, { method: 'DELETE' }),
+  /** 节点列表：传 projectId 按项目过滤，不传返回全部（全局列表页用）。按日期升序，附推导状态 */
+  listMilestones: (projectId?: number) =>
+    request<Milestone[]>(
+      `/milestones${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
+  createMilestone: (input: {
+    projectId: number
+    /** 应完成日期（YYYY-MM-DD，北京时间当日 23:59:59 前） */
+    date: string
+    content: string
+    remark?: string
+    deliverer?: string
+    acceptor?: string
+  }) =>
+    request<Milestone>('/milestones', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 更新节点；achieved=yes 即研发验收（自动记录北京时间当天为实际达成日期），no 撤销、cancel 取消节点 */
+  updateMilestone: (
+    id: number,
+    input: Partial<{
+      date: string
+      content: string
+      remark: string
+      deliverer: string
+      acceptor: string
+      achieved: MilestoneAchieved
+    }>,
+  ) =>
+    request<Milestone>(`/milestones/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteMilestone: (id: number) =>
+    request<void>(`/milestones/${id}`, { method: 'DELETE' }),
 }

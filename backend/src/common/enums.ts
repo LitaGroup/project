@@ -98,3 +98,26 @@ export enum ResourceStatus {
   CONFIRMED = '确认',
   DISCARDED = '废弃',
 }
+
+/**
+ * 节点达成标记：no（默认）/yes/cancel。
+ * yes 须研发验收后标记（标记时自动记录北京时间当天为实际达成日期）。
+ */
+export enum MilestoneAchieved {
+  NO = 'no',
+  YES = 'yes',
+  CANCEL = 'cancel',
+}
+
+/**
+ * 节点状态（不落库，由 达成 + 实际达成日期 + 日期 推导）：
+ * cancel → 取消；yes → 达成日期早于日期1天以上=提前达成 / 等于日期=达成 / 晚于日期=延期；
+ * no → 今天（北京）超过日期=延期，否则=准备中。
+ */
+export enum MilestoneStatus {
+  PREPARING = '准备中',
+  EARLY = '提前达成',
+  ACHIEVED = '达成',
+  DELAYED = '延期',
+  CANCELLED = '取消',
+}

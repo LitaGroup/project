@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、查看系统设置与更新脚本仓库
-version: 1.3.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、登记与验收节点、查看系统设置与更新脚本仓库
+version: 1.4.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -18,10 +18,11 @@ tags:
 对接项目管理平台（以 AI 为中心的项目管理与脚本运行平台），供 Agent 完成以下工作：
 
 1. 按项目名称模糊搜索项目
-2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及检查/用例/导出/任务的清单、运行命令、最近运行结果与运行记录
+2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及资源/节点/检查/用例/导出/任务的清单、运行命令、最近运行结果与运行记录
 3. 读取文档 Markdown 正文；写入/更新项目文档（按 fileName upsert）
 4. 运行检查/用例/导出/任务，流式读取脚本输出与结果（导出运行详情含产物文件下载链接）
-5. 获取平台设置信息、更新脚本仓库
+5. 登记项目节点（时间点事项），研发验收后标记达成
+6. 获取平台设置信息、更新脚本仓库
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`。
 
@@ -53,6 +54,7 @@ GET /api/projects/{id}.md
 - 描述正文
 - 文档清单：类型 + 标题 + 链接 `GET /api/documents/{docId}.md`（该链接即文档正文）
 - 资源清单（需求方提供的素材/信息，已隐藏软删除）：状态 + 标题 + 链接 `GET /api/resources/{id}.md` + 类型 + 来源 URL
+- 节点清单（时间点事项，按日期升序）：推导状态（准备中/提前达成/达成/延期/取消）+ 日期 + 内容 + id + 实际达成日期/交付人/验收人/备注
 - 检查清单：每条含编号、描述、脚本路径、运行命令 `POST /api/checks/{checkId}/run.md`、最近一次运行结果摘要 + 详情链接 `GET /api/checks/runs/{runId}.md`、运行历史地址
 - 用例（测试）清单：结构同检查（base 为 `/api/tests`）
 - 导出清单：结构同检查（base 为 `/api/exports`）；导出运行详情的 Markdown 视图含产物文件下载链接（`/export-files/{exportId}/{runId}/{file}`）
@@ -143,11 +145,27 @@ GET /api/documents[?projectId=]   # 文档列表（不含正文）
 GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运行统计）
 GET /api/defects[?projectId=]     # 缺陷列表
 GET /api/resources[?projectId=&includeDeleted=]  # 资源列表（不含多语言缓存正文；includeDeleted=true 含软删除）
+GET /api/milestones[?projectId=]  # 节点列表（按日期升序，附推导状态）
 ```
+
+### 7. 节点（JSON，非 .md）
+
+节点表示项目在某个时间点需要完成的事项，`date` 指北京时间当日 23:59:59 前：
+
+```bash
+curl -X POST {BASE}/api/milestones -H 'Content-Type: application/json' \
+  -d '{"projectId": 123, "date": "2026-10-01", "content": "完成联调", "deliverer": "张三", "acceptor": "李四"}'  # 新建（deliverer/acceptor/remark 可空）
+curl -X PATCH {BASE}/api/milestones/{milestoneId} -H 'Content-Type: application/json' \
+  -d '{"achieved": "yes"}'   # 研发验收后标记达成：自动记录北京时间当天为实际达成日期；no 撤销达成、cancel 取消节点
+```
+
+- 状态不落库，由 达成标记 + 实际达成日期 + 日期 推导：cancel→取消；yes→达成日期早于日期1天以上=提前达成 / 等于=达成 / 晚于=延期；no→今天超过日期=延期，否则=准备中
+- **是否达成须研发验收后才能标记 yes**（平台不校验操作者，流程上由验收人确认后标记）
+- 更新（改日期/内容/备注/交付人/验收人）走同一个 `PATCH /api/milestones/{id}`；删除 `DELETE /api/milestones/{id}`
 
 ## 工作约定
 
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）、节点登记与验收（milestones）

@@ -17,6 +17,7 @@ const navItems = [
   { to: '/defects', label: '缺陷', ready: true },
   { to: '/documents', label: '文档', ready: true },
   { to: '/resources', label: '资源', ready: true },
+  { to: '/milestones', label: '节点', ready: true },
   { to: '/scripts', label: '脚本', ready: true },
   { to: '/tasks', label: '任务', ready: true },
   { to: '/apps', label: 'APP', ready: true },
