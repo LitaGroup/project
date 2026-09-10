@@ -19,6 +19,7 @@ import { MilestonesModule } from './milestones/milestones.module';
 import { FeishuModule } from './feishu/feishu.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { SettingsModule } from './settings/settings.module';
+import { ImagesModule } from './images/images.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { SettingsModule } from './settings/settings.module';
     ScriptsModule,
     FeishuModule,
     SettingsModule,
+    ImagesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

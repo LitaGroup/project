@@ -21,9 +21,10 @@ import {
   SelectContent,
   SelectItem,
 } from '@appica/ui-react/select'
-import { api, type AppVersion, type TestRun, type ProjectTest } from '../lib/api'
+import { api, type AppVersion, type Project, type TestRun, type ProjectTest } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { Terminal } from '../components/Terminal'
+import { NewDefectDialog } from '../components/NewDefectDialog'
 
 const runStatusMeta: Record<
   TestRun['status'],
@@ -161,6 +162,8 @@ export function TestRunPage() {
   const run = selectedRunId !== null && runData?.id === selectedRunId ? runData : null
   const progress =
     run && run.total ? Math.round((run.current / run.total) * 100) : null
+  // 失败项：可一键生成缺陷（来源=脚本，预填步骤/预期/实际）
+  const failedItems = (run?.items ?? []).filter((i) => i.status === 'fail')
 
   return (
     <div className="flex h-full gap-6">
@@ -273,6 +276,61 @@ export function TestRunPage() {
             <p className="px-6 pb-6 text-sm">暂无运行记录</p>
           )}
         </Card>
+
+        {failedItems.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>失败项（{failedItems.length}）</CardTitle>
+            </CardHeader>
+            <div className="flex flex-col gap-2 px-6 pb-6">
+              {failedItems.map((item, idx) => {
+                const steps = [
+                  item.title ? `**步骤**：${item.title}` : null,
+                  item.expect ? `**预期**：${item.expect}` : null,
+                  item.real ? `**实际**：${item.real}` : null,
+                  item.message ? `**信息**：${item.message}` : null,
+                ]
+                  .filter(Boolean)
+                  .join('\n\n')
+                const defectProject = {
+                  id: projectId,
+                  name: projectName ?? `#${projectId}`,
+                } as Project
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between gap-2 text-sm"
+                  >
+                    <span
+                      className="min-w-0 flex-1 truncate"
+                      title={item.title ?? item.message ?? ''}
+                    >
+                      {item.no !== undefined ? `${item.no}. ` : ''}
+                      {item.title ?? item.message ?? '失败项'}
+                    </span>
+                    <NewDefectDialog
+                      projects={[defectProject]}
+                      preset={{
+                        projectId,
+                        testScript: test?.scriptPath,
+                        title: item.title ?? test?.code ?? '用例失败',
+                        steps,
+                        expected: item.expect,
+                        actual: item.real,
+                        source: '脚本',
+                      }}
+                      trigger={
+                        <Button variant="outline" size="sm">
+                          生成缺陷
+                        </Button>
+                      }
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

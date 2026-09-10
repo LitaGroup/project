@@ -18,27 +18,70 @@ class SyncDefectsDto {
   projectId: number;
 }
 
+class CreateDefectDto {
+  /** 所属项目 */
+  projectId: number;
+  /** 简述（标题） */
+  title: string;
+  /** 来源：脚本/录入（飞书来源只能由同步产生），缺省录入 */
+  source?: string;
+  /** 端：前端/后端/APP端/未知（默认） */
+  platform?: string;
+  /** 操作步骤与关键信息（Markdown，截图以 /images/... 链接内嵌） */
+  steps?: string;
+  /** 预期结果 */
+  expected?: string;
+  /** 实际结果 */
+  actual?: string;
+  /** 测试脚本：相对脚本根目录的 .test.ts 路径 */
+  testScript?: string;
+  /** 开发 */
+  developer?: string;
+  /** 测试 */
+  tester?: string;
+  /** 备注 */
+  remark?: string;
+}
+
 class UpdateDefectDto {
+  /** 简述（标题） */
+  title?: string;
   /** 端：前端/后端/APP端/未知（默认），空串或非规范值归为"未知" */
   platform?: string;
-  /** 状态：open/reopen/fixed/closed/invalid；改 fixed 的规则见 defects.service */
+  /** 状态：开放/修复/关闭；改"修复"的规则见 defects.service */
   status?: string;
   /** 测试脚本：相对脚本根目录的 .test.ts 路径，空串清除 */
   testScript?: string;
   /** 备注 */
   remark?: string;
+  /** 操作步骤与关键信息（Markdown） */
+  steps?: string;
+  /** 预期结果 */
+  expected?: string;
+  /** 实际结果 */
+  actual?: string;
+  /** 开发 */
+  developer?: string;
+  /** 测试 */
+  tester?: string;
 }
 
 @Controller('defects')
 export class DefectsController {
   constructor(private readonly defectsService: DefectsService) {}
 
-  /** 缺陷列表：传 projectId 按项目过滤，不传返回全部（全局列表页用）。不含 description/images */
+  /** 缺陷列表：传 projectId 按项目过滤，不传返回全部（全局列表页用）。不含大字段 */
   @Get()
   findByProject(@Query('projectId') projectId?: string): Promise<Defect[]> {
     return this.defectsService.findByProject(
       projectId === undefined ? undefined : Number(projectId),
     );
+  }
+
+  /** 人工/脚本一键生成缺陷（来源为录入或脚本） */
+  @Post()
+  create(@Body() dto: CreateDefectDto): Promise<Defect> {
+    return this.defectsService.create(dto);
   }
 
   /** 从项目绑定的飞书多维表格全量同步缺陷（直接覆盖本地飞书侧字段） */
@@ -52,7 +95,7 @@ export class DefectsController {
     return this.defectsService.findOne(id);
   }
 
-  /** 更新缺陷（端/状态/测试脚本/备注）；状态或端变更后异步回写飞书 */
+  /** 更新缺陷（端/状态/测试脚本/备注/正文与人员字段）；状态或端变更后异步回写飞书 */
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,

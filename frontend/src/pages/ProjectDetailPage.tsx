@@ -78,12 +78,14 @@ import {
 } from '../lib/api'
 import {
   DefectStatusBadge,
+  DefectSourceBadge,
   MilestoneStatusBadge,
   ResourceStatusBadge,
   StatusBadge,
 } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { RunStats } from '../components/RunStats'
+import { NewDefectDialog } from '../components/NewDefectDialog'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -2529,7 +2531,7 @@ function DefectsPanel({
   project: Project
   onChanged: () => void
 }) {
-  const [quickFilter, setQuickFilter] = useState<'all' | 'pending' | 'fixed'>(
+  const [quickFilter, setQuickFilter] = useState<'all' | 'open' | 'fixed'>(
     'all',
   )
   const [error, setError] = useState<string | null>(null)
@@ -2538,9 +2540,7 @@ function DefectsPanel({
     quickFilter === 'all'
       ? allDefects
       : allDefects.filter((d) =>
-          quickFilter === 'pending'
-            ? d.status === 'open' || d.status === 'reopen'
-            : d.status === 'fixed',
+          quickFilter === 'open' ? d.status === '开放' : d.status === '修复',
         )
   const defects = filteredDefects.slice(0, 10)
   return (
@@ -2548,17 +2548,17 @@ function DefectsPanel({
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-xl font-semibold">缺陷</h2>
-          {/* 快速筛选：未选中=对应语义浅色（open/reopen=warning、fixed=success），选中=深色背景浅色字体；再次点击当前项恢复全部 */}
+          {/* 快速筛选：未选中=对应语义浅色（开放=warning、修复=success），选中=深色背景浅色字体；再次点击当前项恢复全部 */}
           <FilterPill
-            label="open/reopen"
+            label="开放"
             tone="warning"
-            active={quickFilter === 'pending'}
+            active={quickFilter === 'open'}
             onClick={() =>
-              setQuickFilter((v) => (v === 'pending' ? 'all' : 'pending'))
+              setQuickFilter((v) => (v === 'open' ? 'all' : 'open'))
             }
           />
           <FilterPill
-            label="fixed"
+            label="修复"
             tone="success"
             active={quickFilter === 'fixed'}
             onClick={() =>
@@ -2573,6 +2573,11 @@ function DefectsPanel({
           >
             查看全部
           </Link>
+          <NewDefectDialog
+            projects={[project]}
+            preset={{ projectId: project.id }}
+            onCreated={onChanged}
+          />
           <SyncDefectsButton project={project} onSynced={onChanged} />
         </div>
       </div>
@@ -2583,7 +2588,8 @@ function DefectsPanel({
             <TableHead>问题描述</TableHead>
             <TableHead className="w-24 text-center">端</TableHead>
             <TableHead className="w-24 text-center">状态</TableHead>
-            <TableHead className="w-32">人员</TableHead>
+            <TableHead className="w-36">人员</TableHead>
+            <TableHead className="w-20 text-center">来源</TableHead>
             <TableHead className="w-24 text-center">操作</TableHead>
           </TableRow>
         </TableHeader>
@@ -2602,8 +2608,13 @@ function DefectsPanel({
               <TableCell className="text-center">
                 <DefectStatusBadge status={d.status} />
               </TableCell>
-              <TableCell className="max-w-32 truncate">
-                {d.assignee ?? '—'}
+              <TableCell className="max-w-36 truncate">
+                {[d.developer && `开发 ${d.developer}`, d.tester && `测试 ${d.tester}`]
+                  .filter(Boolean)
+                  .join(' / ') || '—'}
+              </TableCell>
+              <TableCell className="text-center">
+                <DefectSourceBadge source={d.source} />
               </TableCell>
               <TableCell className="text-center">
                 <DeleteDefectButton
@@ -2620,9 +2631,9 @@ function DefectsPanel({
           ))}
           {defects.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5}>
+              <TableCell colSpan={6}>
                 {allDefects.length === 0
-                  ? '暂无缺陷，设置缺陷表格地址后点击「同步飞书」拉取'
+                  ? '暂无缺陷，点击「新建缺陷」或设置缺陷表格地址后「同步飞书」'
                   : quickFilter === 'all'
                     ? '暂无缺陷'
                     : '无符合筛选条件的缺陷'}
@@ -2630,7 +2641,7 @@ function DefectsPanel({
             </TableRow>
           )}
           <CountRow
-            colSpan={5}
+            colSpan={6}
             total={filteredDefects.length}
             displayed={defects.length}
           />

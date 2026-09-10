@@ -5,9 +5,13 @@ export type ProjectType = (typeof PROJECT_TYPES)[number]
 export const PROJECT_STATUSES = ['计划中', '进行中', '已结束', '暂停'] as const
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
 
-/** 与后端 DefectStatus 对应，平台侧统一为这五个状态（飞书 new→open、close→closed，乱填→open） */
-export const DEFECT_STATUSES = ['open', 'reopen', 'fixed', 'closed', 'invalid'] as const
+/** 与后端 DefectStatus 对应，平台侧统一为 开放/修复/关闭（飞书 new/reopen→开放、fixed→修复、close/invalid→关闭） */
+export const DEFECT_STATUSES = ['开放', '修复', '关闭'] as const
 export type DefectStatus = (typeof DEFECT_STATUSES)[number]
+
+/** 与后端 DefectSource 对应：脚本=测试运行失败一键生成；飞书=多维表格同步；录入=人工表单 */
+export const DEFECT_SOURCES = ['脚本', '飞书', '录入'] as const
+export type DefectSource = (typeof DEFECT_SOURCES)[number]
 
 /** 缺陷端：只保留这四类，飞书侧其它值统一为"未知"（默认） */
 export const DEFECT_PLATFORMS = ['前端', '后端', 'APP端', '未知'] as const
@@ -304,22 +308,37 @@ export interface Project {
 export interface Defect {
   id: number
   projectId: number
-  /** 问题描述（长文本截断至 500；全文在 description） */
+  /** 简述（标题，长文本截断至 500） */
   title: string
   /** 问题描述全文（仅详情接口返回；与 title 相同为 null） */
   description?: string | null
-  /** 端（前端/后端/产品/IOS/Android…） */
+  /** 操作步骤与关键信息（Markdown，截图以 /images/... 内嵌；仅详情接口返回） */
+  steps?: string | null
+  /** 预期结果（仅详情接口返回） */
+  expected?: string | null
+  /** 实际结果（仅详情接口返回） */
+  actual?: string | null
+  /** 端（前端/后端/APP端/未知） */
   platform: string | null
-  /** 状态：new/fixed/close/reopen/invalid（飞书侧乱填的选项原样保留） */
+  /** 状态：开放/修复/关闭 */
   status: string
-  /** 人员（飞书同步） */
-  assignee: string | null
+  /** 来源：脚本/飞书/录入 */
+  source: string
+  /** 开发（飞书"人员"同步到此） */
+  developer: string | null
+  /** 测试 */
+  tester: string | null
   remark: string | null
   /** 截图：相对图片根目录的路径数组，经 /images/{path} 访问（仅详情接口返回） */
   images?: string[] | null
-  /** 测试脚本：相对脚本根目录的 .test.ts 路径；非空时标记 fixed 前须最近一次运行通过 */
+  /** 测试脚本：相对脚本根目录的 .test.ts 路径；非空时标记修复前须最近一次运行通过 */
   testScript: string | null
   feishuRecordId: string | null
+  /** 修复时间（验证运行通过自动流转为"修复"时记录） */
+  fixedAt: string | null
+  /** 验证时间（人工二次确认，改为"关闭"时记录） */
+  verifiedAt: string | null
+  createdAt: string
   updatedAt: string
 }
 
@@ -808,20 +827,44 @@ export const api = {
       `/defects${projectId === undefined ? '' : `?projectId=${projectId}`}`,
     ),
   getDefect: (id: number) => request<Defect>(`/defects/${id}`),
+  /** 人工/脚本一键生成缺陷（来源：脚本/录入） */
+  createDefect: (input: {
+    projectId: number
+    title: string
+    source?: DefectSource
+    platform?: string
+    steps?: string
+    expected?: string
+    actual?: string
+    testScript?: string
+    developer?: string
+    tester?: string
+    remark?: string
+  }) =>
+    request<Defect>('/defects', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   /** 从项目绑定的飞书多维表格全量同步缺陷（直接覆盖本地飞书侧字段） */
   syncDefects: (projectId: number) =>
     request<{ scanned: number; created: number; updated: number }>(
       '/defects/sync',
       { method: 'POST', body: JSON.stringify({ projectId }) },
     ),
-  /** 更新缺陷（端/状态/测试脚本/备注）；状态或端变更后异步回写飞书 */
+  /** 更新缺陷（简述/端/状态/脚本/备注/正文/开发/测试）；状态或端变更后异步回写飞书 */
   updateDefect: (
     id: number,
     input: Partial<{
+      title: string
       platform: string
       status: DefectStatus
       testScript: string
       remark: string
+      steps: string
+      expected: string
+      actual: string
+      developer: string
+      tester: string
     }>,
   ) =>
     request<Defect>(`/defects/${id}`, {
@@ -833,6 +876,17 @@ export const api = {
     request<TestRun>(`/defects/${id}/verify`, { method: 'POST' }),
   deleteDefect: (id: number) =>
     request<void>(`/defects/${id}`, { method: 'DELETE' }),
+  /** 上传图片（Markdown 正文内嵌用），返回可访问链接 */
+  uploadImage: async (file: File): Promise<{ path: string; url: string }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/images', { method: 'POST', body: form })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      throw new Error(body?.message ?? `上传失败 (${res.status})`)
+    }
+    return res.json() as Promise<{ path: string; url: string }>
+  },
   /** 资源列表：传 projectId 按项目过滤，不传返回全部；默认隐藏软删除（includeDeleted 含全部） */
   listResources: (projectId?: number, includeDeleted = false) => {
     const params = new URLSearchParams()

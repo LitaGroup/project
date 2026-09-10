@@ -58,6 +58,9 @@ export class TestsService implements OnModuleInit {
   /** 运行中的实时状态（runId → 快照+事件），终态后保留 TTL 供 SSE 晚订阅 */
   private readonly liveRuns = new Map<number, LiveRun>();
 
+  /** 运行终态监听（缺陷模块据此自动流转），避免模块间循环依赖 */
+  private readonly runFinalizedListeners: Array<(run: TestRun) => void> = [];
+
   constructor(
     @InjectRepository(Test)
     private readonly tests: Repository<Test>,
@@ -99,6 +102,28 @@ export class TestsService implements OnModuleInit {
       onFinalize: (ctx, patch) => this.applyRemoteFinal(ctx, patch),
       onAbort: (ctx, patch) => this.applyRemoteFinal(ctx, patch),
     });
+  }
+
+  /**
+   * 注册运行终态监听（缺陷模块用于"脚本跑通自动流转修复"）。
+   * 回调收到的 run 为落库后的最终快照；回调异常仅记日志不影响运行。
+   */
+  onRunFinalized(listener: (run: TestRun) => void): void {
+    this.runFinalizedListeners.push(listener);
+  }
+
+  /** 通知终态监听（fire-and-forget） */
+  private async emitRunFinalized(runId: number): Promise<void> {
+    if (this.runFinalizedListeners.length === 0) return;
+    const run = await this.runs.findOne({ where: { id: runId } });
+    if (!run) return;
+    for (const listener of this.runFinalizedListeners) {
+      try {
+        void Promise.resolve(listener(run)).catch(() => undefined);
+      } catch {
+        // 单个监听失败不影响其它监听
+      }
+    }
   }
 
   /** 按项目列出测试；不传 projectId 时返回全部（全局列表页用） */
@@ -315,6 +340,7 @@ export class TestsService implements OnModuleInit {
             LIVE_SNAPSHOT_TTL_MS,
           );
         }
+        void this.emitRunFinalized(ctx.runId);
       });
   }
 
@@ -532,10 +558,12 @@ export class TestsService implements OnModuleInit {
         .catch(() => undefined)
         .then(() => {
           const live = this.liveRuns.get(runId);
-          if (!live) return;
-          Object.assign(live.snapshot, finalPatch);
-          live.emitter.emit('update', { ...live.snapshot });
-          setTimeout(() => this.liveRuns.delete(runId), LIVE_SNAPSHOT_TTL_MS);
+          if (live) {
+            Object.assign(live.snapshot, finalPatch);
+            live.emitter.emit('update', { ...live.snapshot });
+            setTimeout(() => this.liveRuns.delete(runId), LIVE_SNAPSHOT_TTL_MS);
+          }
+          void this.emitRunFinalized(runId);
         });
     };
 

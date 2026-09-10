@@ -12,21 +12,32 @@ export function StatusBadge({ status }: { status: ProjectStatus }) {
   return <Badge variant={variantByStatus[status] ?? 'soft'}>{status}</Badge>
 }
 
-/** 缺陷状态 → Badge variant（乱填/未知状态兜底 soft） */
+/** 缺陷状态 → Badge variant：开放红 / 修复蓝 / 关闭绿（未知兜底 soft） */
 const defectVariantByStatus: Record<
   string,
-  'info' | 'success' | 'soft' | 'warning' | 'secondary'
+  'info' | 'success' | 'error' | 'soft' | 'warning' | 'secondary'
 > = {
-  open: 'info',
-  reopen: 'warning',
-  fixed: 'success',
-  closed: 'soft',
-  invalid: 'secondary',
+  开放: 'error',
+  修复: 'info',
+  关闭: 'success',
+}
+
+/** 缺陷来源 → Badge variant（未知兜底 soft） */
+const defectSourceVariant: Record<string, 'info' | 'success' | 'soft'> = {
+  脚本: 'success',
+  飞书: 'info',
+  录入: 'soft',
 }
 
 export function DefectStatusBadge({ status }: { status: string }) {
   return (
     <Badge variant={defectVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+  )
+}
+
+export function DefectSourceBadge({ source }: { source: string }) {
+  return (
+    <Badge variant={defectSourceVariant[source] ?? 'soft'}>{source}</Badge>
   )
 }
 

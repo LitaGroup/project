@@ -364,7 +364,8 @@ export class ProjectsService {
     const defects = project.defects.map((d) => {
       const parts = [`**${d.status}** ${d.title}`];
       if (d.platform) parts.push(`端：${d.platform}`);
-      if (d.assignee) parts.push(`人员：${d.assignee}`);
+      if (d.developer) parts.push(`开发：${d.developer}`);
+      if (d.tester) parts.push(`测试：${d.tester}`);
       if (d.testScript) parts.push(`测试脚本：${d.testScript}`);
       return `- ${parts.join(' — ')}`;
     });
@@ -473,7 +474,8 @@ export class ProjectsService {
       '',
       '```bash',
       "curl -X POST /api/defects/sync -H 'Content-Type: application/json' -d '{\"projectId\": {id}}'  # 从飞书全量同步（覆盖本地）",
-      'curl -X PATCH /api/defects/{defectId} -H \'Content-Type: application/json\' -d \'{"status": "fixed"}\'  # 改状态（异步回写飞书；有测试脚本时须先验证通过）',
+      `curl -X POST /api/defects -H 'Content-Type: application/json' -d '{"projectId": {id}, "title": "登录按钮点击无响应", "source": "录入", "steps": "1. 打开登录页\\n2. 点击登录", "expected": "正常登录", "actual": "无响应", "developer": "张三", "tester": "李四"}'  # 新建缺陷（来源：脚本/录入）`,
+      'curl -X PATCH /api/defects/{defectId} -H \'Content-Type: application/json\' -d \'{"status": "修复"}\'  # 改状态（开放/修复/关闭，异步回写飞书；有测试脚本时须先验证通过）',
       '```',
       '',
       '节点（某个时间点需完成的事项；状态由 达成+实际达成日期+日期 推导：准备中/提前达成/达成/延期/取消）：',
