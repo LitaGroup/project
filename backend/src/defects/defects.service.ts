@@ -8,7 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { FindOptionsSelect, Repository } from 'typeorm';
+import { FindOptionsSelect, In, Repository } from 'typeorm';
 import { DefectSource, DefectStatus } from '../common/enums';
 import { imageWebroot } from '../common/paths';
 import { BitableRecord, FeishuService } from '../feishu/feishu.service';
@@ -156,6 +156,11 @@ function mapPlatform(value: unknown): string {
   return '未知';
 }
 
+/** Markdown 表格单元格转义（换行与竖线） */
+function escapeCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
+}
+
 @Injectable()
 export class DefectsService implements OnModuleInit {
   private readonly logger = new Logger(DefectsService.name);
@@ -193,6 +198,173 @@ export class DefectsService implements OnModuleInit {
     const defect = await this.defects.findOne({ where: { id } });
     if (!defect) throw new NotFoundException(`Defect ${id} not found`);
     return defect;
+  }
+
+  /** Markdown 视图（GET /api/defects/:id.md）：元信息 + 步骤/预期/实际/截图/备注 + AI 操作 */
+  async findOneMarkdown(id: number): Promise<string> {
+    const defect = await this.findOne(id);
+    const project = await this.projects.findOne({
+      where: { id: defect.projectId },
+      select: { id: true, name: true },
+    });
+    const meta = [
+      `- ID：${defect.id}`,
+      `- 项目：${project ? `${project.name}（${defect.projectId}）` : defect.projectId}`,
+      `- 状态：${defect.status}`,
+      `- 来源：${defect.source}`,
+      `- 端：${defect.platform ?? '—'}`,
+      `- 开发：${defect.developer ?? '—'}`,
+      `- 测试：${defect.tester ?? '—'}`,
+      `- 用例：${defect.testScript ? `\`${defect.testScript}\`` : '—'}`,
+      `- 创建时间：${defect.createdAt.toISOString()}`,
+      `- 修复时间：${defect.fixedAt ? defect.fixedAt.toISOString() : '—'}`,
+      `- 验证时间：${defect.verifiedAt ? defect.verifiedAt.toISOString() : '—'}`,
+      `- 飞书记录：${defect.feishuRecordId ?? '—'}`,
+      `- 更新时间：${defect.updatedAt.toISOString()}`,
+    ];
+    const lines = [
+      `# ${defect.title}`,
+      '',
+      ...meta,
+      '',
+      '## 操作步骤与关键信息',
+      '',
+      defect.steps ?? defect.description ?? '（无）',
+      '',
+      '## 预期',
+      '',
+      defect.expected ?? '（无）',
+      '',
+      '## 实际',
+      '',
+      defect.actual ?? '（无）',
+    ];
+    if (defect.images && defect.images.length > 0) {
+      lines.push('', '## 截图', '');
+      for (const img of defect.images) {
+        lines.push(`![缺陷截图](/images/${img})`);
+      }
+    }
+    if (defect.remark) {
+      lines.push('', '## 备注', '', defect.remark);
+    }
+    lines.push(
+      '',
+      '## AI 操作',
+      '',
+      '```bash',
+      `curl -X POST /api/defects/${defect.id}/update.md -H 'Content-Type: application/json' -d '{"status": "修复"}'  # 更新（状态：开放/修复/关闭）`,
+      `curl -X POST /api/defects/${defect.id}/delete.md  # 删除`,
+      `curl -X POST /api/defects/${defect.id}/verify  # 运行验证（须已配置用例脚本）`,
+      '```',
+      '',
+    );
+    return lines.join('\n');
+  }
+
+  /** Markdown 视图（GET /api/defects.md）：缺陷清单，供 AI 跨项目检索 */
+  async listMarkdown(filter: {
+    projectId?: number;
+    status?: string;
+    source?: string;
+    q?: string;
+  }): Promise<string> {
+    const all = await this.findByProject(filter.projectId);
+    const q = filter.q?.trim().toLowerCase();
+    const rows = all.filter(
+      (d) =>
+        (!filter.status || d.status === filter.status) &&
+        (!filter.source || d.source === filter.source) &&
+        (!q || d.title.toLowerCase().includes(q)),
+    );
+    const names = await this.projectNames(rows.map((d) => d.projectId));
+    const lines = [
+      '# 缺陷清单',
+      '',
+      `- 共 ${rows.length} 条${filter.projectId ? `（项目 ${filter.projectId}）` : ''}`,
+      '',
+      '| ID | 简述 | 状态 | 来源 | 端 | 开发 | 测试 | 项目 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    ];
+    for (const d of rows) {
+      lines.push(
+        `| ${d.id} | ${escapeCell(d.title)} | ${d.status} | ${d.source} | ${d.platform ?? '-'} | ${d.developer ?? '-'} | ${d.tester ?? '-'} | ${escapeCell(names.get(d.projectId) ?? `#${d.projectId}`)} |`,
+      );
+    }
+    if (rows.length === 0) {
+      lines.push('| - | （无匹配缺陷） | - | - | - | - | - | - |');
+    }
+    lines.push(
+      '',
+      '## 详情',
+      '',
+      '阅读单条缺陷（含步骤/预期/实际/截图）：`GET /api/defects/{id}.md`',
+      '',
+      '## AI 操作',
+      '',
+      '```bash',
+      'curl -X POST /api/defects/create.md -H \'Content-Type: application/json\' -d \'{"projectId": 123, "title": "简述", "steps": "1. 操作", "expected": "预期", "actual": "实际", "developer": "张三", "tester": "李四"}\'  # 新建（来源=录入；source 可为 脚本）',
+      'curl -X POST /api/defects/{id}/update.md -H \'Content-Type: application/json\' -d \'{"status": "关闭"}\'  # 更新（状态：开放/修复/关闭）',
+      'curl -X POST /api/defects/{id}/delete.md  # 删除',
+      '```',
+      '',
+      '创建/更新也支持 `POST /api/defects` 与 `PATCH /api/defects/{id}`（返回 JSON）。',
+      '',
+    );
+    return lines.join('\n');
+  }
+
+  /** AI 用：创建缺陷并返回 Markdown 结果 */
+  async createMarkdown(input: CreateDefectInput): Promise<string> {
+    const defect = await this.create(input);
+    return this.renderMutationMarkdown('创建', defect);
+  }
+
+  /** AI 用：更新缺陷并返回 Markdown 结果 */
+  async updateMarkdown(id: number, input: UpdateDefectInput): Promise<string> {
+    const defect = await this.update(id, input);
+    return this.renderMutationMarkdown('更新', defect);
+  }
+
+  /** AI 用：删除缺陷并返回 Markdown 结果 */
+  async removeMarkdown(id: number): Promise<string> {
+    const defect = await this.findOne(id);
+    await this.remove(id);
+    return [
+      '# 缺陷已删除',
+      '',
+      `- ID：${defect.id}`,
+      `- 简述：${defect.title}`,
+      '',
+    ].join('\n');
+  }
+
+  /** 变更类操作的 Markdown 结果（创建/更新共用） */
+  private renderMutationMarkdown(action: string, defect: Defect): string {
+    return [
+      `# 缺陷已${action}`,
+      '',
+      `- ID：${defect.id}`,
+      `- 简述：${defect.title}`,
+      `- 状态：${defect.status}`,
+      `- 来源：${defect.source}`,
+      `- 项目：${defect.projectId}`,
+      `- 阅读地址：GET /api/defects/${defect.id}.md`,
+      '',
+    ].join('\n');
+  }
+
+  /** 批量取项目名（Markdown 清单用） */
+  private async projectNames(ids: number[]): Promise<Map<number, string>> {
+    const unique = [...new Set(ids)];
+    const map = new Map<number, string>();
+    if (unique.length === 0) return map;
+    const projects = await this.projects.find({
+      where: { id: In(unique) },
+      select: { id: true, name: true },
+    });
+    for (const p of projects) map.set(p.id, p.name);
+    return map;
   }
 
   /** 人工/脚本一键生成缺陷（来源为录入或脚本） */

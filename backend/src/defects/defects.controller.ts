@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Param,
   ParseIntPipe,
@@ -84,10 +85,27 @@ export class DefectsController {
     return this.defectsService.create(dto);
   }
 
+  /**
+   * AI 用：创建缺陷并返回 Markdown 结果（text/markdown）。
+   * body 同 POST /api/defects，返回缺陷 ID 与阅读地址。
+   */
+  @Post('create.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  createMarkdown(@Body() dto: CreateDefectDto): Promise<string> {
+    return this.defectsService.createMarkdown(dto);
+  }
+
   /** 从项目绑定的飞书多维表格全量同步缺陷（直接覆盖本地飞书侧字段） */
   @Post('sync')
   syncFromFeishu(@Body() dto: SyncDefectsDto): Promise<SyncDefectsResult> {
     return this.defectsService.syncFromFeishu(dto.projectId);
+  }
+
+  /** Markdown 视图（须声明在 :id 之前，避免 :id 匹配到带 .md 后缀的路径） */
+  @Get(':id.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  findOneMarkdown(@Param('id', ParseIntPipe) id: number): Promise<string> {
+    return this.defectsService.findOneMarkdown(id);
   }
 
   @Get(':id')
@@ -104,6 +122,29 @@ export class DefectsController {
     return this.defectsService.update(id, dto);
   }
 
+  /**
+   * AI 用：更新缺陷并返回 Markdown 结果（text/markdown）。
+   * body 同 PATCH /api/defects/:id，改状态为"修复"时同样校验用例最近运行。
+   */
+  @Post(':id/update.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  updateMarkdown(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateDefectDto,
+  ): Promise<string> {
+    return this.defectsService.updateMarkdown(id, dto);
+  }
+
+  /**
+   * AI 用：删除缺陷并返回 Markdown 结果（text/markdown）。
+   * 仅删本地记录，不影响飞书多维表格。
+   */
+  @Post(':id/delete.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  removeMarkdown(@Param('id', ParseIntPipe) id: number): Promise<string> {
+    return this.defectsService.removeMarkdown(id);
+  }
+
   /** 运行验证：启动缺陷测试脚本的一次运行，通过后才允许标记 fixed */
   @Post(':id/verify')
   verify(@Param('id', ParseIntPipe) id: number): Promise<TestRun> {
@@ -115,5 +156,27 @@ export class DefectsController {
   @HttpCode(204)
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.defectsService.remove(id);
+  }
+}
+
+/** GET /api/defects.md：缺陷清单 Markdown 视图（单段路径经独立控制器挂载） */
+@Controller('defects.md')
+export class DefectsMarkdownController {
+  constructor(private readonly defectsService: DefectsService) {}
+
+  @Get()
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  listMarkdown(
+    @Query('projectId') projectId?: string,
+    @Query('status') status?: string,
+    @Query('source') source?: string,
+    @Query('q') q?: string,
+  ): Promise<string> {
+    return this.defectsService.listMarkdown({
+      projectId: projectId === undefined ? undefined : Number(projectId),
+      status,
+      source,
+      q,
+    });
   }
 }

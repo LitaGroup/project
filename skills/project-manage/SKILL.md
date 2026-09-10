@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、登记与验收节点、查看系统设置与更新脚本仓库
-version: 1.4.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、登记与验收节点、查看/创建/更新/删除缺陷、查看系统设置与更新脚本仓库
+version: 1.5.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -22,7 +22,8 @@ tags:
 3. 读取文档 Markdown 正文；写入/更新项目文档（按 fileName upsert）
 4. 运行检查/用例/导出/任务，流式读取脚本输出与结果（导出运行详情含产物文件下载链接）
 5. 登记项目节点（时间点事项），研发验收后标记达成
-6. 获取平台设置信息、更新脚本仓库
+6. 查看/创建/更新/删除项目缺陷（含飞书同步来源）
+7. 获取平台设置信息、更新脚本仓库
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`。
 
@@ -143,7 +144,7 @@ GET /api/tests[?projectId=]       # 用例列表
 GET /api/exports[?projectId=]     # 导出列表
 GET /api/documents[?projectId=]   # 文档列表（不含正文）
 GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运行统计）
-GET /api/defects[?projectId=]     # 缺陷列表
+GET /api/defects[?projectId=]     # 缺陷列表（Markdown 版见第 8 节 /api/defects.md）
 GET /api/resources[?projectId=&includeDeleted=]  # 资源列表（不含多语言缓存正文；includeDeleted=true 含软删除）
 GET /api/milestones[?projectId=]  # 节点列表（按日期升序，附推导状态）
 ```
@@ -163,9 +164,32 @@ curl -X PATCH {BASE}/api/milestones/{milestoneId} -H 'Content-Type: application/
 - **是否达成须研发验收后才能标记 yes**（平台不校验操作者，流程上由验收人确认后标记）
 - 更新（改日期/内容/备注/交付人/验收人）走同一个 `PATCH /api/milestones/{id}`；删除 `DELETE /api/milestones/{id}`
 
+### 8. 缺陷（Markdown）
+
+缺陷归属项目，来源分 脚本 / 飞书 / 录入，状态分 开放 / 修复 / 关闭。飞书来源与项目绑定的多维表格双向同步（同步/回写由平台处理）：
+
+```
+GET  /api/defects.md?projectId={id}[&status=开放|修复|关闭][&source=脚本|飞书|录入][&q=关键词]   # 缺陷清单
+GET  /api/defects/{defectId}.md                          # 详情（含步骤/预期/实际/截图/备注）
+```
+
+写入类操作（均返回 Markdown 结果）：
+
+```bash
+curl -X POST {BASE}/api/defects/create.md -H 'Content-Type: application/json' \
+  -d '{"projectId": 123, "title": "登录按钮点击无响应", "steps": "1. 打开登录页\n2. 点击登录", "expected": "正常登录", "actual": "无响应", "developer": "张三", "tester": "李四", "platform": "前端", "testScript": "xxx/xxx.test.ts"}'  # source 缺省=录入，可传 脚本
+curl -X POST {BASE}/api/defects/{defectId}/update.md -H 'Content-Type: application/json' \
+  -d '{"status": "修复"}'   # 可改 title/platform/status/steps/expected/actual/developer/tester/testScript/remark
+curl -X POST {BASE}/api/defects/{defectId}/delete.md      # 删除（仅本地，不影响飞书）
+```
+
+- 状态流转：改为"修复"时——有 `testScript` 则须该用例最近一次运行通过（否则 400），无则允许手动改；**用例运行通过后后端自动把同项目+同脚本+开放态缺陷流转为"修复"**；改为"关闭"记录验证时间（人工二次确认）
+- 端：前端 / 后端 / APP端 / 未知；飞书"人员"字段同步到 `developer`
+- 正文图片：`POST /api/images`（multipart，字段 `file`）上传后返回 `/images/...` 链接，可内嵌进 `steps` Markdown
+
 ## 工作约定
 
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）、节点登记与验收（milestones）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）、节点登记与验收（milestones）、缺陷创建/更新/删除（defects）

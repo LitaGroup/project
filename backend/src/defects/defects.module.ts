@@ -4,7 +4,10 @@ import { FeishuModule } from '../feishu/feishu.module';
 import { Project } from '../projects/project.entity';
 import { TestsModule } from '../tests/tests.module';
 import { Defect } from './defect.entity';
-import { DefectsController } from './defects.controller';
+import {
+  DefectsController,
+  DefectsMarkdownController,
+} from './defects.controller';
 import { DefectsService } from './defects.service';
 
 @Module({
@@ -13,7 +16,7 @@ import { DefectsService } from './defects.service';
     FeishuModule,
     TestsModule,
   ],
-  controllers: [DefectsController],
+  controllers: [DefectsController, DefectsMarkdownController],
   providers: [DefectsService],
   exports: [DefectsService],
 })
