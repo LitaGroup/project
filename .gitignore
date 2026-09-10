@@ -6,6 +6,6 @@ dist/
 .DS_Store
 .env.*
 !.env.production
-images/
+/images/
 appium-agent/app-cache/
 install-state.json
