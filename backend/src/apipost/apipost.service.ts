@@ -13,7 +13,7 @@ export interface ApipostUrlRef {
 export interface ApipostReadResult {
   projectId: string;
   docsUrl: string;
-  /** 文档标题，取 swagger info.title */
+  /** 文档标题：`接口文档-{首个 tag 的 name}`；tags 为空时取 swagger info.title */
   title: string;
   /** 原始 swagger JSON 字符串（存 Document.content） */
   rawJson: string;
@@ -71,11 +71,25 @@ export class ApipostService {
         '链接返回的不是有效的 APIPOST swagger 内容',
       );
     }
-    const info = (data as { info?: { title?: unknown } }).info;
+    // 标题格式：接口文档-{首个 tag 的 name}；tags 为空（或无有效 name）时取 info.title
+    const swaggerTags = (data as { tags?: { name?: unknown }[] }).tags;
+    const firstTagName = Array.isArray(swaggerTags)
+      ? swaggerTags.find(
+          (t) =>
+            t &&
+            typeof t === 'object' &&
+            typeof t.name === 'string' &&
+            t.name.trim(),
+        )?.name
+      : undefined;
+    const infoTitle =
+      typeof (data as { info?: { title?: unknown } }).info?.title === 'string'
+        ? ((data as { info?: { title?: string } }).info!.title as string).trim()
+        : '';
     const title =
-      typeof info?.title === 'string' && info.title.trim()
-        ? info.title.trim()
-        : `APIPOST ${ref.projectId}`;
+      typeof firstTagName === 'string' && firstTagName.trim()
+        ? `接口文档-${firstTagName.trim()}`
+        : infoTitle || `APIPOST ${ref.projectId}`;
     return {
       projectId: ref.projectId,
       docsUrl: ref.docsUrl,

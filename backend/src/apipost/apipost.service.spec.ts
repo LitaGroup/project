@@ -67,4 +67,26 @@ describe('ApipostService.readByUrl', () => {
       '链接返回的不是有效的 APIPOST swagger 内容',
     );
   });
+
+  it('标题格式：接口文档-{首个 tag 的 name}', async () => {
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: {
+        info: { title: '活动V3/active-v3' },
+        tags: [{ name: '滴滴巴士 didibus' }, { name: '调试' }],
+        paths: {},
+      },
+    });
+    const result = await service.readByUrl(url);
+    expect(result.title).toBe('接口文档-滴滴巴士 didibus');
+  });
+
+  it('tags 为空时标题取 info.title', async () => {
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({
+      status: 200,
+      data: { info: { title: '活动V3/active-v3' }, tags: [], paths: {} },
+    });
+    const result = await service.readByUrl(url);
+    expect(result.title).toBe('活动V3/active-v3');
+  });
 });
