@@ -35,7 +35,7 @@ export class Document {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  /** Markdown 正文；飞书导入的内容也统一存为 Markdown */
+  /** 正文：Markdown（飞书/手工）；apipost 来源存原始 swagger JSON 字符串（单一数据源） */
   @Column({ type: 'longtext', nullable: true })
   content: string | null;
 
@@ -50,6 +50,10 @@ export class Document {
   /** 飞书同步判重 key：docx:<id> / sheets:<token>#<sheetId> / bitable:<token>#<tableId> */
   @Column({ type: 'varchar', length: 200, nullable: true })
   feishuToken: string | null;
+
+  /** 来源为 apipost 时的规范化原文链接（docs.apipost.net/docs/detail/{projectId}），兼作同步判重 key */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  apipostUrl: string | null;
 
   // 测试库账号无 REFERENCES 权限，暂不建物理外键；获得授权后可移除该选项
   @ManyToOne(() => Project, (project) => project.documents, {

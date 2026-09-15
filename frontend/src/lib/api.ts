@@ -38,6 +38,15 @@ export const DOCUMENT_TYPES = [
 ] as const
 export type DocumentType = (typeof DOCUMENT_TYPES)[number]
 
+/** 文档来源：飞书（单向同步）/ apipost（接口文档导入）/ '-'（平台内手写） */
+export const DOCUMENT_SOURCES = ['飞书', 'apipost', '-'] as const
+/** 来源展示文案：'-' 显示为手写 */
+export function documentSourceLabel(source: string): string {
+  if (source === 'apipost') return 'APIPOST'
+  if (source === '-') return '手写'
+  return source
+}
+
 /** 与后端 ResourceType 对应：配置=飞书配置文档（绑定文档模块）；多语言=固定多语言表的命名空间前缀（Activity/Frontend/FE/Backend 四类 SHEET）；文件资源=文件链接；UI=蓝湖设计稿地址（仅存链接不处理）；其它=自由登记 */
 export const RESOURCE_TYPES = ['配置', '多语言', '文件资源', 'UI', '其它'] as const
 export type ResourceType = (typeof RESOURCE_TYPES)[number]
@@ -97,6 +106,8 @@ export interface ProjectDocument {
   /** AI 写入文档的判重标识，项目内唯一（飞书/手工创建的文档为 null） */
   fileName?: string | null
   feishuUrl: string | null
+  /** 来源为 apipost 时的规范化原文链接（docs.apipost.net），兼作同步判重 key */
+  apipostUrl?: string | null
   description: string | null
   remark: string | null
   content?: string | null
@@ -557,6 +568,17 @@ export const api = {
     description?: string
   }) =>
     request<ProjectDocument>('/documents/sync-feishu', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 导入 APIPOST 接口文档（docs 文档页 / swagger 链接均可），content 存原始 swagger JSON */
+  importApipostDocument: (input: {
+    projectId: number
+    url: string
+    type?: DocumentType
+    description?: string
+  }) =>
+    request<ProjectDocument>('/documents/sync-apipost', {
       method: 'POST',
       body: JSON.stringify(input),
     }),

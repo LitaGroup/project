@@ -19,15 +19,14 @@ import {
 } from '@appica/ui-react/select'
 import {
   api,
+  documentSourceLabel,
+  DOCUMENT_SOURCES,
   DOCUMENT_TYPES,
   type Project,
   type ProjectDocument,
 } from '../lib/api'
 import { ProjectFilterSelect } from '../components/ProjectFilterSelect'
 import { useProjectIdParam } from '../components/useProjectIdParam'
-
-/** 文档来源取值（后端存储原文）：飞书同步 / 平台内直接编写 */
-const DOCUMENT_SOURCES = ['飞书', '-'] as const
 
 /** 文档全局列表：全部项目的文档（标题/类型/来源/项目），支持标题模糊搜索 */
 export function DocumentsPage() {
@@ -101,7 +100,12 @@ export function DocumentsPage() {
         <Select
           value={sourceFilter}
           onValueChange={(v) => setSourceFilter(v as string)}
-          items={{ all: '不限来源', 飞书: '飞书', '-': '手写' }}
+          items={{
+            all: '不限来源',
+            ...Object.fromEntries(
+              DOCUMENT_SOURCES.map((s) => [s, documentSourceLabel(s)]),
+            ),
+          }}
         >
           <SelectTrigger className="w-36">
             <SelectValue placeholder="来源" />
@@ -110,7 +114,7 @@ export function DocumentsPage() {
             <SelectItem value="all">不限来源</SelectItem>
             {DOCUMENT_SOURCES.map((s) => (
               <SelectItem key={s} value={s}>
-                {s === '-' ? '手写' : s}
+                {documentSourceLabel(s)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -143,7 +147,7 @@ export function DocumentsPage() {
                 <Badge variant="secondary">{d.type}</Badge>
               </TableCell>
               <TableCell className="text-center">
-                {d.source === '-' ? '手写' : d.source}
+                {documentSourceLabel(d.source)}
               </TableCell>
               <TableCell className="max-w-64 truncate">
                 {d.projectId === undefined ? (

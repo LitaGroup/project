@@ -15,6 +15,8 @@ export enum DocumentType {
 export enum DocumentSource {
   /** 飞书一键同步，单向导入（飞书 → 平台，不回写） */
   FEISHU = '飞书',
+  /** APIPOST 接口文档导入（swagger JSON 单向拉取，content 存原始 JSON） */
+  APIPOST = 'apipost',
   /** 平台内直接编写，无外部来源 */
   MARKDOWN = '-',
 }

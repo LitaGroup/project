@@ -18,8 +18,9 @@ import {
   AlertDialogFooter,
   AlertDialogClose,
 } from '@appica/ui-react/alert-dialog'
-import { api, type DocumentType, type ProjectDocument } from '../lib/api'
+import { api, documentSourceLabel, type DocumentType, type ProjectDocument } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { ApipostDocViewer } from '../components/ApipostDocViewer'
 
 const plugins = [gfm()]
 
@@ -69,6 +70,8 @@ export function DocumentDetailPage() {
   if (!doc) return <p>加载中…</p>
 
   const isFeishu = doc.source === '飞书'
+  const isApipost = doc.source === 'apipost'
+  const isExternal = isFeishu || isApipost
 
   const handleSave = () => {
     setSaving(true)
@@ -81,15 +84,25 @@ export function DocumentDetailPage() {
   }
 
   const handleResync = () => {
-    if (!doc.feishuUrl || !doc.projectId) return
+    if (!doc.projectId) return
     setSaving(true)
     setError(null)
-    api
-      .importFeishuDocument({
-        projectId: doc.projectId,
-        type: doc.type as DocumentType,
-        url: doc.feishuUrl,
-      })
+    const call = isApipost
+      ? doc.apipostUrl
+        ? api.importApipostDocument({ projectId: doc.projectId, url: doc.apipostUrl })
+        : null
+      : doc.feishuUrl
+        ? api.importFeishuDocument({
+            projectId: doc.projectId,
+            type: doc.type as DocumentType,
+            url: doc.feishuUrl,
+          })
+        : null
+    if (!call) {
+      setSaving(false)
+      return
+    }
+    call
       .then(reload)
       .catch((e: Error) => setError(e.message))
       .finally(() => setSaving(false))
@@ -138,33 +151,33 @@ export function DocumentDetailPage() {
               .filter(Boolean)
               .join(' · ')}
           </span>
-          {/* 来源标识放在信息行末尾：非飞书文档省略；飞书文档显示「来自飞书」并附原文链接 */}
-          {isFeishu && (
+          {/* 来源标识放在信息行末尾：本地文档省略；外部导入显示「来自 xx」并附原文链接 */}
+          {isExternal && (
             <>
               {' · '}
-              {doc.feishuUrl ? (
+              {(isApipost ? doc.apipostUrl : doc.feishuUrl) ? (
                 <a
-                  href={doc.feishuUrl}
+                  href={isApipost ? doc.apipostUrl! : doc.feishuUrl!}
                   target="_blank"
                   rel="noreferrer"
                   className="underline"
                 >
-                  来自飞书（查看原文）
+                  来自{isApipost ? documentSourceLabel(doc.source) : '飞书'}（查看原文）
                 </a>
               ) : (
-                <span>来自飞书</span>
+                <span>来自{isApipost ? documentSourceLabel(doc.source) : '飞书'}</span>
               )}
             </>
           )}
         </p>
       </div>
 
-      {/* 2. Markdown 内容（ByteMD），用带边框的面板与标题/说明区分开；全屏用 ByteMD 工具栏自带按钮 */}
+      {/* 2. 内容区：apipost 文档为结构化接口视图；其余为 Markdown（ByteMD） */}
       <section className="flex min-h-0 flex-1 flex-col gap-2">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold">内容</h2>
           <div className="flex gap-2">
-            {isFeishu ? (
+            {isExternal ? (
               <Button variant="outline" size="sm" onClick={handleResync} disabled={saving}>
                 {saving ? '同步中…' : '更新同步'}
               </Button>
@@ -176,29 +189,42 @@ export function DocumentDetailPage() {
             <DeleteDocumentButton doc={doc} />
           </div>
         </div>
-        <div
-          ref={editorBoxRef}
-          className="doc-editor min-h-0 flex-1 overflow-auto rounded-md border border-border-strong bg-background"
-        >
-          {/* 统一用 Editor；飞书导入的文档正文不允许本地修改：readOnly 禁用编辑、默认预览页签，内容变更走「更新同步」。
-              key 保证切换文档时编辑器重新挂载，页签/只读状态不串文档 */}
-          <Editor
-            key={doc.id}
-            mode="tab"
-            value={draft}
-            plugins={plugins}
-            locale={zhHans}
-            editorConfig={isFeishu ? { readOnly: true } : undefined}
-            onChange={(v) => {
-              setDraft(v)
-              setDirty(true)
-            }}
-          />
-        </div>
-        {isFeishu && (
-          <p className="text-sm text-foreground-muted">
-            飞书导入的文档为只读，内容变更请使用「更新同步」从源拉取。
-          </p>
+        {isApipost ? (
+          <>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <ApipostDocViewer content={doc.content} docsUrl={doc.apipostUrl ?? null} />
+            </div>
+            <p className="text-sm text-foreground-muted">
+              APIPOST 导入的接口文档为只读，内容变更请使用「更新同步」从源拉取。
+            </p>
+          </>
+        ) : (
+          <>
+            <div
+              ref={editorBoxRef}
+              className="doc-editor min-h-0 flex-1 overflow-auto rounded-md border border-border-strong bg-background"
+            >
+              {/* 统一用 Editor；飞书导入的文档正文不允许本地修改：readOnly 禁用编辑、默认预览页签，内容变更走「更新同步」。
+                  key 保证切换文档时编辑器重新挂载，页签/只读状态不串文档 */}
+              <Editor
+                key={doc.id}
+                mode="tab"
+                value={draft}
+                plugins={plugins}
+                locale={zhHans}
+                editorConfig={isFeishu ? { readOnly: true } : undefined}
+                onChange={(v) => {
+                  setDraft(v)
+                  setDirty(true)
+                }}
+              />
+            </div>
+            {isFeishu && (
+              <p className="text-sm text-foreground-muted">
+                飞书导入的文档为只读，内容变更请使用「更新同步」从源拉取。
+              </p>
+            )}
+          </>
         )}
       </section>
     </div>

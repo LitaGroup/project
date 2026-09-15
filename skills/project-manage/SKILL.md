@@ -1,7 +1,7 @@
 ---
 name: project-manage
 description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、登记与验收节点、查看/创建/更新/删除缺陷、查看系统设置与更新脚本仓库
-version: 1.5.0
+version: 1.6.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -70,7 +70,7 @@ GET /api/projects/{id}.md
 GET /api/documents/{docId}.md
 ```
 
-返回文档元信息（标题 / 类型 / 来源 / 所属项目 / 更新时间等）+ Markdown 正文全文。
+返回文档元信息（标题 / 类型 / 来源 / 所属项目 / 更新时间等）+ Markdown 正文全文。来源为 apipost 的接口文档正文由后端把 swagger JSON 实时转换为 Markdown（按目录分组的接口清单 + 参数/请求体/响应表格），可直接阅读。
 
 ### 3.1 读取资源详情
 
@@ -93,7 +93,20 @@ Content-Type: application/json
 - 已存在 → 覆盖正文（`title`/`type`/`description` 提供了才更新，不填保持原样）；不存在 → 新建（`title` 缺省取 fileName、`type` 缺省"技术"）
 - `type` 可选：需求/功能/测试/技术/接口/配置
 - 响应为 text/markdown：创建/更新结果 + 文档 ID + 阅读地址 `GET /api/documents/{docId}.md`
-- 若 fileName 命中飞书导入的文档会返回 403（飞书文档只能从源同步更新）
+- 若 fileName 命中外部导入（飞书/apipost）的文档会返回 403（外部文档只能从源同步更新）
+
+### 3.3 导入 APIPOST 接口文档
+
+```
+POST /api/documents/sync-apipost
+Content-Type: application/json
+
+{"projectId": 123, "url": "https://docs.apipost.net/docs/detail/xxxx", "type": "接口", "description": "可选描述"}
+```
+
+- `url` 支持 docs.apipost.net 文档页与 openapi.apipost.net swagger 链接两种格式（同项目判重，重复调用即更新）
+- 文档类型缺省"接口"；正文存原始 swagger JSON，经 `GET /api/documents/{docId}.md` 读取时自动转换为 Markdown
+- 同一 apipost 项目重复导入不会新建文档（按 `(projectId, 规范化原文链接)` upsert）
 
 **建议每个项目沉淀以下文档**（fileName 固定，便于重复 upsert；正文为 Markdown，脚本类内容用 ```` ```yaml ```` / ```` ```json ```` / ```` ```sql ```` 代码块包裹）：
 
@@ -192,4 +205,4 @@ curl -X POST {BASE}/api/defects/{defectId}/delete.md      # 删除（仅本地�
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）、节点登记与验收（milestones）、缺陷创建/更新/删除（defects）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、缺陷创建/更新/删除（defects）

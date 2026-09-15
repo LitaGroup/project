@@ -56,6 +56,7 @@ import { Badge } from '@appica/ui-react/badge'
 import { Switch } from '@appica/ui-react/switch'
 import {
   api,
+  documentSourceLabel,
   DOCUMENT_TYPES,
   MILESTONE_ACHIEVED,
   PROJECT_STATUSES,
@@ -1242,21 +1243,19 @@ function DocumentsPanel({
               {d.description ?? '—'}
             </TableCell>
             <TableCell>
-              {d.feishuUrl ? (
-                <a
-                  href={d.feishuUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline"
-                >
-                  {d.source}
-                </a>
-              ) : (
-                d.source
-              )}
+              {(() => {
+                const url = d.source === 'apipost' ? d.apipostUrl : d.feishuUrl
+                return url ? (
+                  <a href={url} target="_blank" rel="noreferrer" className="underline">
+                    {documentSourceLabel(d.source)}
+                  </a>
+                ) : (
+                  documentSourceLabel(d.source)
+                )
+              })()}
             </TableCell>
             <TableCell className="text-center">
-              {d.source === '飞书' && (
+              {(d.source === '飞书' || d.source === 'apipost') && (
                 <ResyncDocumentButton
                   document={d}
                   projectId={project.id}
@@ -1283,7 +1282,7 @@ function DocumentsPanel({
 }
 
 
-/** 更新同步：按原始链接重新从飞书拉取（覆盖本地内容） */
+/** 更新同步：按原始链接重新从源（飞书 / APIPOST）拉取（覆盖本地内容） */
 function ResyncDocumentButton({
   document: doc,
   projectId,
@@ -1297,15 +1296,19 @@ function ResyncDocumentButton({
   const [error, setError] = useState<string | null>(null)
 
   const resync = () => {
-    if (!doc.feishuUrl) return
+    const url = doc.source === 'apipost' ? doc.apipostUrl : doc.feishuUrl
+    if (!url) return
     setLoading(true)
     setError(null)
-    api
-      .importFeishuDocument({
-        projectId,
-        type: doc.type as DocumentType,
-        url: doc.feishuUrl,
-      })
+    const call =
+      doc.source === 'apipost'
+        ? api.importApipostDocument({ projectId, url })
+        : api.importFeishuDocument({
+            projectId,
+            type: doc.type as DocumentType,
+            url,
+          })
+    call
       .then(onSynced)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
@@ -1318,7 +1321,7 @@ function ResyncDocumentButton({
         size="sm"
         onClick={resync}
         disabled={loading}
-        title={error ?? '从飞书重新拉取最新内容'}
+        title={error ?? '从源重新拉取最新内容'}
       >
         {loading ? '同步中…' : '同步'}
       </Button>
@@ -1426,7 +1429,13 @@ function CreateDocumentDialog({
   )
 }
 
-/** 导入文档（飞书单向同步） */
+/** 按链接识别导入来源（决定走哪个同步端点）；未识别时交由飞书端点校验报错 */
+function detectImportSource(url: string): 'apipost' | 'feishu' {
+  if (/apipost\.net/i.test(url)) return 'apipost'
+  return 'feishu'
+}
+
+/** 导入文档（飞书单向同步 / APIPOST 接口文档导入，按链接自动识别） */
 function ImportDocumentDialog({
   projectId,
   onImported,
@@ -1441,16 +1450,32 @@ function ImportDocumentDialog({
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const source = detectImportSource(url)
+
+  const handleUrlChange = (value: string) => {
+    setUrl(value)
+    // APIPOST 是接口文档，识别到后类型自动切为「接口」
+    if (detectImportSource(value) === 'apipost') setType('接口')
+  }
+
   const submit = () => {
     setError(null)
     setLoading(true)
-    api
-      .importFeishuDocument({
-        projectId,
-        type,
-        url,
-        description: description || undefined,
-      })
+    const call =
+      source === 'apipost'
+        ? api.importApipostDocument({
+            projectId,
+            url,
+            type,
+            description: description || undefined,
+          })
+        : api.importFeishuDocument({
+            projectId,
+            type,
+            url,
+            description: description || undefined,
+          })
+    call
       .then(() => {
         setOpen(false)
         setUrl('')
@@ -1468,7 +1493,7 @@ function ImportDocumentDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>从飞书导入文档</DialogTitle>
+          <DialogTitle>导入文档</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
@@ -1477,12 +1502,19 @@ function ImportDocumentDialog({
               <DocumentTypeSelect value={type} onChange={setType} />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              飞书链接
+              文档链接
               <Input
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="支持 文档 / 表格 / 多维表格 / 知识库链接"
+                onChange={(e) => handleUrlChange(e.target.value)}
+                placeholder="支持 飞书（文档/表格/多维表格/知识库）或 APIPOST 链接"
               />
+              {url.trim() && (
+                <span className="text-xs text-foreground-muted">
+                  {source === 'apipost'
+                    ? '已识别为 APIPOST 链接，将导入为接口文档（内容存 swagger JSON）'
+                    : '已识别为飞书链接，将单向同步为 Markdown'}
+                </span>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-sm">
               文档描述（可不填）

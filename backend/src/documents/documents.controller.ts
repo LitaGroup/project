@@ -30,6 +30,16 @@ class SyncFeishuDocumentDto {
   description?: string;
 }
 
+class SyncApipostDocumentDto {
+  projectId: number;
+  /** docs.apipost.net 文档页或 openapi.apipost.net swagger 链接，两种格式均可 */
+  url: string;
+  /** 新建时不填默认"接口" */
+  type?: DocumentType;
+  /** 文档描述，可不填 */
+  description?: string;
+}
+
 class UpsertDocumentDto {
   projectId: number;
   /** AI 写入文档的判重标识，项目内唯一（如 'deploy-guide.md'） */
@@ -76,6 +86,12 @@ export class DocumentsController {
   @Post('sync-feishu')
   syncFromFeishu(@Body() dto: SyncFeishuDocumentDto): Promise<Document> {
     return this.documentsService.syncFromFeishu(dto);
+  }
+
+  /** 一键同步 APIPOST 接口文档（swagger JSON 单向导入，content 存原始 JSON） */
+  @Post('sync-apipost')
+  syncFromApipost(@Body() dto: SyncApipostDocumentDto): Promise<Document> {
+    return this.documentsService.syncFromApipost(dto);
   }
 
   /**
