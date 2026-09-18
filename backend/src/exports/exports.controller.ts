@@ -118,6 +118,7 @@ export class ExportsController {
         `- 详情：/api/exports/runs/${run.id}`,
       ],
       this.exportsService.streamRun(run.id),
+      run.startedAt,
     );
   }
 

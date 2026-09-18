@@ -11,6 +11,7 @@ import {
   ResourceType,
   ResourceStatus,
 } from '../common/enums';
+import { mdFrontmatter } from '../common/frontmatter';
 import { Document } from '../documents/document.entity';
 import { DocumentsService } from '../documents/documents.service';
 import { Resource } from './resource.entity';
@@ -145,9 +146,21 @@ export class ResourcesService {
       body = resource.description ?? '（暂无内容）';
     }
 
-    return [`# ${resource.title}`, '', ...meta, '', '---', '', body, ''].join(
-      '\n',
-    );
+    return [
+      mdFrontmatter({
+        update: resource.updatedAt,
+        title: resource.title,
+        description: resource.description,
+      }),
+      `# ${resource.title}`,
+      '',
+      ...meta,
+      '',
+      '---',
+      '',
+      body,
+      '',
+    ].join('\n');
   }
 
   /**

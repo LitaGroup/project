@@ -10,6 +10,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { FindOptionsSelect, In, Repository } from 'typeorm';
 import { DefectSource, DefectStatus } from '../common/enums';
+import { mdFrontmatter } from '../common/frontmatter';
 import { imageWebroot } from '../common/paths';
 import { BitableRecord, FeishuService } from '../feishu/feishu.service';
 import { Project } from '../projects/project.entity';
@@ -223,6 +224,7 @@ export class DefectsService implements OnModuleInit {
       `- 更新时间：${defect.updatedAt.toISOString()}`,
     ];
     const lines = [
+      mdFrontmatter({ update: defect.updatedAt, title: defect.title }),
       `# ${defect.title}`,
       '',
       ...meta,
@@ -279,6 +281,7 @@ export class DefectsService implements OnModuleInit {
     );
     const names = await this.projectNames(rows.map((d) => d.projectId));
     const lines = [
+      mdFrontmatter({ title: '缺陷清单' }),
       '# 缺陷清单',
       '',
       `- 共 ${rows.length} 条${filter.projectId ? `（项目 ${filter.projectId}）` : ''}`,
@@ -331,6 +334,7 @@ export class DefectsService implements OnModuleInit {
     const defect = await this.findOne(id);
     await this.remove(id);
     return [
+      mdFrontmatter({ title: defect.title }),
       '# 缺陷已删除',
       '',
       `- ID：${defect.id}`,
@@ -342,6 +346,7 @@ export class DefectsService implements OnModuleInit {
   /** 变更类操作的 Markdown 结果（创建/更新共用） */
   private renderMutationMarkdown(action: string, defect: Defect): string {
     return [
+      mdFrontmatter({ update: defect.updatedAt, title: defect.title }),
       `# 缺陷已${action}`,
       '',
       `- ID：${defect.id}`,

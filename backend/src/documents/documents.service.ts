@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsSelect, Repository } from 'typeorm';
 import { DocumentSource, DocumentType } from '../common/enums';
+import { mdFrontmatter } from '../common/frontmatter';
 import { ApipostService } from '../apipost/apipost.service';
 import {
   swaggerToMarkdown,
@@ -74,6 +75,12 @@ export class DocumentsService {
     if (doc.apipostUrl) meta.push(`- 原始链接：${doc.apipostUrl}`);
     meta.push(`- 更新时间：${doc.updatedAt.toISOString()}`);
     return [
+      mdFrontmatter({
+        update: doc.updatedAt,
+        title: doc.title,
+        filename: doc.fileName,
+        description: doc.description,
+      }),
       `# ${doc.title}`,
       '',
       ...meta,

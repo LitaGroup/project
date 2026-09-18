@@ -1,5 +1,6 @@
 import { Controller, Get, Header, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import { mdFrontmatter } from '../common/frontmatter';
 import { SettingsService } from './settings.service';
 import type { PullResult, Settings } from './settings.service';
 
@@ -31,6 +32,7 @@ export class SettingsController {
     res.setHeader('X-Accel-Buffering', 'no');
     res.write(
       [
+        mdFrontmatter({ title: '更新脚本仓库' }),
         '# 更新脚本仓库',
         '',
         `- 脚本根目录：\`${this.settingsService.getSettings().scriptsDir}\``,
@@ -60,6 +62,7 @@ export class SettingsMarkdownController {
   getSettingsMarkdown(): string {
     const s = this.settingsService.getSettings();
     return [
+      mdFrontmatter({ title: '平台设置' }),
       '# 平台设置',
       '',
       '- 运行环境：' + s.environment,

@@ -37,6 +37,7 @@ import { MilestonesService } from '../milestones/milestones.service';
 import { deriveMilestoneStatus } from '../milestones/milestones.service';
 import { AppVersionsService } from '../app-versions/app-versions.service';
 import { runSummaryLine, RunDetailLike } from '../common/run-markdown';
+import { mdFrontmatter } from '../common/frontmatter';
 import { Project } from './project.entity';
 
 export interface CreateProjectInput {
@@ -220,6 +221,7 @@ export class ProjectsService {
     const q = query.trim();
     if (!q) {
       return [
+        mdFrontmatter({}),
         '# 项目搜索',
         '',
         '缺少查询参数 `q`，用法：`GET /api/projects/search.md?q={项目名称关键词}`',
@@ -252,6 +254,7 @@ export class ProjectsService {
         `- **${p.name}**（${p.type} / ${p.status}）— id：${p.id}，更新：${p.updatedAt.toISOString()} — [详情](/api/projects/${p.id}.md)`,
     );
     return [
+      mdFrontmatter({ title: `项目搜索：${q}` }),
       `# 项目搜索：${q}`,
       '',
       `共 ${candidates.length} 个命中（按匹配度 + 创建时间倒序），返回前 ${items.length} 个：`,
@@ -393,6 +396,7 @@ export class ProjectsService {
     });
 
     return [
+      mdFrontmatter({ update: project.updatedAt, title: project.name }),
       `# ${project.name}`,
       '',
       ...meta,

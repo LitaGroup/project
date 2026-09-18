@@ -79,6 +79,7 @@ export class TasksController {
         `- 详情：/api/checks/runs/${run.id}.md`,
       ],
       this.tasksService.streamRun(run.id),
+      run.startedAt,
     );
   }
 

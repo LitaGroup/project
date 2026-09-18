@@ -1,6 +1,7 @@
 import { MessageEvent } from '@nestjs/common';
 import { Response } from 'express';
 import { Observable } from 'rxjs';
+import { mdFrontmatter } from './frontmatter';
 
 /** 运行快照的最小公共结构（CheckRun / TestRun 字段一致） */
 interface RunSnapshotLike {
@@ -25,19 +26,21 @@ export interface RunDetailLike extends RunSnapshotLike {
 
 /**
  * AI 用：将一次脚本运行以 Markdown 流式写出（text/markdown）。
- * 先写头部信息与"输出"小节，运行中逐行追加脚本原始输出（快照为累积式，只写增量），
+ * 先写 frontmatter（update 缺省取当前北京时间，可传运行 startedAt）与头部信息及"输出"小节，
+ * 运行中逐行追加脚本原始输出（快照为累积式，只写增量），
  * 终态后补"结果"小节并结束响应。客户端断开时退订，不再写入。
  */
 export function streamRunMarkdown(
   res: Response,
   header: string[],
   stream: Observable<MessageEvent>,
+  update?: Date | string,
 ): Promise<void> {
   res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   // 关闭反向代理缓冲，保证逐行实时到达
   res.setHeader('X-Accel-Buffering', 'no');
-  res.write(`${header.join('\n')}\n\n## 输出\n\n`);
+  res.write(`${mdFrontmatter({ update })}${header.join('\n')}\n\n## 输出\n\n`);
 
   return new Promise((resolve) => {
     let sent = 0;
@@ -111,6 +114,7 @@ export function renderRunMarkdown(
 ): string {
   const running = run.status === 'running' || run.status === 'queued';
   const body = [
+    mdFrontmatter({ update: run.finishedAt ?? run.startedAt, title }),
     `# ${title}`,
     '',
     ...metaLines,

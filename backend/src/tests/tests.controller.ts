@@ -131,6 +131,7 @@ export class TestsController {
         `- 详情：/api/tests/runs/${run.id}`,
       ],
       this.testsService.streamRun(run.id),
+      run.startedAt,
     );
   }
 

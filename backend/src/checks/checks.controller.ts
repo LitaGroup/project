@@ -127,6 +127,7 @@ export class ChecksController {
         `- 详情：/api/checks/runs/${run.id}`,
       ],
       this.checksService.streamRun(run.id),
+      run.startedAt,
     );
   }
 
