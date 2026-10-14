@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、登记与验收节点、查看/创建/更新/删除缺陷、查看系统设置与更新脚本仓库
-version: 1.6.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、登记与验收节点、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
+version: 1.7.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -22,7 +22,7 @@ tags:
 3. 读取文档 Markdown 正文；写入/更新项目文档（按 fileName upsert）
 4. 运行检查/用例/导出/任务，流式读取脚本输出与结果（导出运行详情含产物文件下载链接）
 5. 登记项目节点（时间点事项），研发验收后标记达成
-6. 查看/创建/更新/删除项目缺陷（含飞书同步来源）
+6. 查询缺陷清单与详情、创建/编辑缺陷、变更状态、追加变更记录、删除缺陷（见第 8 节）
 7. 获取平台设置信息、更新脚本仓库
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
@@ -157,7 +157,7 @@ GET /api/tests[?projectId=]       # 用例列表
 GET /api/exports[?projectId=]     # 导出列表
 GET /api/documents[?projectId=]   # 文档列表（不含正文）
 GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运行统计）
-GET /api/defects[?projectId=]     # 缺陷列表（Markdown 版见第 8 节 /api/defects.md）
+GET /api/defects[?projectId=]     # 缺陷列表（Markdown 清单见 8.1 `/api/defects.md`，详情见 8.2 `/api/defects/{id}.md`）
 GET /api/resources[?projectId=&includeDeleted=]  # 资源列表（不含多语言缓存正文；includeDeleted=true 含软删除）
 GET /api/milestones[?projectId=]  # 节点列表（按日期升序，附推导状态）
 ```
@@ -179,28 +179,52 @@ curl -X PATCH {BASE}/api/milestones/{milestoneId} -H 'Content-Type: application/
 
 ### 8. 缺陷（Markdown）
 
-缺陷归属项目，**仅平台内维护**（接口/人工创建，不与飞书同步）。属性：端 / 优先级（高/中/低）/ 预期功能描述 / 实际结果描述 / 图片（多张）/ 用例脚本 / 状态（开放 / 修复 / 关闭）：
+缺陷归属项目，**仅平台内维护**（接口/人工创建，不与飞书同步）。属性：端 / 优先级（高/中/低）/ 预期功能描述 / 实际结果描述 / 图片（多张）/ 用例脚本 / 状态（开放 / 修复 / 关闭）。
+
+#### 8.1 查询缺陷（清单）
 
 ```
-GET  /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|中|低][&q=关键词]   # 缺陷清单（q 匹配 预期+实际）
-GET  /api/defects/{defectId}.md                          # 详情（含预期/实际/图片/变更记录）
+GET /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|中|低][&q=关键词]
 ```
 
-写入类操作（均返回 Markdown 结果）：
+- 返回 Markdown 表格：`ID | 预期 | 端 | 状态 | 优先级 | 项目`；`projectId` 可选（不传返回全部项目），`q` 模糊匹配 预期 + 实际，`status`/`priority` 按枚举筛选（可组合）
+- 表格中每条按 `ID` 经 `GET /api/defects/{defectId}.md` 取详情
+
+#### 8.2 获取缺陷详情
+
+```
+GET /api/defects/{defectId}.md
+```
+
+- 返回：元信息（ID/项目/状态/端/优先级/用例/创建·修复·验证·更新时间）+ 预期功能描述 + 实际结果描述 + 图片（`/images/...` 链接）+ 变更记录表（时间/状态/来源/变更内容/备注）+ "AI 操作"小节（各端点示例）
+- 图片为 `/images/...` 相对链接，拼基础地址即可访问
+
+#### 8.3 编辑缺陷（创建 / 更新 / 状态变更 / 变更记录 / 删除）
+
+写入类操作均返回 Markdown 结果：
 
 ```bash
+# 新建（expected/actual 必填；platform 前端|后端|APP端|未知；priority 高|中|低；images 传上传接口返回的 /images/... 数组；testScript 可选）
 curl -X POST {BASE}/api/defects/create.md -H 'Content-Type: application/json' \
-  -d '{"projectId": 123, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高", "images": ["/images/uploads/20261014/xxx.png"], "testScript": "xxx/xxx.test.ts"}'  # expected/actual 必填；platform 可选：前端/后端/APP端/未知；priority 可选：高/中/低（默认中）；images 传上传接口返回的 /images/... 数组；testScript 可选
-curl -X POST {BASE}/api/defects/{defectId}/status.md -H 'Content-Type: application/json' \
-  -d '{"status": "修复", "remark": "验证通过"}'   # 专用状态变更（开放/修复/关闭），自动生成变更记录
-curl -X POST {BASE}/api/defects/{defectId}/records.md -H 'Content-Type: application/json' \
-  -d '{"content": "复核处理进度", "remark": "已通知开发"}'   # 追加变更记录（只记录，不改缺陷字段）
+  -d '{"projectId": 123, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高", "images": ["/images/uploads/20261014/xxx.png"], "testScript": "xxx/xxx.test.ts"}'
+
+# 更新字段（可改 platform/priority/status/expected/actual/images/testScript；changeContent/changeRemark 写入变更记录）
 curl -X POST {BASE}/api/defects/{defectId}/update.md -H 'Content-Type: application/json' \
-  -d '{"priority": "高", "actual": "新的实际结果", "changeContent": "补充信息", "changeRemark": "原因"}'   # 可改 platform/priority/status/expected/actual/images/testScript；changeContent/changeRemark 写入变更记录
-curl -X POST {BASE}/api/defects/{defectId}/delete.md      # 删除（仅本地，含变更记录）
+  -d '{"priority": "高", "actual": "新的实际结果", "changeContent": "补充信息", "changeRemark": "原因"}'
+
+# 专用状态变更（开放/修复/关闭；可带备注，自动生成变更记录，状态未变化时幂等返回"状态未变化"）
+curl -X POST {BASE}/api/defects/{defectId}/status.md -H 'Content-Type: application/json' \
+  -d '{"status": "修复", "remark": "研发已修复，等待回归"}'
+
+# 追加变更记录（只记录，不改缺陷字段）
+curl -X POST {BASE}/api/defects/{defectId}/records.md -H 'Content-Type: application/json' \
+  -d '{"content": "复核处理进度", "remark": "已通知开发"}'
+
+# 删除（仅本地，含变更记录）
+curl -X POST {BASE}/api/defects/{defectId}/delete.md
 ```
 
-- 状态流转：开放 → 修复 → 关闭。标记"修复"无前置校验（表示研发已修复、等待脚本回归验证）；**脚本用例运行通过后后端自动把同项目+同脚本+"修复"态缺陷流转为"关闭"**（记验证时间）；改为"关闭"亦可人工确认；状态未变化时幂等返回"状态未变化"
+- 状态流转：开放 → 修复 → 关闭。标记"修复"无前置校验（表示研发已修复、等待脚本回归验证）；**脚本用例运行通过后后端自动把同项目+同脚本+"修复"态缺陷流转为"关闭"**（记验证时间）；改为"关闭"亦可人工确认
 - **变更记录**（append-only，仅本地存储）：创建/状态流转/脚本回归通过自动记录；来源分 录入/AI/自动；详情 `.md` 末尾附完整记录表
 - 端：前端 / 后端 / APP端 / 未知；优先级：高 / 中 / 低（默认中）
 - 图片：`POST /api/images`（multipart，字段 `file`）上传后返回 `/images/...` 链接，缺陷 `images` 存该路径数组（最多 9 张，update 时全量覆盖，空数组清除）
