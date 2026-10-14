@@ -341,7 +341,7 @@ export class DefectsService implements OnModuleInit {
     ];
     for (const d of rows) {
       lines.push(
-        `| ${d.id} | ${escapeCell(defectLabel(d.expected))} | ${d.platform ?? '-'} | ${d.status} | ${d.priority} | ${escapeCell(names.get(d.projectId) ?? `#${d.projectId}`)} |`,
+        `| [${d.id}](/api/defects/${d.id}.md) | ${escapeCell(defectLabel(d.expected))} | ${d.platform ?? '-'} | ${d.status} | ${d.priority} | ${escapeCell(names.get(d.projectId) ?? `#${d.projectId}`)} |`,
       );
     }
     if (rows.length === 0) {
@@ -351,7 +351,7 @@ export class DefectsService implements OnModuleInit {
       '',
       '## 详情',
       '',
-      '阅读单条缺陷（含预期/实际/图片/变更记录）：`GET /api/defects/{id}.md`',
+      '表格 ID 列即详情链接；单条完整内容（预期/实际/图片/变更记录）见 `GET /api/defects/{id}.md`',
       '',
       '## AI 操作',
       '',

@@ -189,7 +189,7 @@ GET /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|�
 ```
 
 - 返回 Markdown 表格：`ID | 预期 | 端 | 状态 | 优先级 | 项目`；`projectId` 可选（不传返回全部项目），`q` 模糊匹配 预期 + 实际，`status`/`priority` 按枚举筛选（可组合）
-- 表格中每条按 `ID` 经 `GET /api/defects/{defectId}.md` 取详情
+- 表格的 `ID` 列即详情链接，直接点开 `GET /api/defects/{defectId}.md` 查看单条
 
 #### 8.2 获取缺陷详情
 
