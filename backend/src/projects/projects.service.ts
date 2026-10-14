@@ -365,8 +365,11 @@ export class ProjectsService {
       return lines.join('\n');
     });
     const defects = project.defects.map((d) => {
-      const parts = [`**${d.status}** ${d.expected.replace(/\s*\n\s*/g, ' ')}`];
+      const parts = [
+        `[${d.id}](/api/defects/${d.id}.md) **${d.status}** ${d.expected.replace(/\s*\n\s*/g, ' ')}`,
+      ];
       if (d.platform) parts.push(`端：${d.platform}`);
+      if (d.priority) parts.push(`优先级：${d.priority}`);
       if (d.testScript) parts.push(`测试脚本：${d.testScript}`);
       return `- ${parts.join(' — ')}`;
     });
@@ -432,6 +435,8 @@ export class ProjectsService {
       ...(tasks.length > 0 ? tasks : ['（暂无）']),
       '',
       `## 缺陷（${project.defects.length}）`,
+      '',
+      `全部缺陷（Markdown 清单）：\`GET /api/defects.md?projectId=${project.id}\``,
       '',
       ...(defects.length > 0 ? defects : ['（暂无）']),
       '',

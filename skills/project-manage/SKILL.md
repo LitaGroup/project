@@ -60,6 +60,7 @@ GET /api/projects/{id}.md
 - 用例（测试）清单：结构同检查（base 为 `/api/tests`）
 - 导出清单：结构同检查（base 为 `/api/exports`）；导出运行详情的 Markdown 视图含产物文件下载链接（`/export-files/{exportId}/{runId}/{file}`）
 - 任务清单：标题、cron、绑定的检查编号、开关状态、上次执行时间、下次执行时间、上次执行结果 + 详情链接、执行命令 `POST /api/tasks/{taskId}/run.md`、运行记录地址 `GET /api/tasks/{taskId}/runs`
+- 缺陷清单：每条含 id + 详情链接 `GET /api/defects/{id}.md` + 状态 + 预期 + 端 + 优先级 + 用例脚本；"缺陷"小节另附本项目全部缺陷清单地址 `GET /api/defects.md?projectId={id}`（见第 8 节）
 - 末尾"AI 操作"小节列出全部可用端点
 
 典型流程：**搜索 → 取目标项目 id → 读项目详情 → 再决定运行什么**。
