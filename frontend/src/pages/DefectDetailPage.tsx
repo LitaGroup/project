@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Viewer } from '@bytemd/react'
 import gfm from '@bytemd/plugin-gfm'
@@ -29,7 +29,6 @@ import {
 } from '@appica/ui-react/autocomplete'
 import { Button } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
-import { Input } from '@appica/ui-react/input'
 import { Textarea } from '@appica/ui-react/textarea'
 import {
   Select,
@@ -41,17 +40,19 @@ import {
 import {
   api,
   DEFECT_PLATFORMS,
+  DEFECT_PRIORITIES,
   DEFECT_STATUSES,
   type Defect,
+  type DefectChangeRecord,
+  type DefectPriority,
   type DefectStatus,
   type ProjectTest,
   type TestRun,
 } from '../lib/api'
-import { DefectStatusBadge, DefectSourceBadge } from '../components/StatusBadge'
+import { DefectStatusBadge, DefectPriorityBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { Terminal } from '../components/Terminal'
-
-const plugins = [gfm()]
+import { DefectImagesField } from '../components/DefectImagesField'
 
 const runStatusMeta: Record<
   TestRun['status'],
@@ -85,13 +86,52 @@ function formatTime(value: string | null): string {
   return value ? new Date(value).toLocaleString() : '—'
 }
 
-/** 缺陷详情：简述 + 操作步骤/预期/实际 + 截图 + 属性编辑，状态/端变更后回写飞书 */
+const plugins = [gfm()]
+
+/** 明细文本内联：折行折叠为空格，避免破坏 Markdown 结构 */
+function inline(value: string): string {
+  return value.replace(/\s*\n\s*/g, ' ').trim()
+}
+
+/**
+ * 把一次运行整理成 Markdown 报告：脚本 message 作为概述，
+ * 逐项明细（步骤/预期/实际/信息）按结果图标列出，供 Viewer 渲染。
+ */
+function buildRunMarkdown(run: TestRun): string {
+  const blocks: string[] = []
+  const message = run.message?.trim()
+  if (message) blocks.push(message)
+  for (const it of run.items ?? []) {
+    const icon =
+      it.status === 'success'
+        ? '✅'
+        : it.status === 'fail'
+          ? '❌'
+          : it.status === 'skip'
+            ? '⏭️'
+            : '•'
+    const head = `${icon} **${it.no !== undefined ? `${it.no}. ` : ''}${inline(
+      it.title ?? it.message ?? '步骤',
+    )}**`
+    const sub: string[] = []
+    if (it.expect) sub.push(`- 预期：${inline(it.expect)}`)
+    if (it.real) sub.push(`- 实际：${inline(it.real)}`)
+    if (it.message && it.message !== it.title) {
+      sub.push(`- 信息：${inline(it.message)}`)
+    }
+    blocks.push([head, ...sub].join('\n'))
+  }
+  return blocks.join('\n\n')
+}
+
+/** 缺陷详情：预期/实际 + 图片 + 测试运行结果 + 变更记录；属性只保留 端/预期/实际/图片/用例脚本/状态 */
 export function DefectDetailPage() {
   const { id, defectId } = useParams<{ id: string; defectId: string }>()
   const projectId = Number(id)
   const defectIdNum = Number(defectId)
 
   const [defect, setDefect] = useState<Defect | null>(null)
+  const [records, setRecords] = useState<DefectChangeRecord[]>([])
   const [projectName, setProjectName] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   // 测试运行结果：当前展示的运行（默认该测试最近一次），运行验证后实时订阅更新
@@ -102,12 +142,19 @@ export function DefectDetailPage() {
   const [test, setTest] = useState<ProjectTest | null>(null)
   // 仅用于驱动运行中耗时每秒重渲染
   const [now, setNow] = useState(() => Date.now())
+  // 原始输出默认折叠，运行结果以 Markdown 文本描述为主
+  const [showRaw, setShowRaw] = useState(false)
 
   const reload = useCallback(() => {
     api
       .getDefect(defectIdNum)
       .then(setDefect)
       .catch((e: Error) => setError(e.message))
+    // 变更记录与缺陷同刷：状态流转/编辑/运行验证成功后都能看到新记录
+    api
+      .listDefectRecords(defectIdNum)
+      .then(setRecords)
+      .catch(() => setRecords([]))
   }, [defectIdNum])
 
   useEffect(() => {
@@ -126,6 +173,7 @@ export function DefectDetailPage() {
 
   const testScript = defect?.testScript ?? null
   const defectProjectId = defect?.projectId ?? null
+  const runMarkdown = run ? buildRunMarkdown(run) : ''
 
   // 加载测试运行结果：按 defect.testScript 找到登记的测试，取其最近一次运行
   useEffect(() => {
@@ -162,7 +210,7 @@ export function DefectDetailPage() {
       if (r.status !== 'running' && r.status !== 'queued') {
         finished = true
         es.close()
-        // 运行通过后后端会自动把缺陷流转为"修复"，刷新详情以反映状态/时间
+        // 脚本回归通过后后端会自动把"修复"态缺陷流转为"关闭"，刷新详情以反映状态/时间
         if (r.status === 'success') reload()
       }
     }
@@ -182,68 +230,44 @@ export function DefectDetailPage() {
 
   return (
     <div className="flex gap-6">
-      {/* 左侧：简述 + 操作步骤/预期/实际 + 截图 */}
+      {/* 左侧：预期 + 实际 + 图片 + 测试运行结果 + 变更记录 */}
       <div className="flex min-w-0 flex-1 flex-col gap-6">
         <PageBreadcrumb
           items={[
             { label: '缺陷', to: '/defects' },
             { label: projectName ?? '…', to: `/projects/${projectId}` },
-            { label: defect.title },
+            { label: defect.expected.split('\n')[0] || `缺陷 ${defect.id}` },
           ]}
         />
-        <section>
-          <h2 className="mb-3 text-xl font-semibold">简述</h2>
-          <Card>
-            <p className="px-6 py-4 text-sm">{defect.title}</p>
-          </Card>
-        </section>
-        <section>
-          <h2 className="mb-3 text-xl font-semibold">操作步骤与关键信息</h2>
-          <Card>
-            <div className="markdown-body px-6 py-4 text-sm">
-              <Viewer
-                value={
-                  defect.steps ??
-                  defect.description ??
-                  '*（未填写操作步骤）*'
-                }
-                plugins={plugins}
-              />
-            </div>
-          </Card>
-        </section>
-        <section>
-          <h2 className="mb-3 text-xl font-semibold">预期</h2>
-          <Card>
-            <p className="whitespace-pre-wrap px-6 py-4 text-sm">
-              {defect.expected ?? '—'}
-            </p>
-          </Card>
-        </section>
-        <section>
-          <h2 className="mb-3 text-xl font-semibold">实际</h2>
-          <Card>
-            <p className="whitespace-pre-wrap px-6 py-4 text-sm">
-              {defect.actual ?? '—'}
-            </p>
-          </Card>
-        </section>
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <section>
+            <h2 className="mb-3 text-xl font-semibold">预期功能描述</h2>
+            <Card>
+              <p className="whitespace-pre-wrap px-6 py-4 text-sm">
+                {defect.expected}
+              </p>
+            </Card>
+          </section>
+          <section>
+            <h2 className="mb-3 text-xl font-semibold">实际结果描述</h2>
+            <Card>
+              <p className="whitespace-pre-wrap px-6 py-4 text-sm">
+                {defect.actual}
+              </p>
+            </Card>
+          </section>
+        </div>
         {defect.images && defect.images.length > 0 && (
           <section>
             <h2 className="mb-3 text-xl font-semibold">
-              截图（{defect.images.length}）
+              图片（{defect.images.length}）
             </h2>
             <div className="flex flex-wrap gap-3">
-              {defect.images.map((p) => (
-                <a
-                  key={p}
-                  href={`/images/${p}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+              {defect.images.map((img) => (
+                <a key={img} href={img} target="_blank" rel="noreferrer">
                   <img
-                    src={`/images/${p}`}
-                    alt="缺陷截图"
+                    src={img}
+                    alt="缺陷图片"
                     className="h-40 rounded-[var(--radius-md)] border border-border-strong object-cover"
                   />
                 </a>
@@ -251,18 +275,12 @@ export function DefectDetailPage() {
             </div>
           </section>
         )}
-        {defect.remark && (
-          <section>
-            <h2 className="mb-3 text-xl font-semibold">备注</h2>
-            <p className="whitespace-pre-wrap text-sm">{defect.remark}</p>
-          </section>
-        )}
         <section>
           <h2 className="mb-3 text-xl font-semibold">测试运行结果</h2>
           {defect.testScript ? (
             run ? (
               <Card>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 pt-4 text-sm">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border-strong px-6 py-4 text-sm">
                   <RunStatusBadge status={run.status} />
                   <span>
                     开始：{new Date(run.startedAt).toLocaleString()}
@@ -290,18 +308,31 @@ export function DefectDetailPage() {
                       /跳过 {run.skip ?? 0}
                     </span>
                   )}
-                  {run.message && (
-                    <span className="w-full whitespace-pre-wrap text-foreground-muted">
-                      {run.message}
-                    </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowRaw((v) => !v)}
+                    className="ml-auto text-xs text-foreground-muted underline"
+                  >
+                    {showRaw ? '隐藏原始输出' : '显示原始输出'}
+                  </button>
+                </div>
+                <div className="markdown-body px-6 py-4 text-sm">
+                  {runMarkdown ? (
+                    <Viewer value={runMarkdown} plugins={plugins} />
+                  ) : (
+                    <p className="text-foreground-muted">
+                      （本次运行未产生文本描述，可查看原始输出）
+                    </p>
                   )}
                 </div>
                 {streamError && (
-                  <p className="px-6 pt-2 text-sm">{streamError}</p>
+                  <p className="px-6 pb-2 text-sm">{streamError}</p>
                 )}
-                <div className="flex h-72 flex-col p-4">
-                  <Terminal run={run} scriptPath={defect.testScript} />
-                </div>
+                {showRaw && (
+                  <div className="flex h-72 flex-col p-4 pt-0">
+                    <Terminal run={run} scriptPath={defect.testScript} />
+                  </div>
+                )}
               </Card>
             ) : (
               <Card>
@@ -315,6 +346,41 @@ export function DefectDetailPage() {
               <p className="px-6 py-4 text-sm">
                 未配置用例，暂无运行结果。
               </p>
+            </Card>
+          )}
+        </section>
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">
+              变更记录（{records.length}）
+            </h2>
+            <AddRecordDialog defectId={defectIdNum} onSaved={reload} />
+          </div>
+          {records.length === 0 ? (
+            <Card>
+              <p className="px-6 py-4 text-sm">暂无变更记录。</p>
+            </Card>
+          ) : (
+            <Card>
+              <ul className="flex flex-col divide-y px-6 py-2 text-sm">
+                {records.map((r) => (
+                  <li key={r.id} className="flex flex-col gap-1 py-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <DefectStatusBadge status={r.status} />
+                      <Badge variant="soft">{r.source}</Badge>
+                      <span className="text-xs text-foreground-muted">
+                        {formatTime(r.createdAt)}
+                      </span>
+                    </div>
+                    <p className="whitespace-pre-wrap">{r.content}</p>
+                    {r.remark && (
+                      <p className="whitespace-pre-wrap text-foreground-muted">
+                        {r.remark}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </Card>
           )}
         </section>
@@ -335,36 +401,28 @@ export function DefectDetailPage() {
               </dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt>端</dt>
-              <dd className="flex items-center gap-1">
-                <span>{defect.platform ?? '—'}</span>
-                <EditPlatformDialog defect={defect} onSaved={reload} />
+              <dt>优先级</dt>
+              <dd>
+                <DefectPriorityBadge priority={defect.priority} />
               </dd>
             </div>
             <div className="flex justify-between">
-              <dt>开发</dt>
-              <dd>{defect.developer ?? '—'}</dd>
+              <dt>端</dt>
+              <dd>{defect.platform ?? '—'}</dd>
             </div>
             <div className="flex justify-between">
-              <dt>测试</dt>
-              <dd>{defect.tester ?? '—'}</dd>
+              <dt>图片</dt>
+              <dd>{defect.images?.length ?? 0} 张</dd>
             </div>
             <div className="flex items-center justify-between">
               <dt>用例</dt>
-              <dd className="flex items-center gap-1">
+              <dd>
                 <span
                   className="max-w-40 truncate"
                   title={defect.testScript ?? ''}
                 >
                   {test?.code ?? defect.testScript ?? '—'}
                 </span>
-                <EditTestScriptDialog defect={defect} onSaved={reload} />
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>来源</dt>
-              <dd>
-                <DefectSourceBadge source={defect.source} />
               </dd>
             </div>
             <div className="flex justify-between">
@@ -379,10 +437,6 @@ export function DefectDetailPage() {
               <dt>验证时间</dt>
               <dd>{formatTime(defect.verifiedAt)}</dd>
             </div>
-            <div className="flex justify-between">
-              <dt>飞书记录</dt>
-              <dd>{defect.feishuRecordId ?? '—'}</dd>
-            </div>
           </dl>
           <div className="flex flex-col gap-2 px-6 pb-6">
             <EditContentDialog defect={defect} onSaved={reload} />
@@ -393,11 +447,11 @@ export function DefectDetailPage() {
             />
             {defect.testScript ? (
               <p className="text-xs text-foreground-muted">
-                用例运行通过后自动流转为"修复"
+                脚本回归通过后自动流转为"关闭"
               </p>
             ) : (
               <p className="text-xs text-foreground-muted">
-                未配置用例，可手动标记修复
+                未配置用例，可手动标记修复/关闭
               </p>
             )}
           </div>
@@ -407,7 +461,7 @@ export function DefectDetailPage() {
   )
 }
 
-/** 修改状态：改"修复"时后端校验测试脚本（有脚本须最近一次运行通过）；变更后回写飞书 */
+/** 修改状态：置"修复"表示研发已修复；脚本回归通过后自动关闭 */
 function StatusSelect({
   defect,
   onChanged,
@@ -497,7 +551,7 @@ function VerifyButton({
   )
 }
 
-/** 编辑内容：简述 + 操作步骤（Markdown，可上传图片）+ 预期 + 实际 + 开发 + 测试 */
+/** 编辑内容：端 + 预期 + 实际 + 图片（多张）+ 用例脚本 */
 function EditContentDialog({
   defect,
   onSaved,
@@ -506,74 +560,52 @@ function EditContentDialog({
   onSaved: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const [title, setTitle] = useState('')
-  const [steps, setSteps] = useState('')
+  const [platform, setPlatform] = useState('未知')
+  const [priority, setPriority] = useState('中')
   const [expected, setExpected] = useState('')
   const [actual, setActual] = useState('')
-  const [developer, setDeveloper] = useState('')
-  const [tester, setTester] = useState('')
+  const [images, setImages] = useState<string[]>([])
+  const [testScript, setTestScript] = useState('')
+  const [tests, setTests] = useState<ProjectTest[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const stepsRef = useRef<HTMLTextAreaElement>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
     if (next) {
-      setTitle(defect.title)
-      setSteps(defect.steps ?? defect.description ?? '')
-      setExpected(defect.expected ?? '')
-      setActual(defect.actual ?? '')
-      setDeveloper(defect.developer ?? '')
-      setTester(defect.tester ?? '')
+      setPlatform(defect.platform ?? '未知')
+      setPriority(defect.priority ?? '中')
+      setExpected(defect.expected)
+      setActual(defect.actual)
+      setImages(defect.images ?? [])
+      setTestScript(defect.testScript ?? '')
       setError(null)
+      api
+        .listTests(defect.projectId)
+        .then(setTests)
+        .catch(() => setTests([]))
     }
   }
 
-  const uploadImage = (file: File) => {
-    setUploading(true)
-    setError(null)
-    api
-      .uploadImage(file)
-      .then(({ url }) => {
-        const textarea = stepsRef.current
-        const markdown = `![](${url})`
-        if (textarea) {
-          const start = textarea.selectionStart ?? steps.length
-          const end = textarea.selectionEnd ?? steps.length
-          const next = `${steps.slice(0, start)}${markdown}${steps.slice(end)}`
-          setSteps(next)
-          requestAnimationFrame(() => {
-            textarea.focus()
-            textarea.setSelectionRange(start + markdown.length, start + markdown.length)
-          })
-        } else {
-          setSteps((prev) => `${prev}${markdown}`)
-        }
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => {
-        setUploading(false)
-        if (fileRef.current) fileRef.current.value = ''
-      })
-  }
-
   const submit = () => {
-    if (!title.trim()) {
-      setError('简述（标题）不能为空')
+    if (!expected.trim()) {
+      setError('预期功能描述不能为空')
+      return
+    }
+    if (!actual.trim()) {
+      setError('实际结果描述不能为空')
       return
     }
     setSaving(true)
     setError(null)
     api
       .updateDefect(defect.id, {
-        title,
-        steps,
+        platform,
+        priority: priority as DefectPriority,
         expected,
         actual,
-        developer,
-        tester,
+        images,
+        testScript,
       })
       .then(() => {
         setOpen(false)
@@ -596,77 +628,94 @@ function EditContentDialog({
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1 text-sm">
-              简述
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="简要描述"
-              />
-            </label>
-            <div className="flex flex-col gap-1 text-sm">
-              <div className="flex items-center justify-between">
-                <span>操作步骤与关键信息（Markdown）</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={uploading}
-                  onClick={() => fileRef.current?.click()}
+            <div className="grid grid-cols-2 gap-4">
+              <label className="flex flex-col gap-1 text-sm">
+                端
+                <Select
+                  value={platform}
+                  onValueChange={(v) => setPlatform(v as string)}
+                  items={Object.fromEntries(
+                    DEFECT_PLATFORMS.map((p) => [p, p]),
+                  )}
                 >
-                  {uploading ? '上传中…' : '上传图片'}
-                </Button>
-              </div>
-              <Textarea
-                ref={stepsRef}
-                value={steps}
-                onChange={(e) => setSteps(e.target.value)}
-                rows={6}
-                placeholder="1. 操作步骤…&#10;2. 关键信息…"
-              />
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) uploadImage(file)
-                }}
-              />
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择端" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEFECT_PLATFORMS.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                优先级
+                <Select
+                  value={priority}
+                  onValueChange={(v) => setPriority(v as string)}
+                  items={Object.fromEntries(
+                    DEFECT_PRIORITIES.map((p) => [p, p]),
+                  )}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择优先级" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEFECT_PRIORITIES.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
             </div>
             <label className="flex flex-col gap-1 text-sm">
-              预期
+              预期功能描述
               <Textarea
                 value={expected}
                 onChange={(e) => setExpected(e.target.value)}
-                rows={2}
+                rows={3}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              实际
+              实际结果描述
               <Textarea
                 value={actual}
                 onChange={(e) => setActual(e.target.value)}
-                rows={2}
+                rows={3}
               />
             </label>
-            <div className="grid grid-cols-2 gap-4">
-              <label className="flex flex-col gap-1 text-sm">
-                开发
-                <Input
-                  value={developer}
-                  onChange={(e) => setDeveloper(e.target.value)}
+            <DefectImagesField value={images} onChange={setImages} />
+            <label className="flex flex-col gap-1 text-sm">
+              用例脚本（从项目已登记的测试中选择，可搜索，清除可留空）
+              <Autocomplete
+                items={tests.map((t) => t.scriptPath)}
+                value={testScript}
+                onValueChange={(v) => setTestScript(v as string)}
+                clearable
+              >
+                <AutocompleteInput
+                  placeholder="搜索测试编号或脚本…"
+                  aria-label="用例脚本"
                 />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                测试
-                <Input
-                  value={tester}
-                  onChange={(e) => setTester(e.target.value)}
-                />
-              </label>
-            </div>
+                <AutocompleteContent>
+                  <AutocompleteEmpty>未找到匹配的测试</AutocompleteEmpty>
+                  <AutocompleteList>
+                    {(item: string) => {
+                      const t = tests.find((x) => x.scriptPath === item)
+                      return (
+                        <AutocompleteItem key={item} value={item}>
+                          {t ? `${t.code}（${t.scriptPath}）` : item}
+                        </AutocompleteItem>
+                      )
+                    }}
+                  </AutocompleteList>
+                </AutocompleteContent>
+              </Autocomplete>
+            </label>
             {error && <p className="text-sm">保存失败:{error}</p>}
           </div>
         </DialogBody>
@@ -685,68 +734,76 @@ function EditContentDialog({
   )
 }
 
-/** 编辑端：下拉选择 前端/后端/APP端/未知（默认），变更后回写飞书 */
-function EditPlatformDialog({
-  defect,
+/** 追加变更记录：变更内容（必填）+ 备注（选填），状态自动取缺陷当前状态 */
+function AddRecordDialog({
+  defectId,
   onSaved,
 }: {
-  defect: Defect
+  defectId: number
   onSaved: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const [platform, setPlatform] = useState('未知')
+  const [content, setContent] = useState('')
+  const [remark, setRemark] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
     if (next) {
-      setPlatform(defect.platform ?? '未知')
+      setContent('')
+      setRemark('')
       setError(null)
     }
   }
 
   const submit = () => {
+    if (!content.trim()) {
+      setError('变更内容不能为空')
+      return
+    }
+    setSaving(true)
     setError(null)
     api
-      .updateDefect(defect.id, { platform })
+      .addDefectRecord(defectId, { content, remark: remark || undefined })
       .then(() => {
         setOpen(false)
         onSaved()
       })
       .catch((e: Error) => setError(e.message))
+      .finally(() => setSaving(false))
   }
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger>
-        <Button variant="ghost" size="sm">
-          编辑
+        <Button variant="outline" size="sm">
+          添加记录
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>编辑端</DialogTitle>
+          <DialogTitle>添加变更记录</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
             <label className="flex flex-col gap-1 text-sm">
-              端
-              <Select
-                value={platform}
-                onValueChange={(v) => setPlatform(v as string)}
-                items={Object.fromEntries(DEFECT_PLATFORMS.map((p) => [p, p]))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="选择端" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DEFECT_PLATFORMS.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {p}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              变更内容
+              <Textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={3}
+                placeholder="本次变更说明…"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              备注
+              <Textarea
+                value={remark}
+                onChange={(e) => setRemark(e.target.value)}
+                rows={2}
+                placeholder="补充说明（可空）"
+              />
             </label>
             {error && <p className="text-sm">保存失败:{error}</p>}
           </div>
@@ -757,105 +814,8 @@ function EditPlatformDialog({
               取消
             </Button>
           </DialogClose>
-          <Button size="sm" onClick={submit}>
-            保存
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/** 编辑测试脚本：带搜索的选择器，从项目已登记的测试中选取（存脚本相对路径） */
-function EditTestScriptDialog({
-  defect,
-  onSaved,
-}: {
-  defect: Defect
-  onSaved: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [testScript, setTestScript] = useState('')
-  const [tests, setTests] = useState<ProjectTest[]>([])
-  const [error, setError] = useState<string | null>(null)
-
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next)
-    if (next) {
-      setTestScript(defect.testScript ?? '')
-      setError(null)
-      api
-        .listTests(defect.projectId)
-        .then(setTests)
-        .catch(() => setTests([]))
-    }
-  }
-
-  const submit = () => {
-    setError(null)
-    api
-      .updateDefect(defect.id, { testScript })
-      .then(() => {
-        setOpen(false)
-        onSaved()
-      })
-      .catch((e: Error) => setError(e.message))
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        <Button variant="ghost" size="sm">
-          编辑
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>编辑用例</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1 text-sm">
-              测试（从项目已登记的测试中选择，可搜索，清除可留空）
-              <Autocomplete
-                items={tests.map((t) => t.scriptPath)}
-                value={testScript}
-                onValueChange={(v) => setTestScript(v as string)}
-                clearable
-              >
-                <AutocompleteInput
-                  placeholder="搜索测试编号或脚本…"
-                  aria-label="测试"
-                />
-                <AutocompleteContent>
-                  <AutocompleteEmpty>未找到匹配的测试</AutocompleteEmpty>
-                  <AutocompleteList>
-                    {(item: string) => {
-                      const t = tests.find((x) => x.scriptPath === item)
-                      return (
-                        <AutocompleteItem key={item} value={item}>
-                          {t ? `${t.code}（${t.scriptPath}）` : item}
-                        </AutocompleteItem>
-                      )
-                    }}
-                  </AutocompleteList>
-                </AutocompleteContent>
-              </Autocomplete>
-            </label>
-            <p className="text-xs text-foreground-muted">
-              配置后标记修复前须该用例最近一次运行通过
-            </p>
-            {error && <p className="text-sm">保存失败:{error}</p>}
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">
-              取消
-            </Button>
-          </DialogClose>
-          <Button size="sm" onClick={submit}>
-            保存
+          <Button size="sm" onClick={submit} disabled={saving}>
+            {saving ? '保存中…' : '保存'}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -39,26 +39,18 @@ export enum ProjectStatus {
   PAUSED = '暂停',
 }
 
-/**
- * 缺陷状态：平台侧统一为 开放/修复/关闭。
- * 飞书侧对应选项为 new/fixed/close/reopen/invalid，
- * 同步时按别名映射（new/reopen/乱填→开放、fixed→修复、close/invalid→关闭），
- * 回写时还原飞书侧原名（开放→new、修复→fixed、关闭→close），不新建选项。
- */
+/** 缺陷状态：平台侧统一为 开放/修复/关闭 */
 export enum DefectStatus {
   OPEN = '开放',
   FIXED = '修复',
   CLOSED = '关闭',
 }
 
-/**
- * 缺陷来源：脚本=测试运行失败后一键生成；飞书=多维表格同步导入；录入=人工表单创建。
- * 飞书来源按 feishuRecordId 非空判定，其余由创建入口决定。
- */
-export enum DefectSource {
-  SCRIPT = '脚本',
-  FEISHU = '飞书',
-  MANUAL = '录入',
+/** 缺陷优先级：高/中/低（默认中） */
+export enum DefectPriority {
+  HIGH = '高',
+  MEDIUM = '中',
+  LOW = '低',
 }
 
 /**

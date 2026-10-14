@@ -63,10 +63,6 @@ export class Project {
   @Column({ type: 'varchar', length: 500, nullable: true })
   feishuWebhook: string | null;
 
-  /** 缺陷多维表格地址（飞书 wiki/base 链接，须带 table 参数，可带 view）；项目的缺陷与该表双向绑定 */
-  @Column({ type: 'varchar', length: 500, nullable: true })
-  defectBitableUrl: string | null;
-
   @OneToMany(() => Document, (doc) => doc.project)
   documents: Document[];
 

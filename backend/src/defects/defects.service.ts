@@ -1,38 +1,35 @@
 import {
   BadRequestException,
   Injectable,
-  Logger,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { promises as fs } from 'fs';
 import * as path from 'path';
 import { FindOptionsSelect, In, Repository } from 'typeorm';
-import { DefectSource, DefectStatus } from '../common/enums';
-import { mdFrontmatter } from '../common/frontmatter';
-import { imageWebroot } from '../common/paths';
-import { BitableRecord, FeishuService } from '../feishu/feishu.service';
+import { DefectPriority, DefectStatus } from '../common/enums';
+import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { Project } from '../projects/project.entity';
 import { TestRun } from '../tests/test-run.entity';
 import { TestsService } from '../tests/tests.service';
+import {
+  DefectChangeRecord,
+  DEFECT_RECORD_SOURCES,
+} from './defect-change-record.entity';
 import { Defect } from './defect.entity';
 
-/**
- * 列表查询不取 text/json 大字段：description/steps/expected/actual 与 images
- * 仅经 GET /defects/:id 返回。
- */
+/** 图片上限（单条缺陷最多 9 张，经 POST /api/images 上传） */
+const MAX_IMAGES = 9;
+
 export const DEFECT_LIST_SELECT: FindOptionsSelect<Defect> = {
   id: true,
-  title: true,
   platform: true,
+  priority: true,
+  expected: true,
+  actual: true,
+  images: true,
   status: true,
-  source: true,
-  developer: true,
-  tester: true,
-  remark: true,
   testScript: true,
-  feishuRecordId: true,
   projectId: true,
   fixedAt: true,
   verifiedAt: true,
@@ -40,149 +37,88 @@ export const DEFECT_LIST_SELECT: FindOptionsSelect<Defect> = {
   updatedAt: true,
 };
 
-export interface SyncDefectsResult {
-  /** 视图内记录总数 */
-  scanned: number;
-  created: number;
-  updated: number;
-}
-
 export interface CreateDefectInput {
   projectId: number;
-  title: string;
-  /** 来源：脚本/录入（飞书来源只能由同步产生），缺省录入 */
-  source?: string;
+  /** 预期功能描述（必填） */
+  expected: string;
+  /** 实际结果描述（必填） */
+  actual: string;
+  /** 端：前端/后端/APP端/未知（默认） */
   platform?: string;
-  steps?: string;
-  expected?: string;
-  actual?: string;
+  /** 优先级：高/中/低（默认中） */
+  priority?: string;
+  /** 图片：/images/... 路径数组（POST /api/images 上传后返回的 url），最多 9 张 */
+  images?: string[];
+  /** 用例脚本：相对脚本根目录的 .test.ts 路径 */
   testScript?: string;
-  developer?: string;
-  tester?: string;
-  remark?: string;
 }
+
+/** 变更记录来源：录入（前端表单）/ AI（.md 接口）/ 自动（测试运行流转） */
+export type DefectRecordSource = (typeof DEFECT_RECORD_SOURCES)[number];
 
 export interface UpdateDefectInput {
-  title?: string;
   platform?: string;
+  priority?: string;
   status?: string;
-  testScript?: string;
-  remark?: string;
-  steps?: string;
   expected?: string;
   actual?: string;
-  developer?: string;
-  tester?: string;
+  /** 图片：/images/... 路径数组，全量覆盖（空数组清除） */
+  images?: string[];
+  testScript?: string;
+  /** 变更内容：状态变更并入状态记录，否则单独记一条内容变更记录（可空） */
+  changeContent?: string;
+  /** 本次变更的备注信息 */
+  changeRemark?: string;
 }
 
-/** 飞书附件字段（截图/截图2/截图3）的单项结构 */
-interface FeishuAttachment {
-  file_token?: string;
-  name?: string;
-  type?: string;
+export interface ChangeStatusInput {
+  /** 目标状态：开放/修复/关闭 */
+  status: string;
+  /** 备注信息（写入变更记录） */
+  remark?: string;
+  /** 变更内容（缺省生成"状态变更：X → Y"） */
+  content?: string;
+}
+
+export interface CreateRecordInput {
+  /** 变更内容 */
+  content: string;
+  /** 备注信息 */
+  remark?: string;
 }
 
 /**
  * 平台侧端取值：只保留 前端/后端/APP端/未知（默认）。
- * 同步时飞书单选里除 前端/后端/APP端 外的值统一映射为 未知。
  */
 export const DEFECT_PLATFORMS = ['前端', '后端', 'APP端', '未知'] as const;
-const REAL_PLATFORMS: readonly string[] = ['前端', '后端', 'APP端'];
-
-/**
- * 飞书状态别名 → 平台状态（开放/修复/关闭）。
- * new/reopen 及任何未识别值 → 开放；fixed → 修复；close/invalid → 关闭。
- */
-const FEISHU_STATUS_ALIAS: Record<string, string> = {
-  new: DefectStatus.OPEN,
-  reopen: DefectStatus.OPEN,
-  fixed: DefectStatus.FIXED,
-  close: DefectStatus.CLOSED,
-  closed: DefectStatus.CLOSED,
-  invalid: DefectStatus.CLOSED,
-};
-/** 平台状态 → 飞书状态（回写时还原飞书侧原名，避免在飞书表新建选项） */
-const FEISHU_STATUS_ALIAS_REVERSE: Record<string, string> = {
-  [DefectStatus.OPEN]: 'new',
-  [DefectStatus.FIXED]: 'fixed',
-  [DefectStatus.CLOSED]: 'close',
-};
-
-/** 附件 MIME → 扩展名（name 无扩展名时兜底） */
-const MIME_EXT: Record<string, string> = {
-  'image/png': '.png',
-  'image/jpeg': '.jpg',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-};
-
-/** 文本字段：segment 数组（含 mention）→ 纯文本 */
-function extractText(value: unknown): string | null {
-  if (typeof value === 'string') return value || null;
-  if (!Array.isArray(value)) return null;
-  const text = value
-    .map((seg: { text?: string; name?: string }) => seg.name ?? seg.text ?? '')
-    .join('')
-    .trim();
-  return text || null;
-}
-
-/** 人员字段：[{name, email, id}] → 姓名（多人顿号连接） */
-function extractPeople(value: unknown): string | null {
-  if (!Array.isArray(value)) return null;
-  const names = value
-    .map((seg: { name?: string; text?: string }) =>
-      (seg.name ?? seg.text ?? '').replace(/^@/, '').trim(),
-    )
-    .filter(Boolean);
-  return names.length ? names.join('、') : null;
-}
-
-/** 飞书状态 → 平台状态：别名映射，未识别值一律归为"开放" */
-function mapStatus(value: unknown): string {
-  if (typeof value !== 'string' || !value) return DefectStatus.OPEN;
-  return FEISHU_STATUS_ALIAS[value] ?? DefectStatus.OPEN;
-}
-
-/** 平台状态 → 飞书状态：还原飞书侧原名（开放→new、修复→fixed、关闭→close），回写用 */
-function toFeishuStatus(status: string): string {
-  return FEISHU_STATUS_ALIAS_REVERSE[status] ?? status;
-}
-
-/** 飞书端 → 平台端：只保留 前端/后端/APP端，其余统一为 未知（默认） */
-function mapPlatform(value: unknown): string {
-  if (typeof value === 'string' && REAL_PLATFORMS.includes(value)) {
-    return value;
-  }
-  return '未知';
-}
 
 /** Markdown 表格单元格转义（换行与竖线） */
 function escapeCell(value: string): string {
   return value.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
 }
 
+/** 缺陷单行摘要（frontmatter title / 列表展示用）：预期功能描述折行截断 */
+function defectLabel(expected: string | null | undefined): string {
+  const oneLine = (expected ?? '').replace(/\s*\n\s*/g, ' ').trim();
+  return oneLine.length > 80 ? `${oneLine.slice(0, 80)}…` : oneLine;
+}
+
 @Injectable()
 export class DefectsService implements OnModuleInit {
-  private readonly logger = new Logger(DefectsService.name);
-
   constructor(
     @InjectRepository(Defect)
     private readonly defects: Repository<Defect>,
+    @InjectRepository(DefectChangeRecord)
+    private readonly records: Repository<DefectChangeRecord>,
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
-    private readonly feishu: FeishuService,
     private readonly testsService: TestsService,
   ) {}
 
   onModuleInit(): void {
-    // 测试运行通过后自动流转关联缺陷为"修复"（脚本来源闭环）
+    // 脚本回归通过后自动把关联"修复"态缺陷流转为"关闭"（脚本来源闭环）
     this.testsService.onRunFinalized(
       (run) => void this.handleTestRunFinal(run),
-    );
-    // 存量数据一次性迁移（幂等）
-    void this.migrateLegacy().catch((e: Error) =>
-      this.logger.warn(`缺陷存量迁移失败: ${e.message}`),
     );
   }
 
@@ -201,7 +137,111 @@ export class DefectsService implements OnModuleInit {
     return defect;
   }
 
-  /** Markdown 视图（GET /api/defects/:id.md）：元信息 + 步骤/预期/实际/截图/备注 + AI 操作 */
+  /** 变更记录列表（倒序） */
+  listRecords(defectId: number): Promise<DefectChangeRecord[]> {
+    return this.records.find({
+      where: { defectId },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+  }
+
+  /** 追加一条变更记录（手动：录入/AI），status 取缺陷当前状态 */
+  async addRecord(
+    id: number,
+    input: CreateRecordInput,
+    source: DefectRecordSource = '录入',
+  ): Promise<DefectChangeRecord> {
+    const content = (input.content ?? '').trim();
+    if (!content) throw new BadRequestException('变更内容不能为空');
+    const defect = await this.findOne(id);
+    return this.saveRecord(defect, { content, remark: input.remark, source });
+  }
+
+  /** AI 用：追加变更记录并返回 Markdown 结果 */
+  async addRecordMarkdown(
+    id: number,
+    input: CreateRecordInput,
+  ): Promise<string> {
+    const record = await this.addRecord(id, input, 'AI');
+    return [
+      mdFrontmatter({ update: record.createdAt, title: record.content }),
+      '# 变更记录已添加',
+      '',
+      `- 缺陷 ID：${record.defectId}`,
+      `- 变更内容：${record.content}`,
+      `- 备注：${record.remark ?? '—'}`,
+      `- 状态：${record.status}`,
+      `- 来源：${record.source}`,
+      `- 时间：${beijingTime(record.createdAt)}`,
+      `- 阅读地址：GET /api/defects/${record.defectId}.md`,
+      '',
+    ].join('\n');
+  }
+
+  /**
+   * 专用状态变更：校验 → 时间戳维护 → 落库 → 记录变更记录。
+   * 状态与当前一致时幂等返回（changed=false，不记录）；改"修复"同样校验用例最近运行。
+   */
+  async changeStatus(
+    id: number,
+    input: ChangeStatusInput,
+    source: DefectRecordSource = '录入',
+  ): Promise<{ defect: Defect; changed: boolean }> {
+    const allowed = Object.values(DefectStatus) as string[];
+    if (!allowed.includes(input.status)) {
+      throw new BadRequestException(`状态只能是：${allowed.join(' / ')}`);
+    }
+    const defect = await this.findOne(id);
+    if (input.status === defect.status) return { defect, changed: false };
+    const prev = defect.status;
+    defect.status = input.status;
+    this.applyStatusTimestamps(defect);
+    const saved = await this.defects.save(defect);
+    await this.saveRecord(saved, {
+      content: input.content?.trim() || `状态变更：${prev} → ${saved.status}`,
+      remark: input.remark,
+      source,
+    });
+    return { defect: saved, changed: true };
+  }
+
+  /** AI 用：状态变更并返回 Markdown 结果（状态未变化时如实说明） */
+  async changeStatusMarkdown(
+    id: number,
+    input: ChangeStatusInput,
+  ): Promise<string> {
+    const { defect, changed } = await this.changeStatus(id, input, 'AI');
+    if (!changed) {
+      return [
+        mdFrontmatter({
+          update: defect.updatedAt,
+          title: defectLabel(defect.expected),
+        }),
+        '# 状态未变化',
+        '',
+        `- ID：${defect.id}`,
+        `- 当前状态：${defect.status}（与目标状态一致，未生成变更记录）`,
+        '',
+      ].join('\n');
+    }
+    return [
+      mdFrontmatter({
+        update: defect.updatedAt,
+        title: defectLabel(defect.expected),
+      }),
+      '# 缺陷状态已变更',
+      '',
+      `- ID：${defect.id}`,
+      `- 预期：${defectLabel(defect.expected)}`,
+      `- 状态：${defect.status}`,
+      `- 修复时间：${defect.fixedAt ? beijingTime(defect.fixedAt) : '—'}`,
+      `- 验证时间：${defect.verifiedAt ? beijingTime(defect.verifiedAt) : '—'}`,
+      `- 阅读地址：GET /api/defects/${defect.id}.md`,
+      '',
+    ].join('\n');
+  }
+
+  /** Markdown 视图（GET /api/defects/:id.md）：元信息 + 预期/实际/图片 + 变更记录 + AI 操作 */
   async findOneMarkdown(id: number): Promise<string> {
     const defect = await this.findOne(id);
     const project = await this.projects.findOne({
@@ -212,50 +252,58 @@ export class DefectsService implements OnModuleInit {
       `- ID：${defect.id}`,
       `- 项目：${project ? `${project.name}（${defect.projectId}）` : defect.projectId}`,
       `- 状态：${defect.status}`,
-      `- 来源：${defect.source}`,
       `- 端：${defect.platform ?? '—'}`,
-      `- 开发：${defect.developer ?? '—'}`,
-      `- 测试：${defect.tester ?? '—'}`,
+      `- 优先级：${defect.priority}`,
       `- 用例：${defect.testScript ? `\`${defect.testScript}\`` : '—'}`,
       `- 创建时间：${defect.createdAt.toISOString()}`,
       `- 修复时间：${defect.fixedAt ? defect.fixedAt.toISOString() : '—'}`,
       `- 验证时间：${defect.verifiedAt ? defect.verifiedAt.toISOString() : '—'}`,
-      `- 飞书记录：${defect.feishuRecordId ?? '—'}`,
       `- 更新时间：${defect.updatedAt.toISOString()}`,
     ];
     const lines = [
-      mdFrontmatter({ update: defect.updatedAt, title: defect.title }),
-      `# ${defect.title}`,
+      mdFrontmatter({
+        update: defect.updatedAt,
+        title: defectLabel(defect.expected),
+      }),
+      `# ${defectLabel(defect.expected) || `缺陷 ${defect.id}`}`,
       '',
       ...meta,
       '',
-      '## 操作步骤与关键信息',
+      '## 预期功能描述',
       '',
-      defect.steps ?? defect.description ?? '（无）',
+      defect.expected,
       '',
-      '## 预期',
+      '## 实际结果描述',
       '',
-      defect.expected ?? '（无）',
-      '',
-      '## 实际',
-      '',
-      defect.actual ?? '（无）',
+      defect.actual,
     ];
     if (defect.images && defect.images.length > 0) {
-      lines.push('', '## 截图', '');
+      lines.push('', '## 图片', '');
       for (const img of defect.images) {
-        lines.push(`![缺陷截图](/images/${img})`);
+        lines.push(`![缺陷图片](${img})`);
       }
     }
-    if (defect.remark) {
-      lines.push('', '## 备注', '', defect.remark);
+    const records = await this.listRecords(defect.id);
+    if (records.length > 0) {
+      lines.push('', '## 变更记录', '');
+      lines.push(
+        '| 时间 | 状态 | 来源 | 变更内容 | 备注 |',
+        '| --- | --- | --- | --- | --- |',
+      );
+      for (const r of records) {
+        lines.push(
+          `| ${beijingTime(r.createdAt)} | ${r.status} | ${r.source} | ${escapeCell(r.content)} | ${escapeCell(r.remark ?? '-')} |`,
+        );
+      }
     }
     lines.push(
       '',
       '## AI 操作',
       '',
       '```bash',
-      `curl -X POST /api/defects/${defect.id}/update.md -H 'Content-Type: application/json' -d '{"status": "修复"}'  # 更新（状态：开放/修复/关闭）`,
+      `curl -X POST /api/defects/${defect.id}/status.md -H 'Content-Type: application/json' -d '{"status": "修复", "remark": "备注"}'  # 状态变更（开放/修复/关闭），自动记录`,
+      `curl -X POST /api/defects/${defect.id}/records.md -H 'Content-Type: application/json' -d '{"content": "变更内容", "remark": "备注"}'  # 追加变更记录`,
+      `curl -X POST /api/defects/${defect.id}/update.md -H 'Content-Type: application/json' -d '{"actual": "新的实际结果", "changeContent": "更新说明"}'  # 更新（changeContent/changeRemark 并入变更记录）`,
       `curl -X POST /api/defects/${defect.id}/delete.md  # 删除`,
       `curl -X POST /api/defects/${defect.id}/verify  # 运行验证（须已配置用例脚本）`,
       '```',
@@ -268,7 +316,7 @@ export class DefectsService implements OnModuleInit {
   async listMarkdown(filter: {
     projectId?: number;
     status?: string;
-    source?: string;
+    priority?: string;
     q?: string;
   }): Promise<string> {
     const all = await this.findByProject(filter.projectId);
@@ -276,8 +324,10 @@ export class DefectsService implements OnModuleInit {
     const rows = all.filter(
       (d) =>
         (!filter.status || d.status === filter.status) &&
-        (!filter.source || d.source === filter.source) &&
-        (!q || d.title.toLowerCase().includes(q)),
+        (!filter.priority || d.priority === filter.priority) &&
+        (!q ||
+          d.expected.toLowerCase().includes(q) ||
+          d.actual.toLowerCase().includes(q)),
     );
     const names = await this.projectNames(rows.map((d) => d.projectId));
     const lines = [
@@ -286,28 +336,29 @@ export class DefectsService implements OnModuleInit {
       '',
       `- 共 ${rows.length} 条${filter.projectId ? `（项目 ${filter.projectId}）` : ''}`,
       '',
-      '| ID | 简述 | 状态 | 来源 | 端 | 开发 | 测试 | 项目 |',
-      '| --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| ID | 预期 | 端 | 状态 | 优先级 | 项目 |',
+      '| --- | --- | --- | --- | --- | --- |',
     ];
     for (const d of rows) {
       lines.push(
-        `| ${d.id} | ${escapeCell(d.title)} | ${d.status} | ${d.source} | ${d.platform ?? '-'} | ${d.developer ?? '-'} | ${d.tester ?? '-'} | ${escapeCell(names.get(d.projectId) ?? `#${d.projectId}`)} |`,
+        `| ${d.id} | ${escapeCell(defectLabel(d.expected))} | ${d.platform ?? '-'} | ${d.status} | ${d.priority} | ${escapeCell(names.get(d.projectId) ?? `#${d.projectId}`)} |`,
       );
     }
     if (rows.length === 0) {
-      lines.push('| - | （无匹配缺陷） | - | - | - | - | - | - |');
+      lines.push('| - | （无匹配缺陷） | - | - | - | - |');
     }
     lines.push(
       '',
       '## 详情',
       '',
-      '阅读单条缺陷（含步骤/预期/实际/截图）：`GET /api/defects/{id}.md`',
+      '阅读单条缺陷（含预期/实际/图片/变更记录）：`GET /api/defects/{id}.md`',
       '',
       '## AI 操作',
       '',
       '```bash',
-      'curl -X POST /api/defects/create.md -H \'Content-Type: application/json\' -d \'{"projectId": 123, "title": "简述", "steps": "1. 操作", "expected": "预期", "actual": "实际", "developer": "张三", "tester": "李四"}\'  # 新建（来源=录入；source 可为 脚本）',
-      'curl -X POST /api/defects/{id}/update.md -H \'Content-Type: application/json\' -d \'{"status": "关闭"}\'  # 更新（状态：开放/修复/关闭）',
+      'curl -X POST /api/defects/create.md -H \'Content-Type: application/json\' -d \'{"projectId": 123, "expected": "预期功能描述", "actual": "实际结果描述", "platform": "前端", "priority": "高"}\'  # 新建（platform 可选：前端/后端/APP端/未知；priority 可选：高/中/低；images 传 /images/... 数组，testScript 可选）',
+      'curl -X POST /api/defects/{id}/status.md -H \'Content-Type: application/json\' -d \'{"status": "修复", "remark": "备注"}\'  # 状态变更（开放/修复/关闭），自动记录',
+      'curl -X POST /api/defects/{id}/records.md -H \'Content-Type: application/json\' -d \'{"content": "变更内容", "remark": "备注"}\'  # 追加变更记录',
       'curl -X POST /api/defects/{id}/delete.md  # 删除',
       '```',
       '',
@@ -319,13 +370,13 @@ export class DefectsService implements OnModuleInit {
 
   /** AI 用：创建缺陷并返回 Markdown 结果 */
   async createMarkdown(input: CreateDefectInput): Promise<string> {
-    const defect = await this.create(input);
+    const defect = await this.create(input, 'AI');
     return this.renderMutationMarkdown('创建', defect);
   }
 
   /** AI 用：更新缺陷并返回 Markdown 结果 */
   async updateMarkdown(id: number, input: UpdateDefectInput): Promise<string> {
-    const defect = await this.update(id, input);
+    const defect = await this.update(id, input, 'AI');
     return this.renderMutationMarkdown('更新', defect);
   }
 
@@ -334,11 +385,11 @@ export class DefectsService implements OnModuleInit {
     const defect = await this.findOne(id);
     await this.remove(id);
     return [
-      mdFrontmatter({ title: defect.title }),
+      mdFrontmatter({ title: defectLabel(defect.expected) }),
       '# 缺陷已删除',
       '',
       `- ID：${defect.id}`,
-      `- 简述：${defect.title}`,
+      `- 预期：${defectLabel(defect.expected)}`,
       '',
     ].join('\n');
   }
@@ -346,13 +397,15 @@ export class DefectsService implements OnModuleInit {
   /** 变更类操作的 Markdown 结果（创建/更新共用） */
   private renderMutationMarkdown(action: string, defect: Defect): string {
     return [
-      mdFrontmatter({ update: defect.updatedAt, title: defect.title }),
+      mdFrontmatter({
+        update: defect.updatedAt,
+        title: defectLabel(defect.expected),
+      }),
       `# 缺陷已${action}`,
       '',
       `- ID：${defect.id}`,
-      `- 简述：${defect.title}`,
+      `- 预期：${defectLabel(defect.expected)}`,
       `- 状态：${defect.status}`,
-      `- 来源：${defect.source}`,
       `- 项目：${defect.projectId}`,
       `- 阅读地址：GET /api/defects/${defect.id}.md`,
       '',
@@ -372,105 +425,73 @@ export class DefectsService implements OnModuleInit {
     return map;
   }
 
-  /** 人工/脚本一键生成缺陷（来源为录入或脚本） */
-  async create(input: CreateDefectInput): Promise<Defect> {
-    const title = (input.title ?? '').trim();
-    if (!title) throw new BadRequestException('简述（标题）不能为空');
+  /** 人工/AI 生成缺陷，创建后自动记一条"创建缺陷"变更记录。预期与实际为必填 */
+  async create(
+    input: CreateDefectInput,
+    recordSource: DefectRecordSource = '录入',
+  ): Promise<Defect> {
+    const expected = (input.expected ?? '').trim();
+    const actual = (input.actual ?? '').trim();
+    if (!expected) throw new BadRequestException('预期功能描述不能为空');
+    if (!actual) throw new BadRequestException('实际结果描述不能为空');
     const project = await this.projects.findOne({
       where: { id: input.projectId },
     });
     if (!project)
       throw new NotFoundException(`Project ${input.projectId} not found`);
-    const source =
-      input.source === DefectSource.SCRIPT
-        ? DefectSource.SCRIPT
-        : DefectSource.MANUAL;
-    return this.defects.save(
+    const saved = await this.defects.save(
       this.defects.create({
         projectId: input.projectId,
-        title: title.length > 500 ? title.slice(0, 500) : title,
-        source,
+        expected,
+        actual,
         status: DefectStatus.OPEN,
         platform:
           input.platform !== undefined
             ? this.normalizePlatform(input.platform)
             : null,
-        steps: this.normalizeText(input.steps),
-        expected: this.normalizeText(input.expected),
-        actual: this.normalizeText(input.actual),
+        priority:
+          input.priority !== undefined
+            ? this.normalizePriority(input.priority)
+            : DefectPriority.MEDIUM,
+        images:
+          input.images !== undefined
+            ? this.normalizeImages(input.images)
+            : null,
         testScript:
           input.testScript !== undefined
             ? this.normalizeTestScript(input.testScript)
             : null,
-        developer: this.normalizeText(input.developer),
-        tester: this.normalizeText(input.tester),
-        remark: this.normalizeText(input.remark),
       }),
     );
+    await this.saveRecord(saved, { content: '创建缺陷', source: recordSource });
+    return saved;
   }
 
   /**
-   * 从项目绑定的飞书多维表格全量同步缺陷（直接覆盖本地字段）。
-   * 本地专有字段（steps/expected/actual/testScript/developer/tester/时间）不受影响；
-   * 飞书侧已删除的记录本地保留。
+   * 更新缺陷（端/状态/预期/实际/图片/用例脚本）。
+   * 标记"修复"无前置校验（表示研发已修复，等待脚本回归验证）；
+   * 状态变更时维护修复/验证时间并记一条变更记录（changeContent 缺省"状态变更：X → Y"）；
+   * 无状态变更但传了 changeContent/changeRemark 时记一条内容变更记录。
    */
-  async syncFromFeishu(projectId: number): Promise<SyncDefectsResult> {
-    const project = await this.projects.findOne({ where: { id: projectId } });
-    if (!project) throw new NotFoundException(`Project ${projectId} not found`);
-    if (!project.defectBitableUrl) {
-      throw new BadRequestException(
-        '请先在项目详情右侧设置缺陷多维表格地址，再执行同步',
-      );
-    }
-    const { appToken, tableId, viewId } = await this.parseBitableUrl(
-      project.defectBitableUrl,
-    );
-    const records = await this.feishu.searchBitableRecords(
-      appToken,
-      tableId,
-      viewId,
-    );
-    let created = 0;
-    let updated = 0;
-    for (const record of records) {
-      const result = await this.upsert(projectId, record);
-      if (result === 'created') created++;
-      if (result === 'updated') updated++;
-    }
-    return { scanned: records.length, created, updated };
-  }
-
-  /**
-   * 更新缺陷（端/状态/测试脚本/备注/正文与人员字段）。
-   * 状态改为"修复"时校验：配置了测试脚本则须其最近一次运行通过；未配置则允许手动改。
-   * 状态变更时维护修复/验证时间；状态或端变更后异步回写飞书多维表格。
-   */
-  async update(id: number, input: UpdateDefectInput): Promise<Defect> {
+  async update(
+    id: number,
+    input: UpdateDefectInput,
+    recordSource: DefectRecordSource = '录入',
+  ): Promise<Defect> {
     const defect = await this.findOne(id);
-    // 端归一化后比较（空串/未识别一律归为"未知"），避免无变化也触发回写
+    // 端归一化（空串/未识别一律归为"未知"）
     const nextPlatform =
       input.platform !== undefined
         ? this.normalizePlatform(input.platform)
         : defect.platform;
     const statusChanged =
       input.status !== undefined && input.status !== defect.status;
-    const platformChanged = nextPlatform !== defect.platform;
+    const prevStatus = defect.status;
 
-    if (input.title !== undefined) {
-      const title = input.title.trim();
-      if (!title) throw new BadRequestException('简述（标题）不能为空');
-      defect.title = title.length > 500 ? title.slice(0, 500) : title;
-    }
     if (input.status !== undefined) {
       const allowed = Object.values(DefectStatus) as string[];
       if (!allowed.includes(input.status)) {
         throw new BadRequestException(`状态只能是：${allowed.join(' / ')}`);
-      }
-      if (
-        input.status === (DefectStatus.FIXED as string) &&
-        defect.status !== (DefectStatus.FIXED as string)
-      ) {
-        await this.assertFixable(defect);
       }
       defect.status = input.status;
       this.applyStatusTimestamps(defect);
@@ -478,30 +499,40 @@ export class DefectsService implements OnModuleInit {
     if (input.platform !== undefined) {
       defect.platform = nextPlatform;
     }
-    if (input.remark !== undefined) {
-      defect.remark = this.normalizeText(input.remark);
-    }
-    if (input.steps !== undefined) {
-      defect.steps = this.normalizeText(input.steps);
+    if (input.priority !== undefined) {
+      defect.priority = this.normalizePriority(input.priority);
     }
     if (input.expected !== undefined) {
-      defect.expected = this.normalizeText(input.expected);
+      const expected = input.expected.trim();
+      if (!expected) throw new BadRequestException('预期功能描述不能为空');
+      defect.expected = expected;
     }
     if (input.actual !== undefined) {
-      defect.actual = this.normalizeText(input.actual);
+      const actual = input.actual.trim();
+      if (!actual) throw new BadRequestException('实际结果描述不能为空');
+      defect.actual = actual;
     }
-    if (input.developer !== undefined) {
-      defect.developer = this.normalizeText(input.developer);
-    }
-    if (input.tester !== undefined) {
-      defect.tester = this.normalizeText(input.tester);
+    if (input.images !== undefined) {
+      defect.images = this.normalizeImages(input.images);
     }
     if (input.testScript !== undefined) {
       defect.testScript = this.normalizeTestScript(input.testScript);
     }
     const saved = await this.defects.save(defect);
-    if (statusChanged || platformChanged) {
-      void this.pushToFeishu(saved);
+    const changeContent = input.changeContent?.trim();
+    const changeRemark = input.changeRemark?.trim();
+    if (statusChanged) {
+      await this.saveRecord(saved, {
+        content: changeContent || `状态变更：${prevStatus} → ${saved.status}`,
+        remark: input.changeRemark,
+        source: recordSource,
+      });
+    } else if (changeContent || changeRemark) {
+      await this.saveRecord(saved, {
+        content: changeContent || '内容更新',
+        remark: input.changeRemark,
+        source: recordSource,
+      });
     }
     return saved;
   }
@@ -526,17 +557,38 @@ export class DefectsService implements OnModuleInit {
 
   async remove(id: number): Promise<void> {
     const defect = await this.findOne(id);
+    await this.records.delete({ defectId: id });
     await this.defects.remove(defect);
-    void this.cleanImages(defect.projectId, defect.feishuRecordId);
   }
 
   /** 删除项目时的应用层级联清理（测试库无物理外键） */
   async removeByProject(projectId: number): Promise<void> {
+    await this.records.delete({ projectId });
     await this.defects.delete({ projectId });
-    void this.cleanImages(projectId);
   }
 
   // ---- 内部 ----
+
+  /** 写入一条变更记录（status 取缺陷当前状态；source 缺省录入） */
+  private saveRecord(
+    defect: Defect,
+    input: {
+      content: string;
+      remark?: string | null;
+      source?: DefectRecordSource;
+    },
+  ): Promise<DefectChangeRecord> {
+    return this.records.save(
+      this.records.create({
+        defectId: defect.id,
+        projectId: defect.projectId,
+        content: input.content,
+        remark: this.normalizeText(input.remark),
+        status: defect.status,
+        source: input.source ?? '录入',
+      }),
+    );
+  }
 
   /** 状态变更时维护修复/验证时间：开放清空；修复记 fixedAt；关闭记 verifiedAt */
   private applyStatusTimestamps(defect: Defect): void {
@@ -553,8 +605,8 @@ export class DefectsService implements OnModuleInit {
   }
 
   /**
-   * 测试运行终态回调：脚本通过（success）时把关联缺陷（同项目 + 同脚本 + 开放）
-   * 自动流转为"修复"并记录修复时间，同时回写飞书。
+   * 测试运行终态回调：脚本回归通过（success）时把关联缺陷（同项目 + 同脚本 +
+   * "修复"态，即研发已修复、等待脚本回归验证）自动流转为"关闭"并记录验证时间。
    */
   private async handleTestRunFinal(run: TestRun): Promise<void> {
     if (run.status !== 'success') return;
@@ -564,220 +616,21 @@ export class DefectsService implements OnModuleInit {
       where: {
         projectId: test.projectId,
         testScript: test.scriptPath,
-        status: DefectStatus.OPEN,
+        status: DefectStatus.FIXED,
       },
     });
     if (defects.length === 0) return;
     const now = new Date();
     for (const defect of defects) {
-      defect.status = DefectStatus.FIXED;
-      defect.fixedAt = now;
-      defect.verifiedAt = null;
+      defect.status = DefectStatus.CLOSED;
+      defect.fixedAt = defect.fixedAt ?? now;
+      defect.verifiedAt = now;
       const saved = await this.defects.save(defect);
-      void this.pushToFeishu(saved);
-    }
-  }
-
-  /** 存量数据一次性迁移：旧英文状态 → 中文三态；飞书来源按 record_id 回填 */
-  private async migrateLegacy(): Promise<void> {
-    await this.defects
-      .createQueryBuilder()
-      .update()
-      .set({ status: DefectStatus.OPEN })
-      .where('status IN (:...values)', { values: ['open', 'reopen'] })
-      .execute();
-    await this.defects
-      .createQueryBuilder()
-      .update()
-      .set({ status: DefectStatus.FIXED })
-      .where('status = :value', { value: 'fixed' })
-      .execute();
-    await this.defects
-      .createQueryBuilder()
-      .update()
-      .set({ status: DefectStatus.CLOSED })
-      .where('status IN (:...values)', { values: ['closed', 'invalid'] })
-      .execute();
-    await this.defects
-      .createQueryBuilder()
-      .update()
-      .set({ source: DefectSource.FEISHU })
-      .where('feishuRecordId IS NOT NULL')
-      .andWhere('source != :source', { source: DefectSource.FEISHU })
-      .execute();
-  }
-
-  /** fixed 前置校验：配置了测试脚本时，须最近一次运行通过 */
-  private async assertFixable(defect: Defect): Promise<void> {
-    if (!defect.testScript) return;
-    const test = await this.testsService.findByScriptPath(
-      defect.projectId,
-      defect.testScript,
-    );
-    if (!test) {
-      throw new BadRequestException(
-        '测试脚本未在本项目用例中登记，请先在"测试"板块登记该脚本',
-      );
-    }
-    const run = await this.testsService.findLatestRun(test.id);
-    if (!run || run.status !== 'success') {
-      throw new BadRequestException(
-        '测试脚本最近一次运行未通过，请先运行验证通过后再标记修复',
-      );
-    }
-  }
-
-  /** 回写飞书多维表格（单条）：状态必写，端有值时一并写 */
-  private async pushToFeishu(defect: Defect): Promise<void> {
-    try {
-      if (!defect.feishuRecordId) return;
-      const project = await this.projects.findOne({
-        where: { id: defect.projectId },
+      await this.saveRecord(saved, {
+        content: '脚本回归通过，自动流转为关闭',
+        source: '自动',
       });
-      if (!project?.defectBitableUrl) return;
-      const { appToken, tableId } = await this.parseBitableUrl(
-        project.defectBitableUrl,
-      );
-      const fields: Record<string, unknown> = {
-        // 状态回写用飞书侧原名（开放→new、修复→fixed、关闭→close），不新建选项
-        状态: toFeishuStatus(defect.status),
-      };
-      if (defect.platform && REAL_PLATFORMS.includes(defect.platform)) {
-        fields['端'] = defect.platform;
-      }
-      await this.feishu.updateBitableRecord(
-        appToken,
-        tableId,
-        defect.feishuRecordId,
-        fields,
-      );
-    } catch (e) {
-      this.logger.warn(
-        `缺陷 ${defect.id} 回写飞书失败: ${(e as Error).message}`,
-      );
     }
-  }
-
-  /** 按 record_id upsert：命中即覆盖飞书侧字段（steps 等本地字段保留） */
-  private async upsert(
-    projectId: number,
-    record: BitableRecord,
-  ): Promise<'created' | 'updated' | null> {
-    const f = record.fields;
-    const fullText = extractText(f['问题描述']);
-    if (!fullText) return null; // 无问题描述的记录跳过
-    // 标题单行化（多行正文存 description），截断至列宽 500
-    const oneLine = fullText.replace(/\s*\n\s*/g, ' ');
-    const title = oneLine.length > 500 ? oneLine.slice(0, 500) : oneLine;
-    const defect =
-      (await this.defects.findOne({
-        where: { projectId, feishuRecordId: record.record_id },
-      })) ??
-      this.defects.create({ projectId, feishuRecordId: record.record_id });
-    const isNew = defect.id === undefined;
-
-    defect.title = title;
-    defect.description = fullText !== oneLine ? fullText : null;
-    defect.platform = mapPlatform(f['端']);
-    defect.status = mapStatus(f['状态']);
-    defect.source = DefectSource.FEISHU;
-    defect.developer = extractPeople(f['人员']);
-    defect.remark = extractText(f['备注']);
-    defect.images = await this.syncImages(projectId, record.record_id, f);
-    await this.defects.save(defect);
-    return isNew ? 'created' : 'updated';
-  }
-
-  /**
-   * 同步截图：合并飞书 截图/截图2/截图3 三个附件字段，下载到
-   * imageWebroot()/defects/{projectId}/{recordId}/ 下，返回相对 webroot 的路径数组。
-   * 已存在的文件跳过下载；单个附件失败仅记日志不影响整体同步。
-   */
-  private async syncImages(
-    projectId: number,
-    recordId: string,
-    fields: Record<string, unknown>,
-  ): Promise<string[] | null> {
-    const attachments: FeishuAttachment[] = [];
-    for (const key of ['截图', '截图2', '截图3']) {
-      const value = fields[key];
-      if (Array.isArray(value)) {
-        attachments.push(...(value as FeishuAttachment[]));
-      }
-    }
-    if (attachments.length === 0) return null;
-
-    const relDir = path.posix.join('defects', String(projectId), recordId);
-    const absDir = path.join(imageWebroot(), relDir);
-    const relPaths: string[] = [];
-    for (const att of attachments) {
-      if (!att.file_token) continue;
-      const ext =
-        path.extname(att.name ?? '') || MIME_EXT[att.type ?? ''] || '';
-      const relPath = path.posix.join(relDir, `${att.file_token}${ext}`);
-      const absPath = path.join(imageWebroot(), relPath);
-      try {
-        await fs.access(absPath);
-      } catch {
-        try {
-          const buf = await this.feishu.downloadMedia(att.file_token);
-          await fs.mkdir(absDir, { recursive: true });
-          await fs.writeFile(absPath, buf);
-        } catch (e) {
-          this.logger.warn(
-            `缺陷截图下载失败 ${att.file_token}: ${(e as Error).message}`,
-          );
-          continue;
-        }
-      }
-      relPaths.push(relPath);
-    }
-    return relPaths.length > 0 ? relPaths : null;
-  }
-
-  /** 清理缺陷截图目录（fire-and-forget）：传 recordId 清单条，否则清整个项目 */
-  private async cleanImages(
-    projectId: number,
-    recordId?: string | null,
-  ): Promise<void> {
-    const relDir = recordId
-      ? path.join('defects', String(projectId), recordId)
-      : path.join('defects', String(projectId));
-    await fs
-      .rm(path.join(imageWebroot(), relDir), { recursive: true, force: true })
-      .catch(() => undefined);
-  }
-
-  /** 解析缺陷多维表格地址：飞书 wiki/base 链接，须带 table 参数（view 可选） */
-  private async parseBitableUrl(url: string): Promise<{
-    appToken: string;
-    tableId: string;
-    viewId?: string;
-  }> {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new BadRequestException(`缺陷多维表格地址不合法: ${url}`);
-    }
-    const tableId = parsed.searchParams.get('table');
-    if (!tableId) {
-      throw new BadRequestException('缺陷多维表格地址缺少 table 参数');
-    }
-    const viewId = parsed.searchParams.get('view') ?? undefined;
-    const pathMatch = parsed.pathname.match(/\/(wiki|base)\/([A-Za-z0-9]+)/);
-    if (!pathMatch) {
-      throw new BadRequestException(
-        '缺陷多维表格地址必须是飞书 wiki/base 链接',
-      );
-    }
-    const [, kind, token] = pathMatch;
-    if (kind === 'base') return { appToken: token, tableId, viewId };
-    const ref = await this.feishu.resolveWiki(token);
-    if (ref.type !== 'bitable') {
-      throw new BadRequestException('缺陷多维表格地址必须指向多维表格');
-    }
-    return { appToken: ref.token, tableId, viewId };
   }
 
   /** 端归一化：空串/非规范值一律归为"未知"（默认） */
@@ -788,11 +641,41 @@ export class DefectsService implements OnModuleInit {
       : '未知';
   }
 
+  /** 优先级归一化：非规范值一律归为"中"（默认） */
+  private normalizePriority(priority: string): string {
+    const normalized = priority.trim();
+    return (Object.values(DefectPriority) as string[]).includes(normalized)
+      ? normalized
+      : DefectPriority.MEDIUM;
+  }
+
   /** 文本字段归一：空串清除 */
   private normalizeText(value: string | null | undefined): string | null {
     if (value === undefined || value === null) return null;
     const trimmed = String(value).trim();
     return trimmed || null;
+  }
+
+  /**
+   * 图片归一：仅接受 POST /api/images 返回的 /images/... 路径，去重，空数组/空串清除。
+   * 超过上限拒绝；非法路径拒绝（防止存入任意 URL）。
+   */
+  private normalizeImages(images: string[]): string[] | null {
+    const normalized: string[] = [];
+    for (const raw of images ?? []) {
+      const item = String(raw ?? '').trim();
+      if (!item) continue;
+      if (!item.startsWith('/images/') || item.includes('..')) {
+        throw new BadRequestException(
+          '图片必须是 POST /api/images 上传后返回的 /images/... 路径',
+        );
+      }
+      if (!normalized.includes(item)) normalized.push(item);
+    }
+    if (normalized.length > MAX_IMAGES) {
+      throw new BadRequestException(`图片最多 ${MAX_IMAGES} 张`);
+    }
+    return normalized.length > 0 ? normalized : null;
   }
 
   /** 测试脚本：相对脚本根目录的 .test.ts 路径，空串清除；拒绝绝对路径与目录穿越 */

@@ -5,16 +5,16 @@ export type ProjectType = (typeof PROJECT_TYPES)[number]
 export const PROJECT_STATUSES = ['计划中', '进行中', '已结束', '暂停'] as const
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
 
-/** 与后端 DefectStatus 对应，平台侧统一为 开放/修复/关闭（飞书 new/reopen→开放、fixed→修复、close/invalid→关闭） */
+/** 与后端 DefectStatus 对应，平台侧统一为 开放/修复/关闭 */
 export const DEFECT_STATUSES = ['开放', '修复', '关闭'] as const
 export type DefectStatus = (typeof DEFECT_STATUSES)[number]
 
-/** 与后端 DefectSource 对应：脚本=测试运行失败一键生成；飞书=多维表格同步；录入=人工表单 */
-export const DEFECT_SOURCES = ['脚本', '飞书', '录入'] as const
-export type DefectSource = (typeof DEFECT_SOURCES)[number]
-
-/** 缺陷端：只保留这四类，飞书侧其它值统一为"未知"（默认） */
+/** 缺陷端：只保留这四类，非规范值统一为"未知"（默认） */
 export const DEFECT_PLATFORMS = ['前端', '后端', 'APP端', '未知'] as const
+
+/** 缺陷优先级：高/中/低（默认中，与后端 DefectPriority 对应） */
+export const DEFECT_PRIORITIES = ['高', '中', '低'] as const
+export type DefectPriority = (typeof DEFECT_PRIORITIES)[number]
 
 /** APP 自动化测试目标应用（与后端 AppTarget 对应，app_versions 用） */
 export const APP_TARGETS = ['lita', 'lita lite'] as const
@@ -299,8 +299,6 @@ export interface Project {
   scriptsPath?: string | null
   /** 飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送通知 */
   feishuWebhook?: string | null
-  /** 缺陷多维表格地址：项目的缺陷与该表双向绑定 */
-  defectBitableUrl?: string | null
   documents?: ProjectDocument[]
   checks?: ProjectCheck[]
   tests?: ProjectTest[]
@@ -315,42 +313,49 @@ export interface Project {
   updatedAt: string
 }
 
-/** 缺陷：与项目设置的飞书多维表格双向绑定（拉取覆盖本地；本地状态/端变更异步回写飞书） */
+/** 缺陷：仅平台内维护（接口/人工创建），属性只保留 端/预期/实际/图片/用例脚本/状态 */
 export interface Defect {
   id: number
   projectId: number
-  /** 简述（标题，长文本截断至 500） */
-  title: string
-  /** 问题描述全文（仅详情接口返回；与 title 相同为 null） */
-  description?: string | null
-  /** 操作步骤与关键信息（Markdown，截图以 /images/... 内嵌；仅详情接口返回） */
-  steps?: string | null
-  /** 预期结果（仅详情接口返回） */
-  expected?: string | null
-  /** 实际结果（仅详情接口返回） */
-  actual?: string | null
   /** 端（前端/后端/APP端/未知） */
   platform: string | null
+  /** 优先级：高/中/低（默认中） */
+  priority: string
+  /** 预期功能描述 */
+  expected: string
+  /** 实际结果描述 */
+  actual: string
+  /** 图片：/images/... 路径数组（最多 9 张，经 POST /api/images 上传） */
+  images: string[] | null
   /** 状态：开放/修复/关闭 */
   status: string
-  /** 来源：脚本/飞书/录入 */
-  source: string
-  /** 开发（飞书"人员"同步到此） */
-  developer: string | null
-  /** 测试 */
-  tester: string | null
-  remark: string | null
-  /** 截图：相对图片根目录的路径数组，经 /images/{path} 访问（仅详情接口返回） */
-  images?: string[] | null
-  /** 测试脚本：相对脚本根目录的 .test.ts 路径；非空时标记修复前须最近一次运行通过 */
+  /** 用例脚本：相对脚本根目录的 .test.ts 路径；配置后脚本回归通过时后端自动把"修复"态流转为"关闭" */
   testScript: string | null
-  feishuRecordId: string | null
-  /** 修复时间（验证运行通过自动流转为"修复"时记录） */
+  /** 修复时间（状态置"修复"时记录） */
   fixedAt: string | null
   /** 验证时间（人工二次确认，改为"关闭"时记录） */
   verifiedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** 缺陷变更记录来源：录入=前端表单 / AI=.md 接口 / 自动=脚本回归通过自动流转 */
+export const DEFECT_RECORD_SOURCES = ['录入', 'AI', '自动'] as const
+
+/** 缺陷变更记录（append-only，不可编辑删除；倒序返回） */
+export interface DefectChangeRecord {
+  id: number
+  defectId: number
+  projectId: number
+  /** 变更内容（本次改了什么） */
+  content: string
+  /** 备注信息 */
+  remark: string | null
+  /** 记录时缺陷状态（变更后的状态） */
+  status: string
+  /** 记录来源：录入/AI/自动 */
+  source: string
+  createdAt: string
 }
 
 /** 资源：项目完成需要需求方提供的素材/信息（配置/多语言/文件资源/UI/其它）。"废弃"为软删除，列表默认隐藏 */
@@ -535,7 +540,6 @@ export const api = {
       expectedReleaseAt?: string
       scriptsPath?: string
       feishuWebhook?: string
-      defectBitableUrl?: string
       /** 项目描述（Markdown），空串清除 */
       description?: string
     },
@@ -849,44 +853,44 @@ export const api = {
       `/defects${projectId === undefined ? '' : `?projectId=${projectId}`}`,
     ),
   getDefect: (id: number) => request<Defect>(`/defects/${id}`),
-  /** 人工/脚本一键生成缺陷（来源：脚本/录入） */
+  /** 缺陷变更记录列表（倒序） */
+  listDefectRecords: (id: number) =>
+    request<DefectChangeRecord[]>(`/defects/${id}/records`),
+  /** 追加一条缺陷变更记录（变更内容 + 备注，状态取缺陷当前状态） */
+  addDefectRecord: (id: number, input: { content: string; remark?: string }) =>
+    request<DefectChangeRecord>(`/defects/${id}/records`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 创建缺陷（预期与实际为必填） */
   createDefect: (input: {
     projectId: number
-    title: string
-    source?: DefectSource
+    expected: string
+    actual: string
     platform?: string
-    steps?: string
-    expected?: string
-    actual?: string
+    priority?: DefectPriority
+    images?: string[]
     testScript?: string
-    developer?: string
-    tester?: string
-    remark?: string
   }) =>
     request<Defect>('/defects', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  /** 从项目绑定的飞书多维表格全量同步缺陷（直接覆盖本地飞书侧字段） */
-  syncDefects: (projectId: number) =>
-    request<{ scanned: number; created: number; updated: number }>(
-      '/defects/sync',
-      { method: 'POST', body: JSON.stringify({ projectId }) },
-    ),
-  /** 更新缺陷（简述/端/状态/脚本/备注/正文/开发/测试）；状态或端变更后异步回写飞书 */
+  /** 更新缺陷（端/状态/预期/实际/图片/脚本）；images 全量覆盖（空数组清除） */
   updateDefect: (
     id: number,
     input: Partial<{
-      title: string
       platform: string
+      priority: DefectPriority
       status: DefectStatus
-      testScript: string
-      remark: string
-      steps: string
       expected: string
       actual: string
-      developer: string
-      tester: string
+      images: string[]
+      testScript: string
+      /** 变更内容：状态变更时并入状态记录，否则单独记一条内容变更记录 */
+      changeContent: string
+      /** 本次变更的备注信息（写入变更记录） */
+      changeRemark: string
     }>,
   ) =>
     request<Defect>(`/defects/${id}`, {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Dialog,
   DialogTrigger,
@@ -18,7 +18,6 @@ import {
   AutocompleteItem,
 } from '@appica/ui-react/autocomplete'
 import { Button } from '@appica/ui-react/button'
-import { Input } from '@appica/ui-react/input'
 import { Textarea } from '@appica/ui-react/textarea'
 import {
   Select,
@@ -30,25 +29,23 @@ import {
 import {
   api,
   DEFECT_PLATFORMS,
+  DEFECT_PRIORITIES,
   type Defect,
-  type DefectSource,
+  type DefectPriority,
   type Project,
   type ProjectTest,
 } from '../lib/api'
+import { DefectImagesField } from './DefectImagesField'
 
 interface NewDefectPreset {
   projectId?: number
   testScript?: string
-  title?: string
-  steps?: string
   expected?: string
   actual?: string
-  /** 来源：脚本（测试运行一键生成）/录入（人工），缺省录入 */
-  source?: DefectSource
 }
 
 /**
- * 新建缺陷弹窗（来源：脚本/录入）。
+ * 新建缺陷弹窗（属性：端/预期/实际/图片/用例脚本）。
  * 可用于全局缺陷页（多项目选择）、项目详情页（锁定项目）、测试运行页（携带失败用例预填）。
  */
 export function NewDefectDialog({
@@ -57,40 +54,33 @@ export function NewDefectDialog({
   trigger,
   onCreated,
 }: {
-  projects: Project[]
+  projects: Pick<Project, 'id' | 'name'>[]
   preset?: NewDefectPreset
   trigger?: React.ReactNode
   onCreated?: (defect: Defect) => void
 }) {
   const [open, setOpen] = useState(false)
   const [projectId, setProjectId] = useState<number | null>(null)
-  const [title, setTitle] = useState('')
   const [platform, setPlatform] = useState('未知')
-  const [steps, setSteps] = useState('')
+  const [priority, setPriority] = useState('中')
   const [expected, setExpected] = useState('')
   const [actual, setActual] = useState('')
+  const [images, setImages] = useState<string[]>([])
   const [testScript, setTestScript] = useState('')
-  const [developer, setDeveloper] = useState('')
-  const [tester, setTester] = useState('')
   const [tests, setTests] = useState<ProjectTest[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const stepsRef = useRef<HTMLTextAreaElement>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
     if (next) {
       setProjectId(preset?.projectId ?? projects[0]?.id ?? null)
-      setTitle(preset?.title ?? '')
       setPlatform('未知')
-      setSteps(preset?.steps ?? '')
+      setPriority('中')
       setExpected(preset?.expected ?? '')
       setActual(preset?.actual ?? '')
+      setImages([])
       setTestScript(preset?.testScript ?? '')
-      setDeveloper('')
-      setTester('')
       setError(null)
     }
   }
@@ -104,43 +94,17 @@ export function NewDefectDialog({
       .catch(() => setTests([]))
   }, [open, projectId])
 
-  const uploadImage = (file: File) => {
-    setUploading(true)
-    setError(null)
-    api
-      .uploadImage(file)
-      .then(({ url }) => {
-        const textarea = stepsRef.current
-        const markdown = `![](${url})`
-        if (textarea) {
-          const start = textarea.selectionStart ?? steps.length
-          const end = textarea.selectionEnd ?? steps.length
-          setSteps(`${steps.slice(0, start)}${markdown}${steps.slice(end)}`)
-          requestAnimationFrame(() => {
-            textarea.focus()
-            textarea.setSelectionRange(
-              start + markdown.length,
-              start + markdown.length,
-            )
-          })
-        } else {
-          setSteps((prev) => `${prev}${markdown}`)
-        }
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => {
-        setUploading(false)
-        if (fileRef.current) fileRef.current.value = ''
-      })
-  }
-
   const submit = () => {
     if (projectId === null) {
       setError('请选择所属项目')
       return
     }
-    if (!title.trim()) {
-      setError('简述（标题）不能为空')
+    if (!expected.trim()) {
+      setError('预期功能描述不能为空')
+      return
+    }
+    if (!actual.trim()) {
+      setError('实际结果描述不能为空')
       return
     }
     setSaving(true)
@@ -148,15 +112,12 @@ export function NewDefectDialog({
     api
       .createDefect({
         projectId,
-        title,
-        source: preset?.source ?? '录入',
-        platform,
-        steps,
         expected,
         actual,
+        platform,
+        priority: priority as DefectPriority,
+        images: images.length > 0 ? images : undefined,
         testScript,
-        developer,
-        tester,
       })
       .then((d) => {
         setOpen(false)
@@ -179,7 +140,7 @@ export function NewDefectDialog({
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <label className="flex flex-col gap-1 text-sm">
                 所属项目
                 <Select
@@ -223,64 +184,49 @@ export function NewDefectDialog({
                   </SelectContent>
                 </Select>
               </label>
-            </div>
-            <label className="flex flex-col gap-1 text-sm">
-              简述
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="简要描述"
-              />
-            </label>
-            <div className="flex flex-col gap-1 text-sm">
-              <div className="flex items-center justify-between">
-                <span>操作步骤与关键信息（Markdown）</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={uploading}
-                  onClick={() => fileRef.current?.click()}
+              <label className="flex flex-col gap-1 text-sm">
+                优先级
+                <Select
+                  value={priority}
+                  onValueChange={(v) => setPriority(v as string)}
+                  items={Object.fromEntries(
+                    DEFECT_PRIORITIES.map((p) => [p, p]),
+                  )}
                 >
-                  {uploading ? '上传中…' : '上传图片'}
-                </Button>
-              </div>
-              <Textarea
-                ref={stepsRef}
-                value={steps}
-                onChange={(e) => setSteps(e.target.value)}
-                rows={6}
-                placeholder="1. 操作步骤…&#10;2. 关键信息…"
-              />
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) uploadImage(file)
-                }}
-              />
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择优先级" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEFECT_PRIORITIES.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
             </div>
             <label className="flex flex-col gap-1 text-sm">
-              预期
+              预期功能描述
               <Textarea
                 value={expected}
                 onChange={(e) => setExpected(e.target.value)}
-                rows={2}
+                rows={3}
+                placeholder="功能预期表现…"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              实际
+              实际结果描述
               <Textarea
                 value={actual}
                 onChange={(e) => setActual(e.target.value)}
-                rows={2}
+                rows={3}
+                placeholder="实际表现与差异…"
               />
             </label>
+            <DefectImagesField value={images} onChange={setImages} />
             <label className="flex flex-col gap-1 text-sm">
-              用例（从项目已登记的测试中选择，可搜索，可留空）
+              用例脚本（从项目已登记的测试中选择，可搜索，可留空）
               <Autocomplete
                 items={tests.map((t) => t.scriptPath)}
                 value={testScript}
@@ -289,7 +235,7 @@ export function NewDefectDialog({
               >
                 <AutocompleteInput
                   placeholder="搜索测试编号或脚本…"
-                  aria-label="用例"
+                  aria-label="用例脚本"
                 />
                 <AutocompleteContent>
                   <AutocompleteEmpty>未找到匹配的测试</AutocompleteEmpty>
@@ -306,22 +252,6 @@ export function NewDefectDialog({
                 </AutocompleteContent>
               </Autocomplete>
             </label>
-            <div className="grid grid-cols-2 gap-4">
-              <label className="flex flex-col gap-1 text-sm">
-                开发
-                <Input
-                  value={developer}
-                  onChange={(e) => setDeveloper(e.target.value)}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                测试
-                <Input
-                  value={tester}
-                  onChange={(e) => setTester(e.target.value)}
-                />
-              </label>
-            </div>
             {error && <p className="text-sm">创建失败:{error}</p>}
           </div>
         </DialogBody>

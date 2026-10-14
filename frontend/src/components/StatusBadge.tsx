@@ -22,22 +22,27 @@ const defectVariantByStatus: Record<
   关闭: 'success',
 }
 
-/** 缺陷来源 → Badge variant（未知兜底 soft） */
-const defectSourceVariant: Record<string, 'info' | 'success' | 'soft'> = {
-  脚本: 'success',
-  飞书: 'info',
-  录入: 'soft',
-}
-
 export function DefectStatusBadge({ status }: { status: string }) {
   return (
     <Badge variant={defectVariantByStatus[status] ?? 'soft'}>{status}</Badge>
   )
 }
 
-export function DefectSourceBadge({ source }: { source: string }) {
+/** 缺陷优先级 → Badge variant：高红 / 中黄 / 低淡（未知兜底 soft） */
+const defectPriorityVariant: Record<
+  string,
+  'error' | 'warning' | 'soft'
+> = {
+  高: 'error',
+  中: 'warning',
+  低: 'soft',
+}
+
+export function DefectPriorityBadge({ priority }: { priority: string }) {
   return (
-    <Badge variant={defectSourceVariant[source] ?? 'soft'}>{source}</Badge>
+    <Badge variant={defectPriorityVariant[priority] ?? 'soft'}>
+      {priority}
+    </Badge>
   )
 }
 

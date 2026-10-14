@@ -179,7 +179,7 @@ export class ProjectsService {
       manager.find(Test, { where: { projectId: id } }),
       manager.find(Export, { where: { projectId: id } }),
       manager.find(Task, { where: { projectId: id } }),
-      // 缺陷列表不取 description/images（详情经 GET /defects/:id 单独加载）
+      // 缺陷列表不取 description 等大字段（详情经 GET /defects/:id 单独加载）
       manager.find(Defect, {
         where: { projectId: id },
         select: DEFECT_LIST_SELECT,
@@ -365,10 +365,8 @@ export class ProjectsService {
       return lines.join('\n');
     });
     const defects = project.defects.map((d) => {
-      const parts = [`**${d.status}** ${d.title}`];
+      const parts = [`**${d.status}** ${d.expected.replace(/\s*\n\s*/g, ' ')}`];
       if (d.platform) parts.push(`端：${d.platform}`);
-      if (d.developer) parts.push(`开发：${d.developer}`);
-      if (d.tester) parts.push(`测试：${d.tester}`);
       if (d.testScript) parts.push(`测试脚本：${d.testScript}`);
       return `- ${parts.join(' — ')}`;
     });
@@ -474,15 +472,14 @@ export class ProjectsService {
       '| 配置脚本（Yaml/Json） | `xxxxx-xxxx.yaml`（按项目命名） | 配置 |',
       '| SQL脚本 | `init.sql` | 技术 |',
       '',
-      '缺陷（与项目设置的飞书多维表格双向绑定）：',
+      '缺陷（仅平台内维护，经接口/人工创建）：',
       '',
       '```bash',
-      `curl '/api/defects.md?projectId=${project.id}'  # 缺陷清单（Markdown，可按 status/source/q 过滤）`,
-      `curl -X POST /api/defects/create.md -H 'Content-Type: application/json' -d '{"projectId": ${project.id}, "title": "登录按钮点击无响应", "source": "录入", "steps": "1. 打开登录页\\n2. 点击登录", "expected": "正常登录", "actual": "无响应", "developer": "张三", "tester": "李四"}'  # 新建（来源：脚本/录入）`,
-      'curl /api/defects/{defectId}.md  # 缺陷详情（含步骤/预期/实际/截图）',
-      'curl -X POST /api/defects/{defectId}/update.md -H \'Content-Type: application/json\' -d \'{"status": "修复"}\'  # 更新（开放/修复/关闭，异步回写飞书；有测试脚本时须先验证通过）',
-      'curl -X POST /api/defects/{defectId}/delete.md  # 删除（仅本地，不影响飞书）',
-      "curl -X POST /api/defects/sync -H 'Content-Type: application/json' -d '{\"projectId\": {id}}'  # 从飞书全量同步（覆盖本地）",
+      `curl '/api/defects.md?projectId=${project.id}'  # 缺陷清单（Markdown，可按 status/priority/q 过滤）`,
+      `curl -X POST /api/defects/create.md -H 'Content-Type: application/json' -d '{"projectId": ${project.id}, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高"}'  # 新建（预期与实际必填；priority 高/中/低；images 传 /images/... 数组，testScript 可选）`,
+      'curl /api/defects/{defectId}.md  # 缺陷详情（含预期/实际/图片/变更记录）',
+      'curl -X POST /api/defects/{defectId}/status.md -H \'Content-Type: application/json\' -d \'{"status": "修复", "remark": "备注"}\'  # 状态变更（开放/修复/关闭；置"修复"表示研发已修复，脚本回归通过后自动关闭）',
+      'curl -X POST /api/defects/{defectId}/delete.md  # 删除（仅本地）',
       '```',
       '',
       '节点（某个时间点需完成的事项；状态由 达成+实际达成日期+日期 推导：准备中/提前达成/达成/延期/取消）：',
@@ -496,7 +493,7 @@ export class ProjectsService {
     ].join('\n');
   }
 
-  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、缺陷多维表格地址（defectBitableUrl）、描述（description），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布）会在下次同步时被飞书侧覆盖 */
+  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、描述（description），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布）会在下次同步时被飞书侧覆盖 */
   async update(
     id: number,
     input: {
@@ -507,7 +504,6 @@ export class ProjectsService {
       expectedReleaseAt?: string;
       scriptsPath?: string;
       feishuWebhook?: string;
-      defectBitableUrl?: string;
       description?: string;
     },
   ): Promise<Project> {
@@ -547,11 +543,6 @@ export class ProjectsService {
     if (input.feishuWebhook !== undefined) {
       project.feishuWebhook = this.normalizeWebhook(input.feishuWebhook);
     }
-    if (input.defectBitableUrl !== undefined) {
-      project.defectBitableUrl = this.normalizeDefectBitableUrl(
-        input.defectBitableUrl,
-      );
-    }
     if (input.description !== undefined) {
       project.description = input.description.trim() || null;
     }
@@ -568,22 +559,6 @@ export class ProjectsService {
     if (!normalized) return null;
     if (normalized.length > max) {
       throw new BadRequestException(`${label}长度不能超过 ${max} 个字符`);
-    }
-    return normalized;
-  }
-
-  /** 缺陷多维表格地址：飞书 wiki/base 链接且须带 table 参数；空串清除 */
-  private normalizeDefectBitableUrl(url: string): string | null {
-    const normalized = url.trim();
-    if (!normalized) return null;
-    const isFeishuTable =
-      /(?:feishu\.cn|larksuite\.com)\/(wiki|base)\/[A-Za-z0-9]+/.test(
-        normalized,
-      ) && /[?&]table=[A-Za-z0-9]+/.test(normalized);
-    if (!isFeishuTable) {
-      throw new BadRequestException(
-        '缺陷多维表格地址必须是带 table 参数的飞书 wiki/base 链接，如 https://xxx.feishu.cn/wiki/XXX?table=tblXXX&view=vewXXX',
-      );
     }
     return normalized;
   }

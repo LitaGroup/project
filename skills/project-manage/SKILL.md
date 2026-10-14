@@ -179,30 +179,35 @@ curl -X PATCH {BASE}/api/milestones/{milestoneId} -H 'Content-Type: application/
 
 ### 8. 缺陷（Markdown）
 
-缺陷归属项目，来源分 脚本 / 飞书 / 录入，状态分 开放 / 修复 / 关闭。飞书来源与项目绑定的多维表格双向同步（同步/回写由平台处理）：
+缺陷归属项目，**仅平台内维护**（接口/人工创建，不与飞书同步）。属性：端 / 优先级（高/中/低）/ 预期功能描述 / 实际结果描述 / 图片（多张）/ 用例脚本 / 状态（开放 / 修复 / 关闭）：
 
 ```
-GET  /api/defects.md?projectId={id}[&status=开放|修复|关闭][&source=脚本|飞书|录入][&q=关键词]   # 缺陷清单
-GET  /api/defects/{defectId}.md                          # 详情（含步骤/预期/实际/截图/备注）
+GET  /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|中|低][&q=关键词]   # 缺陷清单（q 匹配 预期+实际）
+GET  /api/defects/{defectId}.md                          # 详情（含预期/实际/图片/变更记录）
 ```
 
 写入类操作（均返回 Markdown 结果）：
 
 ```bash
 curl -X POST {BASE}/api/defects/create.md -H 'Content-Type: application/json' \
-  -d '{"projectId": 123, "title": "登录按钮点击无响应", "steps": "1. 打开登录页\n2. 点击登录", "expected": "正常登录", "actual": "无响应", "developer": "张三", "tester": "李四", "platform": "前端", "testScript": "xxx/xxx.test.ts"}'  # source 缺省=录入，可传 脚本
+  -d '{"projectId": 123, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高", "images": ["/images/uploads/20261014/xxx.png"], "testScript": "xxx/xxx.test.ts"}'  # expected/actual 必填；platform 可选：前端/后端/APP端/未知；priority 可选：高/中/低（默认中）；images 传上传接口返回的 /images/... 数组；testScript 可选
+curl -X POST {BASE}/api/defects/{defectId}/status.md -H 'Content-Type: application/json' \
+  -d '{"status": "修复", "remark": "验证通过"}'   # 专用状态变更（开放/修复/关闭），自动生成变更记录
+curl -X POST {BASE}/api/defects/{defectId}/records.md -H 'Content-Type: application/json' \
+  -d '{"content": "复核处理进度", "remark": "已通知开发"}'   # 追加变更记录（只记录，不改缺陷字段）
 curl -X POST {BASE}/api/defects/{defectId}/update.md -H 'Content-Type: application/json' \
-  -d '{"status": "修复"}'   # 可改 title/platform/status/steps/expected/actual/developer/tester/testScript/remark
-curl -X POST {BASE}/api/defects/{defectId}/delete.md      # 删除（仅本地，不影响飞书）
+  -d '{"priority": "高", "actual": "新的实际结果", "changeContent": "补充信息", "changeRemark": "原因"}'   # 可改 platform/priority/status/expected/actual/images/testScript；changeContent/changeRemark 写入变更记录
+curl -X POST {BASE}/api/defects/{defectId}/delete.md      # 删除（仅本地，含变更记录）
 ```
 
-- 状态流转：改为"修复"时——有 `testScript` 则须该用例最近一次运行通过（否则 400），无则允许手动改；**用例运行通过后后端自动把同项目+同脚本+开放态缺陷流转为"修复"**；改为"关闭"记录验证时间（人工二次确认）
-- 端：前端 / 后端 / APP端 / 未知；飞书"人员"字段同步到 `developer`
-- 正文图片：`POST /api/images`（multipart，字段 `file`）上传后返回 `/images/...` 链接，可内嵌进 `steps` Markdown
+- 状态流转：开放 → 修复 → 关闭。标记"修复"无前置校验（表示研发已修复、等待脚本回归验证）；**脚本用例运行通过后后端自动把同项目+同脚本+"修复"态缺陷流转为"关闭"**（记验证时间）；改为"关闭"亦可人工确认；状态未变化时幂等返回"状态未变化"
+- **变更记录**（append-only，仅本地存储）：创建/状态流转/脚本回归通过自动记录；来源分 录入/AI/自动；详情 `.md` 末尾附完整记录表
+- 端：前端 / 后端 / APP端 / 未知；优先级：高 / 中 / 低（默认中）
+- 图片：`POST /api/images`（multipart，字段 `file`）上传后返回 `/images/...` 链接，缺陷 `images` 存该路径数组（最多 9 张，update 时全量覆盖，空数组清除）
 
 ## 工作约定
 
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、缺陷创建/更新/删除（defects）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、缺陷创建/状态变更/更新/删除（defects）

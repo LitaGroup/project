@@ -16,19 +16,19 @@ import {
   SelectContent,
   SelectItem,
 } from '@appica/ui-react/select'
-import { api, DEFECT_SOURCES, DEFECT_STATUSES, type Defect, type Project } from '../lib/api'
-import { DefectStatusBadge, DefectSourceBadge } from '../components/StatusBadge'
+import { api, DEFECT_PRIORITIES, DEFECT_STATUSES, type Defect, type Project } from '../lib/api'
+import { DefectStatusBadge, DefectPriorityBadge } from '../components/StatusBadge'
 import { ProjectFilterSelect } from '../components/ProjectFilterSelect'
 import { useProjectIdParam } from '../components/useProjectIdParam'
 import { NewDefectDialog } from '../components/NewDefectDialog'
 
-/** 全局缺陷列表：描述/端/状态/人员/来源/项目六列，支持描述模糊搜索 + 状态/来源筛选 */
+/** 全局缺陷列表：预期/端/状态/项目四列，支持描述模糊搜索（预期+实际）+ 状态筛选 */
 export function DefectsPage() {
   const [defects, setDefects] = useState<Defect[] | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [sourceFilter, setSourceFilter] = useState('all')
+  const [priorityFilter, setPriorityFilter] = useState('all')
   const [error, setError] = useState<string | null>(null)
   const [projectFilter, setProjectFilter] = useProjectIdParam()
 
@@ -46,9 +46,11 @@ export function DefectsPage() {
   const filtered = (defects ?? []).filter(
     (d) =>
       (projectFilter === 'all' || String(d.projectId) === projectFilter) &&
-      (!q || d.title.toLowerCase().includes(q)) &&
+      (!q ||
+        d.expected.toLowerCase().includes(q) ||
+        d.actual.toLowerCase().includes(q)) &&
       (statusFilter === 'all' || d.status === statusFilter) &&
-      (sourceFilter === 'all' || d.source === sourceFilter),
+      (priorityFilter === 'all' || d.priority === priorityFilter),
   )
   // 状态筛选项：已知状态 + 数据中出现的异常值
   const statusItems = Object.fromEntries(
@@ -56,8 +58,8 @@ export function DefectsPage() {
       .filter((v, i, arr) => arr.indexOf(v) === i)
       .map((s) => [s, s === 'all' ? '不限状态' : s]),
   )
-  const sourceItems = Object.fromEntries(
-    ['all', ...DEFECT_SOURCES].map((s) => [s, s === 'all' ? '不限来源' : s]),
+  const priorityItems = Object.fromEntries(
+    ['all', ...DEFECT_PRIORITIES].map((p) => [p, p === 'all' ? '不限优先级' : p]),
   )
 
   return (
@@ -74,7 +76,7 @@ export function DefectsPage() {
         />
         <Input
           className="w-64"
-          placeholder="搜索问题描述…"
+          placeholder="搜索预期或实际描述…"
           clearable
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
@@ -97,17 +99,17 @@ export function DefectsPage() {
           </SelectContent>
         </Select>
         <Select
-          value={sourceFilter}
-          onValueChange={(v) => setSourceFilter(v as string)}
-          items={sourceItems}
+          value={priorityFilter}
+          onValueChange={(v) => setPriorityFilter(v as string)}
+          items={priorityItems}
         >
           <SelectTrigger className="w-36">
-            <SelectValue placeholder="来源" />
+            <SelectValue placeholder="优先级" />
           </SelectTrigger>
           <SelectContent>
-            {Object.keys(sourceItems).map((s) => (
-              <SelectItem key={s} value={s}>
-                {sourceItems[s]}
+            {Object.keys(priorityItems).map((p) => (
+              <SelectItem key={p} value={p}>
+                {priorityItems[p]}
               </SelectItem>
             ))}
           </SelectContent>
@@ -117,36 +119,37 @@ export function DefectsPage() {
       <Table hoverableRows>
         <TableHeader>
           <TableRow>
-            <TableHead>问题描述</TableHead>
+            <TableHead>预期功能描述</TableHead>
             <TableHead className="w-24 text-center">端</TableHead>
+            <TableHead className="w-24 text-center">优先级</TableHead>
             <TableHead className="w-24 text-center">状态</TableHead>
-            <TableHead className="w-36">人员</TableHead>
-            <TableHead className="w-20 text-center">来源</TableHead>
+            <TableHead className="w-16 text-center">图片</TableHead>
             <TableHead>项目</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {filtered.map((d) => (
             <TableRow key={d.id}>
-              <TableCell className="max-w-xl truncate" title={d.title}>
+              <TableCell
+                className="max-w-xl truncate"
+                title={d.expected}
+              >
                 <Link
                   to={`/projects/${d.projectId}/defects/${d.id}`}
                   className="text-foreground-intense underline"
                 >
-                  {d.title}
+                  {d.expected}
                 </Link>
               </TableCell>
               <TableCell className="text-center">{d.platform ?? '—'}</TableCell>
               <TableCell className="text-center">
-                <DefectStatusBadge status={d.status} />
-              </TableCell>
-              <TableCell className="max-w-36 truncate">
-                {[d.developer && `开发 ${d.developer}`, d.tester && `测试 ${d.tester}`]
-                  .filter(Boolean)
-                  .join(' / ') || '—'}
+                <DefectPriorityBadge priority={d.priority} />
               </TableCell>
               <TableCell className="text-center">
-                <DefectSourceBadge source={d.source} />
+                <DefectStatusBadge status={d.status} />
+              </TableCell>
+              <TableCell className="text-center">
+                {(d.images?.length ?? 0) > 0 ? d.images!.length : '—'}
               </TableCell>
               <TableCell className="max-w-64 truncate">
                 <Link
@@ -162,7 +165,7 @@ export function DefectsPage() {
             <TableRow>
               <TableCell colSpan={6}>
                 {defects.length === 0
-                  ? '暂无缺陷，点击"新建缺陷"或同步飞书多维表格'
+                  ? '暂无缺陷，点击"新建缺陷"创建'
                   : '无匹配的缺陷'}
               </TableCell>
             </TableRow>

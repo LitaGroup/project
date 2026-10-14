@@ -12,59 +12,62 @@ import {
   Query,
 } from '@nestjs/common';
 import { TestRun } from '../tests/test-run.entity';
+import { DefectChangeRecord } from './defect-change-record.entity';
 import { Defect } from './defect.entity';
-import { DefectsService, SyncDefectsResult } from './defects.service';
-
-class SyncDefectsDto {
-  projectId: number;
-}
+import { DefectsService } from './defects.service';
 
 class CreateDefectDto {
   /** 所属项目 */
   projectId: number;
-  /** 简述（标题） */
-  title: string;
-  /** 来源：脚本/录入（飞书来源只能由同步产生），缺省录入 */
-  source?: string;
+  /** 预期功能描述（必填） */
+  expected: string;
+  /** 实际结果描述（必填） */
+  actual: string;
   /** 端：前端/后端/APP端/未知（默认） */
   platform?: string;
-  /** 操作步骤与关键信息（Markdown，截图以 /images/... 链接内嵌） */
-  steps?: string;
-  /** 预期结果 */
-  expected?: string;
-  /** 实际结果 */
-  actual?: string;
-  /** 测试脚本：相对脚本根目录的 .test.ts 路径 */
+  /** 优先级：高/中/低（默认中） */
+  priority?: string;
+  /** 图片：/images/... 路径数组（POST /api/images 上传后返回的 url），最多 9 张 */
+  images?: string[];
+  /** 用例脚本：相对脚本根目录的 .test.ts 路径 */
   testScript?: string;
-  /** 开发 */
-  developer?: string;
-  /** 测试 */
-  tester?: string;
-  /** 备注 */
-  remark?: string;
 }
 
 class UpdateDefectDto {
-  /** 简述（标题） */
-  title?: string;
   /** 端：前端/后端/APP端/未知（默认），空串或非规范值归为"未知" */
   platform?: string;
+  /** 优先级：高/中/低，非规范值归为"中" */
+  priority?: string;
   /** 状态：开放/修复/关闭；改"修复"的规则见 defects.service */
   status?: string;
-  /** 测试脚本：相对脚本根目录的 .test.ts 路径，空串清除 */
-  testScript?: string;
-  /** 备注 */
-  remark?: string;
-  /** 操作步骤与关键信息（Markdown） */
-  steps?: string;
-  /** 预期结果 */
+  /** 预期功能描述 */
   expected?: string;
-  /** 实际结果 */
+  /** 实际结果描述 */
   actual?: string;
-  /** 开发 */
-  developer?: string;
-  /** 测试 */
-  tester?: string;
+  /** 图片：/images/... 路径数组，全量覆盖（空数组清除） */
+  images?: string[];
+  /** 用例脚本：相对脚本根目录的 .test.ts 路径，空串清除 */
+  testScript?: string;
+  /** 变更内容：状态变更时并入状态记录，否则单独记一条内容变更记录（可空） */
+  changeContent?: string;
+  /** 本次变更的备注信息（写入变更记录） */
+  changeRemark?: string;
+}
+
+class ChangeStatusDto {
+  /** 目标状态：开放/修复/关闭 */
+  status: string;
+  /** 备注信息（写入变更记录） */
+  remark?: string;
+  /** 变更内容（缺省生成"状态变更：X → Y"） */
+  content?: string;
+}
+
+class CreateDefectRecordDto {
+  /** 变更内容 */
+  content: string;
+  /** 备注信息 */
+  remark?: string;
 }
 
 @Controller('defects')
@@ -79,7 +82,7 @@ export class DefectsController {
     );
   }
 
-  /** 人工/脚本一键生成缺陷（来源为录入或脚本） */
+  /** 人工/AI 创建缺陷（预期与实际为必填） */
   @Post()
   create(@Body() dto: CreateDefectDto): Promise<Defect> {
     return this.defectsService.create(dto);
@@ -95,12 +98,6 @@ export class DefectsController {
     return this.defectsService.createMarkdown(dto);
   }
 
-  /** 从项目绑定的飞书多维表格全量同步缺陷（直接覆盖本地飞书侧字段） */
-  @Post('sync')
-  syncFromFeishu(@Body() dto: SyncDefectsDto): Promise<SyncDefectsResult> {
-    return this.defectsService.syncFromFeishu(dto.projectId);
-  }
-
   /** Markdown 视图（须声明在 :id 之前，避免 :id 匹配到带 .md 后缀的路径） */
   @Get(':id.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')
@@ -113,13 +110,57 @@ export class DefectsController {
     return this.defectsService.findOne(id);
   }
 
-  /** 更新缺陷（端/状态/测试脚本/备注/正文与人员字段）；状态或端变更后异步回写飞书 */
+  /** 变更记录列表（倒序） */
+  @Get(':id/records')
+  listRecords(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<DefectChangeRecord[]> {
+    return this.defectsService.listRecords(id);
+  }
+
+  /** 追加一条变更记录（变更内容 + 备注，状态取缺陷当前状态） */
+  @Post(':id/records')
+  @HttpCode(201)
+  addRecord(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateDefectRecordDto,
+  ): Promise<DefectChangeRecord> {
+    return this.defectsService.addRecord(id, dto);
+  }
+
+  /** 更新缺陷（端/状态/测试脚本/备注/正文与人员字段） */
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateDefectDto,
   ): Promise<Defect> {
     return this.defectsService.update(id, dto);
+  }
+
+  /**
+   * AI 用：状态变更并返回 Markdown 结果（text/markdown）。
+   * 一步完成状态流转 + 变更记录；改"修复"同样校验用例最近运行，状态未变化时幂等。
+   */
+  @Post(':id/status.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  changeStatusMarkdown(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ChangeStatusDto,
+  ): Promise<string> {
+    return this.defectsService.changeStatusMarkdown(id, dto);
+  }
+
+  /**
+   * AI 用：追加变更记录并返回 Markdown 结果（text/markdown）。
+   * 只追加不改缺陷字段；状态取缺陷当前状态。
+   */
+  @Post(':id/records.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  addRecordMarkdown(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateDefectRecordDto,
+  ): Promise<string> {
+    return this.defectsService.addRecordMarkdown(id, dto);
   }
 
   /**
@@ -137,7 +178,7 @@ export class DefectsController {
 
   /**
    * AI 用：删除缺陷并返回 Markdown 结果（text/markdown）。
-   * 仅删本地记录，不影响飞书多维表格。
+   * 仅删本地记录及变更记录。
    */
   @Post(':id/delete.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')
@@ -151,7 +192,7 @@ export class DefectsController {
     return this.defectsService.verify(id);
   }
 
-  /** 删除本地缺陷记录（不影响飞书多维表格） */
+  /** 删除本地缺陷记录（含变更记录） */
   @Delete(':id')
   @HttpCode(204)
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
@@ -169,13 +210,13 @@ export class DefectsMarkdownController {
   listMarkdown(
     @Query('projectId') projectId?: string,
     @Query('status') status?: string,
-    @Query('source') source?: string,
+    @Query('priority') priority?: string,
     @Query('q') q?: string,
   ): Promise<string> {
     return this.defectsService.listMarkdown({
       projectId: projectId === undefined ? undefined : Number(projectId),
       status,
-      source,
+      priority,
       q,
     });
   }

@@ -50,8 +50,7 @@ interface TenantTokenCache {
 
 /**
  * 飞书开放平台客户端。
- * 以只读为主（单向导入）；唯一的写操作是 updateBitableRecord——
- * 缺陷模块的双向绑定需要把平台内的状态变更回写飞书多维表格（见 defects 模块）。
+ * 只读（单向导入：文档/项目/缺陷已解绑，飞书 → 平台，不回写）。
  * 凭据：Lita 平台 token 服务（LITA_USER_TOKEN），兜底 FEISHU_APP_ID / FEISHU_APP_SECRET。
  */
 @Injectable()
@@ -293,36 +292,6 @@ export class FeishuService implements OnModuleInit {
 
   // ---- 内部 ----
 
-  /**
-   * 更新多维表格单条记录（缺陷模块回写状态用，唯一的写操作）。
-   * fields 键为字段名，如 { 状态: 'fixed' }；单选字段直接传选项名（不存在会自动新建）。
-   */
-  async updateBitableRecord(
-    appToken: string,
-    tableId: string,
-    recordId: string,
-    fields: Record<string, unknown>,
-  ): Promise<void> {
-    await this.request(
-      'PUT',
-      `/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`,
-      { data: { fields } },
-    );
-  }
-
-  /** 下载附件素材（多维表格附件字段的 file_token），返回二进制内容 */
-  async downloadMedia(fileToken: string): Promise<Buffer> {
-    const token = await this.getTenantAccessToken();
-    const { data } = await this.http.get<ArrayBuffer>(
-      `/drive/v1/medias/${fileToken}/download`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: 'arraybuffer',
-      },
-    );
-    return Buffer.from(data);
-  }
-
   private async getTenantAccessToken(): Promise<string> {
     if (this.tokenCache && Date.now() < this.tokenCache.expireAt) {
       return this.tokenCache.token;
@@ -419,25 +388,41 @@ export class FeishuService implements OnModuleInit {
     config?: { params?: Record<string, unknown>; data?: unknown },
   ): Promise<T> {
     const token = await this.getTenantAccessToken();
-    const { data } = await this.http.request<{
-      code: number;
-      msg: string;
-      data: T;
-    }>({
-      method,
-      url: path,
-      headers: { Authorization: `Bearer ${token}` },
-      params: config?.params,
-      data: config?.data,
-    });
-    if (data.code !== 0) {
+    let body: { code: number; msg: string; data: T };
+    try {
+      const { data } = await this.http.request<{
+        code: number;
+        msg: string;
+        data: T;
+      }>({
+        method,
+        url: path,
+        headers: { Authorization: `Bearer ${token}` },
+        params: config?.params,
+        data: config?.data,
+      });
+      body = data;
+    } catch (e) {
+      // 飞书部分错误（如 131006 权限不足）以非 2xx 状态码返回，axios 会直接抛错，
+      // 此时业务错误信息在响应体里，需转成可读的 400 而非兜底 500
+      if (axios.isAxiosError(e) && e.response) {
+        const detail = e.response.data as
+          { code?: number; msg?: string } | undefined;
+        const code = detail?.code ?? e.response.status;
+        const msg = detail?.msg ?? e.message;
+        this.logger.warn(`飞书 API 错误 ${path}: code=${code} msg=${msg}`);
+        throw new BadRequestException(`飞书 API 错误: ${msg} (code ${code})`);
+      }
+      throw e;
+    }
+    if (body.code !== 0) {
       this.logger.warn(
-        `飞书 API 错误 ${path}: code=${data.code} msg=${data.msg}`,
+        `飞书 API 错误 ${path}: code=${body.code} msg=${body.msg}`,
       );
       throw new BadRequestException(
-        `飞书 API 错误: ${data.msg} (code ${data.code})`,
+        `飞书 API 错误: ${body.msg} (code ${body.code})`,
       );
     }
-    return data.data;
+    return body.data;
   }
 }

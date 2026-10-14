@@ -284,14 +284,6 @@ export function TestRunPage() {
             </CardHeader>
             <div className="flex flex-col gap-2 px-6 pb-6">
               {failedItems.map((item, idx) => {
-                const steps = [
-                  item.title ? `**步骤**：${item.title}` : null,
-                  item.expect ? `**预期**：${item.expect}` : null,
-                  item.real ? `**实际**：${item.real}` : null,
-                  item.message ? `**信息**：${item.message}` : null,
-                ]
-                  .filter(Boolean)
-                  .join('\n\n')
                 const defectProject = {
                   id: projectId,
                   name: projectName ?? `#${projectId}`,
@@ -313,11 +305,8 @@ export function TestRunPage() {
                       preset={{
                         projectId,
                         testScript: test?.scriptPath,
-                        title: item.title ?? test?.code ?? '用例失败',
-                        steps,
-                        expected: item.expect,
-                        actual: item.real,
-                        source: '脚本',
+                        expected: item.expect ?? item.title ?? item.message,
+                        actual: item.real ?? item.message,
                       }}
                       trigger={
                         <Button variant="outline" size="sm">
