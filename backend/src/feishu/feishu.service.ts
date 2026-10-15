@@ -221,9 +221,11 @@ export class FeishuService implements OnModuleInit {
     ];
     if (tokens.length === 0) return new Map();
     const results = await Promise.all(
-      tokens.map(async (token) => {
+      tokens.map(async (token, index) => {
         try {
-          return [token, await this.downloadMedia(token)] as const;
+          // 错峰启动，避免并发触发飞书接口频控（99991400）
+          await new Promise((resolve) => setTimeout(resolve, index * 200));
+          return [token, await this.downloadMediaWithRetry(token)] as const;
         } catch (e) {
           this.logger.warn(
             `飞书图片下载失败 ${token}: ${(e as Error).message}`,
@@ -255,6 +257,26 @@ export class FeishuService implements OnModuleInit {
       map.set(token, `/images/${relPath}`);
     }
     return map;
+  }
+
+  /**
+   * 下载媒体素材（含限频重试）：飞书接口偶发 99991400 频控，
+   * 命中后等待 1.5s 重试一次，仍失败按原错误抛出（调用方降级跳过）。
+   */
+  private async downloadMediaWithRetry(
+    fileToken: string,
+  ): Promise<{ buffer: Buffer; contentType?: string }> {
+    try {
+      return await this.downloadMedia(fileToken);
+    } catch (e) {
+      const message = (e as Error).message;
+      if (!message.includes('99991400') && !message.includes('frequency')) {
+        throw e;
+      }
+      this.logger.warn(`飞书图片下载触发频控，1.5s 后重试 ${fileToken}`);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return this.downloadMedia(fileToken);
+    }
   }
 
   /**
