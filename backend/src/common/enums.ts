@@ -124,3 +124,12 @@ export enum MilestoneStatus {
   DELAYED = '延期',
   CANCELLED = '取消',
 }
+
+/**
+ * 用户角色：飞书登录落库的身份（仅身份展示，不拦截接口）。
+ * 首个登录的用户自动授予管理员。
+ */
+export enum UserRole {
+  ADMIN = '管理员',
+  MEMBER = '成员',
+}

@@ -1,5 +1,6 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
+import { useAuth } from './context/AuthContext'
 import { OverviewPage } from './pages/OverviewPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
@@ -21,13 +22,27 @@ import { DefectDetailPage } from './pages/DefectDetailPage'
 import { ProjectDefectsPage } from './pages/ProjectDefectsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AppsPage } from './pages/AppsPage'
+import { LoginPage } from './pages/LoginPage'
+
+/** 路由级登录守卫：未登录一律跳 /login（会话加载中先不渲染，避免登录用户闪跳） */
+function RequireAuth() {
+  const { user, loading } = useAuth()
+  if (loading) return null
+  if (!user) return <Navigate to="/login" replace />
+  return <Outlet />
+}
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<Layout />}>
+        {/* 登录页公开（OAuth 回调失败跳转目标） */}
+        <Route path="/login" element={<LoginPage />} />
+        {/* 其余网页全部要求登录（后端 JSON 接口由 AuthGuard 同步拦截） */}
+        <Route element={<RequireAuth />}>
+          <Route element={<Layout />}>
           <Route path="/" element={<OverviewPage />} />
+          <Route path="/login" element={<LoginPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route
@@ -66,6 +81,7 @@ function App() {
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>

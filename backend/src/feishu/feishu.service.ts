@@ -442,6 +442,37 @@ export class FeishuService implements OnModuleInit {
 
   // ---- 内部 ----
 
+  /**
+   * 以应用机器人身份给指定用户发单聊文本消息。
+   * 前置：应用开通「以应用身份发消息」权限（im:message:send_as_bot）且用户在应用可用范围内。
+   * 供登录欢迎语等场景使用；失败抛 BadRequestException，由调用方决定是否降级。
+   */
+  async sendUserText(openId: string, text: string): Promise<void> {
+    await this.request('POST', '/im/v1/messages', {
+      params: { receive_id_type: 'open_id' },
+      data: {
+        receive_id: openId,
+        msg_type: 'text',
+        content: JSON.stringify({ text }),
+      },
+    });
+  }
+
+  /** 以应用机器人身份给指定用户发单聊卡片消息（interactive），供欢迎指南等场景使用 */
+  async sendUserCard(
+    openId: string,
+    card: Record<string, unknown>,
+  ): Promise<void> {
+    await this.request('POST', '/im/v1/messages', {
+      params: { receive_id_type: 'open_id' },
+      data: {
+        receive_id: openId,
+        msg_type: 'interactive',
+        content: JSON.stringify(card),
+      },
+    });
+  }
+
   private async getTenantAccessToken(): Promise<string> {
     if (this.tokenCache && Date.now() < this.tokenCache.expireAt) {
       return this.tokenCache.token;

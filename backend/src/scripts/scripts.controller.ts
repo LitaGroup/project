@@ -9,12 +9,15 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
+import { Public } from '../auth/public.decorator';
 import { ScriptsService } from './scripts.service';
 
 /**
  * 脚本下载端点：供 appium-agent 拉取脚本文件内容。
- * 鉴权：请求须带 X-Agent-Token header（或 ?token=）与 AGENT_TOKEN 一致。
+ * 鉴权：请求须带 X-Agent-Token header（或 ?token=）与 AGENT_TOKEN 一致
+ * （@Public 跳过全局登录 Guard，由下方自带 token 校验）。
  */
+@Public()
 @Controller('scripts')
 export class ScriptsController {
   private readonly agentToken: string | null;

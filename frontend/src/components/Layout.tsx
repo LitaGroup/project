@@ -6,6 +6,20 @@ import {
 } from '@appica/ui-react/navigation'
 import { NavigationLink } from '@appica/ui-react/navigation'
 import { Badge } from '@appica/ui-react/badge'
+import { Button, buttonVariants } from '@appica/ui-react/button'
+import {
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
+} from '@appica/ui-react/avatar'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuItem,
+} from '@appica/ui-react/dropdown-menu'
+import { useAuth } from '../context/AuthContext'
 
 /** 导航项 */
 const navItems = [
@@ -24,15 +38,72 @@ const navItems = [
   { to: '/settings', label: '设置', ready: true },
 ]
 
+/** 顶栏右侧用户区：未登录显示飞书登录入口，已登录显示头像下拉（身份信息 + 退出登录） */
+function UserArea() {
+  const { user, loading, logout } = useAuth()
+  if (loading) return null
+  if (!user) {
+    return (
+      <a
+        href="/api/auth/feishu"
+        className={buttonVariants({ variant: 'outline', size: 'sm' })}
+      >
+        飞书登录
+      </a>
+    )
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="ghost" size="sm" className="gap-2">
+            <Avatar size="2xs">
+              {user.avatarUrl && (
+                <AvatarImage src={user.avatarUrl} alt={user.name} />
+              )}
+              <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
+            </Avatar>
+            <span className="max-w-24 truncate">{user.name}</span>
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-56">
+        <div className="flex items-center gap-3 px-2.5 pt-2.5 pb-1.5">
+          <Avatar size="sm">
+            {user.avatarUrl && (
+              <AvatarImage src={user.avatarUrl} alt={user.name} />
+            )}
+            <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-foreground-intense">
+              {user.name}
+            </p>
+            <p className="truncate text-xs text-foreground-muted">
+              {user.email ?? '未绑定邮箱'}
+            </p>
+          </div>
+          <Badge variant="secondary" size="sm">
+            {user.role}
+          </Badge>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => void logout()}>退出登录</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function Layout() {
   const { pathname } = useLocation()
   return (
     <div className="flex min-h-screen flex-col bg-background-muted">
       {/* 顶部导航 */}
-      <header className="flex h-14 shrink-0 items-center border-b border-border-strong bg-background px-6">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border-strong bg-background px-6">
         <Link to="/" className="text-base font-semibold text-foreground-intense">
           AI 项目管理平台
         </Link>
+        <UserArea />
       </header>
 
       <div className="flex flex-1">

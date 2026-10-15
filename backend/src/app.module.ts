@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -7,6 +8,8 @@ import { AppService } from './app.service';
 import { AppVersionsModule } from './app-versions/app-versions.module';
 import { AgentModule } from './agent/agent.module';
 import { AgentAppsModule } from './agent/agent-apps.module';
+import { AuthModule } from './auth/auth.module';
+import { AuthGuard } from './auth/auth.guard';
 import { ProjectsModule } from './projects/projects.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ChecksModule } from './checks/checks.module';
@@ -40,6 +43,7 @@ import { ImagesModule } from './images/images.module';
       }),
     }),
     ProjectsModule,
+    AuthModule,
     DocumentsModule,
     ChecksModule,
     TasksModule,
@@ -57,6 +61,10 @@ import { ImagesModule } from './images/images.module';
     ImagesModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // 全局登录 Guard：网页 JSON 接口要求登录（.md / @Public / WS 例外，见 auth.guard.ts）
+    { provide: APP_GUARD, useClass: AuthGuard },
+  ],
 })
 export class AppModule {}

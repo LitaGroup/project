@@ -9,7 +9,7 @@ import { imageWebroot, exportWebroot } from './common/paths';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.setGlobalPrefix('api');
-  app.enableCors({ origin: true }); // 开发期放开，前端 Vite dev server 直连
+  app.enableCors({ origin: true, credentials: true }); // 开发期放开，前端 Vite dev server 直连；credentials 供登录 Cookie 跨端携带
 
   // 图片静态资源：http://{host}/images/{image-path} → DIR_IMAGE_WEBROOT（不走 /api 前缀）
   const webroot = imageWebroot();

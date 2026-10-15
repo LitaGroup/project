@@ -76,6 +76,20 @@ export const MILESTONE_STATUSES = [
 ] as const
 export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number]
 
+/** 用户角色（与后端 UserRole 对应）：首个登录用户自动为管理员 */
+export const USER_ROLES = ['管理员', '成员'] as const
+export type UserRole = (typeof USER_ROLES)[number]
+
+/** 当前登录用户（飞书 OAuth 落库，仅身份展示，接口不拦截） */
+export interface User {
+  id: number
+  name: string
+  avatarUrl: string | null
+  email: string | null
+  role: UserRole
+  lastLoginAt: string | null
+}
+
 /** 节点：项目在某个时间点需要完成的事项（日期=北京时间当日 23:59:59 前）；状态由后端推导 */
 export interface Milestone {
   id: number
@@ -494,10 +508,19 @@ export interface AgentSimulator {
   env: string | null
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {  const res = await fetch(`/api${path}`, {
+/** 401 统一处理：会话缺失/过期跳转登录页；/auth/*（getMe 等）由调用方自行消化未登录态，避免循环跳转 */
+function handleUnauthorized(path: string): void {
+  if (!path.startsWith('/auth/')) {
+    window.location.href = `/login?error=${encodeURIComponent('请先登录')}`
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
+  if (res.status === 401) handleUnauthorized(path)
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     throw new Error(body?.message ?? `请求失败 (${res.status})`)
@@ -907,6 +930,7 @@ export const api = {
     const form = new FormData()
     form.append('file', file)
     const res = await fetch('/api/images', { method: 'POST', body: form })
+    if (res.status === 401) handleUnauthorized('/images')
     if (!res.ok) {
       const body = await res.json().catch(() => null)
       throw new Error(body?.message ?? `上传失败 (${res.status})`)
@@ -998,4 +1022,8 @@ export const api = {
     }),
   deleteMilestone: (id: number) =>
     request<void>(`/milestones/${id}`, { method: 'DELETE' }),
+  /** 当前登录用户（未登录 401，调用方 catch 视为未登录态） */
+  getMe: () => request<{ user: User }>('/auth/me').then((r) => r.user),
+  /** 登出：清除会话 Cookie */
+  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 }
