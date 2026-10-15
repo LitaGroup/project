@@ -1,7 +1,7 @@
 ---
 name: project-manage
 description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、登记与验收节点、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
-version: 1.7.0
+version: 1.8.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -31,6 +31,20 @@ tags:
 
 - 测试环境：`http://project.cinta.team`（生产同域，按实际环境替换）
 - 所有路径省略前缀写法如下文，调用时拼在基础地址后（如 `{BASE}/api/projects/search.md?q=pk`）
+
+## 鉴权
+
+所有 `/api/...*.md` 端点要求鉴权，凭 **agent 访问令牌**调用（登录网页 → 右上角头像 → 个人中心 → "Agent 访问令牌"可查看与重置，重置后旧令牌立即失效）。两种携带方式任选：
+
+```bash
+# 方式一：请求头（推荐）
+curl -H "X-Agent-Token: {TOKEN}" {BASE}/api/projects/search.md?q=pk
+
+# 方式二：URL 参数
+curl "{BASE}/api/projects/search.md?q=pk&token={TOKEN}"
+```
+
+令牌无效或缺失返回 401。网页内直接点击 `.md` 链接无需令牌（浏览器会话自动放行）。
 
 ## 能力清单
 

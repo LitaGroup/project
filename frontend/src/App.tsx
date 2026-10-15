@@ -21,6 +21,7 @@ import { DefectsPage } from './pages/DefectsPage'
 import { DefectDetailPage } from './pages/DefectDetailPage'
 import { ProjectDefectsPage } from './pages/ProjectDefectsPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { AppsPage } from './pages/AppsPage'
 import { LoginPage } from './pages/LoginPage'
 
@@ -81,6 +82,7 @@ function App() {
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           </Route>
         </Route>
       </Routes>

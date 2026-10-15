@@ -1,4 +1,4 @@
-import { Outlet, Link, NavLink, useLocation } from 'react-router-dom'
+import { Outlet, Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   Navigation,
   NavigationList,
@@ -38,9 +38,10 @@ const navItems = [
   { to: '/settings', label: '设置', ready: true },
 ]
 
-/** 顶栏右侧用户区：未登录显示飞书登录入口，已登录显示头像下拉（身份信息 + 退出登录） */
+/** 顶栏右侧用户区：未登录显示飞书登录入口，已登录显示头像下拉（身份信息 + 个人中心 + 退出登录） */
 function UserArea() {
   const { user, loading, logout } = useAuth()
+  const navigate = useNavigate()
   if (loading) return null
   if (!user) {
     return (
@@ -80,7 +81,7 @@ function UserArea() {
               {user.name}
             </p>
             <p className="truncate text-xs text-foreground-muted">
-              {user.email ?? '未绑定邮箱'}
+              {user.department ?? '未获取部门'}
             </p>
           </div>
           <Badge variant="secondary" size="sm">
@@ -88,6 +89,9 @@ function UserArea() {
           </Badge>
         </div>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => navigate('/profile')}>
+          个人中心
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => void logout()}>退出登录</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

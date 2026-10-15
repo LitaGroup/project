@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios, { AxiosInstance } from 'axios';
@@ -113,8 +118,10 @@ export class AuthService {
     return this.fetchUserInfo(accessToken);
   }
 
-  /** 按 open_id upsert 用户；表为空时首个用户自动授予管理员；每次登录刷新姓名/头像/邮箱与 lastLoginAt */
+  /** 按 open_id upsert 用户；表为空时首个用户自动授予管理员；每次登录刷新姓名/头像/邮箱/部门与 lastLoginAt */
   async upsertFeishuUser(info: FeishuUserInfo): Promise<User> {
+    // 部门查不到（无通讯录权限等）为 null，更新时保留旧值
+    const department = await this.feishu.getUserDepartment(info.openId);
     const existing = await this.usersRepo.findOne({
       where: { feishuOpenId: info.openId },
     });
@@ -122,6 +129,7 @@ export class AuthService {
       existing.name = info.name ?? existing.name;
       existing.avatarUrl = info.avatarUrl ?? existing.avatarUrl;
       existing.email = info.email ?? existing.email;
+      existing.department = department ?? existing.department;
       existing.unionId = info.unionId ?? existing.unionId;
       existing.lastLoginAt = new Date();
       const user = await this.usersRepo.save(existing);
@@ -135,6 +143,7 @@ export class AuthService {
       name: info.name ?? info.openId,
       avatarUrl: info.avatarUrl,
       email: info.email,
+      department,
       role: total === 0 ? UserRole.ADMIN : UserRole.MEMBER,
       enabled: true,
       lastLoginAt: new Date(),
@@ -273,7 +282,41 @@ export class AuthService {
     }
   }
 
+  /** 取用户的 agent 访问令牌，尚未发放则生成（首次在个人中心查看时发放） */
+  async ensureAgentToken(userId: number): Promise<string> {
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('用户不存在');
+    if (user.agentToken) return user.agentToken;
+    user.agentToken = this.generateAgentToken();
+    await this.usersRepo.save(user);
+    return user.agentToken;
+  }
+
+  /** 重置 agent 访问令牌（旧令牌立即失效，需同步更新 agent 侧配置） */
+  async resetAgentToken(userId: number): Promise<string> {
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('用户不存在');
+    user.agentToken = this.generateAgentToken();
+    await this.usersRepo.save(user);
+    this.logger.log(`agent 访问令牌已重置: ${user.name}（id=${user.id}）`);
+    return user.agentToken;
+  }
+
+  /** 按 agent 访问令牌查用户（.md 端点鉴权用，enabled=false 视为无效） */
+  async getUserByAgentToken(token: string): Promise<User | null> {
+    if (!token) return null;
+    const user = await this.usersRepo.findOne({
+      where: { agentToken: token },
+    });
+    return user && user.enabled ? user : null;
+  }
+
   // ---- 内部 ----
+
+  /** 生成 agent 访问令牌（48 位随机 hex） */
+  private generateAgentToken(): string {
+    return randomBytes(24).toString('hex');
+  }
 
   /** 飞书应用凭据（登录直接依赖 app_id/secret；tenant token 的 Lita 来源不适用于 OAuth） */
   private getFeishuCredential(): FeishuAppCredential {

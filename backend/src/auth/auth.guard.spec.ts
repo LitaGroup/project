@@ -1,14 +1,21 @@
 import 'reflect-metadata';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { AuthGuard } from './auth.guard';
+import { AuthGuard, type AuthedRequest } from './auth.guard';
 import { AUTH_COOKIE } from './auth.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
-function createContext(url: string, cookie?: string, handler = () => {}) {
+type Headers = Record<string, string>;
+
+function createContext(
+  url: string,
+  cookie?: string,
+  headers: Headers = {},
+  handler = () => {},
+) {
   const req: Record<string, unknown> = {
     originalUrl: url,
-    headers: cookie ? { cookie } : {},
+    headers: { ...headers, ...(cookie ? { cookie } : {}) },
   };
   return {
     req,
@@ -23,26 +30,74 @@ function createContext(url: string, cookie?: string, handler = () => {}) {
 describe('AuthGuard（网页接口强制登录）', () => {
   const reflector = new Reflector();
   const getUserByToken = jest.fn();
-  const guard = new AuthGuard(reflector, { getUserByToken } as never);
+  const getUserByAgentToken = jest.fn();
+  const guard = new AuthGuard(reflector, {
+    getUserByToken,
+    getUserByAgentToken,
+  } as never);
 
   beforeEach(() => {
     getUserByToken.mockReset();
+    getUserByAgentToken.mockReset();
   });
 
   it('@Public() 路由直接放行', async () => {
     const handler = () => {};
     Reflect.defineMetadata(IS_PUBLIC_KEY, true, handler);
-    const { context } = createContext('/api/auth/me', undefined, handler);
+    const { context } = createContext('/api/auth/me', undefined, {}, handler);
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(getUserByToken).not.toHaveBeenCalled();
   });
 
-  it('.md 后缀端点放行（AI/agent 用，无需 Cookie）', async () => {
-    const { context } = createContext('/api/settings.md');
+  it('.md 端点凭有效 agent token（请求头）放行并挂载 req.user', async () => {
+    const user = { id: 2, name: '李四', enabled: true };
+    getUserByAgentToken.mockResolvedValue(user);
+    const { context, req } = createContext('/api/settings.md', undefined, {
+      'x-agent-token': 'valid-agent-token',
+    });
     await expect(guard.canActivate(context)).resolves.toBe(true);
-    const { context: ctx2 } = createContext('/api/checks/1/run.md');
-    await expect(guard.canActivate(ctx2)).resolves.toBe(true);
-    expect(getUserByToken).not.toHaveBeenCalled();
+    expect((req as AuthedRequest).user).toBe(user);
+    expect(getUserByAgentToken).toHaveBeenCalledWith('valid-agent-token');
+  });
+
+  it('.md 端点凭 ?token= 参数放行（query 不影响 .md 判定）', async () => {
+    const user = { id: 2, name: '李四', enabled: true };
+    getUserByAgentToken.mockResolvedValue(user);
+    const { context, req } = createContext(
+      '/api/defects.md?status=%E5%BC%80%E6%94%BE&token=query-token',
+    );
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect((req as AuthedRequest).user).toBe(user);
+    expect(getUserByAgentToken).toHaveBeenCalledWith('query-token');
+  });
+
+  it('.md 端点 agent token 无效 401（不回退会话）', async () => {
+    getUserByAgentToken.mockResolvedValue(null);
+    const { context } = createContext('/api/settings.md', undefined, {
+      'x-agent-token': 'stale-token',
+    });
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('.md 端点无令牌但会话有效放行（浏览器直接打开 .md 链接）', async () => {
+    const user = { id: 1, name: '张三', enabled: true };
+    getUserByToken.mockResolvedValue(user);
+    const { context, req } = createContext(
+      '/api/projects/1.md',
+      `${AUTH_COOKIE}=session-token`,
+    );
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect((req as AuthedRequest).user).toBe(user);
+    expect(getUserByAgentToken).not.toHaveBeenCalled();
+  });
+
+  it('.md 端点无令牌无会话 401', async () => {
+    const { context } = createContext('/api/checks/1/run.md');
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('无 Cookie 的 JSON 接口 401', async () => {
@@ -72,10 +127,5 @@ describe('AuthGuard（网页接口强制登录）', () => {
     await expect(guard.canActivate(context)).rejects.toThrow(
       UnauthorizedException,
     );
-  });
-
-  it('query 串不影响 .md 判定', async () => {
-    const { context } = createContext('/api/defects.md?status=开放');
-    await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 });

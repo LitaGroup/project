@@ -20,6 +20,7 @@ function serializeUser(user: User) {
     name: user.name,
     avatarUrl: user.avatarUrl,
     email: user.email,
+    department: user.department,
     role: user.role,
     lastLoginAt: user.lastLoginAt,
   };
@@ -90,10 +91,33 @@ export class AuthController {
   /** 当前登录用户（未登录 401，前端视为未登录态） */
   @Get('me')
   async me(@Req() req: Request) {
+    const user = await this.requireUser(req);
+    return { user: serializeUser(user) };
+  }
+
+  /**
+   * 当前用户的 agent 访问令牌：agent 调 .md 端点的鉴权凭据。
+   * 尚未发放则自动生成（首次查看个人中心时发放）。
+   */
+  @Get('agent-token')
+  async getAgentToken(@Req() req: Request) {
+    const user = await this.requireUser(req);
+    return { token: await this.authService.ensureAgentToken(user.id) };
+  }
+
+  /** 重置 agent 访问令牌（旧令牌立即失效，需同步更新 agent 侧配置） */
+  @Post('agent-token/reset')
+  async resetAgentToken(@Req() req: Request) {
+    const user = await this.requireUser(req);
+    return { token: await this.authService.resetAgentToken(user.id) };
+  }
+
+  /** 会话校验（本控制器整体 @Public，登录后接口在此手动校验 Cookie，与 me 同口径） */
+  private async requireUser(req: Request): Promise<User> {
     const token = readCookie(req, AUTH_COOKIE);
     const user = token ? await this.authService.getUserByToken(token) : null;
     if (!user) throw new UnauthorizedException();
-    return { user: serializeUser(user) };
+    return user;
   }
 
   /** 登出：清除会话 Cookie（JWT 无服务端状态，无法吊销已签发 token，7 天自然过期） */
