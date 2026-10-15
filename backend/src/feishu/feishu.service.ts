@@ -260,8 +260,9 @@ export class FeishuService implements OnModuleInit {
   }
 
   /**
-   * 下载媒体素材（含限频重试）：飞书接口偶发 99991400 频控，
-   * 命中后等待 1.5s 重试一次，仍失败按原错误抛出（调用方降级跳过）。
+   * 下载媒体素材（含瞬态失败重试）：频控（99991400）等 1.5s 重试，
+   * 403 等待 800ms 重试一次——飞书权限传播是最终一致的，窗口期内会抖动；
+   * 仍失败按原错误抛出（调用方降级跳过，下次同步可恢复）。
    */
   private async downloadMediaWithRetry(
     fileToken: string,
@@ -270,11 +271,17 @@ export class FeishuService implements OnModuleInit {
       return await this.downloadMedia(fileToken);
     } catch (e) {
       const message = (e as Error).message;
-      if (!message.includes('99991400') && !message.includes('frequency')) {
+      const rateLimited =
+        message.includes('99991400') || message.includes('frequency');
+      if (!rateLimited && !message.includes('403')) {
         throw e;
       }
-      this.logger.warn(`飞书图片下载触发频控，1.5s 后重试 ${fileToken}`);
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      this.logger.warn(
+        `飞书图片下载瞬态失败（${rateLimited ? '频控' : '403'}），稍后重试 ${fileToken}`,
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, rateLimited ? 1500 : 800),
+      );
       return this.downloadMedia(fileToken);
     }
   }
