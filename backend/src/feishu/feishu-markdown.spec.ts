@@ -230,6 +230,171 @@ describe('docxBlocksToMarkdown 表格块', () => {
   });
 });
 
+/** 有序列表块（block_type=13），可指定父块模拟列表嵌套 */
+function ordered(id: string, content: string, parentId?: string): Block {
+  return {
+    block_id: id,
+    parent_id: parentId,
+    block_type: 13,
+    ordered: { elements: [{ text_run: { content } }] },
+  };
+}
+
+describe('docxBlocksToMarkdown 列表', () => {
+  it('有序列表编号按父块分组递增，穿插兄弟内容不断号，标题后重新计数', () => {
+    const blocks: Block[] = [
+      ordered('a', '第一条'),
+      ordered('b', '第二条'),
+      ordered('c', '第三条'),
+      text('t', '中间的段落'),
+      ordered('d', '延续编号'),
+      {
+        block_id: 'h',
+        block_type: 3,
+        heading1: { elements: [{ text_run: { content: '下一节' } }] },
+      },
+      ordered('e', '新列表'),
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe(
+      '1. 第一条\n\n2. 第二条\n\n3. 第三条\n\n中间的段落\n\n4. 延续编号\n\n# 下一节\n\n1. 新列表',
+    );
+  });
+
+  it('有序列表项的嵌套子项（无序/段落）不打断编号', () => {
+    const blocks: Block[] = [
+      ordered('a', '第一条'),
+      {
+        block_id: 'sub',
+        parent_id: 'a',
+        block_type: 12,
+        bullet: { elements: [{ text_run: { content: '子项' } }] },
+      },
+      { ...text('cont', '补充说明'), parent_id: 'a' },
+      ordered('b', '第二条'),
+      text('t', '顶层段落'),
+      ordered('c', '新列表'),
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe(
+      '1. 第一条\n\n  - 子项\n\n补充说明\n\n2. 第二条\n\n顶层段落\n\n3. 新列表',
+    );
+  });
+
+  it('无序列表与待办列表保持原有格式', () => {
+    const blocks: Block[] = [
+      {
+        block_id: 'b',
+        block_type: 12,
+        bullet: { elements: [{ text_run: { content: '无序项' } }] },
+      },
+      {
+        block_id: 'd',
+        block_type: 17,
+        todo: {
+          elements: [{ text_run: { content: '已完成' } }],
+          style: { done: true },
+        },
+      },
+      {
+        block_id: 'e',
+        block_type: 17,
+        todo: {
+          elements: [{ text_run: { content: '未完成' } }],
+          style: { done: false },
+        },
+      },
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe(
+      '- 无序项\n\n- [x] 已完成\n\n- [ ] 未完成',
+    );
+  });
+
+  it('多级列表按父链缩进，子有序列表独立编号', () => {
+    const blocks: Block[] = [
+      ordered('p1', '父项一'),
+      ordered('c1', '子项一', 'p1'),
+      ordered('c2', '子项二', 'p1'),
+      ordered('p2', '父项二'),
+      {
+        block_id: 'sc1',
+        parent_id: 'p2',
+        block_type: 12,
+        bullet: { elements: [{ text_run: { content: '子无序' } }] },
+      },
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe(
+      '1. 父项一\n\n   1. 子项一\n\n   2. 子项二\n\n2. 父项二\n\n  - 子无序',
+    );
+  });
+
+  it('表格单元格内有序列表独立递增编号', () => {
+    const blocks: Block[] = [
+      {
+        block_id: 't1',
+        block_type: 18,
+        children: ['c1'],
+        table: {
+          property: { row_size: 1, column_size: 1, merge_info: [] },
+          cells: ['c1'],
+        },
+      },
+      cell('c1', ['i1', 'i2']),
+      ordered('i1', '首页Banner'),
+      ordered('i2', '语音房MINI Banner'),
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe(
+      '| 1. 首页Banner<br>2. 语音房MINI Banner |\n| --- |',
+    );
+  });
+});
+
+describe('docxBlocksToMarkdown 备注块与引用容器', () => {
+  it('备注块（19 callout）子内容渲染为引用样式', () => {
+    const blocks: Block[] = [
+      {
+        block_id: 'callout',
+        block_type: 19,
+        callout: { background_color: 2, emoji_id: 'dvd' },
+        children: ['p1', 'p2'],
+      },
+      text('p1', '备注第一段'),
+      text('p2', '备注第二段'),
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe('> 备注第一段\n> 备注第二段');
+  });
+
+  it('引用容器（34）子内容渲染为引用样式，内部引用块不重复加前缀', () => {
+    const blocks: Block[] = [
+      {
+        block_id: 'qc',
+        block_type: 34,
+        quote_container: {},
+        children: ['p1', 'q1'],
+      },
+      text('p1', '容器内文本'),
+      {
+        block_id: 'q1',
+        block_type: 15,
+        quote: { elements: [{ text_run: { content: '已有引用' } }] },
+      },
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe('> 容器内文本\n> 已有引用');
+  });
+
+  it('引用容器内的有序列表正常编号', () => {
+    const blocks: Block[] = [
+      {
+        block_id: 'qc',
+        block_type: 34,
+        quote_container: {},
+        children: ['i1', 'i2'],
+      },
+      ordered('i1', '第一点'),
+      ordered('i2', '第二点'),
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe('> 1. 第一点\n> 2. 第二点');
+  });
+});
+
 describe('docxBlocksToMarkdown 非表格回归', () => {
   it('标题/列表/图片/分割线行为不变', () => {
     const blocks: Block[] = [

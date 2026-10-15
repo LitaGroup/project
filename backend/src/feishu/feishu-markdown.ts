@@ -131,8 +131,9 @@ interface DocxTextElement {
 
 interface DocxBlock {
   block_id: string;
+  parent_id?: string;
   block_type: number;
-  /** 子块 id 列表（如表格单元格内的内容块） */
+  /** 子块 id 列表（如表格单元格、容器块内的内容块，列表子项） */
   children?: string[];
   text?: { elements?: DocxTextElement[] };
   heading1?: { elements?: DocxTextElement[] };
@@ -149,6 +150,10 @@ interface DocxBlock {
   code?: { elements?: DocxTextElement[] };
   quote?: { elements?: DocxTextElement[] };
   todo?: { elements?: DocxTextElement[]; style?: { done?: boolean } };
+  /** 备注块（block_type=19，标注高亮块），内容在 children */
+  callout?: unknown;
+  /** 引用容器（block_type=34），内容在 children */
+  quote_container?: unknown;
   /** 表格块（block_type=18 旧版 / 31 新版，均带 table body） */
   table?: {
     property?: {
@@ -199,6 +204,7 @@ function elementsToMarkdown(elements?: DocxTextElement[]): string {
 
 /**
  * 单个内容块 → 一行 Markdown；null 表示该块不产出内容。
+ * 列表块（12/13/17）由 createBlockRenderer 处理（需要编号与缩进状态）。
  */
 function blockToLine(block: DocxBlock): string | null {
   const t = block.block_type;
@@ -210,21 +216,11 @@ function blockToLine(block: DocxBlock): string | null {
       block[`heading${t - 2}` as `heading${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`];
     return `${'#'.repeat(t - 2)} ${elementsToMarkdown(body?.elements)}`;
   }
-  if (t === 12) {
-    return `- ${elementsToMarkdown(block.bullet?.elements)}`;
-  }
-  if (t === 13) {
-    return `1. ${elementsToMarkdown(block.ordered?.elements)}`;
-  }
   if (t === 14) {
     return '```\n\n' + elementsToMarkdown(block.code?.elements) + '\n\n```';
   }
   if (t === 15) {
     return `> ${elementsToMarkdown(block.quote?.elements)}`;
-  }
-  if (t === 17) {
-    const mark = block.todo?.style?.done ? 'x' : ' ';
-    return `- [${mark}] ${elementsToMarkdown(block.todo?.elements)}`;
   }
   if (t === 2) {
     return elementsToMarkdown(block.text?.elements);
@@ -233,11 +229,116 @@ function blockToLine(block: DocxBlock): string | null {
   return null;
 }
 
-/** 表格单元格内容：子块逐个转换，多段落以 <br> 连接（Markdown 单元格内不支持换行） */
+function isListBlock(block?: DocxBlock): boolean {
+  return (
+    !!block &&
+    (block.block_type === 12 ||
+      block.block_type === 13 ||
+      block.block_type === 17)
+  );
+}
+
+/** 列表项层级：沿父链上溯连续的列表块（飞书用 children 表示列表嵌套） */
+function listIndentLevel(
+  block: DocxBlock,
+  byId: Map<string, DocxBlock>,
+): number {
+  let level = 0;
+  let parent = byId.get(block.parent_id ?? '');
+  while (parent && isListBlock(parent)) {
+    level += 1;
+    parent = byId.get(parent.parent_id ?? '');
+  }
+  return level;
+}
+
+/**
+ * 创建带列表状态的块渲染器：
+ * - 有序列表（13）编号按父块分组递增（飞书每个列表项是独立块，编号隐含在顺序里）；
+ *   同一父块下即使穿插兄弟段落/引用容器/无序子项也延续编号（对应标题折叠列表），
+ *   标题/分割线后重新从 1 计数；
+ * - 多级列表按父链推导缩进（无序/待办 2 空格、有序 3 空格每级）。
+ * 每个独立上下文（正文流、容器、表格单元格）各建一个实例，编号互不串扰。
+ */
+function createBlockRenderer(
+  byId: Map<string, DocxBlock>,
+): (block: DocxBlock) => string | null {
+  const countersByParent = new Map<string, number[]>();
+  return (block: DocxBlock): string | null => {
+    const t = block.block_type;
+    if (t === 12) {
+      const pad = '  '.repeat(listIndentLevel(block, byId));
+      return `${pad}- ${elementsToMarkdown(block.bullet?.elements)}`;
+    }
+    if (t === 13) {
+      const level = listIndentLevel(block, byId);
+      const key = block.parent_id ?? '';
+      let counters = countersByParent.get(key);
+      if (!counters) {
+        counters = [];
+        countersByParent.set(key, counters);
+      }
+      while (counters.length <= level) counters.push(0);
+      counters.length = level + 1; // 回到浅层时清掉深层计数
+      counters[level] += 1;
+      const pad = '   '.repeat(level);
+      return `${pad}${counters[level]}. ${elementsToMarkdown(block.ordered?.elements)}`;
+    }
+    if (t === 17) {
+      const pad = '  '.repeat(listIndentLevel(block, byId));
+      const mark = block.todo?.style?.done ? 'x' : ' ';
+      return `${pad}- [${mark}] ${elementsToMarkdown(block.todo?.elements)}`;
+    }
+    const line = blockToLine(block);
+    // 标题/分割线代表列表上下文边界
+    if (line !== null && ((t >= 3 && t <= 11) || t === 22)) {
+      countersByParent.clear();
+    }
+    return line;
+  };
+}
+
+/** 容器块：19 备注（标注高亮块）/ 34 引用容器，子块由容器统一渲染为引用样式 */
+function isContainerBlock(block: DocxBlock): boolean {
+  return (
+    (block.block_type === 19 || block.block_type === 34) &&
+    !!block.children?.length
+  );
+}
+
+/** 容器块 → Markdown 引用（> 前缀）；子块中的表格/嵌套容器递归渲染后统一加前缀 */
+function containerToMarkdown(
+  block: DocxBlock,
+  byId: Map<string, DocxBlock>,
+): string | null {
+  const render = createBlockRenderer(byId);
+  const lines: string[] = [];
+  for (const childId of block.children ?? []) {
+    const child = byId.get(childId);
+    if (!child) continue;
+    if (isTableBlock(child)) {
+      const table = tableToMarkdown(child, byId);
+      if (table) lines.push(table.replace(/^/gm, '> '));
+    } else if (isContainerBlock(child)) {
+      const inner = containerToMarkdown(child, byId);
+      if (inner) lines.push(inner);
+    } else {
+      const line = render(child);
+      if (line !== null && line !== '') lines.push(line);
+    }
+  }
+  if (lines.length === 0) return null;
+  return lines
+    .map((line) => (line === '>' || line.startsWith('> ') ? line : `> ${line}`))
+    .join('\n');
+}
+
+/** 表格单元格内容：子块逐个转换（独立编号上下文），多段落以 <br> 连接 */
 function tableCellToText(
   cellBlock: DocxBlock | undefined,
   byId: Map<string, DocxBlock>,
 ): string {
+  const render = createBlockRenderer(byId);
   const parts: string[] = [];
   for (const childId of cellBlock?.children ?? []) {
     const child = byId.get(childId);
@@ -246,8 +347,11 @@ function tableCellToText(
       // 嵌套表格：Markdown 不支持嵌套，拍平为一段文本塞进单元格
       const nested = tableToMarkdown(child, byId);
       if (nested) parts.push(nested.replace(/\n/g, '<br>'));
+    } else if (isContainerBlock(child)) {
+      const inner = containerToMarkdown(child, byId);
+      if (inner) parts.push(inner.replace(/\n/g, '<br>'));
     } else {
-      const line = blockToLine(child);
+      const line = render(child);
       if (line !== null && line !== '') parts.push(line);
     }
   }
@@ -309,55 +413,71 @@ function tableToMarkdown(
   return rowsToMarkdownTable(grid);
 }
 
+/** 表格单元格块：31 旧版（非表格形态）/ 32 新版 */
+function isTableCellBlock(block: DocxBlock): boolean {
+  return (
+    block.block_type === 32 || (block.block_type === 31 && !isTableBlock(block))
+  );
+}
+
 /**
- * 递归收集表格（含嵌套表格）名下的所有块 id：表格块本身 + 单元格块 + 单元格子块。
- * 这些块由 tableToMarkdown 统一渲染，主流程须跳过，避免单元格文本散落输出。
+ * 递归收集表格（含嵌套表格）与容器块名下的所有块 id：单元格块 + 单元格子块 + 容器子块。
+ * 这些块由 tableToMarkdown / containerToMarkdown 统一渲染，
+ * 主流程须跳过（表格、容器块本身不在集合内，由主流程渲染）。
  */
-function collectTableOwnedBlockIds(
-  tables: DocxBlock[],
+function collectNestedBlockIds(
+  owners: DocxBlock[],
   byId: Map<string, DocxBlock>,
 ): Set<string> {
-  const owned = new Set<string>();
-  const walkCell = (cellId: string): void => {
-    if (owned.has(cellId)) return;
-    owned.add(cellId);
-    const cell = byId.get(cellId);
-    for (const childId of cell?.children ?? []) {
-      const child = byId.get(childId);
-      if (child && isTableBlock(child)) walkTable(child);
-      else walkCell(childId);
+  const nested = new Set<string>();
+  const addNested = (id: string): void => {
+    if (nested.has(id)) return;
+    nested.add(id);
+    const block = byId.get(id);
+    if (!block) return;
+    if (isTableBlock(block)) {
+      for (const cellId of block.table?.cells ?? []) addNested(cellId);
+    } else if (isContainerBlock(block) || isTableCellBlock(block)) {
+      for (const childId of block.children ?? []) addNested(childId);
     }
   };
-  const walkTable = (table: DocxBlock): void => {
-    if (owned.has(table.block_id)) return;
-    owned.add(table.block_id);
-    for (const cellId of table.table?.cells ?? []) walkCell(cellId);
-  };
-  for (const table of tables) walkTable(table);
-  return owned;
+  for (const owner of owners) {
+    if (isTableBlock(owner)) {
+      for (const cellId of owner.table?.cells ?? []) addNested(cellId);
+    } else if (isContainerBlock(owner)) {
+      for (const childId of owner.children ?? []) addNested(childId);
+    }
+  }
+  return nested;
 }
 
 /**
  * docx 块列表（接口按文档顺序返回）→ Markdown。
  * block_type 参考：1 页面, 2 文本, 3-11 标题1-9, 12 无序列表, 13 有序列表,
- * 14 代码块, 15 引用, 17 待办, 18/31 表格, 22 分割线, 27 图片(占位),
- * 31(旧)/32(新) 表格单元格（随表格渲染）。
+ * 14 代码块, 15 引用, 17 待办, 18/31 表格, 19 备注(标注), 22 分割线, 27 图片(占位),
+ * 31(旧)/32(新) 表格单元格（随表格渲染）, 34 引用容器。
  */
 export function docxBlocksToMarkdown(blocks: DocxBlock[]): string {
   const byId = new Map(blocks.map((b) => [b.block_id, b]));
-  const owned = collectTableOwnedBlockIds(
-    blocks.filter((b) => isTableBlock(b)),
+  const nested = collectNestedBlockIds(
+    blocks.filter((b) => isTableBlock(b) || isContainerBlock(b)),
     byId,
   );
+  const render = createBlockRenderer(byId);
   const lines: string[] = [];
   for (const block of blocks) {
+    if (nested.has(block.block_id)) continue;
     if (isTableBlock(block)) {
       const table = tableToMarkdown(block, byId);
       if (table) lines.push(table);
       continue;
     }
-    if (owned.has(block.block_id)) continue;
-    const line = blockToLine(block);
+    if (isContainerBlock(block)) {
+      const quote = containerToMarkdown(block, byId);
+      if (quote) lines.push(quote);
+      continue;
+    }
+    const line = render(block);
     if (line !== null) lines.push(line);
   }
   return lines.join('\n\n');
