@@ -371,6 +371,8 @@ export interface DefectChangeRecord {
   status: string
   /** 记录来源：录入/AI/自动 */
   source: string
+  /** 操作人姓名（agent 令牌对应用户 / 网页登录用户；系统自动流转为空） */
+  operator: string | null
   createdAt: string
 }
 

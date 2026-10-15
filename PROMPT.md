@@ -90,9 +90,10 @@ Appica UI（参考：https://appica.dev/llms.txt） + nestjs + MySQL 实现，�
 
 
 
+## 几个待办
 
 
-## 个人中心
 
-右上角的面板，增加 个人中心 的链接，跳转到个人详情页，个人详情页里面展示用户的头像、名称、部门，以及 用户的agent访问 /api/.../xxx.md 所需要的token，这个token有个按钮可以重置
-
+1. SKILL.md 中，增加关于 token 的描述（从哪里取、怎么配置），token 的获取顺序：环境变量`LITA_PROJECT_TOKEN` 、`~/.env` 中 `LITA_PROJECT_TOKEN` 配置、用户单独配置（或者单独提供）
+2. 个人详情页中，提供一段shell脚本，一键 设置 token
+3. 通过agent 完成的请求，比如：缺陷的操作，需要加上 用户 信息

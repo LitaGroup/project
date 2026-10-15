@@ -384,6 +384,9 @@ export function DefectDetailPage() {
                       <DefectStatusBadge status={r.status} />
                       <Badge variant="soft">{r.source}</Badge>
                       <span className="text-xs text-foreground-muted">
+                        {r.operator ?? '系统'}
+                      </span>
+                      <span className="text-xs text-foreground-muted">
                         {formatTime(r.createdAt)}
                       </span>
                     </div>

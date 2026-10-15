@@ -46,6 +46,10 @@ export class DefectChangeRecord {
   @Column({ type: 'varchar', length: 20, default: '录入' })
   source: string;
 
+  /** 操作人姓名：agent 令牌对应用户 / 网页登录用户；系统自动流转为空 */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  operator: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }

@@ -475,8 +475,9 @@ export class FeishuService implements OnModuleInit {
 
   /**
    * 查用户主部门名称：contact v3 用户详情取 department_ids 首个 → 部门详情取 name。
-   * 需应用具备通讯录读权限（contact:user.base:readonly / contact:department.base:readonly），
-   * 无权限或查询失败时返回 null（调用方降级，不阻断登录流程）。
+   * 需应用具备通讯录读权限：用户组织信息 contact:user.department:readonly（否则响应不含
+   * department_ids）与部门基础信息 contact:department.base:readonly（否则部门详情不含 name），
+   * 并将用户纳入应用「通讯录数据权限范围」。任一步取不到均返回 null（调用方降级，不阻断登录）。
    */
   async getUserDepartment(openId: string): Promise<string | null> {
     try {
@@ -489,13 +490,25 @@ export class FeishuService implements OnModuleInit {
         },
       });
       const deptId = data.user?.department_ids?.[0];
-      if (!deptId) return null;
+      if (!deptId) {
+        // 权限缺失时飞书返回 200 但字段被静默剔除，无法从异常感知，这里主动告警便于排查
+        this.logger.warn(
+          `未取到用户部门 ${openId}：响应无 department_ids（需应用具备「获取用户组织信息」contact:user.department:readonly 权限，并将用户纳入通讯录数据权限范围）`,
+        );
+        return null;
+      }
       const dept = await this.request<{
         department?: { name?: string };
       }>('GET', `/contact/v3/departments/${deptId}`, {
         params: { department_id_type: 'department_id' },
       });
-      return dept.department?.name ?? null;
+      const name = dept.department?.name ?? null;
+      if (!name) {
+        this.logger.warn(
+          `未取到部门名称 ${deptId}：部门详情响应无 name（需应用具备「获取部门基础信息」contact:department.base:readonly 权限）`,
+        );
+      }
+      return name;
     } catch (e) {
       this.logger.warn(
         `获取用户部门失败 ${openId}: ${(e as Error).message}（需通讯录读权限）`,

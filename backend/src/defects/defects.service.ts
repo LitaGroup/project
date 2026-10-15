@@ -150,19 +150,26 @@ export class DefectsService implements OnModuleInit {
     id: number,
     input: CreateRecordInput,
     source: DefectRecordSource = '录入',
+    operator?: string | null,
   ): Promise<DefectChangeRecord> {
     const content = (input.content ?? '').trim();
     if (!content) throw new BadRequestException('变更内容不能为空');
     const defect = await this.findOne(id);
-    return this.saveRecord(defect, { content, remark: input.remark, source });
+    return this.saveRecord(defect, {
+      content,
+      remark: input.remark,
+      source,
+      operator,
+    });
   }
 
   /** AI 用：追加变更记录并返回 Markdown 结果 */
   async addRecordMarkdown(
     id: number,
     input: CreateRecordInput,
+    operator?: string | null,
   ): Promise<string> {
-    const record = await this.addRecord(id, input, 'AI');
+    const record = await this.addRecord(id, input, 'AI', operator);
     return [
       mdFrontmatter({ update: record.createdAt, title: record.content }),
       '# 变更记录已添加',
@@ -172,6 +179,7 @@ export class DefectsService implements OnModuleInit {
       `- 备注：${record.remark ?? '—'}`,
       `- 状态：${record.status}`,
       `- 来源：${record.source}`,
+      `- 操作人：${record.operator ?? '—'}`,
       `- 时间：${beijingTime(record.createdAt)}`,
       `- 阅读地址：GET /api/defects/${record.defectId}.md`,
       '',
@@ -186,6 +194,7 @@ export class DefectsService implements OnModuleInit {
     id: number,
     input: ChangeStatusInput,
     source: DefectRecordSource = '录入',
+    operator?: string | null,
   ): Promise<{ defect: Defect; changed: boolean }> {
     const allowed = Object.values(DefectStatus) as string[];
     if (!allowed.includes(input.status)) {
@@ -201,6 +210,7 @@ export class DefectsService implements OnModuleInit {
       content: input.content?.trim() || `状态变更：${prev} → ${saved.status}`,
       remark: input.remark,
       source,
+      operator,
     });
     return { defect: saved, changed: true };
   }
@@ -209,8 +219,14 @@ export class DefectsService implements OnModuleInit {
   async changeStatusMarkdown(
     id: number,
     input: ChangeStatusInput,
+    operator?: string | null,
   ): Promise<string> {
-    const { defect, changed } = await this.changeStatus(id, input, 'AI');
+    const { defect, changed } = await this.changeStatus(
+      id,
+      input,
+      'AI',
+      operator,
+    );
     if (!changed) {
       return [
         mdFrontmatter({
@@ -287,12 +303,12 @@ export class DefectsService implements OnModuleInit {
     if (records.length > 0) {
       lines.push('', '## 变更记录', '');
       lines.push(
-        '| 时间 | 状态 | 来源 | 变更内容 | 备注 |',
-        '| --- | --- | --- | --- | --- |',
+        '| 时间 | 状态 | 来源 | 操作人 | 变更内容 | 备注 |',
+        '| --- | --- | --- | --- | --- | --- |',
       );
       for (const r of records) {
         lines.push(
-          `| ${beijingTime(r.createdAt)} | ${r.status} | ${r.source} | ${escapeCell(r.content)} | ${escapeCell(r.remark ?? '-')} |`,
+          `| ${beijingTime(r.createdAt)} | ${r.status} | ${r.source} | ${escapeCell(r.operator ?? '-')} | ${escapeCell(r.content)} | ${escapeCell(r.remark ?? '-')} |`,
         );
       }
     }
@@ -369,15 +385,22 @@ export class DefectsService implements OnModuleInit {
   }
 
   /** AI 用：创建缺陷并返回 Markdown 结果 */
-  async createMarkdown(input: CreateDefectInput): Promise<string> {
-    const defect = await this.create(input, 'AI');
-    return this.renderMutationMarkdown('创建', defect);
+  async createMarkdown(
+    input: CreateDefectInput,
+    operator?: string | null,
+  ): Promise<string> {
+    const defect = await this.create(input, 'AI', operator);
+    return this.renderMutationMarkdown('创建', defect, operator);
   }
 
   /** AI 用：更新缺陷并返回 Markdown 结果 */
-  async updateMarkdown(id: number, input: UpdateDefectInput): Promise<string> {
-    const defect = await this.update(id, input, 'AI');
-    return this.renderMutationMarkdown('更新', defect);
+  async updateMarkdown(
+    id: number,
+    input: UpdateDefectInput,
+    operator?: string | null,
+  ): Promise<string> {
+    const defect = await this.update(id, input, 'AI', operator);
+    return this.renderMutationMarkdown('更新', defect, operator);
   }
 
   /** AI 用：删除缺陷并返回 Markdown 结果 */
@@ -395,7 +418,11 @@ export class DefectsService implements OnModuleInit {
   }
 
   /** 变更类操作的 Markdown 结果（创建/更新共用） */
-  private renderMutationMarkdown(action: string, defect: Defect): string {
+  private renderMutationMarkdown(
+    action: string,
+    defect: Defect,
+    operator?: string | null,
+  ): string {
     return [
       mdFrontmatter({
         update: defect.updatedAt,
@@ -407,6 +434,7 @@ export class DefectsService implements OnModuleInit {
       `- 预期：${defectLabel(defect.expected)}`,
       `- 状态：${defect.status}`,
       `- 项目：${defect.projectId}`,
+      `- 操作人：${operator ?? '—'}`,
       `- 阅读地址：GET /api/defects/${defect.id}.md`,
       '',
     ].join('\n');
@@ -429,6 +457,7 @@ export class DefectsService implements OnModuleInit {
   async create(
     input: CreateDefectInput,
     recordSource: DefectRecordSource = '录入',
+    operator?: string | null,
   ): Promise<Defect> {
     const expected = (input.expected ?? '').trim();
     const actual = (input.actual ?? '').trim();
@@ -463,7 +492,11 @@ export class DefectsService implements OnModuleInit {
             : null,
       }),
     );
-    await this.saveRecord(saved, { content: '创建缺陷', source: recordSource });
+    await this.saveRecord(saved, {
+      content: '创建缺陷',
+      source: recordSource,
+      operator,
+    });
     return saved;
   }
 
@@ -477,6 +510,7 @@ export class DefectsService implements OnModuleInit {
     id: number,
     input: UpdateDefectInput,
     recordSource: DefectRecordSource = '录入',
+    operator?: string | null,
   ): Promise<Defect> {
     const defect = await this.findOne(id);
     // 端归一化（空串/未识别一律归为"未知"）
@@ -526,12 +560,14 @@ export class DefectsService implements OnModuleInit {
         content: changeContent || `状态变更：${prevStatus} → ${saved.status}`,
         remark: input.changeRemark,
         source: recordSource,
+        operator,
       });
     } else if (changeContent || changeRemark) {
       await this.saveRecord(saved, {
         content: changeContent || '内容更新',
         remark: input.changeRemark,
         source: recordSource,
+        operator,
       });
     }
     return saved;
@@ -576,6 +612,7 @@ export class DefectsService implements OnModuleInit {
       content: string;
       remark?: string | null;
       source?: DefectRecordSource;
+      operator?: string | null;
     },
   ): Promise<DefectChangeRecord> {
     return this.records.save(
@@ -586,6 +623,7 @@ export class DefectsService implements OnModuleInit {
         remark: this.normalizeText(input.remark),
         status: defect.status,
         source: input.source ?? '录入',
+        operator: this.normalizeText(input.operator),
       }),
     );
   }

@@ -31,6 +31,7 @@ export function ProfilePage() {
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copiedScript, setCopiedScript] = useState(false)
   const [resetting, setResetting] = useState(false)
 
   useEffect(() => {
@@ -55,6 +56,16 @@ export function ProfilePage() {
     }
   }
 
+  const handleCopyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(setupScript)
+      setCopiedScript(true)
+      setTimeout(() => setCopiedScript(false), 1500)
+    } catch {
+      /* 剪贴板不可用时忽略 */
+    }
+  }
+
   const handleReset = () => {
     setResetting(true)
     setTokenError(null)
@@ -68,6 +79,11 @@ export function ProfilePage() {
   if (!user) return null
 
   const apiUrl = settings?.apiUrl ?? '{接口地址}'
+  const tokenValue = token ?? '<令牌>'
+  const setupScript = `# 一键设置 Agent 访问令牌（写入 ~/.env，Agent 按此读取）
+{ grep -v '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null; echo 'LITA_PROJECT_TOKEN=${tokenValue}'; } > ~/.env.tmp && mv ~/.env.tmp ~/.env
+# 当前 shell 立即生效（可选）
+export LITA_PROJECT_TOKEN=${tokenValue}`
 
   return (
     <div className="flex max-w-2xl flex-col gap-8">
@@ -173,6 +189,26 @@ export function ProfilePage() {
           <pre className="overflow-auto rounded-[var(--radius-md)] bg-background-muted p-3 text-sm whitespace-pre-wrap">
             {`curl -H "X-Agent-Token: ${token ?? '<令牌>'}" ${apiUrl}/projects/search.md?q=项目名`}
           </pre>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">一键设置令牌（Shell）</p>
+            <p className="text-sm text-foreground-muted">
+              在终端执行以下脚本，令牌写入 <code>~/.env</code> 的 LITA_PROJECT_TOKEN，
+              Agent 无需每次手动传参即可调用 .md 接口。
+            </p>
+            <pre className="overflow-auto rounded-[var(--radius-md)] bg-background-muted p-3 text-sm whitespace-pre-wrap">
+              {setupScript}
+            </pre>
+            <div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCopyScript}
+                disabled={!token}
+              >
+                {copiedScript ? '已复制' : '复制脚本'}
+              </Button>
+            </div>
+          </div>
         </div>
       </Card>
     </div>

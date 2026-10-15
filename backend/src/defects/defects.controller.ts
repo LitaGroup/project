@@ -10,7 +10,9 @@ import {
   Patch,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
+import type { AuthedRequest } from '../auth/auth.guard';
 import { TestRun } from '../tests/test-run.entity';
 import { DefectChangeRecord } from './defect-change-record.entity';
 import { Defect } from './defect.entity';
@@ -84,8 +86,11 @@ export class DefectsController {
 
   /** 人工/AI 创建缺陷（预期与实际为必填） */
   @Post()
-  create(@Body() dto: CreateDefectDto): Promise<Defect> {
-    return this.defectsService.create(dto);
+  create(
+    @Body() dto: CreateDefectDto,
+    @Req() req: AuthedRequest,
+  ): Promise<Defect> {
+    return this.defectsService.create(dto, '录入', req.user?.name);
   }
 
   /**
@@ -94,8 +99,11 @@ export class DefectsController {
    */
   @Post('create.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')
-  createMarkdown(@Body() dto: CreateDefectDto): Promise<string> {
-    return this.defectsService.createMarkdown(dto);
+  createMarkdown(
+    @Body() dto: CreateDefectDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    return this.defectsService.createMarkdown(dto, req.user?.name);
   }
 
   /** Markdown 视图（须声明在 :id 之前，避免 :id 匹配到带 .md 后缀的路径） */
@@ -124,8 +132,9 @@ export class DefectsController {
   addRecord(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateDefectRecordDto,
+    @Req() req: AuthedRequest,
   ): Promise<DefectChangeRecord> {
-    return this.defectsService.addRecord(id, dto);
+    return this.defectsService.addRecord(id, dto, '录入', req.user?.name);
   }
 
   /** 更新缺陷（端/状态/测试脚本/备注/正文与人员字段） */
@@ -133,8 +142,9 @@ export class DefectsController {
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateDefectDto,
+    @Req() req: AuthedRequest,
   ): Promise<Defect> {
-    return this.defectsService.update(id, dto);
+    return this.defectsService.update(id, dto, '录入', req.user?.name);
   }
 
   /**
@@ -146,8 +156,9 @@ export class DefectsController {
   changeStatusMarkdown(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ChangeStatusDto,
+    @Req() req: AuthedRequest,
   ): Promise<string> {
-    return this.defectsService.changeStatusMarkdown(id, dto);
+    return this.defectsService.changeStatusMarkdown(id, dto, req.user?.name);
   }
 
   /**
@@ -159,8 +170,9 @@ export class DefectsController {
   addRecordMarkdown(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateDefectRecordDto,
+    @Req() req: AuthedRequest,
   ): Promise<string> {
-    return this.defectsService.addRecordMarkdown(id, dto);
+    return this.defectsService.addRecordMarkdown(id, dto, req.user?.name);
   }
 
   /**
@@ -172,8 +184,9 @@ export class DefectsController {
   updateMarkdown(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateDefectDto,
+    @Req() req: AuthedRequest,
   ): Promise<string> {
-    return this.defectsService.updateMarkdown(id, dto);
+    return this.defectsService.updateMarkdown(id, dto, req.user?.name);
   }
 
   /**
