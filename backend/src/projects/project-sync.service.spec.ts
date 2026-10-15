@@ -1,4 +1,4 @@
-import { toIterationCycle } from './project-sync.service';
+import { extractDocLinks, toIterationCycle } from './project-sync.service';
 
 describe('toIterationCycle（飞书 w 字段 → 迭代周期归一化）', () => {
   it('已是目标结构的保持不变', () => {
@@ -36,5 +36,60 @@ describe('toIterationCycle（飞书 w 字段 → 迭代周期归一化）', () =
     expect(toIterationCycle('')).toBe('-');
     expect(toIterationCycle(null)).toBe('-');
     expect(toIterationCycle(undefined)).toBe('-');
+  });
+});
+
+describe('extractDocLinks（需求字段 → 文档链接）', () => {
+  it('url 段的 link 提取为文档链接', () => {
+    expect(
+      extractDocLinks([
+        { type: 'text', text: '需求看这个文档：' },
+        {
+          type: 'url',
+          text: '点此查看',
+          link: 'https://lita-group.feishu.cn/docx/abc123',
+        },
+      ]),
+    ).toEqual(['https://lita-group.feishu.cn/docx/abc123']);
+  });
+
+  it('正文中的裸飞书文档链接也会提取（wiki/sheets/base + query 参数）', () => {
+    expect(
+      extractDocLinks(
+        '前置阅读 https://lita-group.feishu.cn/wiki/wikcn9hxHvxX55gXXH6g35AFknd?table=tblmfWA2DvqQ76Ri&view=vewrCaS2Ym 完成',
+      ),
+    ).toEqual([
+      'https://lita-group.feishu.cn/wiki/wikcn9hxHvxX55gXXH6g35AFknd?table=tblmfWA2DvqQ76Ri&view=vewrCaS2Ym',
+    ]);
+    expect(
+      extractDocLinks('表格 https://lita-group.feishu.cn/sheets/shipS1ABC'),
+    ).toEqual(['https://lita-group.feishu.cn/sheets/shipS1ABC']);
+  });
+
+  it('多链接去重保序（link 段与正文重复算一条）', () => {
+    const docUrl = 'https://lita-group.feishu.cn/docx/docTOKEN01';
+    expect(
+      extractDocLinks([
+        { type: 'url', text: 'A', link: docUrl },
+        { type: 'text', text: `说明 ${docUrl}` },
+        {
+          type: 'url',
+          text: 'B',
+          link: 'https://lita-group.feishu.cn/docs/oldTOKEN9',
+        },
+      ]),
+    ).toEqual([docUrl, 'https://lita-group.feishu.cn/docs/oldTOKEN9']);
+  });
+
+  it('非飞书链接 / 旧版 docs 链接后缀不误伤普通域名 / 空值返回空', () => {
+    expect(
+      extractDocLinks([
+        { type: 'url', text: '外链', link: 'https://github.com/a/b' },
+      ]),
+    ).toEqual([]);
+    expect(extractDocLinks('纯文本需求，没有任何链接')).toEqual([]);
+    expect(extractDocLinks(null)).toEqual([]);
+    expect(extractDocLinks(undefined)).toEqual([]);
+    expect(extractDocLinks([])).toEqual([]);
   });
 });

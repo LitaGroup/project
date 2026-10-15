@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ProjectStatus, ProjectType } from '../common/enums';
+import { DocumentType, ProjectStatus, ProjectType } from '../common/enums';
+import { DocumentsService } from '../documents/documents.service';
 import { BitableRecord, FeishuService } from '../feishu/feishu.service';
 import { Project } from './project.entity';
 import { SyncState } from './sync-state.entity';
@@ -41,6 +42,33 @@ function toProjectType(value: unknown): ProjectType {
   if (TYPE_ALIAS[value]) return TYPE_ALIAS[value];
   const all = Object.values(ProjectType) as string[];
   return all.includes(value) ? (value as ProjectType) : ProjectType.OTHER;
+}
+
+/** 需求列无文档链接时，需求文本落的平台文档（fileName 作为 upsert 幂等判重） */
+export const REQUIREMENT_DOC_TITLE = '需求文档';
+export const REQUIREMENT_DOC_FILENAME = '需求文档.md';
+
+/** 飞书文档链接（docx/docs/sheets/base/wiki），允许带 ?sheet= / ?table= 等 query 参数 */
+const FEISHU_DOC_URL_RE =
+  /https?:\/\/(?:[A-Za-z0-9-]+\.)*(?:feishu\.cn|larksuite\.com)\/(?:docx|docs|sheets|base|wiki)\/[A-Za-z0-9]+(?:\?[^\s"'<>（）()【】,，。;；！？!?]*)?/g;
+
+/** "需求"字段 → 文档链接列表：url 段的 link + 各 segment 文本中的飞书文档链接，去重保序。
+ *  逐 segment 匹配而非拼接全文——拼接会把相邻展示文字黏到 URL 尾部产生假 token。 */
+export function extractDocLinks(value: unknown): string[] {
+  const pool: string[] = [];
+  if (typeof value === 'string') {
+    pool.push(value);
+  } else if (Array.isArray(value)) {
+    for (const seg of value as { link?: unknown; text?: unknown }[]) {
+      if (typeof seg?.link === 'string') pool.push(seg.link);
+      if (typeof seg?.text === 'string') pool.push(seg.text);
+    }
+  }
+  const links = new Set<string>();
+  for (const s of pool) {
+    for (const m of s.matchAll(FEISHU_DOC_URL_RE)) links.add(m[0]);
+  }
+  return [...links];
 }
 
 /**
@@ -110,9 +138,12 @@ export function toIterationCycle(value: unknown): string {
 
 @Injectable()
 export class ProjectSyncService {
+  private readonly logger = new Logger(ProjectSyncService.name);
+
   constructor(
     private readonly feishu: FeishuService,
     private readonly config: ConfigService,
+    private readonly documents: DocumentsService,
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
     @InjectRepository(SyncState)
@@ -185,6 +216,48 @@ export class ProjectSyncService {
       ? resources
       : null;
     await this.projects.save(project);
+    await this.syncRequirementDocuments(project.id, f['需求'], fullText);
+  }
+
+  /**
+   * 需求列文档联动：
+   * - 有文档链接 → 逐个按文档导入（type=需求，syncFromFeishu 按 feishuKey 幂等 upsert）；
+   * - 无文档链接 → 需求全文以"需求文档"为题 upsert 到项目（source '-'，同步可覆盖更新）。
+   * 单条失败仅告警不中断，避免个别文档问题阻断整个项目同步。
+   */
+  private async syncRequirementDocuments(
+    projectId: number,
+    fieldValue: unknown,
+    fullText: string,
+  ): Promise<void> {
+    const links = extractDocLinks(fieldValue);
+    if (links.length > 0) {
+      for (const url of links) {
+        try {
+          await this.documents.syncFromFeishu({
+            projectId,
+            url,
+            type: DocumentType.REQUIREMENT,
+          });
+        } catch (e) {
+          this.logger.warn(
+            `项目需求文档链接导入失败 ${url}: ${(e as Error).message}`,
+          );
+        }
+      }
+      return;
+    }
+    try {
+      await this.documents.upsert({
+        projectId,
+        fileName: REQUIREMENT_DOC_FILENAME,
+        title: REQUIREMENT_DOC_TITLE,
+        type: DocumentType.REQUIREMENT,
+        content: fullText,
+      });
+    } catch (e) {
+      this.logger.warn(`项目需求文档写入失败: ${(e as Error).message}`);
+    }
   }
 
   private async parseSource(url: string): Promise<{
