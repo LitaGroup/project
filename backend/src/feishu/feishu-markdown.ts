@@ -149,17 +149,28 @@ interface DocxBlock {
   code?: { elements?: DocxTextElement[] };
   quote?: { elements?: DocxTextElement[] };
   todo?: { elements?: DocxTextElement[]; style?: { done?: boolean } };
-  /** 表格块（block_type=18） */
+  /** 表格块（block_type=18 旧版 / 31 新版，均带 table body） */
   table?: {
     property?: {
       row_size?: number;
       column_size?: number;
-      /** 合并信息，与 cells 按行优先一一对应；被合并覆盖的位置 row_span/col_span 为 0 */
+      /**
+       * 合并信息，与 cells 按行优先一一对应。
+       * 合并起点为实际跨度；旧版被覆盖位置 span 为 0，新版仍为 1（按起点跨度累积推算覆盖区）
+       */
       merge_info?: { row_span?: number; col_span?: number }[];
     };
     /** 单元格块 id，行优先，数量 = row_size * column_size */
     cells?: string[];
   };
+}
+
+/** 表格块：18 旧版表格 / 31 新版表格（新版同名的 31 单元格无 table body，据此区分） */
+function isTableBlock(block: DocxBlock): boolean {
+  return (
+    (block.block_type === 18 || block.block_type === 31) &&
+    !!block.table?.cells?.length
+  );
 }
 
 function elementToMarkdown(el: DocxTextElement): string {
@@ -231,7 +242,7 @@ function tableCellToText(
   for (const childId of cellBlock?.children ?? []) {
     const child = byId.get(childId);
     if (!child) continue;
-    if (child.block_type === 18) {
+    if (isTableBlock(child)) {
       // 嵌套表格：Markdown 不支持嵌套，拍平为一段文本塞进单元格
       const nested = tableToMarkdown(child, byId);
       if (nested) parts.push(nested.replace(/\n/g, '<br>'));
@@ -244,7 +255,7 @@ function tableCellToText(
 }
 
 /**
- * 表格块（block_type=18）→ Markdown 表格。
+ * 表格块（block_type=18 旧版 / 31 新版）→ Markdown 表格。
  * 首行作表头（与飞书 sheets/bitable 导入行为一致）；
  * 合并单元格：Markdown 不支持，被覆盖的位置降级填空。
  */
@@ -266,15 +277,29 @@ function tableToMarkdown(
   }
   const mergeInfo = table.property?.merge_info ?? [];
   const grid: string[][] = [];
+  const covered = new Set<number>();
   for (let r = 0; r < rowSize; r++) {
     const row: string[] = [];
     for (let c = 0; c < colSize; c++) {
       const idx = r * colSize + c;
       const merge = mergeInfo[idx];
-      // 被合并覆盖的位置（span 为 0）填空
-      if (merge && (merge.row_span === 0 || merge.col_span === 0)) {
+      // 被合并覆盖的位置（旧版 span 为 0；新版由起点跨度累积标记）降级填空
+      if (
+        covered.has(idx) ||
+        (merge && (merge.row_span === 0 || merge.col_span === 0))
+      ) {
         row.push('');
         continue;
+      }
+      const rowSpan = Math.max(1, merge?.row_span ?? 1);
+      const colSpan = Math.max(1, merge?.col_span ?? 1);
+      for (let dr = 0; dr < rowSpan; dr++) {
+        for (let dc = 0; dc < colSpan; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const rr = r + dr;
+          const cc = c + dc;
+          if (rr < rowSize && cc < colSize) covered.add(rr * colSize + cc);
+        }
       }
       const cell = idx < cells.length ? byId.get(cells[idx]) : undefined;
       row.push(tableCellToText(cell, byId));
@@ -299,7 +324,7 @@ function collectTableOwnedBlockIds(
     const cell = byId.get(cellId);
     for (const childId of cell?.children ?? []) {
       const child = byId.get(childId);
-      if (child?.block_type === 18) walkTable(child);
+      if (child && isTableBlock(child)) walkTable(child);
       else walkCell(childId);
     }
   };
@@ -315,17 +340,18 @@ function collectTableOwnedBlockIds(
 /**
  * docx 块列表（接口按文档顺序返回）→ Markdown。
  * block_type 参考：1 页面, 2 文本, 3-11 标题1-9, 12 无序列表, 13 有序列表,
- * 14 代码块, 15 引用, 17 待办, 18 表格, 22 分割线, 27 图片(占位), 31 单元格(随表格渲染)。
+ * 14 代码块, 15 引用, 17 待办, 18/31 表格, 22 分割线, 27 图片(占位),
+ * 31(旧)/32(新) 表格单元格（随表格渲染）。
  */
 export function docxBlocksToMarkdown(blocks: DocxBlock[]): string {
   const byId = new Map(blocks.map((b) => [b.block_id, b]));
   const owned = collectTableOwnedBlockIds(
-    blocks.filter((b) => b.block_type === 18),
+    blocks.filter((b) => isTableBlock(b)),
     byId,
   );
   const lines: string[] = [];
   for (const block of blocks) {
-    if (block.block_type === 18) {
+    if (isTableBlock(block)) {
       const table = tableToMarkdown(block, byId);
       if (table) lines.push(table);
       continue;

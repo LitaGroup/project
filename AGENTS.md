@@ -100,7 +100,7 @@ TypeORM `synchronize` 仅在非 production 开启，**上生产前必须改 migr
 
 - **飞书同步约定**：文档/项目同步永远单向（飞书 → 平台），`FeishuService` 纯只读；缺陷已与飞书解绑（仅平台内维护），任何"回写飞书"都是需求变更，先确认。
 - **飞书导入的文档不允许本地修改正文**（`updateContent` 会 403），只能通过"更新同步"从源拉取覆盖；`remark`（备注，供 AI 阅读）任何来源都可编辑。
-- **导入内容统一为 Markdown**：docx 块级转换（表格块转 Markdown 表格——首行作表头、单元格多段落以 `<br>` 连接、合并单元格降级填空、嵌套表格拍平进单元格；图片块暂不导入，输出 `*[图片暂不导入]*` 占位）；sheets 只导链接 `?sheet=` 指定的工作表；bitable 只导 `?table=` 指定的数据表（`?view=` 生效）。判重 key 含子标识：`docx:<id>` / `sheets:<token>#<sheetId>` / `bitable:<token>#<tableId>`，同一表格不同 sheet 互不覆盖。
+- **导入内容统一为 Markdown**：docx 块级转换（表格块转 Markdown 表格——新旧两种 block_type（18 旧/31 新，单元格为 31 旧/32 新）均支持、首行作表头、单元格多段落以 `<br>` 连接、合并单元格降级填空（新版被覆盖格子 merge_info 仍为 1x1，按合并起点跨度累积推算覆盖区）、嵌套表格拍平进单元格；图片块暂不导入，输出 `*[图片暂不导入]*` 占位）；sheets 只导链接 `?sheet=` 指定的工作表；bitable 只导 `?table=` 指定的数据表（`?view=` 生效）。判重 key 含子标识：`docx:<id>` / `sheets:<token>#<sheetId>` / `bitable:<token>#<tableId>`，同一表格不同 sheet 互不覆盖。
 - 缺陷管理：已实现（见领域模型"缺陷"）。
 - 飞书链接解析支持 `docx/docs/sheets/base/wiki` 五种路径；wiki 节点先经 `resolveWiki` 转成实际资源（query 参数如 sheet/table/view 会从原链接透传）。
 - bitable `records/search` 必须传 `automatic_fields: true`，否则响应没有记录级 `last_modified_time`（增量同步依赖它）。

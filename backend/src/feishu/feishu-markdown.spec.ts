@@ -163,6 +163,71 @@ describe('docxBlocksToMarkdown 表格块', () => {
     ];
     expect(docxBlocksToMarkdown(blocks)).toBe('甲\n\n乙');
   });
+
+  it('新版表格（block_type 31/32）：被覆盖格子 merge_info 仍为 1x1，按起点跨度累积填空', () => {
+    // 2 行 3 列，首格横跨 2 列（封面格子 merge_info 为 {1,1}）
+    const blocks: Block[] = [
+      {
+        block_id: 't1',
+        block_type: 31,
+        children: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'],
+        table: {
+          property: {
+            row_size: 2,
+            column_size: 3,
+            merge_info: [
+              { row_span: 1, col_span: 2 },
+              { row_span: 1, col_span: 1 },
+              { row_span: 1, col_span: 1 },
+              { row_span: 1, col_span: 1 },
+              { row_span: 1, col_span: 1 },
+              { row_span: 1, col_span: 1 },
+            ],
+          },
+          cells: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'],
+        },
+      },
+      ...['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map((id) =>
+        cell(id, [`${id}-p`]),
+      ),
+      text('c1-p', '跨两列'),
+      text('c2-p', '被覆盖'),
+      text('c3-p', 'B'),
+      text('c4-p', 'C'),
+      text('c5-p', 'D'),
+      text('c6-p', 'E'),
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe(
+      '| 跨两列 |  | B |\n| --- | --- | --- |\n| C | D | E |',
+    );
+  });
+
+  it('纵向合并（row_span>1）：下方被覆盖行降级填空', () => {
+    // 2 行 1 列，首格纵向跨 2 行
+    const blocks: Block[] = [
+      {
+        block_id: 't1',
+        block_type: 31,
+        children: ['c1', 'c2'],
+        table: {
+          property: {
+            row_size: 2,
+            column_size: 1,
+            merge_info: [
+              { row_span: 2, col_span: 1 },
+              { row_span: 1, col_span: 1 },
+            ],
+          },
+          cells: ['c1', 'c2'],
+        },
+      },
+      cell('c1', ['p1']),
+      cell('c2', ['p2']),
+      text('p1', '跨两行'),
+      text('p2', '被覆盖'),
+    ];
+    expect(docxBlocksToMarkdown(blocks)).toBe('| 跨两行 |\n| --- |\n|  |');
+  });
 });
 
 describe('docxBlocksToMarkdown 非表格回归', () => {
