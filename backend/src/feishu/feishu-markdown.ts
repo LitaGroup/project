@@ -1,6 +1,6 @@
 /**
  * 飞书内容 → Markdown 转换器。
- * 约定：所有导入内容统一以 Markdown 存储；docx 图片块暂不导入（后续再支持）。
+ * 约定：所有导入内容统一以 Markdown 存储；docx 表格块转 Markdown 表格（合并单元格降级填空），图片块暂不导入（后续再支持）。
  */
 
 // ---- 通用单元格/字段值格式化（表格、多维表格共用） ----
@@ -132,6 +132,8 @@ interface DocxTextElement {
 interface DocxBlock {
   block_id: string;
   block_type: number;
+  /** 子块 id 列表（如表格单元格内的内容块） */
+  children?: string[];
   text?: { elements?: DocxTextElement[] };
   heading1?: { elements?: DocxTextElement[] };
   heading2?: { elements?: DocxTextElement[] };
@@ -147,6 +149,17 @@ interface DocxBlock {
   code?: { elements?: DocxTextElement[] };
   quote?: { elements?: DocxTextElement[] };
   todo?: { elements?: DocxTextElement[]; style?: { done?: boolean } };
+  /** 表格块（block_type=18） */
+  table?: {
+    property?: {
+      row_size?: number;
+      column_size?: number;
+      /** 合并信息，与 cells 按行优先一一对应；被合并覆盖的位置 row_span/col_span 为 0 */
+      merge_info?: { row_span?: number; col_span?: number }[];
+    };
+    /** 单元格块 id，行优先，数量 = row_size * column_size */
+    cells?: string[];
+  };
 }
 
 function elementToMarkdown(el: DocxTextElement): string {
@@ -174,57 +187,152 @@ function elementsToMarkdown(elements?: DocxTextElement[]): string {
 }
 
 /**
+ * 单个内容块 → 一行 Markdown；null 表示该块不产出内容。
+ */
+function blockToLine(block: DocxBlock): string | null {
+  const t = block.block_type;
+  if (t === 1) return null; // 页面块，标题已在元信息里
+  if (t === 27) return '*[图片暂不导入]*';
+  if (t === 22) return '---';
+  if (t >= 3 && t <= 11) {
+    const body =
+      block[`heading${t - 2}` as `heading${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`];
+    return `${'#'.repeat(t - 2)} ${elementsToMarkdown(body?.elements)}`;
+  }
+  if (t === 12) {
+    return `- ${elementsToMarkdown(block.bullet?.elements)}`;
+  }
+  if (t === 13) {
+    return `1. ${elementsToMarkdown(block.ordered?.elements)}`;
+  }
+  if (t === 14) {
+    return '```\n\n' + elementsToMarkdown(block.code?.elements) + '\n\n```';
+  }
+  if (t === 15) {
+    return `> ${elementsToMarkdown(block.quote?.elements)}`;
+  }
+  if (t === 17) {
+    const mark = block.todo?.style?.done ? 'x' : ' ';
+    return `- [${mark}] ${elementsToMarkdown(block.todo?.elements)}`;
+  }
+  if (t === 2) {
+    return elementsToMarkdown(block.text?.elements);
+  }
+  // 其余类型（视图、小组件等）暂不转换
+  return null;
+}
+
+/** 表格单元格内容：子块逐个转换，多段落以 <br> 连接（Markdown 单元格内不支持换行） */
+function tableCellToText(
+  cellBlock: DocxBlock | undefined,
+  byId: Map<string, DocxBlock>,
+): string {
+  const parts: string[] = [];
+  for (const childId of cellBlock?.children ?? []) {
+    const child = byId.get(childId);
+    if (!child) continue;
+    if (child.block_type === 18) {
+      // 嵌套表格：Markdown 不支持嵌套，拍平为一段文本塞进单元格
+      const nested = tableToMarkdown(child, byId);
+      if (nested) parts.push(nested.replace(/\n/g, '<br>'));
+    } else {
+      const line = blockToLine(child);
+      if (line !== null && line !== '') parts.push(line);
+    }
+  }
+  return parts.join('<br>');
+}
+
+/**
+ * 表格块（block_type=18）→ Markdown 表格。
+ * 首行作表头（与飞书 sheets/bitable 导入行为一致）；
+ * 合并单元格：Markdown 不支持，被覆盖的位置降级填空。
+ */
+function tableToMarkdown(
+  block: DocxBlock,
+  byId: Map<string, DocxBlock>,
+): string | null {
+  const table = block.table;
+  const cells = table?.cells ?? [];
+  if (!table || cells.length === 0) return null;
+  const rowSize = table.property?.row_size ?? 0;
+  const colSize = table.property?.column_size ?? 0;
+  if (rowSize <= 0 || colSize <= 0) {
+    // 缺少网格元信息，无法重建行列，降级为按单元格顺序输出文本
+    return cells
+      .map((id) => tableCellToText(byId.get(id), byId))
+      .filter((text) => text !== '')
+      .join('\n\n');
+  }
+  const mergeInfo = table.property?.merge_info ?? [];
+  const grid: string[][] = [];
+  for (let r = 0; r < rowSize; r++) {
+    const row: string[] = [];
+    for (let c = 0; c < colSize; c++) {
+      const idx = r * colSize + c;
+      const merge = mergeInfo[idx];
+      // 被合并覆盖的位置（span 为 0）填空
+      if (merge && (merge.row_span === 0 || merge.col_span === 0)) {
+        row.push('');
+        continue;
+      }
+      const cell = idx < cells.length ? byId.get(cells[idx]) : undefined;
+      row.push(tableCellToText(cell, byId));
+    }
+    grid.push(row);
+  }
+  return rowsToMarkdownTable(grid);
+}
+
+/**
+ * 递归收集表格（含嵌套表格）名下的所有块 id：表格块本身 + 单元格块 + 单元格子块。
+ * 这些块由 tableToMarkdown 统一渲染，主流程须跳过，避免单元格文本散落输出。
+ */
+function collectTableOwnedBlockIds(
+  tables: DocxBlock[],
+  byId: Map<string, DocxBlock>,
+): Set<string> {
+  const owned = new Set<string>();
+  const walkCell = (cellId: string): void => {
+    if (owned.has(cellId)) return;
+    owned.add(cellId);
+    const cell = byId.get(cellId);
+    for (const childId of cell?.children ?? []) {
+      const child = byId.get(childId);
+      if (child?.block_type === 18) walkTable(child);
+      else walkCell(childId);
+    }
+  };
+  const walkTable = (table: DocxBlock): void => {
+    if (owned.has(table.block_id)) return;
+    owned.add(table.block_id);
+    for (const cellId of table.table?.cells ?? []) walkCell(cellId);
+  };
+  for (const table of tables) walkTable(table);
+  return owned;
+}
+
+/**
  * docx 块列表（接口按文档顺序返回）→ Markdown。
  * block_type 参考：1 页面, 2 文本, 3-11 标题1-9, 12 无序列表, 13 有序列表,
- * 14 代码块, 15 引用, 17 待办, 22 分割线, 27 图片(跳过)。
+ * 14 代码块, 15 引用, 17 待办, 18 表格, 22 分割线, 27 图片(占位), 31 单元格(随表格渲染)。
  */
 export function docxBlocksToMarkdown(blocks: DocxBlock[]): string {
+  const byId = new Map(blocks.map((b) => [b.block_id, b]));
+  const owned = collectTableOwnedBlockIds(
+    blocks.filter((b) => b.block_type === 18),
+    byId,
+  );
   const lines: string[] = [];
   for (const block of blocks) {
-    const t = block.block_type;
-    if (t === 1) continue; // 页面块，标题已在元信息里
-    if (t === 27) {
-      lines.push('*[图片暂不导入]*');
+    if (block.block_type === 18) {
+      const table = tableToMarkdown(block, byId);
+      if (table) lines.push(table);
       continue;
     }
-    if (t === 22) {
-      lines.push('---');
-      continue;
-    }
-    if (t >= 3 && t <= 11) {
-      const body =
-        block[
-          `heading${t - 2}` as `heading${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
-        ];
-      lines.push(`${'#'.repeat(t - 2)} ${elementsToMarkdown(body?.elements)}`);
-      continue;
-    }
-    if (t === 12) {
-      lines.push(`- ${elementsToMarkdown(block.bullet?.elements)}`);
-      continue;
-    }
-    if (t === 13) {
-      lines.push(`1. ${elementsToMarkdown(block.ordered?.elements)}`);
-      continue;
-    }
-    if (t === 14) {
-      lines.push('```', elementsToMarkdown(block.code?.elements), '```');
-      continue;
-    }
-    if (t === 15) {
-      lines.push(`> ${elementsToMarkdown(block.quote?.elements)}`);
-      continue;
-    }
-    if (t === 17) {
-      const mark = block.todo?.style?.done ? 'x' : ' ';
-      lines.push(`- [${mark}] ${elementsToMarkdown(block.todo?.elements)}`);
-      continue;
-    }
-    if (t === 2) {
-      lines.push(elementsToMarkdown(block.text?.elements));
-      continue;
-    }
-    // 其余类型（表格、视图、小组件等）暂不转换，其子文本块会按顺序自然输出
+    if (owned.has(block.block_id)) continue;
+    const line = blockToLine(block);
+    if (line !== null) lines.push(line);
   }
   return lines.join('\n\n');
 }
