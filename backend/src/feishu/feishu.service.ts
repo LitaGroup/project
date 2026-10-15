@@ -7,6 +7,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import axios, { AxiosInstance } from 'axios';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import { imageWebroot } from '../common/paths';
 import {
   bitableRecordsToMarkdown,
   docxBlocksToMarkdown,
@@ -46,6 +49,26 @@ interface TenantTokenCache {
   token: string;
   /** epoch 毫秒 */
   expireAt: number;
+}
+
+/** 依据魔数识别图片扩展名（识别不出时按 Content-Type 兜底，默认 .png） */
+function extFromMagic(buf: Buffer, contentType?: string): string {
+  if (buf.length >= 12) {
+    if (buf[0] === 0x89 && buf[1] === 0x50) return '.png';
+    if (buf[0] === 0xff && buf[1] === 0xd8) return '.jpg';
+    if (buf.subarray(0, 3).toString('ascii') === 'GIF') return '.gif';
+    if (
+      buf.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buf.subarray(8, 12).toString('ascii') === 'WEBP'
+    ) {
+      return '.webp';
+    }
+  }
+  const ct = (contentType ?? '').toLowerCase();
+  if (ct.includes('jpeg')) return '.jpg';
+  if (ct.includes('gif')) return '.gif';
+  if (ct.includes('webp')) return '.webp';
+  return '.png';
 }
 
 /**
@@ -153,7 +176,7 @@ export class FeishuService implements OnModuleInit {
     }
   }
 
-  /** 新版文档：标题 + 块级转 Markdown（图片块暂不导入） */
+  /** 新版文档：标题 + 块级转 Markdown；图片块下载到本地图片目录后以内链引用 */
   async readDocx(documentId: string): Promise<FeishuReadResult> {
     const meta = await this.request<{ document: { title: string } }>(
       'GET',
@@ -172,12 +195,110 @@ export class FeishuService implements OnModuleInit {
       blocks.push(...(data.items ?? []));
       pageToken = data.has_more ? data.page_token : undefined;
     } while (pageToken);
+    const imageUrls = await this.downloadDocxImages(blocks);
     return {
       type: 'docx',
       feishuKey: `docx:${documentId}`,
       title: meta.document.title,
-      content: docxBlocksToMarkdown(blocks as never),
+      content: docxBlocksToMarkdown(blocks as never, imageUrls),
     };
+  }
+
+  /**
+   * 下载文档内图片素材（block_type=27 的 image.token）到本地图片目录
+   * （imageWebroot()/feishu/{YYYYMMDD}/{token}.{ext}，经 /images/... 对外访问），
+   * 返回 token → 链接映射；单张失败仅记录告警并跳过（转换时降级为占位文本）。
+   */
+  private async downloadDocxImages(
+    blocks: unknown[],
+  ): Promise<Map<string, string>> {
+    const tokens = [
+      ...new Set(
+        blocks
+          .map((b) => (b as { image?: { token?: string } }).image?.token)
+          .filter((t): t is string => !!t),
+      ),
+    ];
+    if (tokens.length === 0) return new Map();
+    const results = await Promise.all(
+      tokens.map(async (token) => {
+        try {
+          return [token, await this.downloadMedia(token)] as const;
+        } catch (e) {
+          this.logger.warn(
+            `飞书图片下载失败 ${token}: ${(e as Error).message}`,
+          );
+          return null;
+        }
+      }),
+    );
+    const date = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .format(new Date())
+      .replace(/-/g, '');
+    const map = new Map<string, string>();
+    for (const result of results) {
+      if (!result) continue;
+      const [token, media] = result;
+      const relPath = path.posix.join(
+        'feishu',
+        date,
+        `${token}${extFromMagic(media.buffer, media.contentType)}`,
+      );
+      const absPath = path.join(imageWebroot(), relPath);
+      await fs.mkdir(path.dirname(absPath), { recursive: true });
+      await fs.writeFile(absPath, media.buffer);
+      map.set(token, `/images/${relPath}`);
+    }
+    return map;
+  }
+
+  /**
+   * 下载媒体素材二进制：优先 drive 直下（需素材下载权限），失败退回临时下载链接；
+   * 两者都无权限时抛错（调用方降级跳过）。
+   */
+  private async downloadMedia(
+    fileToken: string,
+  ): Promise<{ buffer: Buffer; contentType?: string }> {
+    try {
+      const token = await this.getTenantAccessToken();
+      const resp = await this.http.get<ArrayBuffer>(
+        `/drive/v1/medias/${fileToken}/download`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'arraybuffer',
+          timeout: 60_000,
+        },
+      );
+      return {
+        buffer: Buffer.from(resp.data),
+        contentType: resp.headers?.['content-type'] as string | undefined,
+      };
+    } catch {
+      const data = await this.request<{
+        tmp_download_urls: { tmp_download_url?: string }[];
+      }>('GET', '/drive/v1/medias/batch_get_tmp_download_url', {
+        params: { file_tokens: fileToken },
+      });
+      const url = data.tmp_download_urls?.[0]?.tmp_download_url;
+      if (!url) {
+        throw new BadRequestException(
+          '媒体下载无权限（需 Lita 应用具备素材下载/drive 只读权限）',
+        );
+      }
+      const resp = await axios.get<ArrayBuffer>(url, {
+        responseType: 'arraybuffer',
+        timeout: 60_000,
+      });
+      return {
+        buffer: Buffer.from(resp.data),
+        contentType: resp.headers?.['content-type'] as string | undefined,
+      };
+    }
   }
 
   /** 电子表格：只导入指定 sheet（链接 ?sheet= 参数）；未指定时取第一个工作表 */

@@ -150,6 +150,8 @@ interface DocxBlock {
   code?: { elements?: DocxTextElement[] };
   quote?: { elements?: DocxTextElement[] };
   todo?: { elements?: DocxTextElement[]; style?: { done?: boolean } };
+  /** 图片块（block_type=27），token 为素材文件 id */
+  image?: { token?: string };
   /** 备注块（block_type=19，标注高亮块），内容在 children */
   callout?: unknown;
   /** 引用容器（block_type=34），内容在 children */
@@ -205,11 +207,18 @@ function elementsToMarkdown(elements?: DocxTextElement[]): string {
 /**
  * 单个内容块 → 一行 Markdown；null 表示该块不产出内容。
  * 列表块（12/13/17）由 createBlockRenderer 处理（需要编号与缩进状态）。
+ * imageUrls：已下载图片素材的 token → 链接映射，未命中时图片块降级为占位文本。
  */
-function blockToLine(block: DocxBlock): string | null {
+function blockToLine(
+  block: DocxBlock,
+  imageUrls?: Map<string, string>,
+): string | null {
   const t = block.block_type;
   if (t === 1) return null; // 页面块，标题已在元信息里
-  if (t === 27) return '*[图片暂不导入]*';
+  if (t === 27) {
+    const url = block.image?.token ? imageUrls?.get(block.image.token) : null;
+    return url ? `![图片](${url})` : '*[图片暂不导入]*';
+  }
   if (t === 22) return '---';
   if (t >= 3 && t <= 11) {
     const body =
@@ -262,6 +271,7 @@ function listIndentLevel(
  */
 function createBlockRenderer(
   byId: Map<string, DocxBlock>,
+  imageUrls?: Map<string, string>,
 ): (block: DocxBlock) => string | null {
   const countersByParent = new Map<string, number[]>();
   return (block: DocxBlock): string | null => {
@@ -289,7 +299,7 @@ function createBlockRenderer(
       const mark = block.todo?.style?.done ? 'x' : ' ';
       return `${pad}- [${mark}] ${elementsToMarkdown(block.todo?.elements)}`;
     }
-    const line = blockToLine(block);
+    const line = blockToLine(block, imageUrls);
     // 标题/分割线代表列表上下文边界
     if (line !== null && ((t >= 3 && t <= 11) || t === 22)) {
       countersByParent.clear();
@@ -310,17 +320,18 @@ function isContainerBlock(block: DocxBlock): boolean {
 function containerToMarkdown(
   block: DocxBlock,
   byId: Map<string, DocxBlock>,
+  imageUrls?: Map<string, string>,
 ): string | null {
-  const render = createBlockRenderer(byId);
+  const render = createBlockRenderer(byId, imageUrls);
   const lines: string[] = [];
   for (const childId of block.children ?? []) {
     const child = byId.get(childId);
     if (!child) continue;
     if (isTableBlock(child)) {
-      const table = tableToMarkdown(child, byId);
+      const table = tableToMarkdown(child, byId, imageUrls);
       if (table) lines.push(table.replace(/^/gm, '> '));
     } else if (isContainerBlock(child)) {
-      const inner = containerToMarkdown(child, byId);
+      const inner = containerToMarkdown(child, byId, imageUrls);
       if (inner) lines.push(inner);
     } else {
       const line = render(child);
@@ -337,18 +348,19 @@ function containerToMarkdown(
 function tableCellToText(
   cellBlock: DocxBlock | undefined,
   byId: Map<string, DocxBlock>,
+  imageUrls?: Map<string, string>,
 ): string {
-  const render = createBlockRenderer(byId);
+  const render = createBlockRenderer(byId, imageUrls);
   const parts: string[] = [];
   for (const childId of cellBlock?.children ?? []) {
     const child = byId.get(childId);
     if (!child) continue;
     if (isTableBlock(child)) {
       // 嵌套表格：Markdown 不支持嵌套，拍平为一段文本塞进单元格
-      const nested = tableToMarkdown(child, byId);
+      const nested = tableToMarkdown(child, byId, imageUrls);
       if (nested) parts.push(nested.replace(/\n/g, '<br>'));
     } else if (isContainerBlock(child)) {
-      const inner = containerToMarkdown(child, byId);
+      const inner = containerToMarkdown(child, byId, imageUrls);
       if (inner) parts.push(inner.replace(/\n/g, '<br>'));
     } else {
       const line = render(child);
@@ -366,6 +378,7 @@ function tableCellToText(
 function tableToMarkdown(
   block: DocxBlock,
   byId: Map<string, DocxBlock>,
+  imageUrls?: Map<string, string>,
 ): string | null {
   const table = block.table;
   const cells = table?.cells ?? [];
@@ -375,7 +388,7 @@ function tableToMarkdown(
   if (rowSize <= 0 || colSize <= 0) {
     // 缺少网格元信息，无法重建行列，降级为按单元格顺序输出文本
     return cells
-      .map((id) => tableCellToText(byId.get(id), byId))
+      .map((id) => tableCellToText(byId.get(id), byId, imageUrls))
       .filter((text) => text !== '')
       .join('\n\n');
   }
@@ -406,7 +419,7 @@ function tableToMarkdown(
         }
       }
       const cell = idx < cells.length ? byId.get(cells[idx]) : undefined;
-      row.push(tableCellToText(cell, byId));
+      row.push(tableCellToText(cell, byId, imageUrls));
     }
     grid.push(row);
   }
@@ -454,26 +467,30 @@ function collectNestedBlockIds(
 /**
  * docx 块列表（接口按文档顺序返回）→ Markdown。
  * block_type 参考：1 页面, 2 文本, 3-11 标题1-9, 12 无序列表, 13 有序列表,
- * 14 代码块, 15 引用, 17 待办, 18/31 表格, 19 备注(标注), 22 分割线, 27 图片(占位),
+ * 14 代码块, 15 引用, 17 待办, 18/31 表格, 19 备注(标注), 22 分割线, 27 图片,
  * 31(旧)/32(新) 表格单元格（随表格渲染）, 34 引用容器。
+ * imageUrls：已下载图片素材的 token → 链接映射，未命中的图片块降级为占位文本。
  */
-export function docxBlocksToMarkdown(blocks: DocxBlock[]): string {
+export function docxBlocksToMarkdown(
+  blocks: DocxBlock[],
+  imageUrls?: Map<string, string>,
+): string {
   const byId = new Map(blocks.map((b) => [b.block_id, b]));
   const nested = collectNestedBlockIds(
     blocks.filter((b) => isTableBlock(b) || isContainerBlock(b)),
     byId,
   );
-  const render = createBlockRenderer(byId);
+  const render = createBlockRenderer(byId, imageUrls);
   const lines: string[] = [];
   for (const block of blocks) {
     if (nested.has(block.block_id)) continue;
     if (isTableBlock(block)) {
-      const table = tableToMarkdown(block, byId);
+      const table = tableToMarkdown(block, byId, imageUrls);
       if (table) lines.push(table);
       continue;
     }
     if (isContainerBlock(block)) {
-      const quote = containerToMarkdown(block, byId);
+      const quote = containerToMarkdown(block, byId, imageUrls);
       if (quote) lines.push(quote);
       continue;
     }

@@ -395,6 +395,61 @@ describe('docxBlocksToMarkdown 备注块与引用容器', () => {
   });
 });
 
+describe('docxBlocksToMarkdown 图片块', () => {
+  const imageBlock = (id: string, token: string): Block => ({
+    block_id: id,
+    block_type: 27,
+    image: { token },
+  });
+
+  it('已下载的图片渲染为内链 Markdown 图片', () => {
+    const blocks: Block[] = [
+      text('t1', '图片前的文字'),
+      imageBlock('img', 'boxcnABC'),
+      text('t2', '图片后的文字'),
+    ];
+    const urls = new Map([
+      ['boxcnABC', '/images/feishu/20261015/boxcnABC.png'],
+    ]);
+    expect(docxBlocksToMarkdown(blocks, urls)).toBe(
+      '图片前的文字\n\n![图片](/images/feishu/20261015/boxcnABC.png)\n\n图片后的文字',
+    );
+  });
+
+  it('未下载成功的图片保持占位文本', () => {
+    const blocks: Block[] = [
+      imageBlock('img1', 'boxcnXYZ'),
+      imageBlock('img2', 'boxcnOTHER'),
+    ];
+    const urls = new Map([['boxcnOTHER', '/images/feishu/20261015/b.png']]);
+    expect(docxBlocksToMarkdown(blocks, urls)).toBe(
+      '*[图片暂不导入]*\n\n![图片](/images/feishu/20261015/b.png)',
+    );
+  });
+
+  it('单元格内的图片同样支持内链', () => {
+    const blocks: Block[] = [
+      {
+        block_id: 't1',
+        block_type: 18,
+        children: ['c1'],
+        table: {
+          property: { row_size: 1, column_size: 1, merge_info: [] },
+          cells: ['c1'],
+        },
+      },
+      cell('c1', ['img']),
+      imageBlock('img', 'boxcnABC'),
+    ];
+    const urls = new Map([
+      ['boxcnABC', '/images/feishu/20261015/boxcnABC.png'],
+    ]);
+    expect(docxBlocksToMarkdown(blocks, urls)).toBe(
+      '| ![图片](/images/feishu/20261015/boxcnABC.png) |\n| --- |',
+    );
+  });
+});
+
 describe('docxBlocksToMarkdown 非表格回归', () => {
   it('标题/列表/图片/分割线行为不变', () => {
     const blocks: Block[] = [

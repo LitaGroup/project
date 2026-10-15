@@ -4,7 +4,9 @@
 
 > 自建应用需在飞书开放平台开通对应读权限：
 > 云文档 `docx:document:readonly`、表格 `sheets:spreadsheet:readonly`、
-> 多维表格 `bitable:app:readonly`、知识库 `wiki:wiki:readonly`（链接为 wiki 节点时需要）。
+> 多维表格 `bitable:app:readonly`、知识库 `wiki:wiki:readonly`（链接为 wiki 节点时需要）；
+> 文档内图片导入需要素材下载权限（`drive:drive:readonly` 或等同的媒体下载 scope），
+> 无权限时图片块降级为 `*[图片暂不导入]*` 占位，其余内容不受影响。
 
 ## 预览飞书链接内容（不落库）
 
