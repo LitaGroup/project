@@ -48,6 +48,7 @@ function createService(env: Record<string, string> = {}) {
   const feishu = {
     sendUserText: jest.fn().mockResolvedValue(undefined),
     sendUserCard: jest.fn().mockResolvedValue(undefined),
+    getUserDepartment: jest.fn().mockResolvedValue('研发部'),
   };
   const service = new AuthService(
     createConfig({
@@ -128,6 +129,20 @@ describe('AuthService（飞书登录 + 会话）', () => {
       expect(again.name).toBe('张三改');
       // 新值为 null 时不覆盖旧值
       expect(again.avatarUrl).toBe(FEISHU_INFO.avatarUrl);
+    });
+
+    it('登录时落主部门名称', async () => {
+      const { service } = createService();
+      const user = await service.upsertFeishuUser(FEISHU_INFO);
+      expect(user.department).toBe('研发部');
+    });
+
+    it('部门查询失败保留旧部门', async () => {
+      const { service, feishu } = createService();
+      await service.upsertFeishuUser(FEISHU_INFO);
+      feishu.getUserDepartment.mockResolvedValue(null);
+      const again = await service.upsertFeishuUser(FEISHU_INFO);
+      expect(again.department).toBe('研发部');
     });
   });
 

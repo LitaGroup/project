@@ -473,6 +473,37 @@ export class FeishuService implements OnModuleInit {
     });
   }
 
+  /**
+   * 查用户主部门名称：contact v3 用户详情取 department_ids 首个 → 部门详情取 name。
+   * 需应用具备通讯录读权限（contact:user.base:readonly / contact:department.base:readonly），
+   * 无权限或查询失败时返回 null（调用方降级，不阻断登录流程）。
+   */
+  async getUserDepartment(openId: string): Promise<string | null> {
+    try {
+      const data = await this.request<{
+        user?: { department_ids?: string[] };
+      }>('GET', `/contact/v3/users/${openId}`, {
+        params: {
+          user_id_type: 'open_id',
+          department_id_type: 'department_id',
+        },
+      });
+      const deptId = data.user?.department_ids?.[0];
+      if (!deptId) return null;
+      const dept = await this.request<{
+        department?: { name?: string };
+      }>('GET', `/contact/v3/departments/${deptId}`, {
+        params: { department_id_type: 'department_id' },
+      });
+      return dept.department?.name ?? null;
+    } catch (e) {
+      this.logger.warn(
+        `获取用户部门失败 ${openId}: ${(e as Error).message}（需通讯录读权限）`,
+      );
+      return null;
+    }
+  }
+
   private async getTenantAccessToken(): Promise<string> {
     if (this.tokenCache && Date.now() < this.tokenCache.expireAt) {
       return this.tokenCache.token;
