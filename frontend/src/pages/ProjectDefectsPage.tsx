@@ -92,6 +92,16 @@ export function ProjectDefectsPage() {
   const priorityItems = Object.fromEntries(
     ['all', ...DEFECT_PRIORITIES].map((p) => [p, p === 'all' ? '不限优先级' : p]),
   )
+  // Markdown 视图：本项目缺陷清单带当前筛选参数（'all'/空串不传；.md 端点无 platform 参数）
+  const mdQuery = [
+    `projectId=${projectId}`,
+    statusFilter !== 'all' && `status=${encodeURIComponent(statusFilter)}`,
+    priorityFilter !== 'all' &&
+      `priority=${encodeURIComponent(priorityFilter)}`,
+    q && `q=${encodeURIComponent(q)}`,
+  ]
+    .filter(Boolean)
+    .join('&')
 
   return (
     <div>
@@ -103,7 +113,19 @@ export function ProjectDefectsPage() {
         ]}
       />
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">缺陷</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold">缺陷</h1>
+          {/* Markdown 视图：后端 .md URL 规范（GET /api/defects.md?projectId=） */}
+          <a
+            href={`/api/defects.md${mdQuery ? `?${mdQuery}` : ''}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm underline"
+            title="Markdown 视图"
+          >
+            MD
+          </a>
+        </div>
         <NewDefectDialog
           projects={[{ id: projectId, name: projectName ?? `#${projectId}` }]}
           preset={{ projectId }}
