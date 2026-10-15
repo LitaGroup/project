@@ -144,6 +144,8 @@ export function DefectDetailPage() {
   const [now, setNow] = useState(() => Date.now())
   // 原始输出默认折叠，运行结果以 Markdown 文本描述为主
   const [showRaw, setShowRaw] = useState(false)
+  // 验证通过确认弹窗：仅"开放"态弹出（"修复"态由后端自动流转"关闭"）
+  const [confirmCloseRun, setConfirmCloseRun] = useState<TestRun | null>(null)
 
   const reload = useCallback(() => {
     api
@@ -201,18 +203,31 @@ export function DefectDetailPage() {
   useEffect(() => {
     if (!testScript || runId === null) return
     let finished = false
+    // 本次订阅期间是否出现过活跃状态：初始加载即已结束的历史运行不弹确认窗
+    let sawActive = false
     const es = new EventSource(`/api/tests/runs/${runId}/stream`)
     es.onmessage = (e: MessageEvent<string>) => {
       const r = JSON.parse(e.data) as TestRun
       setRun(r)
       setNow(Date.now())
       // queued（远程执行排队中）也是活跃状态，不能关闭流
-      if (r.status !== 'running' && r.status !== 'queued') {
-        finished = true
-        es.close()
-        // 脚本回归通过后后端会自动把"修复"态缺陷流转为"关闭"，刷新详情以反映状态/时间
-        if (r.status === 'success') reload()
+      if (r.status === 'running' || r.status === 'queued') {
+        sawActive = true
+        return
       }
+      finished = true
+      es.close()
+      if (r.status !== 'success') return
+      // "修复"态缺陷后端会自动流转为"关闭"（与推送存在竞态），拉最新状态判断：
+      // 已关闭则刷新展示；仍是"开放"则弹窗确认关闭
+      api
+        .getDefect(defectIdNum)
+        .then((d) =>
+          sawActive && d.status === '开放'
+            ? setConfirmCloseRun(r)
+            : reload(),
+        )
+        .catch(() => reload())
     }
     es.onerror = () => {
       es.close()
@@ -223,7 +238,7 @@ export function DefectDetailPage() {
       es.close()
       clearInterval(clock)
     }
-  }, [runId, testScript, reload])
+  }, [runId, testScript, reload, defectIdNum])
 
   if (error && !defect) return <p>加载失败:{error}</p>
   if (!defect) return <p>加载中…</p>
@@ -447,7 +462,7 @@ export function DefectDetailPage() {
             />
             {defect.testScript ? (
               <p className="text-xs text-foreground-muted">
-                脚本回归通过后自动流转为"关闭"
+                "修复"态脚本回归通过后自动流转"关闭"；"开放"态验证通过后弹窗确认关闭
               </p>
             ) : (
               <p className="text-xs text-foreground-muted">
@@ -457,6 +472,18 @@ export function DefectDetailPage() {
           </div>
         </Card>
       </aside>
+
+      {/* 验证通过确认弹窗：确认后一步流转"关闭"并写入变更记录 */}
+      {confirmCloseRun && (
+        <VerifyPassDialog
+          defectId={defectIdNum}
+          run={confirmCloseRun}
+          onClose={() => {
+            setConfirmCloseRun(null)
+            reload()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -548,6 +575,70 @@ function VerifyButton({
       </Button>
       {error && <p className="mt-2 text-xs">操作失败:{error}</p>}
     </>
+  )
+}
+
+/** 验证通过确认弹窗：仅"开放"态弹出（"修复"态后端已自动流转"关闭"），
+    确认后一步流转并写入变更记录，取消保持"开放" */
+function VerifyPassDialog({
+  defectId,
+  run,
+  onClose,
+}: {
+  defectId: number
+  run: TestRun
+  onClose: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const confirm = () => {
+    setSaving(true)
+    setError(null)
+    api
+      .updateDefect(defectId, {
+        status: '关闭' as DefectStatus,
+        changeContent: `运行验证通过（成功 ${run.success ?? 0} / 失败 ${
+          run.fail ?? 0
+        } / 跳过 ${run.skip ?? 0}），流转为关闭`,
+      })
+      .then(onClose)
+      .catch((e: Error) => {
+        setError(e.message)
+        setSaving(false)
+      })
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next && !saving) onClose()
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>验证通过</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <p className="text-sm">
+            本次运行全部通过（成功 {run.success ?? 0} / 失败 {run.fail ?? 0} /
+            跳过 {run.skip ?? 0}），是否将缺陷流转为"关闭"？
+          </p>
+          {error && <p className="text-sm">操作失败:{error}</p>}
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm" disabled={saving}>
+              保持开放
+            </Button>
+          </DialogClose>
+          <Button size="sm" onClick={confirm} disabled={saving}>
+            {saving ? '提交中…' : '确认关闭'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
