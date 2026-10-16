@@ -90,6 +90,8 @@ export interface BitableFieldMeta {
   field_name: string;
   /** 5=日期 等，见飞书字段类型枚举 */
   type: number;
+  /** 扩展属性；SingleLink（type 18）含关联表 table_id */
+  property?: { table_id?: string };
 }
 
 function bitableCellToText(value: unknown, fieldType: number): string {

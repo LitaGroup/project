@@ -106,6 +106,34 @@ function extractPeople(value: unknown): string | undefined {
   return names.length ? names.join('、') : undefined;
 }
 
+/** 资源人员：飞书现用 SingleLink（关联「技术资源表」）字段，取关联记录的姓名 */
+const ROLE_LINK_FIELDS = {
+  frontend: '前端人员/新',
+  backend: '后端资源/新',
+  qa: '测试人员/新',
+} as const;
+
+/** 资源人员兜底：旧字段（前端/后端/测试人员；后端为文本备注、可能夹 mention） */
+const ROLE_LEGACY_FIELDS = {
+  frontend: '前端人员',
+  backend: '后端人员',
+  qa: '测试人员',
+} as const;
+
+/** SingleLink 字段值 → 关联记录姓名列表（经 nameById 解析，顿号连接） */
+export function extractLinkedNames(
+  value: unknown,
+  nameById: Map<string, string>,
+): string | undefined {
+  const linkIds = (value as { link_record_ids?: string[] } | undefined)
+    ?.link_record_ids;
+  if (!Array.isArray(linkIds) || linkIds.length === 0) return undefined;
+  const names = linkIds
+    .map((id) => nameById.get(id))
+    .filter((n): n is string => Boolean(n));
+  return names.length ? names.join('、') : undefined;
+}
+
 /** 日期字段：飞书存 ms 时间戳（表时区通常为 +08:00），转为 YYYY-MM-DD */
 function extractDate(value: unknown): string | null {
   if (typeof value !== 'number') return null;
@@ -171,8 +199,14 @@ export class ProjectSyncService {
       (r) => (r.last_modified_time ?? 0) / 1000 >= since,
     );
 
+    // 资源人员现用 SingleLink 字段（关联技术资源表），先批量解析关联记录姓名
+    const linkedNames = await this.resolveLinkedPeople(
+      appToken,
+      tableId,
+      fresh,
+    );
     for (const record of fresh) {
-      await this.upsert(record);
+      await this.upsert(record, linkedNames);
     }
 
     const now = new Date();
@@ -186,8 +220,57 @@ export class ProjectSyncService {
     };
   }
 
+  /**
+   * 解析资源人员 SingleLink 字段（前端人员/新 等）关联记录的姓名：
+   * 从字段元信息取关联表 id，批量取关联记录（姓名字段）建立 record_id → 姓名 映射。
+   * 无关联数据 / 元信息获取失败时返回空映射（upsert 回退旧字段）。
+   */
+  private async resolveLinkedPeople(
+    appToken: string,
+    tableId: string,
+    records: BitableRecord[],
+  ): Promise<Map<string, string>> {
+    const nameById = new Map<string, string>();
+    const wanted = new Set<string>(Object.values(ROLE_LINK_FIELDS));
+    const ids = new Set<string>();
+    for (const r of records) {
+      for (const field of wanted) {
+        const linkIds = (
+          r.fields[field] as { link_record_ids?: string[] } | undefined
+        )?.link_record_ids;
+        for (const id of linkIds ?? []) ids.add(id);
+      }
+    }
+    if (ids.size === 0) return nameById;
+
+    let targetTable: string | undefined;
+    try {
+      const fields = await this.feishu.listBitableFields(appToken, tableId);
+      targetTable = fields.find(
+        (f) => wanted.has(f.field_name) && f.property?.table_id,
+      )?.property?.table_id;
+    } catch (e) {
+      this.logger.warn(`人员关联字段元信息获取失败: ${(e as Error).message}`);
+    }
+    if (!targetTable) return nameById;
+
+    const linked = await this.feishu.batchGetBitableRecords(
+      appToken,
+      targetTable,
+      [...ids],
+    );
+    for (const rec of linked) {
+      const name = extractPeople(rec.fields['姓名']);
+      if (name) nameById.set(rec.record_id, name);
+    }
+    return nameById;
+  }
+
   // ---- 内部 ----
-  private async upsert(record: BitableRecord): Promise<void> {
+  private async upsert(
+    record: BitableRecord,
+    linkedNames: Map<string, string>,
+  ): Promise<void> {
     const f = record.fields;
     const fullText = extractText(f['需求']);
     if (!fullText) return; // 无标题的记录跳过
@@ -211,9 +294,15 @@ export class ProjectSyncService {
     project.expectedReleaseAt = extractDate(f['理想上线时间']);
     project.iterationCycle = toIterationCycle(f['w']);
     const resources = {
-      frontend: extractPeople(f['前端人员']),
-      backend: extractPeople(f['后端人员']),
-      qa: extractPeople(f['测试人员']),
+      frontend:
+        extractLinkedNames(f[ROLE_LINK_FIELDS.frontend], linkedNames) ??
+        extractPeople(f[ROLE_LEGACY_FIELDS.frontend]),
+      backend:
+        extractLinkedNames(f[ROLE_LINK_FIELDS.backend], linkedNames) ??
+        extractPeople(f[ROLE_LEGACY_FIELDS.backend]),
+      qa:
+        extractLinkedNames(f[ROLE_LINK_FIELDS.qa], linkedNames) ??
+        extractPeople(f[ROLE_LEGACY_FIELDS.qa]),
     };
     project.resources = Object.values(resources).some(Boolean)
       ? resources

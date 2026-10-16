@@ -1,4 +1,8 @@
-import { extractDocLinks, toIterationCycle } from './project-sync.service';
+import {
+  extractDocLinks,
+  extractLinkedNames,
+  toIterationCycle,
+} from './project-sync.service';
 
 describe('toIterationCycle（飞书 w 字段 → 迭代周期归一化）', () => {
   it('已是目标结构的保持不变', () => {
@@ -91,5 +95,38 @@ describe('extractDocLinks（需求字段 → 文档链接）', () => {
     expect(extractDocLinks(null)).toEqual([]);
     expect(extractDocLinks(undefined)).toEqual([]);
     expect(extractDocLinks([])).toEqual([]);
+  });
+});
+
+describe('extractLinkedNames（SingleLink 字段 → 关联记录姓名）', () => {
+  const nameById = new Map([
+    ['recA', '赵胜峰'],
+    ['recB', '徐雪梅'],
+  ]);
+
+  it('按 link_record_ids 解析为姓名，多值顿号连接', () => {
+    expect(
+      extractLinkedNames({ link_record_ids: ['recA', 'recB'] }, nameById),
+    ).toBe('赵胜峰、徐雪梅');
+  });
+
+  it('无法解析的 id 忽略；全空返回 undefined', () => {
+    expect(
+      extractLinkedNames({ link_record_ids: ['recA', 'recX'] }, nameById),
+    ).toBe('赵胜峰');
+    expect(extractLinkedNames({ link_record_ids: ['recX'] }, nameById)).toBe(
+      undefined,
+    );
+  });
+
+  it('字段为空 / null link_record_ids 返回 undefined', () => {
+    expect(extractLinkedNames(null, nameById)).toBe(undefined);
+    expect(extractLinkedNames(undefined, nameById)).toBe(undefined);
+    expect(extractLinkedNames({ link_record_ids: null }, nameById)).toBe(
+      undefined,
+    );
+    expect(extractLinkedNames({ link_record_ids: [] }, nameById)).toBe(
+      undefined,
+    );
   });
 });

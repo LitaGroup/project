@@ -466,6 +466,45 @@ export class FeishuService implements OnModuleInit {
     return all;
   }
 
+  /** 多维表格字段元信息（分页拉全；含 property，如 SingleLink 字段的关联 table_id） */
+  async listBitableFields(
+    appToken: string,
+    tableId: string,
+  ): Promise<BitableFieldMeta[]> {
+    const all: BitableFieldMeta[] = [];
+    let pageToken: string | undefined;
+    do {
+      const data = await this.request<{
+        items?: BitableFieldMeta[];
+        has_more: boolean;
+        page_token?: string;
+      }>('GET', `/bitable/v1/apps/${appToken}/tables/${tableId}/fields`, {
+        params: { page_size: 100, page_token: pageToken },
+      });
+      all.push(...(data.items ?? []));
+      pageToken = data.has_more ? data.page_token : undefined;
+    } while (pageToken);
+    return all;
+  }
+
+  /** 按 record_id 批量取多维表格记录（按 100 分片）。用于解析 SingleLink 关联记录的名称 */
+  async batchGetBitableRecords(
+    appToken: string,
+    tableId: string,
+    recordIds: string[],
+  ): Promise<BitableRecord[]> {
+    const all: BitableRecord[] = [];
+    for (let i = 0; i < recordIds.length; i += 100) {
+      const data = await this.request<{ records?: BitableRecord[] }>(
+        'POST',
+        `/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_get`,
+        { data: { record_ids: recordIds.slice(i, i + 100) } },
+      );
+      all.push(...(data.records ?? []));
+    }
+    return all;
+  }
+
   // ---- 内部 ----
 
   /**
