@@ -118,7 +118,7 @@ export class AuthService {
     return this.fetchUserInfo(accessToken);
   }
 
-  /** 按 open_id upsert 用户；表为空时首个用户自动授予管理员；每次登录刷新姓名/头像/邮箱/部门与 lastLoginAt */
+  /** 按 open_id upsert 用户；尚无管理员时首个登录用户自动授予管理员；每次登录刷新姓名/头像/邮箱/部门与 lastLoginAt */
   async upsertFeishuUser(info: FeishuUserInfo): Promise<User> {
     // 部门查不到（无通讯录权限等）为 null，更新时保留旧值
     const department = await this.feishu.getUserDepartment(info.openId);
@@ -136,7 +136,11 @@ export class AuthService {
       await this.sendWelcome(user);
       return user;
     }
-    const total = await this.usersRepo.count();
+    // 首个「登录」用户授予管理员：以库内是否已有管理员判定，
+    // 避免通讯录全量同步预置的（未登录）用户占掉首个管理员名额
+    const adminCount = await this.usersRepo.count({
+      where: { role: UserRole.ADMIN },
+    });
     const user = this.usersRepo.create({
       feishuOpenId: info.openId,
       unionId: info.unionId,
@@ -144,7 +148,7 @@ export class AuthService {
       avatarUrl: info.avatarUrl,
       email: info.email,
       department,
-      role: total === 0 ? UserRole.ADMIN : UserRole.MEMBER,
+      role: adminCount === 0 ? UserRole.ADMIN : UserRole.MEMBER,
       enabled: true,
       lastLoginAt: new Date(),
     });
@@ -338,6 +342,55 @@ export class AuthService {
       },
       order: { name: 'ASC' },
     });
+  }
+
+  /**
+   * 全量同步飞书通讯录到本地用户表（定时任务/启动时调用）。
+   * 遍历所有部门成员去重后按 open_id upsert：
+   * - 已存在：仅刷新姓名/头像/union_id/部门（非空才覆盖），保留邮箱/角色/登录态/agent 令牌
+   * - 不存在：新建为「成员」，lastLoginAt 留空（未登录），不发送欢迎消息
+   * 仅取姓名/头像/部门等基础信息（邮箱需额外飞书权限，未取）。
+   */
+  async syncFeishuUsers(): Promise<{
+    total: number;
+    created: number;
+    updated: number;
+  }> {
+    const contacts = await this.feishu.listAllUsers();
+    let created = 0;
+    let updated = 0;
+    for (const c of contacts) {
+      const existing = await this.usersRepo.findOne({
+        where: { feishuOpenId: c.openId },
+      });
+      if (existing) {
+        existing.name = c.name || existing.name;
+        existing.avatarUrl = c.avatarUrl ?? existing.avatarUrl;
+        existing.unionId = c.unionId ?? existing.unionId;
+        existing.department = c.department ?? existing.department;
+        await this.usersRepo.save(existing);
+        updated++;
+      } else {
+        await this.usersRepo.save(
+          this.usersRepo.create({
+            feishuOpenId: c.openId,
+            unionId: c.unionId,
+            name: c.name || c.openId,
+            avatarUrl: c.avatarUrl,
+            email: null,
+            department: c.department,
+            role: UserRole.MEMBER,
+            enabled: true,
+            lastLoginAt: null,
+          }),
+        );
+        created++;
+      }
+    }
+    this.logger.log(
+      `飞书通讯录同步完成：共 ${contacts.length} 人（新增 ${created}，更新 ${updated}）`,
+    );
+    return { total: contacts.length, created, updated };
   }
 
   // ---- 内部 ----

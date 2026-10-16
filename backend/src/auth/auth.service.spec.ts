@@ -23,7 +23,16 @@ function createRepo() {
               u.feishuOpenId === where.feishuOpenId),
         ) ?? null,
     ),
-    count: jest.fn(() => store.length),
+    count: jest.fn(
+      ({ where }: { where?: Partial<User> } = {}) =>
+        store.filter(
+          (u) =>
+            !where ||
+            Object.entries(where).every(
+              ([k, v]) => (u as Record<string, unknown>)[k] === v,
+            ),
+        ).length,
+    ),
     create: jest.fn(
       (data: Partial<User>) =>
         Object.assign(
@@ -49,6 +58,7 @@ function createService(env: Record<string, string> = {}) {
     sendUserText: jest.fn().mockResolvedValue(undefined),
     sendUserCard: jest.fn().mockResolvedValue(undefined),
     getUserDepartment: jest.fn().mockResolvedValue('研发部'),
+    listAllUsers: jest.fn().mockResolvedValue([]),
   };
   const service = new AuthService(
     createConfig({
@@ -143,6 +153,67 @@ describe('AuthService（飞书登录 + 会话）', () => {
       feishu.getUserDepartment.mockResolvedValue(null);
       const again = await service.upsertFeishuUser(FEISHU_INFO);
       expect(again.department).toBe('研发部');
+    });
+  });
+
+  describe('syncFeishuUsers（通讯录全量同步）', () => {
+    const CONTACTS = [
+      {
+        openId: 'ou_a',
+        unionId: 'un_a',
+        name: '甲',
+        avatarUrl: 'https://example.com/a.png',
+        department: '后端组',
+      },
+      {
+        openId: 'ou_b',
+        unionId: 'un_b',
+        name: '乙',
+        avatarUrl: null,
+        department: null,
+      },
+    ];
+
+    it('新建用户均为成员、无登录态、不发欢迎消息', async () => {
+      const { service, repo, feishu } = createService();
+      feishu.listAllUsers.mockResolvedValue(CONTACTS);
+      const stats = await service.syncFeishuUsers();
+      expect(stats).toEqual({ total: 2, created: 2, updated: 0 });
+      expect(repo.store).toHaveLength(2);
+      expect(repo.store[0].role).toBe(UserRole.MEMBER);
+      expect(repo.store[0].lastLoginAt).toBeNull();
+      expect(feishu.sendUserCard).not.toHaveBeenCalled();
+    });
+
+    it('已存在用户仅刷新姓名/头像/部门，保留邮箱/角色/登录态', async () => {
+      const { service, repo, feishu } = createService();
+      await service.upsertFeishuUser(FEISHU_INFO); // ou_123，管理员登录
+      feishu.listAllUsers.mockResolvedValue([
+        {
+          openId: 'ou_123',
+          unionId: 'un_new',
+          name: '张三新',
+          avatarUrl: null,
+          department: '前端组',
+        },
+      ]);
+      const stats = await service.syncFeishuUsers();
+      expect(stats).toEqual({ total: 1, created: 0, updated: 1 });
+      const user = repo.store[0];
+      expect(user.name).toBe('张三新');
+      expect(user.department).toBe('前端组');
+      expect(user.avatarUrl).toBe(FEISHU_INFO.avatarUrl); // null 不覆盖
+      expect(user.email).toBe(FEISHU_INFO.email); // 邮箱保留
+      expect(user.role).toBe(UserRole.ADMIN); // 角色保留
+      expect(user.lastLoginAt).toBeInstanceOf(Date); // 登录态保留
+    });
+
+    it('通讯录预置用户不占首个管理员名额', async () => {
+      const { service, feishu } = createService();
+      feishu.listAllUsers.mockResolvedValue(CONTACTS);
+      await service.syncFeishuUsers();
+      const loggedIn = await service.upsertFeishuUser(FEISHU_INFO);
+      expect(loggedIn.role).toBe(UserRole.ADMIN);
     });
   });
 

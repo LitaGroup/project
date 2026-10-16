@@ -45,6 +45,32 @@ export interface BitableRecord {
   fields: Record<string, unknown>;
 }
 
+/** 通讯录用户（仅取用户系统同步所需字段，邮箱/手机等需额外权限，未取） */
+export interface FeishuContactUser {
+  openId: string;
+  unionId: string | null;
+  name: string;
+  avatarUrl: string | null;
+  /** 主部门名（取用户主部门 order，取不到则空） */
+  department: string | null;
+}
+
+/** contact/v3/users 用户详情响应子集 */
+interface FeishuContactUserDetail {
+  open_id?: string;
+  union_id?: string;
+  name?: string;
+  en_name?: string;
+  department_ids?: string[];
+  orders?: { department_id?: string; is_primary_dept?: boolean }[];
+  avatar?: {
+    avatar_origin?: string;
+    avatar_640?: string;
+    avatar_240?: string;
+    avatar_72?: string;
+  };
+}
+
 interface TenantTokenCache {
   token: string;
   /** epoch 毫秒 */
@@ -515,6 +541,128 @@ export class FeishuService implements OnModuleInit {
       );
       return null;
     }
+  }
+
+  /**
+   * 全量部门列表（分页拉全，open_department_id 维度）。
+   * 需应用具备通讯录读权限；返回空数组表示无可见部门。
+   */
+  async listAllDepartments(): Promise<
+    { openDepartmentId: string; name: string }[]
+  > {
+    const all: { openDepartmentId: string; name: string }[] = [];
+    let pageToken: string | undefined;
+    do {
+      const data = await this.request<{
+        items?: { open_department_id?: string; name?: string }[];
+        has_more: boolean;
+        page_token?: string;
+      }>('GET', '/contact/v3/departments', {
+        params: {
+          page_size: 50,
+          department_id_type: 'open_department_id',
+          page_token: pageToken,
+        },
+      });
+      for (const d of data.items ?? []) {
+        if (d.open_department_id) {
+          all.push({
+            openDepartmentId: d.open_department_id,
+            name: d.name ?? '',
+          });
+        }
+      }
+      pageToken = data.has_more ? data.page_token : undefined;
+    } while (pageToken);
+    return all;
+  }
+
+  /** 某个部门的直接成员 open_id 列表（分页拉全，不含子部门） */
+  async listDepartmentMembers(openDepartmentId: string): Promise<string[]> {
+    const ids: string[] = [];
+    let pageToken: string | undefined;
+    do {
+      const data = await this.request<{
+        items?: { open_id?: string }[];
+        has_more: boolean;
+        page_token?: string;
+      }>('GET', '/contact/v3/users/find_by_department', {
+        params: {
+          department_id: openDepartmentId,
+          department_id_type: 'open_department_id',
+          user_id_type: 'open_id',
+          page_size: 50,
+          page_token: pageToken,
+        },
+      });
+      for (const u of data.items ?? []) {
+        if (u.open_id) ids.push(u.open_id);
+      }
+      pageToken = data.has_more ? data.page_token : undefined;
+    } while (pageToken);
+    return ids;
+  }
+
+  /** 用户详情（姓名/union_id/头像/部门，avatar 优先原图，缺失逐级降级） */
+  async getContactUser(openId: string): Promise<FeishuContactUserDetail> {
+    const data = await this.request<{ user?: FeishuContactUserDetail }>(
+      'GET',
+      `/contact/v3/users/${openId}`,
+      {
+        params: {
+          user_id_type: 'open_id',
+          department_id_type: 'open_department_id',
+        },
+      },
+    );
+    return data.user ?? {};
+  }
+
+  /**
+   * 全量通讯录用户（遍历所有部门成员去重 → 逐人取详情补全 union_id/头像/主部门）。
+   * 供用户系统全量同步使用；单部门/单用户失败仅告警跳过，不阻断整体。
+   * 仅返回姓名/头像/部门等基础信息（邮箱/手机需额外权限，未取）。
+   */
+  async listAllUsers(): Promise<FeishuContactUser[]> {
+    const departments = await this.listAllDepartments();
+    const deptName = new Map(
+      departments.map((d) => [d.openDepartmentId, d.name]),
+    );
+    const openIds = new Set<string>();
+    for (const dept of departments) {
+      try {
+        const members = await this.listDepartmentMembers(dept.openDepartmentId);
+        for (const id of members) openIds.add(id);
+      } catch (e) {
+        this.logger.warn(
+          `拉取部门成员失败 ${dept.name}（${dept.openDepartmentId}）: ${(e as Error).message}`,
+        );
+      }
+    }
+    const users: FeishuContactUser[] = [];
+    for (const openId of openIds) {
+      try {
+        const detail = await this.getContactUser(openId);
+        const primaryId =
+          detail.orders?.find((o) => o.is_primary_dept)?.department_id ??
+          detail.department_ids?.[0] ??
+          null;
+        users.push({
+          openId,
+          unionId: detail.union_id ?? null,
+          name: detail.name ?? openId,
+          avatarUrl:
+            detail.avatar?.avatar_origin ??
+            detail.avatar?.avatar_640 ??
+            detail.avatar?.avatar_240 ??
+            null,
+          department: primaryId ? (deptName.get(primaryId) ?? null) : null,
+        });
+      } catch (e) {
+        this.logger.warn(`拉取用户详情失败 ${openId}: ${(e as Error).message}`);
+      }
+    }
+    return users;
   }
 
   private async getTenantAccessToken(): Promise<string> {
