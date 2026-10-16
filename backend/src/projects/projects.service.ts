@@ -59,6 +59,13 @@ export interface ProjectPageQuery {
   priority?: string;
 }
 
+/** 人员字段（resources 列）键 → 展示名 */
+const MEMBER_LABELS: Record<string, string> = {
+  frontend: '前端',
+  backend: '后端',
+  qa: '测试',
+};
+
 /** 项目表格分页响应（items 只含当前页，total/iterations/priorities 供分页与筛选用） */
 export interface ProjectPage {
   items: Project[];
@@ -462,6 +469,18 @@ export class ProjectsService {
       'curl -N -X POST /api/settings/scripts/pull.md  # 更新脚本仓库（流式返回 git 输出与结果）',
       '```',
       '',
+      '同步脚本到项目（向 scripts 仓库提交代码后：可先执行上方 scripts/pull.md 更新平台侧仓库，再导入；未指定项目或项目未配置脚本目录时返回引导，按提示操作即可）：',
+      '',
+      '```bash',
+      `curl -X POST /api/scripts/import.md -H 'Content-Type: application/json' -d '{"projectId": ${project.id}}'  # 扫描项目脚本目录，未登记的 .check.ts/.test.ts/.export.ts 一次导入为 检查/用例/导出（按脚本路径判重，编号由文件名生成）`,
+      '```',
+      '',
+      '修改项目配置（仅本地字段：脚本目录 / 飞书通知群 / 描述 / 人员，空串清除；脚本目录即上方导入扫描的子目录，相对脚本根目录）：',
+      '',
+      '```bash',
+      `curl -X POST /api/projects/${project.id}/update.md -H 'Content-Type: application/json' -d '{"scriptsPath": "projects/xxx", "resources": {"frontend": "张三", "backend": "李四", "qa": "王五"}}'`,
+      '```',
+      '',
       '写入/更新项目文档（按 projectId + fileName 判重 upsert：fileName 是稳定唯一标识，重复调用更新同一文档；title/type/description 选填，type 可选 需求/功能/测试/技术/接口/配置，缺省"技术"）：',
       '',
       '```bash',
@@ -498,7 +517,7 @@ export class ProjectsService {
     ].join('\n');
   }
 
-  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、描述（description），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布）会在下次同步时被飞书侧覆盖 */
+  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、描述（description）、人员（resources），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布/人员）会在下次同步时被飞书侧覆盖 */
   async update(
     id: number,
     input: {
@@ -510,6 +529,7 @@ export class ProjectsService {
       scriptsPath?: string;
       feishuWebhook?: string;
       description?: string;
+      resources?: { frontend?: string; backend?: string; qa?: string } | null;
     },
   ): Promise<Project> {
     const project = await this.findOne(id);
@@ -551,7 +571,64 @@ export class ProjectsService {
     if (input.description !== undefined) {
       project.description = input.description.trim() || null;
     }
+    if (input.resources !== undefined) {
+      project.resources = this.normalizeMembers(input.resources);
+    }
     return this.projects.save(project);
+  }
+
+  /**
+   * AI 用：仅本地字段更新（脚本目录/飞书通知群/描述/人员），返回 Markdown 结果。
+   * 刻意不含飞书同步字段（类型/状态/优先级/迭代/预期发布），避免与飞书侧互相覆盖。
+   */
+  async updateMarkdown(
+    id: number,
+    input: {
+      scriptsPath?: string;
+      feishuWebhook?: string;
+      description?: string;
+      resources?: { frontend?: string; backend?: string; qa?: string } | null;
+    },
+  ): Promise<string> {
+    const project = await this.update(id, input);
+    const lines: string[] = [];
+    if (input.scriptsPath !== undefined) {
+      lines.push(
+        `- 脚本目录：${project.scriptsPath ? `\`${project.scriptsPath}\`` : '已清除'}`,
+      );
+    }
+    if (input.feishuWebhook !== undefined) {
+      lines.push(
+        `- 飞书通知群：${project.feishuWebhook ? `\`${project.feishuWebhook}\`` : '已清除'}`,
+      );
+    }
+    if (input.description !== undefined) {
+      lines.push(`- 描述：${project.description ? '已更新' : '已清除'}`);
+    }
+    if (input.resources !== undefined) {
+      const members = project.resources;
+      lines.push(
+        `- 人员：${
+          members
+            ? Object.entries(members)
+                .map(([key, value]) => `${MEMBER_LABELS[key] ?? key}=${value}`)
+                .join('，')
+            : '已清除'
+        }`,
+      );
+    }
+    return [
+      mdFrontmatter({
+        update: project.updatedAt,
+        title: `项目更新 - ${project.name}`,
+      }),
+      '# 项目已更新',
+      '',
+      `- 项目：${project.name}（#${project.id}）`,
+      ...lines,
+      `- 阅读地址：GET /api/projects/${project.id}.md`,
+      '',
+    ].join('\n');
   }
 
   /** 短文本字段（优先级/迭代周期）：trim，空串清除，超长拒绝 */
@@ -597,6 +674,21 @@ export class ProjectsService {
       );
     }
     return normalized;
+  }
+
+  /** 人员（resources 列）：{frontend?, backend?, qa?}，各值 trim、空值移除键；null/空对象清除 */
+  private normalizeMembers(
+    resources: { frontend?: string; backend?: string; qa?: string } | null,
+  ): { frontend?: string; backend?: string; qa?: string } | null {
+    if (!resources || typeof resources !== 'object') return null;
+    const normalized: { frontend?: string; backend?: string; qa?: string } = {};
+    for (const key of ['frontend', 'backend', 'qa'] as const) {
+      const value = resources[key];
+      if (typeof value === 'string' && value.trim()) {
+        normalized[key] = value.trim();
+      }
+    }
+    return Object.keys(normalized).length > 0 ? normalized : null;
   }
 
   /**

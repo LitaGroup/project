@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、写入/更新项目文档、登记与验收节点、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
-version: 1.9.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
+version: 1.10.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -21,9 +21,11 @@ tags:
 2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及资源/节点/检查/用例/导出/任务的清单、运行命令、最近运行结果与运行记录
 3. 读取文档 Markdown 正文；写入/更新项目文档（按 fileName upsert）
 4. 运行检查/用例/导出/任务，流式读取脚本输出与结果（导出运行详情含产物文件下载链接）
-5. 登记项目节点（时间点事项），研发验收后标记达成
-6. 查询缺陷清单与详情、创建/编辑缺陷、变更状态、追加变更记录、删除缺陷（见第 8 节）
-7. 获取平台设置信息、更新脚本仓库
+5. 向 scripts 仓库提交代码后，把新脚本同步导入到指定项目（自动登记为 检查/用例/导出）
+6. 修改项目本地配置：脚本目录、飞书通知群、描述、人员
+7. 登记项目节点（时间点事项），研发验收后标记达成
+8. 查询缺陷清单与详情、创建/编辑缺陷、变更状态、追加变更记录、删除缺陷（见第 8 节）
+9. 获取平台设置信息、更新脚本仓库
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -185,6 +187,44 @@ curl -N -X POST {BASE}/api/settings/scripts/pull.md   # 更新脚本仓库（git
 
 脚本更新为流式响应："输出"小节逐行返回 git 输出，结束附"结果"小节（success / error + 消息）。超时 60 秒。
 
+### 5.1 同步脚本到项目（导入）
+
+**向 scripts 仓库提交代码后**，把新脚本同步登记到平台，一次导入 检查（`.check.ts`）/ 用例（`.test.ts`）/ 导出（`.export.ts`）三类：
+
+```
+POST /api/scripts/import.md
+Content-Type: application/json
+
+{"projectId": 123}
+```
+
+标准流程（提交代码后）：
+
+```bash
+curl -X POST {BASE}/api/projects/123/update.md -H 'Content-Type: application/json' -d '{"scriptsPath": "projects/xxx"}'  # 首次使用先配置脚本目录（见 5.2）
+curl -N -X POST {BASE}/api/settings/scripts/pull.md     # 更新平台侧脚本仓库（代码已在平台服务器上时可跳过）
+curl -X POST {BASE}/api/scripts/import.md -H 'Content-Type: application/json' -d '{"projectId": 123}'  # 导入新脚本
+```
+
+- 必须指定项目；按脚本路径判重（已登记的跳过），编号由文件名生成（`daily.check.ts` → `daily`，冲突追加 `-2`/`-3`）
+- 响应为 text/markdown：按 检查/用例/导出 三小节列出 新增数量、编号、脚本路径与运行命令（拿到 checkId/testId/exportId 可直接调对应 `run.md` 运行）
+- **缺 `projectId`、项目不存在、或项目未配置脚本目录（scriptsPath）时不执行导入**，响应中会明确给出原因与下一步指引（先搜索项目 → 再配置脚本目录 → 再导入），按提示操作后重试即可
+- 导出脚本须位于项目脚本目录的 `exports` 子目录；未发现新脚本时响应会提示先执行 `POST /api/settings/scripts/pull.md`
+
+### 5.2 修改项目配置
+
+```
+POST /api/projects/{projectId}/update.md
+Content-Type: application/json
+
+{"scriptsPath": "projects/xxx", "feishuWebhook": "e09e9672-1f50-4b65-a181-8750bae489fc", "description": "# 描述 Markdown", "resources": {"frontend": "张三", "backend": "李四", "qa": "王五"}}
+```
+
+- 仅开放本地字段：`scriptsPath`（脚本目录，相对脚本根目录的子目录，即提交代码所在的目录）、`feishuWebhook`（群机器人 webhook secret，粘贴完整 hook 地址自动截取）、`description`（Markdown 描述）、`resources`（人员 `{frontend?, backend?, qa?}`）
+- 所有字段选填，只更新提供的字段；传空串清除，`resources` 传 `{}`/`null` 清除
+- 响应为 text/markdown：本次变更字段与新值 + 项目详情地址 `GET /api/projects/{id}.md`
+- 刻意不含类型/状态/优先级/迭代周期/预期发布时间——这些字段来自飞书同步，下次同步会被飞书侧覆盖
+
 ### 6. 全局列表（JSON，非 .md）
 
 需要跨项目列举数据时使用常规 JSON 接口（`projectId` 均可选，不传返回全部）：
@@ -272,4 +312,5 @@ curl -X POST {BASE}/api/defects/{defectId}/delete.md
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、缺陷创建/状态变更/更新/删除（defects）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、缺陷创建/状态变更/更新/删除（defects）
+5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

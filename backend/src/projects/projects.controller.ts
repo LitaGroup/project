@@ -46,6 +46,20 @@ class UpdateProjectDto {
   feishuWebhook?: string;
   /** 项目描述（Markdown），空串清除 */
   description?: string;
+  /** 人员：{frontend?, backend?, qa?}，空值移除键，{} / null 清除 */
+  resources?: { frontend?: string; backend?: string; qa?: string } | null;
+}
+
+/** AI 用更新（.md 端点）：仅本地字段，刻意不含飞书同步覆盖的字段 */
+class UpdateProjectMarkdownDto {
+  /** 脚本目录：相对脚本根目录的子目录，空串清除 */
+  scriptsPath?: string;
+  /** 飞书通知群：webhook secret 或完整 hook 地址（自动截取），空串清除 */
+  feishuWebhook?: string;
+  /** 项目描述（Markdown），空串清除 */
+  description?: string;
+  /** 人员：{frontend?, backend?, qa?}，空值移除键，{} / null 清除 */
+  resources?: { frontend?: string; backend?: string; qa?: string } | null;
 }
 
 class SyncFeishuDto {
@@ -123,6 +137,19 @@ export class ProjectsController {
     @Body() dto: UpdateProjectDto,
   ): Promise<Project> {
     return this.projectsService.update(id, dto);
+  }
+
+  /**
+   * AI 用：仅本地字段更新并以 Markdown 返回结果（text/markdown）。
+   * 可改 脚本目录 / 飞书通知群 / 描述 / 人员，空串清除；用法见项目 .md 视图。
+   */
+  @Post(':id/update.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  updateMarkdown(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateProjectMarkdownDto,
+  ): Promise<string> {
+    return this.projectsService.updateMarkdown(id, dto);
   }
 
   @Delete(':id')

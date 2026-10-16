@@ -49,6 +49,8 @@ const usageCards: InfoCard[] = [
       'GET /api/{checks,tests,exports,documents,tasks,defects}[?projectId=]',
       'GET /api/settings.md（环境 / 脚本目录 / 访问域名 / agent 在线状态）',
       'curl -N -X POST {BASE}/api/settings/scripts/pull.md（脚本仓库 git pull，流式返回）',
+      'POST /api/scripts/import.md（提交 scripts 代码后同步：新脚本一次导入为 检查/用例/导出，需指定项目）',
+      'POST /api/projects/{id}/update.md（AI 改项目配置：脚本目录 / 飞书通知群 / 描述 / 人员）',
     ],
   },
 ]
