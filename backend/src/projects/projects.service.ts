@@ -36,6 +36,8 @@ import { Resource } from '../resources/resource.entity';
 import { MilestonesService } from '../milestones/milestones.service';
 import { deriveMilestoneStatus } from '../milestones/milestones.service';
 import { AppVersionsService } from '../app-versions/app-versions.service';
+import { CodeBranchesService } from '../github/code-branches.service';
+import { ProjectBranch } from '../github/project-branch.entity';
 import { runSummaryLine, RunDetailLike } from '../common/run-markdown';
 import { mdFrontmatter } from '../common/frontmatter';
 import { Project } from './project.entity';
@@ -107,6 +109,7 @@ export class ProjectsService {
     private readonly resourcesService: ResourcesService,
     private readonly milestonesService: MilestonesService,
     private readonly appVersionsService: AppVersionsService,
+    private readonly codeBranchesService: CodeBranchesService,
   ) {}
 
   findAll(): Promise<Project[]> {
@@ -176,6 +179,7 @@ export class ProjectsService {
       defects,
       resources,
       milestones,
+      projectBranches,
     ] = await Promise.all([
       // 文档列表不取 longtext 正文（列表展示只需元信息）
       manager.find(Document, {
@@ -200,6 +204,11 @@ export class ProjectsService {
       }),
       // 节点按日期升序，状态由服务层推导
       this.milestonesService.findByProject(id),
+      // 代码分支登记（仓库+分支+归类）
+      manager.find(ProjectBranch, {
+        where: { projectId: id },
+        order: { repo: 'ASC', branch: 'ASC' },
+      }),
     ]);
     project.documents = documents;
     project.checks = checks;
@@ -209,6 +218,7 @@ export class ProjectsService {
     project.defects = defects;
     project.projectResources = resources;
     project.milestones = milestones;
+    project.projectBranches = projectBranches;
     // 检查/测试/导出按编号自然排序
     project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
     project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
@@ -402,6 +412,11 @@ export class ProjectsService {
       if (m.remark) parts.push(`备注：${m.remark}`);
       return `- ${parts.join(' — ')}`;
     });
+    const branchLines = project.projectBranches.map((b) => {
+      const parts = [`**${b.category}** \`${b.repo}\` @ \`${b.branch}\``];
+      if (b.remark) parts.push(`备注：${b.remark}`);
+      return `- ${parts.join(' — ')}`;
+    });
 
     return [
       mdFrontmatter({ update: project.updatedAt, title: project.name }),
@@ -424,6 +439,14 @@ export class ProjectsService {
       `## 节点（${project.milestones.length}）`,
       '',
       ...(milestoneLines.length > 0 ? milestoneLines : ['（暂无）']),
+      '',
+      `## 代码分支（${project.projectBranches.length}）`,
+      '',
+      ...(branchLines.length > 0
+        ? branchLines
+        : ['（暂无；登记 仓库+分支 后平台每分钟监听新提交/合并）']),
+      '',
+      `监听到的提交/合并记录：\`GET /api/code-events.md?projectId=${project.id}\``,
       '',
       `## 检查（${project.checks.length}）`,
       '',
@@ -512,6 +535,14 @@ export class ProjectsService {
       `curl '/api/milestones?projectId=${project.id}'  # 节点列表（按日期升序，附推导状态）`,
       `curl -X POST /api/milestones -H 'Content-Type: application/json' -d '{"projectId": ${project.id}, "date": "2026-10-01", "content": "完成联调", "deliverer": "张三", "acceptor": "李四"}'  # 新建（deliverer/acceptor 可空）`,
       'curl -X PATCH /api/milestones/{milestoneId} -H \'Content-Type: application/json\' -d \'{"achieved": "yes"}\'  # 研发验收后标记达成（自动记录北京时间当天为实际达成日期）；no 撤销、cancel 取消节点',
+      '```',
+      '',
+      '代码分支（项目涉及修改的 仓库+分支，归类 后端/H5/安卓/IOS/其它；登记后平台每分钟监听该分支的新提交/合并，仓库搜索：`GET /api/github/repos?q=`，分支联想：`GET /api/github/branches?repo=`）：',
+      '',
+      '```bash',
+      `curl '/api/code-branches?projectId=${project.id}'  # 分支登记列表`,
+      `curl -X POST /api/code-branches -H 'Content-Type: application/json' -d '{"projectId": ${project.id}, "repo": "LitaGroup/xxx", "branch": "test", "category": "后端"}'  # 登记（repo 支持仓库名/全名/URL；branch 常为 test/main/stable；同项目同仓库同分支唯一）`,
+      `curl '/api/code-events.md?projectId=${project.id}'  # 监听到的提交/合并记录（时间倒序）`,
       '```',
       '',
     ].join('\n');
@@ -707,6 +738,7 @@ export class ProjectsService {
     await this.testsService.removeByProject(project.id);
     await this.exportsService.removeByProject(project.id);
     await this.appVersionsService.removeByProject(project.id);
+    await this.codeBranchesService.removeByProject(project.id);
     await this.projects.remove(project);
   }
 }

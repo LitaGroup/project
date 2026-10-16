@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
-version: 1.10.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
+version: 1.11.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -25,7 +25,8 @@ tags:
 6. 修改项目本地配置：脚本目录、飞书通知群、描述、人员
 7. 登记项目节点（时间点事项），研发验收后标记达成
 8. 查询缺陷清单与详情、创建/编辑缺陷、变更状态、追加变更记录、删除缺陷（见第 8 节）
-9. 获取平台设置信息、更新脚本仓库
+9. 登记项目代码分支（GitHub 仓库+分支，标注 后端/H5/安卓/IOS/其它），平台自动监听 test/main/stable 等分支的新提交/合并（见第 9 节）
+10. 获取平台设置信息、更新脚本仓库
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -238,6 +239,8 @@ GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运�
 GET /api/defects[?projectId=]     # 缺陷列表（Markdown 清单见 8.1 `/api/defects.md`，详情见 8.2 `/api/defects/{id}.md`）
 GET /api/resources[?projectId=&includeDeleted=]  # 资源列表（不含多语言缓存正文；includeDeleted=true 含软删除）
 GET /api/milestones[?projectId=]  # 节点列表（按日期升序，附推导状态）
+GET /api/code-branches[?projectId=]  # 代码分支登记列表（见第 9 节）
+GET /api/code-events[?projectId=&repo=&branch=&q=]  # 监听到的提交记录（JSON，Markdown 清单见 9.1）
 ```
 
 ### 7. 节点（JSON，非 .md）
@@ -307,10 +310,43 @@ curl -X POST {BASE}/api/defects/{defectId}/delete.md
 - 端：前端 / 后端 / APP端 / 未知；优先级：高 / 中 / 低（默认中）
 - 图片：`POST /api/images`（multipart，字段 `file`）上传后返回 `/images/...` 链接，缺陷 `images` 存该路径数组（最多 9 张，update 时全量覆盖，空数组清除）
 
+### 9. GitHub 代码分支与提交监听
+
+项目可登记「代码分支」= 该项目涉及修改的 GitHub 仓库与分支（归属标注：后端/H5/安卓/IOS/其它）。登记后平台每分钟轮询该分支，新提交/合并自动记录（后续动作——代码 review、自动化测试等——将基于记录触发）。
+
+#### 9.1 查询提交记录（清单）
+
+```
+GET /api/code-events.md?projectId={id}[&repo=][&branch=][&q=关键词][&limit=]
+```
+
+- 按提交时间倒序；每条含 时间 / 仓库 @ 分支 / 提交信息首行 / 合并标记 / 作者 / 提交链接
+- `projectId` 匹配该项目登记的全部 (仓库+分支) 组合；`q` 模糊匹配 提交信息+作者
+- JSON 版：`GET /api/code-events?projectId=`（每条附 `projects` 关联项目数组）
+
+#### 9.2 登记 / 管理代码分支（JSON）
+
+```bash
+# 仓库搜索（组织 LitaGroup 下，q 匹配 名称/描述；最多 50 条，按最近更新倒序）
+curl '{BASE}/api/github/repos?q=lita-android'
+# 分支联想（选定仓库后的全部分支名）
+curl '{BASE}/api/github/branches?repo=lita-android'
+# 登记代码分支（repo 支持仓库名/全名/完整 URL；category 可选 后端/H5/安卓/IOS/其它，缺省其它）
+curl -X POST {BASE}/api/code-branches -H 'Content-Type: application/json' \
+  -d '{"projectId": 123, "repo": "lita-android", "branch": "test", "category": "安卓", "remark": "合并到 test 触发回归"}'
+# 编辑 / 删除
+curl -X PATCH {BASE}/api/code-branches/{id} -H 'Content-Type: application/json' -d '{"branch": "stable"}'
+curl -X DELETE {BASE}/api/code-branches/{id}
+```
+
+- `repo` 归一化存 `LitaGroup/{name}`，仅支持该组织下的仓库（否则 400）；同项目同 (repo, branch) 唯一
+- 监听范围 = 全平台登记的 (repo, branch) 去重集合；分支建议登记 test/main/stable
+- 项目详情 `.md` 含「代码分支」小节与本项目提交记录地址；删除项目时登记随之删除（已记录的提交保留）
+
 ## 工作约定
 
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、缺陷创建/状态变更/更新/删除（defects）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

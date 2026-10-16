@@ -20,6 +20,7 @@ import { DefectsModule } from './defects/defects.module';
 import { ResourcesModule } from './resources/resources.module';
 import { MilestonesModule } from './milestones/milestones.module';
 import { FeishuModule } from './feishu/feishu.module';
+import { GithubModule } from './github/github.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { SettingsModule } from './settings/settings.module';
 import { ImagesModule } from './images/images.module';
@@ -57,6 +58,7 @@ import { ImagesModule } from './images/images.module';
     AgentAppsModule,
     ScriptsModule,
     FeishuModule,
+    GithubModule,
     SettingsModule,
     ImagesModule,
   ],

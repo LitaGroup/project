@@ -80,6 +80,10 @@ export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number]
 export const USER_ROLES = ['管理员', '成员'] as const
 export type UserRole = (typeof USER_ROLES)[number]
 
+/** 项目代码分支归类（与后端 CodeBranchCategory 对应）：该项目涉及修改的仓库/分支属于哪一端 */
+export const CODE_BRANCH_CATEGORIES = ['后端', 'H5', '安卓', 'IOS', '其它'] as const
+export type CodeBranchCategory = (typeof CODE_BRANCH_CATEGORIES)[number]
+
 /** 当前登录用户（飞书 OAuth 落库，仅身份展示，接口不拦截） */
 export interface User {
   id: number
@@ -298,6 +302,60 @@ export interface TestRun {
   finishedAt: string | null
 }
 
+/** GitHub 组织下的仓库（GET /github/repos 搜索联想用，已裁剪字段） */
+export interface GithubRepo {
+  /** 仓库名（如 lita-android） */
+  name: string
+  /** 仓库全名（owner/name，如 LitaGroup/lita-android） */
+  fullName: string
+  private: boolean
+  description: string | null
+  /** 默认分支名（通常 main） */
+  defaultBranch: string
+  htmlUrl: string
+  language: string | null
+  updatedAt: string
+}
+
+/** 项目代码分支：项目涉及修改的 GitHub 仓库与分支登记（登记后自动监听新提交/合并） */
+export interface ProjectBranch {
+  id: number
+  projectId: number
+  /** 仓库全名（owner/name，如 LitaGroup/lita-android） */
+  repo: string
+  /** 分支名（通常 test/main/stable 等被监听的分支） */
+  branch: string
+  /** 归类：后端/H5/安卓/IOS/其它 */
+  category: CodeBranchCategory
+  remark: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 代码事件：监听到的 GitHub 提交/合并记录（append-only，按提交时间倒序） */
+export interface CodeEvent {
+  id: number
+  /** 仓库全名（owner/name） */
+  repo: string
+  branch: string
+  /** 提交 SHA（40 位） */
+  sha: string
+  /** 提交信息全文 */
+  message: string
+  /** 提交作者名 */
+  author: string | null
+  /** 是否合并提交（parents > 1） */
+  isMerge: boolean
+  /** 提交页面链接 */
+  url: string | null
+  /** 提交时间 */
+  committedAt: string
+  /** 平台发现时间 */
+  createdAt: string
+  /** 登记了该 仓库+分支 的项目（一个组合可关联多项目） */
+  projects: { id: number; name: string }[]
+}
+
 export interface Project {
   id: number
   name: string
@@ -325,6 +383,8 @@ export interface Project {
   projectResources?: ProjectResource[]
   /** 节点列表（按日期升序，含推导状态） */
   milestones?: Milestone[]
+  /** 代码分支登记（仓库+分支+归类） */
+  projectBranches?: ProjectBranch[]
   createdAt: string
   updatedAt: string
 }
@@ -463,6 +523,11 @@ export interface Settings {
   feishuTokenSource: 'lita' | 'app-credential'
   /** 兜底通知 webhook 是否已配置（不暴露 secret） */
   feishuWebhookConfigured: boolean
+  /** GitHub 集成：token 配置状态（不回显明文）与组织名 */
+  github: {
+    tokenConfigured: boolean
+    org: string
+  }
   /** appium-agent 连接信息（实时：离线时 name/appiumUrl 为 null） */
   agent: {
     online: boolean
@@ -1026,6 +1091,64 @@ export const api = {
     }),
   deleteMilestone: (id: number) =>
     request<void>(`/milestones/${id}`, { method: 'DELETE' }),
+  /** GitHub 仓库搜索（组织下仓库，q 匹配 名称/描述；后端缓存 5 分钟，最多 50 条） */
+  searchGithubRepos: (q?: string) =>
+    request<GithubRepo[]>(
+      `/github/repos${q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`,
+    ),
+  /** GitHub 分支联想：指定仓库的全部分支名 */
+  listGithubBranches: (repo: string) =>
+    request<string[]>(`/github/branches?repo=${encodeURIComponent(repo)}`),
+  /** 代码分支登记：传 projectId 按项目过滤，不传返回全部 */
+  listCodeBranches: (projectId?: number) =>
+    request<ProjectBranch[]>(
+      `/code-branches${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+    ),
+  /** 登记代码分支（repo 支持仓库名/全名/完整 URL，归一化存 owner/name） */
+  createCodeBranch: (input: {
+    projectId: number
+    repo: string
+    branch: string
+    category?: CodeBranchCategory
+    remark?: string
+  }) =>
+    request<ProjectBranch>('/code-branches', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 更新登记（仓库/分支/归类/备注） */
+  updateCodeBranch: (
+    id: number,
+    input: Partial<{
+      repo: string
+      branch: string
+      category: CodeBranchCategory
+      remark: string
+    }>,
+  ) =>
+    request<ProjectBranch>(`/code-branches/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteCodeBranch: (id: number) =>
+    request<void>(`/code-branches/${id}`, { method: 'DELETE' }),
+  /** 代码提交记录（监听到的提交/合并，按提交时间倒序）：projectId 匹配该项目登记的 仓库+分支 */
+  listCodeEvents: (params?: {
+    projectId?: number
+    repo?: string
+    branch?: string
+    q?: string
+    limit?: number
+  }) => {
+    const search = new URLSearchParams()
+    if (params?.projectId !== undefined) search.set('projectId', String(params.projectId))
+    if (params?.repo) search.set('repo', params.repo)
+    if (params?.branch) search.set('branch', params.branch)
+    if (params?.q) search.set('q', params.q)
+    if (params?.limit !== undefined) search.set('limit', String(params.limit))
+    const qs = search.toString()
+    return request<CodeEvent[]>(`/code-events${qs ? `?${qs}` : ''}`)
+  },
   /** 当前登录用户（未登录 401，调用方 catch 视为未登录态） */
   getMe: () => request<{ user: User }>('/auth/me').then((r) => r.user),
   /** 当前用户的 agent 访问令牌（调 .md 端点鉴权用；尚未发放则自动生成） */

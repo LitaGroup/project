@@ -80,3 +80,23 @@ export function MilestoneStatusBadge({ status }: { status: string }) {
     <Badge variant={milestoneVariantByStatus[status] ?? 'soft'}>{status}</Badge>
   )
 }
+
+/** 代码分支归类 → Badge variant：后端蓝 / H5 青 / 安卓绿 / IOS 紫 / 其它淡（未知兜底 soft） */
+const codeBranchVariantByCategory: Record<
+  string,
+  'info' | 'success' | 'primary' | 'secondary' | 'soft'
+> = {
+  后端: 'info',
+  H5: 'primary',
+  安卓: 'success',
+  IOS: 'secondary',
+  其它: 'soft',
+}
+
+export function CodeBranchCategoryBadge({ category }: { category: string }) {
+  return (
+    <Badge variant={codeBranchVariantByCategory[category] ?? 'soft'}>
+      {category}
+    </Badge>
+  )
+}

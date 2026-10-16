@@ -133,3 +133,14 @@ export enum UserRole {
   ADMIN = '管理员',
   MEMBER = '成员',
 }
+
+/**
+ * 项目代码分支归类：该项目涉及修改的 仓库+分支 属于哪一端。
+ */
+export enum CodeBranchCategory {
+  BACKEND = '后端',
+  H5 = 'H5',
+  ANDROID = '安卓',
+  IOS = 'IOS',
+  OTHER = '其它',
+}

@@ -15,6 +15,7 @@ import { ExportsPage } from './pages/ExportsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { ResourcesPage } from './pages/ResourcesPage'
 import { MilestonesPage } from './pages/MilestonesPage'
+import { CommitsPage } from './pages/CommitsPage'
 import { ScriptsPage } from './pages/ScriptsPage'
 import { TasksPage } from './pages/TasksPage'
 import { DefectsPage } from './pages/DefectsPage'
@@ -78,6 +79,7 @@ function App() {
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/resources" element={<ResourcesPage />} />
           <Route path="/milestones" element={<MilestonesPage />} />
+          <Route path="/commits" element={<CommitsPage />} />
           <Route path="/scripts" element={<ScriptsPage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/apps" element={<AppsPage />} />

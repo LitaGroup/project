@@ -74,6 +74,7 @@ export class SettingsMarkdownController {
       `- Lita API：${s.litaApiHost}`,
       `- 飞书 token 来源：${s.feishuTokenSource}`,
       `- 兜底通知 webhook：${s.feishuWebhookConfigured ? '已配置' : '未配置'}`,
+      `- GitHub：${s.github.tokenConfigured ? `已配置（组织 ${s.github.org}，每分钟监听项目登记分支的新提交）` : '未配置 GITHUB_TOKEN（代码监听停用）'}`,
       `- appium-agent：${s.agent.online ? `在线（${s.agent.name ?? '未知'}）` : '离线'}`,
       `- agent appium 地址：${s.agent.appiumUrl ? `\`${s.agent.appiumUrl}\`` : '-'}`,
       '',

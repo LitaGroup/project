@@ -17,6 +17,7 @@ import { Document } from '../documents/document.entity';
 import { Defect } from '../defects/defect.entity';
 import { Resource } from '../resources/resource.entity';
 import { Milestone } from '../milestones/milestone.entity';
+import { ProjectBranch } from '../github/project-branch.entity';
 
 @Entity('projects')
 export class Project {
@@ -91,6 +92,10 @@ export class Project {
   /** 节点：项目在某个时间点需要完成的事项（状态由服务层推导，不落库） */
   @OneToMany(() => Milestone, (milestone) => milestone.project)
   milestones: Milestone[];
+
+  /** 代码分支：项目涉及修改的 GitHub 仓库与分支登记 */
+  @OneToMany(() => ProjectBranch, (branch) => branch.project)
+  projectBranches: ProjectBranch[];
 
   /** 列表按创建时间倒序展示，建索引避免全表 filesort */
   @Index('IDX_projects_createdAt')

@@ -57,17 +57,22 @@ import { Switch } from '@appica/ui-react/switch'
 import {
   api,
   documentSourceLabel,
+  CODE_BRANCH_CATEGORIES,
   DOCUMENT_TYPES,
   MILESTONE_ACHIEVED,
   PROJECT_STATUSES,
   PROJECT_TYPES,
   RESOURCE_STATUSES,
   RESOURCE_TYPE_OPTIONS,
+  type CodeBranchCategory,
+  type CodeEvent,
   type Defect,
   type DocumentType,
+  type GithubRepo,
   type Milestone,
   type MilestoneAchieved,
   type Project,
+  type ProjectBranch,
   type ProjectCheck,
   type ProjectDocument,
   type ProjectExport,
@@ -78,6 +83,7 @@ import {
   type ProjectType,
 } from '../lib/api'
 import {
+  CodeBranchCategoryBadge,
   DefectStatusBadge,
   DefectPriorityBadge,
   MilestoneStatusBadge,
@@ -163,6 +169,26 @@ export function ProjectDetailPage() {
             </div>
           </div>
           <MilestonesPanel project={project} onChanged={reload} />
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">代码分支</h2>
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/commits?projectId=${project.id}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                查看提交
+              </Link>
+              <BranchFormDialog projectId={project.id} onSaved={reload} />
+            </div>
+          </div>
+          <BranchesPanel project={project} onChanged={reload} />
+        </section>
+
+        <section>
+          <CodeEventsSection project={project} />
         </section>
 
         <section>
@@ -3426,5 +3452,406 @@ function DeleteMilestoneButton({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+/** 代码分支板块：项目涉及修改的 GitHub 仓库与分支登记（登记后平台每分钟监听新提交/合并） */
+function BranchesPanel({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+  const allBranches = project.projectBranches ?? []
+  const branches = allBranches.slice(0, 10)
+  return (
+    <>
+      {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>仓库</TableHead>
+            <TableHead className="w-40">分支</TableHead>
+            <TableHead className="w-20 text-center">归类</TableHead>
+            <TableHead>备注</TableHead>
+            <TableHead className="w-32 text-center">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {branches.map((b) => (
+            <TableRow key={b.id}>
+              <TableCell className="max-w-xs truncate" title={b.repo}>
+                <a
+                  href={`https://github.com/${b.repo}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  {b.repo}
+                </a>
+              </TableCell>
+              <TableCell title="登记后平台每分钟监听该分支的新提交/合并">
+                {b.branch}
+              </TableCell>
+              <TableCell className="text-center">
+                <CodeBranchCategoryBadge category={b.category} />
+              </TableCell>
+              <TableCell className="max-w-md truncate" title={b.remark ?? ''}>
+                {b.remark ?? '—'}
+              </TableCell>
+              <TableCell className="text-center">
+                <div className="flex justify-center gap-2">
+                  <BranchFormDialog
+                    projectId={project.id}
+                    branch={b}
+                    onSaved={onChanged}
+                  />
+                  <DeleteCodeBranchButton
+                    branch={b}
+                    onDeleted={() =>
+                      api
+                        .deleteCodeBranch(b.id)
+                        .then(onChanged)
+                        .catch((e: Error) => setError(e.message))
+                    }
+                  />
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+          {branches.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5}>
+                暂无代码分支，点击「添加分支」登记项目涉及的 仓库+分支（test/main/stable
+                等被监听分支）
+              </TableCell>
+            </TableRow>
+          )}
+          <CountRow
+            colSpan={5}
+            total={allBranches.length}
+            displayed={branches.length}
+          />
+        </TableBody>
+      </Table>
+    </>
+  )
+}
+
+/** 新建/编辑代码分支：仓库联想（组织下搜索）→ 分支联想（该仓库全部分支）→ 归类 */
+function BranchFormDialog({
+  projectId,
+  branch,
+  onSaved,
+}: {
+  projectId: number
+  /** 传入则为编辑，否则为新建 */
+  branch?: ProjectBranch
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [repo, setRepo] = useState('')
+  const [repoOptions, setRepoOptions] = useState<string[]>([])
+  const [branchName, setBranchName] = useState('')
+  const [branchOptions, setBranchOptions] = useState<string[]>([])
+  const [category, setCategory] = useState<CodeBranchCategory>('其它')
+  const [remark, setRemark] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const loadBranchOptions = (repoValue: string) => {
+    const repoName = repoValue.trim()
+    if (!repoName) {
+      setBranchOptions([])
+      return
+    }
+    api
+      .listGithubBranches(repoName)
+      .then(setBranchOptions)
+      .catch(() => setBranchOptions([]))
+  }
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setRepo(branch?.repo ?? '')
+      setBranchName(branch?.branch ?? '')
+      setCategory(branch?.category ?? '其它')
+      setRemark(branch?.remark ?? '')
+      setError(null)
+      setBranchOptions([])
+      api
+        .searchGithubRepos()
+        .then((repos: GithubRepo[]) => setRepoOptions(repos.map((r) => r.fullName)))
+        .catch(() => setRepoOptions([]))
+      if (branch?.repo) loadBranchOptions(branch.repo)
+    }
+  }
+
+  const canSave = repo.trim() !== '' && branchName.trim() !== ''
+
+  const submit = () => {
+    setError(null)
+    const saving = branch
+      ? api.updateCodeBranch(branch.id, {
+          repo: repo.trim(),
+          branch: branchName.trim(),
+          category,
+          remark,
+        })
+      : api.createCodeBranch({
+          projectId,
+          repo: repo.trim(),
+          branch: branchName.trim(),
+          category,
+          remark: remark.trim() || undefined,
+        })
+    saving
+      .then(() => {
+        setOpen(false)
+        onSaved()
+      })
+      .catch((e: Error) => setError(e.message))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        {branch ? (
+          <Button variant="outline" size="sm">
+            编辑
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm">添加分支</Button>
+        )}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{branch ? '编辑代码分支' : '添加代码分支'}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-sm">
+              仓库（输入过滤，可选组织 LitaGroup 下任意仓库）
+              <Autocomplete
+                items={repoOptions}
+                value={repo}
+                onValueChange={(v) => {
+                  const next = v as string
+                  setRepo(next)
+                  setBranchOptions([])
+                  loadBranchOptions(next)
+                }}
+                clearable
+              >
+                <AutocompleteInput placeholder="如 LitaGroup/lita-android" aria-label="仓库" />
+                <AutocompleteContent>
+                  <AutocompleteEmpty>未找到匹配的仓库</AutocompleteEmpty>
+                  <AutocompleteList>
+                    {(item: string) => (
+                      <AutocompleteItem key={item} value={item}>
+                        {item}
+                      </AutocompleteItem>
+                    )}
+                  </AutocompleteList>
+                </AutocompleteContent>
+              </Autocomplete>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              分支（选定仓库后可联想；通常登记 test/main/stable 等被监听分支）
+              <Autocomplete
+                items={branchOptions}
+                value={branchName}
+                onValueChange={(v) => setBranchName(v as string)}
+                clearable
+              >
+                <AutocompleteInput placeholder="如 test / main / stable" aria-label="分支" />
+                <AutocompleteContent>
+                  <AutocompleteEmpty>
+                    {repo.trim() ? '未找到匹配的分支（可直接输入）' : '先填写仓库'}
+                  </AutocompleteEmpty>
+                  <AutocompleteList>
+                    {(item: string) => (
+                      <AutocompleteItem key={item} value={item}>
+                        {item}
+                      </AutocompleteItem>
+                    )}
+                  </AutocompleteList>
+                </AutocompleteContent>
+              </Autocomplete>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              归类（该仓库/分支属于哪一端）
+              <Select
+                value={category}
+                onValueChange={(v) => setCategory(v as CodeBranchCategory)}
+              >
+                <SelectTrigger className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CODE_BRANCH_CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              备注（选填）
+              <Textarea
+                value={remark}
+                onChange={(e) => setRemark(e.target.value)}
+                rows={2}
+                placeholder="如 后端服务仓库，合并到 test 触发回归"
+              />
+            </label>
+            {error && <p className="text-sm">保存失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button size="sm" onClick={submit} disabled={!canSave}>
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 删除代码分支登记 */
+function DeleteCodeBranchButton({
+  branch,
+  onDeleted,
+}: {
+  branch: ProjectBranch
+  onDeleted: () => void
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger>
+        <Button variant="outline" size="sm">
+          删除
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除代码分支</AlertDialogTitle>
+          <AlertDialogDescription>
+            确定删除登记「{branch.repo} @ {branch.branch}」吗？删除后不再监听该分支（已记录的提交保留）。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </AlertDialogClose>
+          <AlertDialogClose>
+            <Button variant="destructive" onClick={onDeleted}>
+              确认删除
+            </Button>
+          </AlertDialogClose>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/** 代码提交板块：本项目登记的 仓库+分支 监听到的提交/合并记录（独立拉取，倒序前 20 条） */
+function CodeEventsSection({ project }: { project: Project }) {
+  const [events, setEvents] = useState<CodeEvent[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const reload = useCallback(() => {
+    api
+      .listCodeEvents({ projectId: project.id, limit: 20 })
+      .then(setEvents)
+      .catch((e: Error) => setError(e.message))
+  }, [project.id])
+
+  useEffect(reload, [reload])
+
+  const list = events ?? []
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xl font-semibold">代码提交</h2>
+        <div className="flex items-center gap-2">
+          <Link
+            to={`/commits?projectId=${project.id}`}
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            查看全部
+          </Link>
+          <Button variant="outline" size="sm" onClick={reload}>
+            刷新
+          </Button>
+        </div>
+      </div>
+      {error && <p className="mb-2 text-sm">加载失败:{error}</p>}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-44">提交时间</TableHead>
+            <TableHead className="w-52">仓库</TableHead>
+            <TableHead className="w-32">分支</TableHead>
+            <TableHead>提交信息</TableHead>
+            <TableHead className="w-28">作者</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {list.map((e) => {
+            const firstLine = (e.message.split('\n')[0] ?? '').trim()
+            return (
+              <TableRow key={e.id}>
+                <TableCell>{new Date(e.committedAt).toLocaleString()}</TableCell>
+                <TableCell className="max-w-52 truncate" title={e.repo}>
+                  {e.repo}
+                </TableCell>
+                <TableCell>
+                  <span className="flex items-center gap-1">
+                    {e.branch}
+                    {e.isMerge && (
+                      <Badge variant="info" title="合并提交（parents > 1）">
+                        合并
+                      </Badge>
+                    )}
+                  </span>
+                </TableCell>
+                <TableCell className="max-w-md truncate" title={e.message}>
+                  {e.url ? (
+                    <a
+                      href={e.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      {firstLine}
+                    </a>
+                  ) : (
+                    firstLine
+                  )}
+                </TableCell>
+                <TableCell className="max-w-28 truncate" title={e.author ?? ''}>
+                  {e.author ?? '—'}
+                </TableCell>
+              </TableRow>
+            )
+          })}
+          {list.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={5}>
+                暂无提交记录，登记「代码分支」后平台每分钟监听新提交/合并（含
+                test/main/stable）
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </>
   )
 }

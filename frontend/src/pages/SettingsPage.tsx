@@ -181,6 +181,28 @@ export function SettingsPage() {
               </div>
             </div>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>GitHub 集成</CardTitle>
+              <CardDescription>
+                仓库搜索 / 分支联想 / 监听项目登记分支的新提交与合并（个人访问令牌，不回显），只读
+              </CardDescription>
+            </CardHeader>
+            <div className="flex flex-col gap-3 px-6 pb-6 group-data-inset/card:px-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm">连接状态</span>
+                <Badge variant={settings.github.tokenConfigured ? 'success' : 'soft'}>
+                  {settings.github.tokenConfigured ? '已配置' : '未配置 GITHUB_TOKEN'}
+                </Badge>
+              </div>
+              <SettingRow
+                label="组织"
+                value={settings.github.org}
+                hint="GITHUB_ORG，仅支持该组织下的仓库"
+              />
+            </div>
+          </Card>
         </>
       )}
     </div>

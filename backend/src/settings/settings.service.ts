@@ -39,6 +39,11 @@ export interface Settings {
   feishuTokenSource: 'lita' | 'app-credential';
   /** 兜底通知 webhook 是否已配置（不暴露 secret） */
   feishuWebhookConfigured: boolean;
+  /** GitHub 集成：token 配置状态（不回显明文）与组织名 */
+  github: {
+    tokenConfigured: boolean;
+    org: string;
+  };
   /** appium-agent 连接信息（实时：离线时 name/appiumUrl 为 null） */
   agent: {
     online: boolean;
@@ -65,6 +70,8 @@ export class SettingsService {
   private readonly feishuProjectSourceUrl: string;
   private readonly feishuTokenSource: 'lita' | 'app-credential';
   private readonly feishuWebhookConfigured: boolean;
+  private readonly githubTokenConfigured: boolean;
+  private readonly githubOrg: string;
 
   constructor(
     config: ConfigService,
@@ -93,6 +100,8 @@ export class SettingsService {
       ? 'lita'
       : 'app-credential';
     this.feishuWebhookConfigured = !!config.get<string>('FEISHU_WEBHOOK_URL');
+    this.githubTokenConfigured = !!config.get<string>('GITHUB_TOKEN')?.trim();
+    this.githubOrg = config.get<string>('GITHUB_ORG')?.trim() || 'LitaGroup';
   }
 
   /** 平台配置概览：运行环境、脚本/图片目录、访问域名、飞书相关、appium-agent 连接信息（均只读，不含密钥） */
@@ -108,6 +117,10 @@ export class SettingsService {
       feishuProjectSourceUrl: this.feishuProjectSourceUrl,
       feishuTokenSource: this.feishuTokenSource,
       feishuWebhookConfigured: this.feishuWebhookConfigured,
+      github: {
+        tokenConfigured: this.githubTokenConfigured,
+        org: this.githubOrg,
+      },
       agent: this.agentGateway.getAgentInfo(),
     };
   }
