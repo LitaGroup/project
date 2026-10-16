@@ -203,7 +203,10 @@ export class ProjectSyncService {
     project.name = name;
     project.description = fullText !== name ? fullText : null;
     project.type = toProjectType(f['需求类型']);
-    project.status = toProjectStatus(f['需求状态']);
+    // 「提测中」为平台本地流程态（飞书侧无对应值），同步时保留不覆盖
+    if (project.status !== ProjectStatus.IN_TEST) {
+      project.status = toProjectStatus(f['需求状态']);
+    }
     project.priority = typeof f['优先级'] === 'string' ? f['优先级'] : null;
     project.expectedReleaseAt = extractDate(f['理想上线时间']);
     project.iterationCycle = toIterationCycle(f['w']);

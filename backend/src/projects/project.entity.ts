@@ -18,6 +18,7 @@ import { Defect } from '../defects/defect.entity';
 import { Resource } from '../resources/resource.entity';
 import { Milestone } from '../milestones/milestone.entity';
 import { ProjectBranch } from '../github/project-branch.entity';
+import { ProjectRelease } from '../releases/project-release.entity';
 
 @Entity('projects')
 export class Project {
@@ -96,6 +97,10 @@ export class Project {
   /** 代码分支：项目涉及修改的 GitHub 仓库与分支登记 */
   @OneToMany(() => ProjectBranch, (branch) => branch.project)
   projectBranches: ProjectBranch[];
+
+  /** 提测记录（点「提测」生成，倒序展示） */
+  @OneToMany(() => ProjectRelease, (release) => release.project)
+  projectReleases: ProjectRelease[];
 
   /** 列表按创建时间倒序展示，建索引避免全表 filesort */
   @Index('IDX_projects_createdAt')

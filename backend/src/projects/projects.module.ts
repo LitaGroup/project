@@ -11,6 +11,7 @@ import { ResourcesModule } from '../resources/resources.module';
 import { MilestonesModule } from '../milestones/milestones.module';
 import { FeishuModule } from '../feishu/feishu.module';
 import { GithubModule } from '../github/github.module';
+import { ReleasesModule } from '../releases/releases.module';
 import { Project } from './project.entity';
 import { ProjectSyncService } from './project-sync.service';
 import { ProjectsController } from './projects.controller';
@@ -31,6 +32,7 @@ import { SyncState } from './sync-state.entity';
     AppVersionsModule,
     FeishuModule,
     GithubModule,
+    ReleasesModule,
   ],
   controllers: [ProjectsController],
   providers: [ProjectsService, ProjectSyncService],

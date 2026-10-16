@@ -1,11 +1,15 @@
 import { Badge } from '@appica/ui-react/badge'
 import type { ProjectStatus } from '../lib/api'
 
-const variantByStatus: Record<ProjectStatus, 'info' | 'primary' | 'soft' | 'warning'> = {
+const variantByStatus: Record<
+  ProjectStatus,
+  'info' | 'primary' | 'soft' | 'warning' | 'success'
+> = {
   计划中: 'info',
   进行中: 'primary',
   已结束: 'soft',
   暂停: 'warning',
+  提测中: 'success',
 }
 
 export function StatusBadge({ status }: { status: ProjectStatus }) {

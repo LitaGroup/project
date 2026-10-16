@@ -37,6 +37,8 @@ export enum ProjectStatus {
   FINISHED = '已结束',
   /** 飞书源表"需求状态"为「暂停」的项目（人工确认新增） */
   PAUSED = '暂停',
+  /** 项目提测后的流程态（仅平台内产生；飞书同步不覆盖，见 project-sync.service） */
+  IN_TEST = '提测中',
 }
 
 /** 缺陷状态：平台侧统一为 开放/修复/关闭 */

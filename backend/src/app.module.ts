@@ -24,6 +24,7 @@ import { GithubModule } from './github/github.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { SettingsModule } from './settings/settings.module';
 import { ImagesModule } from './images/images.module';
+import { ReleasesModule } from './releases/releases.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { ImagesModule } from './images/images.module';
     GithubModule,
     SettingsModule,
     ImagesModule,
+    ReleasesModule,
   ],
   controllers: [AppController],
   providers: [

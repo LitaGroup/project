@@ -39,7 +39,10 @@ import { AppVersionsService } from '../app-versions/app-versions.service';
 import { CodeBranchesService } from '../github/code-branches.service';
 import { ProjectBranch } from '../github/project-branch.entity';
 import { runSummaryLine, RunDetailLike } from '../common/run-markdown';
-import { mdFrontmatter } from '../common/frontmatter';
+import { mdFrontmatter, beijingTime } from '../common/frontmatter';
+import { splitMemberNames } from '../common/names';
+import { ReleasesService } from '../releases/releases.service';
+import { ProjectRelease } from '../releases/project-release.entity';
 import { Project } from './project.entity';
 
 export interface CreateProjectInput {
@@ -100,6 +103,7 @@ export class ProjectsService {
   constructor(
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
+    private readonly releasesService: ReleasesService,
     private readonly documentsService: DocumentsService,
     private readonly checksService: ChecksService,
     private readonly testsService: TestsService,
@@ -180,6 +184,7 @@ export class ProjectsService {
       resources,
       milestones,
       projectBranches,
+      projectReleases,
     ] = await Promise.all([
       // 文档列表不取 longtext 正文（列表展示只需元信息）
       manager.find(Document, {
@@ -209,6 +214,11 @@ export class ProjectsService {
         where: { projectId: id },
         order: { repo: 'ASC', branch: 'ASC' },
       }),
+      // 提测记录（倒序）
+      manager.find(ProjectRelease, {
+        where: { projectId: id },
+        order: { createdAt: 'DESC', id: 'DESC' },
+      }),
     ]);
     project.documents = documents;
     project.checks = checks;
@@ -219,6 +229,7 @@ export class ProjectsService {
     project.projectResources = resources;
     project.milestones = milestones;
     project.projectBranches = projectBranches;
+    project.projectReleases = projectReleases;
     // 检查/测试/导出按编号自然排序
     project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
     project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
@@ -417,6 +428,26 @@ export class ProjectsService {
       if (b.remark) parts.push(`备注：${b.remark}`);
       return `- ${parts.join(' — ')}`;
     });
+    // 提测记录：详情页仅展示最近 5 条，全量走 /api/releases.md
+    const releaseLines = project.projectReleases.slice(0, 5).map((r) => {
+      const parts = [
+        `**${beijingTime(r.createdAt)}**（id：${r.id}）提测人 ${r.operator ?? '—'}`,
+        `测试人员：${r.testers.join('、')}`,
+      ];
+      if (r.urls?.length) parts.push(`访问地址：${r.urls.join('、')}`);
+      if (r.branches?.length) {
+        parts.push(
+          `代码分支：${r.branches.map((b) => `\`${b.repo}\` @ \`${b.branch}\``).join('、')}`,
+        );
+      }
+      if (r.content) {
+        const oneLine = r.content.replace(/\s*\n\s*/g, ' ').trim();
+        parts.push(
+          `提测内容：${oneLine.length > 80 ? `${oneLine.slice(0, 80)}…` : oneLine}`,
+        );
+      }
+      return `- ${parts.join(' — ')}`;
+    });
 
     return [
       mdFrontmatter({ update: project.updatedAt, title: project.name }),
@@ -463,6 +494,14 @@ export class ProjectsService {
       `## 任务（${project.tasks.length}）`,
       '',
       ...(tasks.length > 0 ? tasks : ['（暂无）']),
+      '',
+      `## 提测记录（${project.projectReleases.length}）`,
+      '',
+      `全部提测记录（Markdown 清单）：\`GET /api/releases.md?projectId=${project.id}\``,
+      '',
+      ...(releaseLines.length > 0
+        ? releaseLines
+        : ['（暂无；点「提测」或调用下方提测命令生成，状态将流转「提测中」）']),
       '',
       `## 缺陷（${project.defects.length}）`,
       '',
@@ -545,6 +584,13 @@ export class ProjectsService {
       `curl '/api/code-events.md?projectId=${project.id}'  # 监听到的提交/合并记录（时间倒序）`,
       '```',
       '',
+      '项目提测（创建提测记录，状态流转「提测中」，并通知提测群「H5 Release | 提测上线」+ 项目人员私聊；仅 testers 必填——至少 1 人且须为用户系统内用户，content/urls/branches 可空）：',
+      '',
+      '```bash',
+      `curl -X POST /api/projects/${project.id}/release.md -H 'Content-Type: application/json' -d '{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}]}'`,
+      `curl '/api/releases.md?projectId=${project.id}'  # 提测记录清单（时间倒序）`,
+      '```',
+      '',
     ].join('\n');
   }
 
@@ -603,7 +649,19 @@ export class ProjectsService {
       project.description = input.description.trim() || null;
     }
     if (input.resources !== undefined) {
-      project.resources = this.normalizeMembers(input.resources);
+      const members = this.normalizeMembers(input.resources);
+      // 项目中不允许配置用户系统之外的用户（users 表 = 飞书登录落库）
+      const names = new Set<string>();
+      for (const key of ['frontend', 'backend', 'qa'] as const) {
+        for (const name of splitMemberNames(members?.[key])) names.add(name);
+      }
+      if (names.size > 0) {
+        await this.releasesService.assertNamesInUserSystem(
+          [...names],
+          '项目人员',
+        );
+      }
+      project.resources = members;
     }
     return this.projects.save(project);
   }
@@ -739,6 +797,7 @@ export class ProjectsService {
     await this.exportsService.removeByProject(project.id);
     await this.appVersionsService.removeByProject(project.id);
     await this.codeBranchesService.removeByProject(project.id);
+    await this.releasesService.removeByProject(project.id);
     await this.projects.remove(project);
   }
 }

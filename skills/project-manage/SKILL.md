@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务及运行信息）、运行检查/用例/导出/任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
-version: 1.11.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务/提测记录及运行信息）、运行检查/用例/导出/任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「提测中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
+version: 1.12.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -24,9 +24,10 @@ tags:
 5. 向 scripts 仓库提交代码后，把新脚本同步导入到指定项目（自动登记为 检查/用例/导出）
 6. 修改项目本地配置：脚本目录、飞书通知群、描述、人员
 7. 登记项目节点（时间点事项），研发验收后标记达成
-8. 查询缺陷清单与详情、创建/编辑缺陷、变更状态、追加变更记录、删除缺陷（见第 8 节）
-9. 登记项目代码分支（GitHub 仓库+分支，标注 后端/H5/安卓/IOS/其它），平台自动监听 test/main/stable 等分支的新提交/合并（见第 9 节）
-10. 获取平台设置信息、更新脚本仓库
+8. 项目提测：创建提测记录，项目状态流转「提测中」，通知提测群与项目人员（见第 8 节）
+9. 查询缺陷清单与详情、创建/编辑缺陷、变更状态、追加变更记录、删除缺陷（见第 9 节）
+10. 登记项目代码分支（GitHub 仓库+分支，标注 后端/H5/安卓/IOS/其它），平台自动监听 test/main/stable 等分支的新提交/合并（见第 10 节）
+11. 获取平台设置信息、更新脚本仓库
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -100,7 +101,8 @@ GET /api/projects/{id}.md
 - 用例（测试）清单：结构同检查（base 为 `/api/tests`）
 - 导出清单：结构同检查（base 为 `/api/exports`）；导出运行详情的 Markdown 视图含产物文件下载链接（`/export-files/{exportId}/{runId}/{file}`）
 - 任务清单：标题、cron、绑定的检查编号、开关状态、上次执行时间、下次执行时间、上次执行结果 + 详情链接、执行命令 `POST /api/tasks/{taskId}/run.md`、运行记录地址 `GET /api/tasks/{taskId}/runs`
-- 缺陷清单：每条含 id + 详情链接 `GET /api/defects/{id}.md` + 状态 + 预期 + 端 + 优先级 + 用例脚本；"缺陷"小节另附本项目全部缺陷清单地址 `GET /api/defects.md?projectId={id}`（见第 8 节）
+- 提测记录小节（最近 5 条）：时间 / 提测人 / 测试人员 / 内容摘要；全量清单地址 `GET /api/releases.md?projectId={id}`（见第 8 节）
+- 缺陷清单：每条含 id + 详情链接 `GET /api/defects/{id}.md` + 状态 + 预期 + 端 + 优先级 + 用例脚本；"缺陷"小节另附本项目全部缺陷清单地址 `GET /api/defects.md?projectId={id}`（见第 9 节）
 - 末尾"AI 操作"小节列出全部可用端点
 
 典型流程：**搜索 → 取目标项目 id → 读项目详情 → 再决定运行什么**。
@@ -236,11 +238,12 @@ GET /api/tests[?projectId=]       # 用例列表
 GET /api/exports[?projectId=]     # 导出列表
 GET /api/documents[?projectId=]   # 文档列表（不含正文）
 GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运行统计）
-GET /api/defects[?projectId=]     # 缺陷列表（Markdown 清单见 8.1 `/api/defects.md`，详情见 8.2 `/api/defects/{id}.md`）
+GET /api/defects[?projectId=]     # 缺陷列表（Markdown 清单见 9.1 `/api/defects.md`，详情见 9.2 `/api/defects/{id}.md`）
+GET /api/releases.md?projectId=   # 提测记录清单（Markdown，见 8.2；仅 .md 版）
 GET /api/resources[?projectId=&includeDeleted=]  # 资源列表（不含多语言缓存正文；includeDeleted=true 含软删除）
 GET /api/milestones[?projectId=]  # 节点列表（按日期升序，附推导状态）
-GET /api/code-branches[?projectId=]  # 代码分支登记列表（见第 9 节）
-GET /api/code-events[?projectId=&repo=&branch=&q=]  # 监听到的提交记录（JSON，Markdown 清单见 9.1）
+GET /api/code-branches[?projectId=]  # 代码分支登记列表（见第 10 节）
+GET /api/code-events[?projectId=&repo=&branch=&q=]  # 监听到的提交记录（JSON，Markdown 清单见 10.1）
 ```
 
 ### 7. 节点（JSON，非 .md）
@@ -258,11 +261,36 @@ curl -X PATCH {BASE}/api/milestones/{milestoneId} -H 'Content-Type: application/
 - **是否达成须研发验收后才能标记 yes**（平台不校验操作者，流程上由验收人确认后标记）
 - 更新（改日期/内容/备注/交付人/验收人）走同一个 `PATCH /api/milestones/{id}`；删除 `DELETE /api/milestones/{id}`
 
-### 8. 缺陷（Markdown）
+### 8. 项目提测（Markdown）
+
+提测表示项目进入测试状态：创建一条提测记录，项目状态流转「提测中」，并向提测群「H5 Release | 提测上线」与项目人员（前端/后端/测试 + 测试人员）发飞书机器人卡片。允许重复提测（保持「提测中」仅追加记录）。
+
+#### 8.1 发起提测
+
+```
+POST /api/projects/{projectId}/release.md
+Content-Type: application/json
+
+{"testers": ["王五"], "content": "# 提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/lita-h5", "branch": "test"}]}
+```
+
+- 仅 `testers` 必填：**至少 1 人且须为用户系统内用户**（即登录过本平台的飞书用户），不存在返回 400 并列出无效姓名
+- `content`（提测内容 Markdown）/ `urls`（访问地址数组）/ `branches`（代码分支）均可空；提测时间由后端按当前时间生成；操作人取令牌对应用户
+- 响应为 text/markdown：提测结果（项目/状态/人员/地址/分支/内容）+ 项目详情与提测记录清单地址；通知发送失败仅告警，不影响提测
+
+#### 8.2 查询提测记录（清单）
+
+```
+GET /api/releases.md?projectId={id}
+```
+
+按提测时间倒序返回全部提测记录（时间 / 提测人 / 测试人员 / 访问地址 / 代码分支 / 内容摘要）；不传 `projectId` 返回全平台。
+
+### 9. 缺陷（Markdown）
 
 缺陷归属项目，**仅平台内维护**（接口/人工创建，不与飞书同步）。属性：端 / 优先级（高/中/低）/ 预期功能描述 / 实际结果描述 / 图片（多张）/ 用例脚本 / 状态（开放 / 修复 / 关闭）。
 
-#### 8.1 查询缺陷（清单）
+#### 9.1 查询缺陷（清单）
 
 ```
 GET /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|中|低][&q=关键词]
@@ -271,7 +299,7 @@ GET /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|�
 - 返回 Markdown 表格：`ID | 预期 | 端 | 状态 | 优先级 | 项目`；`projectId` 可选（不传返回全部项目），`q` 模糊匹配 预期 + 实际，`status`/`priority` 按枚举筛选（可组合）
 - 表格的 `ID` 列即详情链接，直接点开 `GET /api/defects/{defectId}.md` 查看单条
 
-#### 8.2 获取缺陷详情
+#### 9.2 获取缺陷详情
 
 ```
 GET /api/defects/{defectId}.md
@@ -280,7 +308,7 @@ GET /api/defects/{defectId}.md
 - 返回：元信息（ID/项目/状态/端/优先级/用例/创建·修复·验证·更新时间）+ 预期功能描述 + 实际结果描述 + 图片（`/images/...` 链接）+ 变更记录表（时间/状态/来源/操作人/变更内容/备注）+ "AI 操作"小节（各端点示例）
 - 图片为 `/images/...` 相对链接，拼基础地址即可访问
 
-#### 8.3 编辑缺陷（创建 / 更新 / 状态变更 / 变更记录 / 删除）
+#### 9.3 编辑缺陷（创建 / 更新 / 状态变更 / 变更记录 / 删除）
 
 写入类操作均返回 Markdown 结果：
 
@@ -310,11 +338,11 @@ curl -X POST {BASE}/api/defects/{defectId}/delete.md
 - 端：前端 / 后端 / APP端 / 未知；优先级：高 / 中 / 低（默认中）
 - 图片：`POST /api/images`（multipart，字段 `file`）上传后返回 `/images/...` 链接，缺陷 `images` 存该路径数组（最多 9 张，update 时全量覆盖，空数组清除）
 
-### 9. GitHub 代码分支与提交监听
+### 10. GitHub 代码分支与提交监听
 
 项目可登记「代码分支」= 该项目涉及修改的 GitHub 仓库与分支（归属标注：后端/H5/安卓/IOS/其它）。登记后平台每分钟轮询该分支，新提交/合并自动记录（后续动作——代码 review、自动化测试等——将基于记录触发）。
 
-#### 9.1 查询提交记录（清单）
+#### 10.1 查询提交记录（清单）
 
 ```
 GET /api/code-events.md?projectId={id}[&repo=][&branch=][&q=关键词][&limit=]
@@ -324,7 +352,7 @@ GET /api/code-events.md?projectId={id}[&repo=][&branch=][&q=关键词][&limit=]
 - `projectId` 匹配该项目登记的全部 (仓库+分支) 组合；`q` 模糊匹配 提交信息+作者
 - JSON 版：`GET /api/code-events?projectId=`（每条附 `projects` 关联项目数组）
 
-#### 9.2 登记 / 管理代码分支（JSON）
+#### 10.2 登记 / 管理代码分支（JSON）
 
 ```bash
 # 仓库搜索（组织 LitaGroup 下，q 匹配 名称/描述；最多 50 条，按最近更新倒序）
@@ -348,5 +376,5 @@ curl -X DELETE {BASE}/api/code-branches/{id}
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

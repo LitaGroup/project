@@ -311,6 +311,16 @@ export class AuthService {
     return user && user.enabled ? user : null;
   }
 
+  /** 用户系统全量名单（id/name/department，按姓名排序）：项目人员/提测测试人员等配置的合法来源 */
+  listUsers(): Promise<
+    { id: number; name: string; department: string | null }[]
+  > {
+    return this.usersRepo.find({
+      select: { id: true, name: true, department: true },
+      order: { name: 'ASC' },
+    });
+  }
+
   // ---- 内部 ----
 
   /** 生成 agent 访问令牌（48 位随机 hex） */

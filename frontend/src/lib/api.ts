@@ -2,7 +2,7 @@
 export const PROJECT_TYPES = ['活动', '功能', '游戏', '数据', '后台', '技术', '其它'] as const
 export type ProjectType = (typeof PROJECT_TYPES)[number]
 
-export const PROJECT_STATUSES = ['计划中', '进行中', '已结束', '暂停'] as const
+export const PROJECT_STATUSES = ['计划中', '进行中', '已结束', '暂停', '提测中'] as const
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
 
 /** 与后端 DefectStatus 对应，平台侧统一为 开放/修复/关闭 */
@@ -356,6 +356,30 @@ export interface CodeEvent {
   projects: { id: number; name: string }[]
 }
 
+/** 提测单上的代码分支（仓库 + 分支，提测时快照） */
+export interface ReleaseBranch {
+  repo: string
+  branch: string
+}
+
+/** 项目提测记录：点「提测」生成，项目状态随之流转「提测中」；允许重复提测追加 */
+export interface ProjectRelease {
+  id: number
+  projectId: number
+  /** 提测内容（Markdown，可空） */
+  content: string | null
+  /** 访问地址（可空） */
+  urls: string[] | null
+  /** 代码分支（仓库+分支 列表，可空） */
+  branches: ReleaseBranch[] | null
+  /** 测试人员姓名（至少 1 个，均为用户系统内用户） */
+  testers: string[]
+  /** 提测人姓名 */
+  operator: string | null
+  /** 提测时间 */
+  createdAt: string
+}
+
 export interface Project {
   id: number
   name: string
@@ -385,6 +409,8 @@ export interface Project {
   milestones?: Milestone[]
   /** 代码分支登记（仓库+分支+归类） */
   projectBranches?: ProjectBranch[]
+  /** 提测记录（倒序） */
+  projectReleases?: ProjectRelease[]
   createdAt: string
   updatedAt: string
 }
@@ -1149,6 +1175,28 @@ export const api = {
     const qs = search.toString()
     return request<CodeEvent[]>(`/code-events${qs ? `?${qs}` : ''}`)
   },
+  /** 项目提测：创建提测记录 + 状态流转「提测中」+ 通知提测群与项目人员（testers 至少 1 人且须为用户系统内用户） */
+  submitRelease: (
+    projectId: number,
+    input: {
+      content?: string
+      urls?: string[]
+      branches?: ReleaseBranch[]
+      testers: string[]
+    },
+  ) =>
+    request<ProjectRelease>(`/projects/${projectId}/release`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 提测记录列表（倒序） */
+  listReleases: (projectId: number) =>
+    request<ProjectRelease[]>(`/projects/${projectId}/releases`),
+  /** 用户系统全量名单（项目人员/提测测试人员等场景选择用户） */
+  listUsers: () =>
+    request<{ users: { id: number; name: string; department: string | null }[] }>(
+      '/auth/users',
+    ).then((r) => r.users),
   /** 当前登录用户（未登录 401，调用方 catch 视为未登录态） */
   getMe: () => request<{ user: User }>('/auth/me').then((r) => r.user),
   /** 当前用户的 agent 访问令牌（调 .md 端点鉴权用；尚未发放则自动生成） */

@@ -76,11 +76,13 @@ import {
   type ProjectCheck,
   type ProjectDocument,
   type ProjectExport,
+  type ProjectRelease,
   type ProjectResource,
   type ProjectStatus,
   type ProjectTask,
   type ProjectTest,
   type ProjectType,
+  type ReleaseBranch,
 } from '../lib/api'
 import {
   CodeBranchCategoryBadge,
@@ -249,6 +251,10 @@ export function ProjectDetailPage() {
         <section>
           <TasksSection project={project} />
         </section>
+
+        <section>
+          <ReleasesSection project={project} />
+        </section>
       </div>
 
       {/* 右侧：项目详情（默认仅展示，点「编辑」进入编辑模式） */}
@@ -395,6 +401,10 @@ export function ProjectDetailPage() {
               <dd>{project.resources?.qa ?? '—'}</dd>
             </div>
           </dl>
+          {/* 提测入口：固定在右侧面板最下面，不依赖编辑模式 */}
+          <div className="border-t border-border px-6 py-4">
+            <SubmitReleaseDialog project={project} onSubmitted={reload} />
+          </div>
         </Card>
       </aside>
     </div>
@@ -3853,5 +3863,378 @@ function CodeEventsSection({ project }: { project: Project }) {
         </TableBody>
       </Table>
     </>
+  )
+}
+
+/** 提测记录：项目提测历史（倒序），点行查看完整内容；提测入口在右侧面板最下面 */
+function ReleasesSection({ project }: { project: Project }) {
+  const [selected, setSelected] = useState<ProjectRelease | null>(null)
+  const releases = project.projectReleases ?? []
+  const displayed = releases.slice(0, 10)
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-xl font-semibold">提测记录</h2>
+        <a
+          href={`/api/releases.md?projectId=${project.id}`}
+          target="_blank"
+          rel="noreferrer"
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        >
+          MD
+        </a>
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-44">提测时间</TableHead>
+            <TableHead className="w-28">提测人</TableHead>
+            <TableHead className="w-56">测试人员</TableHead>
+            <TableHead>提测内容</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {displayed.map((r) => {
+            const contentOneLine = (r.content ?? '')
+              .replace(/\s*\n\s*/g, ' ')
+              .trim()
+            return (
+              <TableRow
+                key={r.id}
+                className="cursor-pointer"
+                onClick={() => setSelected(r)}
+              >
+                <TableCell>{new Date(r.createdAt).toLocaleString()}</TableCell>
+                <TableCell className="max-w-28 truncate" title={r.operator ?? ''}>
+                  {r.operator ?? '—'}
+                </TableCell>
+                <TableCell className="max-w-56 truncate" title={r.testers.join('、')}>
+                  {r.testers.join('、')}
+                </TableCell>
+                <TableCell className="max-w-md truncate" title={contentOneLine}>
+                  {contentOneLine || '—'}
+                </TableCell>
+              </TableRow>
+            )
+          })}
+          {releases.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={4}>
+                暂无提测记录，点右侧面板底部「提测」发起提测（状态将流转「提测中」并通知提测群与项目人员）
+              </TableCell>
+            </TableRow>
+          )}
+          <CountRow colSpan={4} total={releases.length} displayed={displayed.length} />
+        </TableBody>
+      </Table>
+      {/* 提测详情：完整内容 + 访问地址 + 代码分支 */}
+      <Dialog open={selected !== null} onOpenChange={(o) => !o && setSelected(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>提测详情</DialogTitle>
+          </DialogHeader>
+          {selected && (
+            <DialogBody>
+              <dl className="flex flex-col gap-3 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="shrink-0 text-foreground-muted">提测时间</dt>
+                  <dd>{new Date(selected.createdAt).toLocaleString()}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="shrink-0 text-foreground-muted">提测人</dt>
+                  <dd>{selected.operator ?? '—'}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="shrink-0 text-foreground-muted">测试人员</dt>
+                  <dd>{selected.testers.join('、')}</dd>
+                </div>
+                {selected.branches && selected.branches.length > 0 && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="shrink-0 text-foreground-muted">代码分支</dt>
+                    <dd className="flex flex-col items-end gap-1">
+                      {selected.branches.map((b, i) => (
+                        <span key={i} className="truncate" title={`${b.repo} @ ${b.branch}`}>
+                          {b.repo} @ {b.branch}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                )}
+                {selected.urls && selected.urls.length > 0 && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="shrink-0 text-foreground-muted">访问地址</dt>
+                    <dd className="flex flex-col items-end gap-1">
+                      {selected.urls.map((u, i) => (
+                        <a key={i} href={u} target="_blank" rel="noreferrer" className="underline">
+                          {u}
+                        </a>
+                      ))}
+                    </dd>
+                  </div>
+                )}
+                <div className="flex flex-col gap-1">
+                  <dt className="text-foreground-muted">提测内容</dt>
+                  <dd className="whitespace-pre-wrap">{selected.content || '—'}</dd>
+                </div>
+              </dl>
+            </DialogBody>
+          )}
+          <DialogFooter>
+            <DialogClose>
+              <Button variant="outline" size="sm">
+                关闭
+              </Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+/** 提测弹窗：内容/访问地址/代码分支/测试人员 + 提测时间（当前时间只读）；成功后状态流转「提测中」 */
+function SubmitReleaseDialog({
+  project,
+  onSubmitted,
+}: {
+  project: Project
+  onSubmitted: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [content, setContent] = useState('')
+  const [urls, setUrls] = useState<string[]>([])
+  const [branches, setBranches] = useState<ReleaseBranch[]>([])
+  const [testers, setTesters] = useState<string[]>([])
+  const [userNames, setUserNames] = useState<string[]>([])
+  const [submittedAt, setSubmittedAt] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setContent('')
+      setUrls([])
+      // 代码分支默认带入项目已登记的 仓库+分支
+      setBranches(
+        (project.projectBranches ?? []).map((b) => ({ repo: b.repo, branch: b.branch })),
+      )
+      // 测试人员预填项目配置的测试人员（resources.qa 支持多人串，按常见分隔符拆分）
+      setTesters(
+        (project.resources?.qa ?? '')
+          .split(/[、,，;；\s]+/)
+          .filter(Boolean),
+      )
+      setSubmittedAt(new Date().toLocaleString())
+      setError(null)
+      api
+        .listUsers()
+        .then((users) => setUserNames(users.map((u) => u.name)))
+        .catch(() => setUserNames([]))
+    }
+  }
+
+  const validTesters = testers.map((t) => t.trim()).filter(Boolean)
+  const canSave = validTesters.length > 0 && !saving
+
+  const submit = () => {
+    setError(null)
+    setSaving(true)
+    api
+      .submitRelease(project.id, {
+        content: content.trim() || undefined,
+        urls: urls.map((u) => u.trim()).filter(Boolean),
+        branches: branches
+          .filter((b) => b.repo.trim() && b.branch.trim())
+          .map((b) => ({ repo: b.repo.trim(), branch: b.branch.trim() })),
+        testers: validTesters,
+      })
+      .then(() => {
+        setOpen(false)
+        onSubmitted()
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setSaving(false))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger>
+        <Button className="w-full">提测</Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>项目提测</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            {/* 提测时间：当前时间自动填入，不允许修改 */}
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-foreground-muted">提测时间</span>
+              <span>{submittedAt}</span>
+            </div>
+            <label className="flex flex-col gap-1 text-sm">
+              测试人员（至少 1 人，须为用户系统内用户；提测后机器人私聊通知）
+              <div className="flex flex-col gap-2">
+                {testers.map((tester, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Autocomplete
+                        items={userNames}
+                        value={tester}
+                        onValueChange={(v) =>
+                          setTesters((list) =>
+                            list.map((t, j) => (j === i ? (v as string) : t)),
+                          )
+                        }
+                        clearable
+                      >
+                        <AutocompleteInput
+                          placeholder="如 王五"
+                          aria-label={`测试人员 ${i + 1}`}
+                        />
+                        <AutocompleteContent>
+                          <AutocompleteEmpty>未找到匹配的用户（须为登录过本平台的用户）</AutocompleteEmpty>
+                          <AutocompleteList>
+                            {(item: string) => (
+                              <AutocompleteItem key={item} value={item}>
+                                {item}
+                              </AutocompleteItem>
+                            )}
+                          </AutocompleteList>
+                        </AutocompleteContent>
+                      </Autocomplete>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setTesters((list) => list.filter((_, j) => j !== i))}
+                    >
+                      移除
+                    </Button>
+                  </div>
+                ))}
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTesters((list) => [...list, ''])}
+                  >
+                    添加人员
+                  </Button>
+                </div>
+              </div>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              代码分支（默认带入项目已登记的 仓库+分支，可修改）
+              <div className="flex flex-col gap-2">
+                {branches.map((branch, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      value={branch.repo}
+                      onChange={(e) =>
+                        setBranches((list) =>
+                          list.map((b, j) =>
+                            j === i ? { ...b, repo: e.target.value } : b,
+                          ),
+                        )
+                      }
+                      placeholder="仓库，如 LitaGroup/lita-h5"
+                      aria-label={`仓库 ${i + 1}`}
+                      className="flex-1"
+                    />
+                    <Input
+                      value={branch.branch}
+                      onChange={(e) =>
+                        setBranches((list) =>
+                          list.map((b, j) =>
+                            j === i ? { ...b, branch: e.target.value } : b,
+                          ),
+                        )
+                      }
+                      placeholder="分支，如 test"
+                      aria-label={`分支 ${i + 1}`}
+                      className="w-36 shrink-0"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setBranches((list) => list.filter((_, j) => j !== i))}
+                    >
+                      移除
+                    </Button>
+                  </div>
+                ))}
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBranches((list) => [...list, { repo: '', branch: '' }])}
+                  >
+                    添加分支
+                  </Button>
+                </div>
+              </div>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              访问地址（可多个，可为空）
+              <div className="flex flex-col gap-2">
+                {urls.map((url, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      value={url}
+                      onChange={(e) =>
+                        setUrls((list) =>
+                          list.map((u, j) => (j === i ? e.target.value : u)),
+                        )
+                      }
+                      placeholder="https://…"
+                      aria-label={`访问地址 ${i + 1}`}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setUrls((list) => list.filter((_, j) => j !== i))}
+                    >
+                      移除
+                    </Button>
+                  </div>
+                ))}
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setUrls((list) => [...list, ''])}
+                  >
+                    添加地址
+                  </Button>
+                </div>
+              </div>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              提测内容（Markdown，可为空）
+              <Textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={6}
+                placeholder="本次提测范围、注意事项等"
+              />
+            </label>
+            {error && <p className="text-sm">提测失败:{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">
+              取消
+            </Button>
+          </DialogClose>
+          <Button onClick={submit} disabled={!canSave}>
+            {saving ? '提测中…' : '确认提测'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
