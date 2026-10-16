@@ -25,6 +25,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { AppsPage } from './pages/AppsPage'
 import { LoginPage } from './pages/LoginPage'
+import { UserListPage } from './pages/UserListPage'
 
 /** 路由级登录守卫：未登录一律跳 /login（会话加载中先不渲染，避免登录用户闪跳） */
 function RequireAuth() {
@@ -85,6 +86,7 @@ function App() {
           <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/admin/users" element={<UserListPage />} />
           </Route>
         </Route>
       </Routes>

@@ -21,22 +21,54 @@ import {
 } from '@appica/ui-react/dropdown-menu'
 import { useAuth } from '../context/AuthContext'
 
-/** 导航项 */
-const navItems = [
-  { to: '/', label: '概览', ready: true },
-  { to: '/projects', label: '项目', ready: true },
-  { to: '/tests', label: '用例', ready: true },
-  { to: '/checks', label: '检查', ready: true },
-  { to: '/exports', label: '导出', ready: true },
-  { to: '/defects', label: '缺陷', ready: true },
-  { to: '/documents', label: '文档', ready: true },
-  { to: '/resources', label: '资源', ready: true },
-  { to: '/milestones', label: '节点', ready: true },
-  { to: '/commits', label: '提交', ready: true },
-  { to: '/scripts', label: '脚本', ready: true },
-  { to: '/tasks', label: '任务', ready: true },
-  { to: '/apps', label: 'APP', ready: true },
-  { to: '/settings', label: '设置', ready: true },
+/** 左侧导航项 */
+interface NavItem {
+  to: string
+  label: string
+  ready: boolean
+}
+
+/** 顶级导航分区：顶部 Tab 切换，各分区有独立的左侧导航 */
+interface NavSection {
+  key: string
+  label: string
+  /** 点击顶部 Tab 跳转的默认页 */
+  to: string
+  /** 路径归属判定（决定顶部 Tab / 左侧导航高亮） */
+  match: (pathname: string) => boolean
+  items: NavItem[]
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    key: 'projects',
+    label: '项目',
+    to: '/',
+    match: (p) => !p.startsWith('/admin'),
+    items: [
+      { to: '/', label: '概览', ready: true },
+      { to: '/projects', label: '项目', ready: true },
+      { to: '/tests', label: '用例', ready: true },
+      { to: '/checks', label: '检查', ready: true },
+      { to: '/exports', label: '导出', ready: true },
+      { to: '/defects', label: '缺陷', ready: true },
+      { to: '/documents', label: '文档', ready: true },
+      { to: '/resources', label: '资源', ready: true },
+      { to: '/milestones', label: '节点', ready: true },
+      { to: '/commits', label: '提交', ready: true },
+      { to: '/scripts', label: '脚本', ready: true },
+      { to: '/tasks', label: '任务', ready: true },
+      { to: '/apps', label: 'APP', ready: true },
+      { to: '/settings', label: '设置', ready: true },
+    ],
+  },
+  {
+    key: 'admin',
+    label: '管理',
+    to: '/admin/users',
+    match: (p) => p.startsWith('/admin'),
+    items: [{ to: '/admin/users', label: '用户列表', ready: true }],
+  },
 ]
 
 /** 顶栏右侧用户区：未登录显示飞书登录入口，已登录显示头像下拉（身份信息 + 个人中心 + 退出登录） */
@@ -101,13 +133,38 @@ function UserArea() {
 
 export function Layout() {
   const { pathname } = useLocation()
+  const activeSection =
+    NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0]
   return (
     <div className="flex min-h-screen flex-col bg-background-muted">
       {/* 顶部导航 */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border-strong bg-background px-6">
-        <Link to="/" className="text-base font-semibold text-foreground-intense">
-          AI 项目管理平台
-        </Link>
+        <div className="flex items-center gap-8">
+          <Link
+            to="/"
+            className="text-base font-semibold text-foreground-intense"
+          >
+            AI 项目管理平台
+          </Link>
+          <nav className="flex items-center gap-1">
+            {NAV_SECTIONS.map((section) => {
+              const active = section.key === activeSection.key
+              return (
+                <Link
+                  key={section.key}
+                  to={section.to}
+                  className={
+                    active
+                      ? 'rounded-[var(--radius-md)] bg-background-muted px-3 py-1.5 text-sm font-medium text-foreground-intense'
+                      : 'rounded-[var(--radius-md)] px-3 py-1.5 text-sm text-foreground-muted hover:text-foreground-intense'
+                  }
+                >
+                  {section.label}
+                </Link>
+              )
+            })}
+          </nav>
+        </div>
         <UserArea />
       </header>
 
@@ -116,7 +173,7 @@ export function Layout() {
         <aside className="w-52 shrink-0 border-r border-border-strong bg-background p-3">
           <Navigation orientation="vertical" activeLink={pathname}>
             <NavigationList className="gap-1">
-              {navItems.map((item) => (
+              {activeSection.items.map((item) => (
                 <NavigationItem key={item.to}>
                   <NavigationLink
                     value={item.to}

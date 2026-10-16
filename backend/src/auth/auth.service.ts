@@ -311,12 +311,31 @@ export class AuthService {
     return user && user.enabled ? user : null;
   }
 
-  /** 用户系统全量名单（id/name/department，按姓名排序）：项目人员/提测测试人员等配置的合法来源 */
+  /**
+   * 用户系统全量名单（按姓名排序）：项目人员/提测测试人员等配置的合法来源，
+   * 亦供管理端「用户列表」页展示（含头像/邮箱/角色/最近登录）。
+   */
   listUsers(): Promise<
-    { id: number; name: string; department: string | null }[]
+    {
+      id: number;
+      name: string;
+      department: string | null;
+      avatarUrl: string | null;
+      email: string | null;
+      role: UserRole;
+      lastLoginAt: Date | null;
+    }[]
   > {
     return this.usersRepo.find({
-      select: { id: true, name: true, department: true },
+      select: {
+        id: true,
+        name: true,
+        department: true,
+        avatarUrl: true,
+        email: true,
+        role: true,
+        lastLoginAt: true,
+      },
       order: { name: 'ASC' },
     });
   }

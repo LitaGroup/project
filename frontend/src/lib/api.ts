@@ -96,6 +96,17 @@ export interface User {
   lastLoginAt: string | null
 }
 
+/** 用户系统名单条目（管理端「用户列表」页展示） */
+export interface PlatformUser {
+  id: number
+  name: string
+  department: string | null
+  avatarUrl: string | null
+  email: string | null
+  role: UserRole
+  lastLoginAt: string | null
+}
+
 /** 节点：项目在某个时间点需要完成的事项（日期=北京时间当日 23:59:59 前）；状态由后端推导 */
 export interface Milestone {
   id: number
@@ -1192,11 +1203,9 @@ export const api = {
   /** 提测记录列表（倒序） */
   listReleases: (projectId: number) =>
     request<ProjectRelease[]>(`/projects/${projectId}/releases`),
-  /** 用户系统全量名单（项目人员/提测测试人员等场景选择用户） */
+  /** 用户系统全量名单（项目人员/提测测试人员等场景选择用户，亦供管理端用户列表页展示） */
   listUsers: () =>
-    request<{ users: { id: number; name: string; department: string | null }[] }>(
-      '/auth/users',
-    ).then((r) => r.users),
+    request<{ users: PlatformUser[] }>('/auth/users').then((r) => r.users),
   /** 当前登录用户（未登录 401，调用方 catch 视为未登录态） */
   getMe: () => request<{ user: User }>('/auth/me').then((r) => r.user),
   /** 当前用户的 agent 访问令牌（调 .md 端点鉴权用；尚未发放则自动生成） */
