@@ -122,6 +122,15 @@ Appica UI（参考：https://appica.dev/llms.txt） + nestjs + MySQL 实现，�
 
 
 
+提测弹出的面板里面：
+
+1. 代码分支 和 分支号，都支持联想，不允许输入 github 不存在的仓库和分支
+2. 提测内容 的编辑部分，改成 markdown 的编辑器
+
+
+
+
+
 ### 增加GITHUB 的绑定
 
 1. 增加 仓库 搜索，可以搜索 `https://github.com/litaGroup/` 下的仓库

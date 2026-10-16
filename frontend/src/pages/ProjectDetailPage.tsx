@@ -95,6 +95,14 @@ import {
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { RunStats } from '../components/RunStats'
 import { NewDefectDialog } from '../components/NewDefectDialog'
+import { Editor } from '@bytemd/react'
+import gfm from '@bytemd/plugin-gfm'
+import zhHans from 'bytemd/locales/zh_Hans.json'
+import 'bytemd/dist/index.css'
+import 'github-markdown-css/github-markdown.css'
+
+/** 提测内容 Markdown 编辑器插件（与文档详情页一致） */
+const releaseEditorPlugins = [gfm()]
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -4006,19 +4014,37 @@ function SubmitReleaseDialog({
   const [branches, setBranches] = useState<ReleaseBranch[]>([])
   const [testers, setTesters] = useState<string[]>([])
   const [userNames, setUserNames] = useState<string[]>([])
+  // GitHub 仓库候选（组织内），用于代码分支联想与校验
+  const [repoOptions, setRepoOptions] = useState<string[]>([])
+  // 仓库列表加载状态：idle/loading/ready/error（error 时无从校验，禁止提交带分支的提测）
+  const [reposState, setReposState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  // 各仓库的分支候选（key = 仓库全名），供分支联想与校验
+  const [branchOptions, setBranchOptions] = useState<Record<string, string[]>>({})
   const [submittedAt, setSubmittedAt] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  /** 拉取某仓库的分支候选（按仓库全名缓存），供分支联想与提交校验 */
+  const loadBranchOptions = useCallback((repo: string) => {
+    const name = repo.trim()
+    if (!name) return
+    api
+      .listGithubBranches(name)
+      .then((list) => setBranchOptions((m) => ({ ...m, [name]: list })))
+      .catch(() => setBranchOptions((m) => ({ ...m, [name]: [] })))
+  }, [])
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
     if (next) {
       setContent('')
       setUrls([])
-      // 代码分支默认带入项目已登记的 仓库+分支
-      setBranches(
-        (project.projectBranches ?? []).map((b) => ({ repo: b.repo, branch: b.branch })),
-      )
+      // 代码分支默认带入项目已登记的 仓库+分支，并预取其分支候选
+      const initial = (project.projectBranches ?? []).map((b) => ({
+        repo: b.repo,
+        branch: b.branch,
+      }))
+      setBranches(initial)
       // 测试人员预填项目配置的测试人员（resources.qa 支持多人串，按常见分隔符拆分）
       setTesters(
         (project.resources?.qa ?? '')
@@ -4027,6 +4053,17 @@ function SubmitReleaseDialog({
       )
       setSubmittedAt(new Date().toLocaleString())
       setError(null)
+      setBranchOptions({})
+      setRepoOptions([])
+      setReposState('loading')
+      api
+        .searchGithubRepos()
+        .then((repos) => {
+          setRepoOptions(repos.map((r) => r.fullName))
+          setReposState('ready')
+        })
+        .catch(() => setReposState('error'))
+      for (const b of initial) loadBranchOptions(b.repo)
       api
         .listUsers()
         .then((users) => setUserNames(users.map((u) => u.name)))
@@ -4037,8 +4074,37 @@ function SubmitReleaseDialog({
   const validTesters = testers.map((t) => t.trim()).filter(Boolean)
   const canSave = validTesters.length > 0 && !saving
 
+  /** 校验代码分支：字段成对、仓库属于组织且存在、分支存在（仅针对已加载到候选的仓库） */
+  const validateBranches = (): string | null => {
+    const rows = branches.filter((b) => b.repo.trim() || b.branch.trim())
+    if (rows.length === 0) return null
+    for (const b of rows) {
+      if (!b.repo.trim() || !b.branch.trim()) {
+        return '代码分支需同时选择仓库与分支'
+      }
+    }
+    if (reposState === 'loading') return '正在加载 GitHub 仓库列表，请稍候重试'
+    if (reposState === 'error') {
+      return '无法加载 GitHub 仓库列表，请检查 GitHub 集成配置后再选择代码分支'
+    }
+    const badRepo = rows.find((b) => !repoOptions.includes(b.repo.trim()))
+    if (badRepo) return `仓库不存在或不属于组织：${badRepo.repo.trim()}`
+    for (const b of rows) {
+      const opts = branchOptions[b.repo.trim()]
+      if (opts && !opts.includes(b.branch.trim())) {
+        return `分支不存在：${b.repo.trim()} @ ${b.branch.trim()}`
+      }
+    }
+    return null
+  }
+
   const submit = () => {
     setError(null)
+    const branchError = validateBranches()
+    if (branchError) {
+      setError(branchError)
+      return
+    }
     setSaving(true)
     api
       .submitRelease(project.id, {
@@ -4126,36 +4192,78 @@ function SubmitReleaseDialog({
               </div>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              代码分支（默认带入项目已登记的 仓库+分支，可修改）
+              代码分支（默认带入项目已登记的 仓库+分支，仅可选组织内存在的仓库与分支）
               <div className="flex flex-col gap-2">
                 {branches.map((branch, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    <Input
-                      value={branch.repo}
-                      onChange={(e) =>
-                        setBranches((list) =>
-                          list.map((b, j) =>
-                            j === i ? { ...b, repo: e.target.value } : b,
-                          ),
-                        )
-                      }
-                      placeholder="仓库，如 LitaGroup/lita-h5"
-                      aria-label={`仓库 ${i + 1}`}
-                      className="flex-1"
-                    />
-                    <Input
-                      value={branch.branch}
-                      onChange={(e) =>
-                        setBranches((list) =>
-                          list.map((b, j) =>
-                            j === i ? { ...b, branch: e.target.value } : b,
-                          ),
-                        )
-                      }
-                      placeholder="分支，如 test"
-                      aria-label={`分支 ${i + 1}`}
-                      className="w-36 shrink-0"
-                    />
+                    <div className="flex-1">
+                      <Autocomplete
+                        items={repoOptions}
+                        value={branch.repo}
+                        onValueChange={(v) => {
+                          const next = v as string
+                          setBranches((list) =>
+                            list.map((b, j) =>
+                              j === i
+                                ? {
+                                    repo: next,
+                                    // 仓库变化时清空分支（原分支可能不属于新仓库）
+                                    branch: b.repo === next ? b.branch : '',
+                                  }
+                                : b,
+                            ),
+                          )
+                          loadBranchOptions(next)
+                        }}
+                        clearable
+                      >
+                        <AutocompleteInput
+                          placeholder="仓库，如 LitaGroup/lita-h5"
+                          aria-label={`仓库 ${i + 1}`}
+                        />
+                        <AutocompleteContent>
+                          <AutocompleteEmpty>未找到匹配的仓库</AutocompleteEmpty>
+                          <AutocompleteList>
+                            {(item: string) => (
+                              <AutocompleteItem key={item} value={item}>
+                                {item}
+                              </AutocompleteItem>
+                            )}
+                          </AutocompleteList>
+                        </AutocompleteContent>
+                      </Autocomplete>
+                    </div>
+                    <div className="w-40 shrink-0">
+                      <Autocomplete
+                        items={branchOptions[branch.repo.trim()] ?? []}
+                        value={branch.branch}
+                        onValueChange={(v) =>
+                          setBranches((list) =>
+                            list.map((b, j) =>
+                              j === i ? { ...b, branch: v as string } : b,
+                            ),
+                          )
+                        }
+                        clearable
+                      >
+                        <AutocompleteInput
+                          placeholder="分支，如 test"
+                          aria-label={`分支 ${i + 1}`}
+                        />
+                        <AutocompleteContent>
+                          <AutocompleteEmpty>
+                            {branch.repo.trim() ? '未找到匹配的分支' : '先选择仓库'}
+                          </AutocompleteEmpty>
+                          <AutocompleteList>
+                            {(item: string) => (
+                              <AutocompleteItem key={item} value={item}>
+                                {item}
+                              </AutocompleteItem>
+                            )}
+                          </AutocompleteList>
+                        </AutocompleteContent>
+                      </Autocomplete>
+                    </div>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -4174,6 +4282,11 @@ function SubmitReleaseDialog({
                     添加分支
                   </Button>
                 </div>
+                {reposState === 'error' && branches.length > 0 && (
+                  <p className="text-foreground-muted">
+                    无法加载 GitHub 仓库列表（请检查 GitHub 集成配置）
+                  </p>
+                )}
               </div>
             </label>
             <label className="flex flex-col gap-1 text-sm">
@@ -4212,16 +4325,19 @@ function SubmitReleaseDialog({
                 </div>
               </div>
             </label>
-            <label className="flex flex-col gap-1 text-sm">
-              提测内容（Markdown，可为空）
-              <Textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                rows={6}
-                placeholder="本次提测范围、注意事项等"
-              />
-            </label>
-            {error && <p className="text-sm">提测失败:{error}</p>}
+            <div className="flex flex-col gap-1 text-sm">
+              <span>提测内容（Markdown，可为空）</span>
+              <div className="doc-editor h-72 rounded-md border border-border-strong bg-background">
+                <Editor
+                  mode="tab"
+                  value={content}
+                  plugins={releaseEditorPlugins}
+                  locale={zhHans}
+                  onChange={setContent}
+                />
+              </div>
+            </div>
+            {error && <p className="text-sm">{error}</p>}
           </div>
         </DialogBody>
         <DialogFooter>
