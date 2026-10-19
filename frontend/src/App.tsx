@@ -21,6 +21,7 @@ import { TasksPage } from './pages/TasksPage'
 import { DefectsPage } from './pages/DefectsPage'
 import { DefectDetailPage } from './pages/DefectDetailPage'
 import { ProjectDefectsPage } from './pages/ProjectDefectsPage'
+import { ProjectTestsPage } from './pages/ProjectTestsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { AppsPage } from './pages/AppsPage'
@@ -51,6 +52,10 @@ function App() {
           <Route
             path="/projects/:id/checks/:checkId"
             element={<CheckRunPage />}
+          />
+          <Route
+            path="/projects/:id/tests"
+            element={<ProjectTestsPage />}
           />
           <Route
             path="/projects/:id/tests/:testId"

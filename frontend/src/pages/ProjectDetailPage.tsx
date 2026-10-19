@@ -80,7 +80,6 @@ import {
   type ProjectResource,
   type ProjectStatus,
   type ProjectTask,
-  type ProjectTest,
   type ProjectType,
   type ReleaseBranch,
 } from '../lib/api'
@@ -94,6 +93,13 @@ import {
 } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { RunStats } from '../components/RunStats'
+import { CountRow } from '../components/CountRow'
+import { TestFormDialog } from '../components/TestFormDialog'
+import {
+  DeleteTestButton,
+  ImportTestsButton,
+  RunTestButton,
+} from '../components/TestActionButtons'
 import { NewDefectDialog } from '../components/NewDefectDialog'
 import { Editor } from '@bytemd/react'
 import gfm from '@bytemd/plugin-gfm'
@@ -223,7 +229,7 @@ export function ProjectDetailPage() {
             <h2 className="text-xl font-semibold">测试</h2>
             <div className="flex items-center gap-2">
               <Link
-                to={`/tests?projectId=${project.id}`}
+                to={`/projects/${project.id}/tests`}
                 className={buttonVariants({ variant: 'outline', size: 'sm' })}
               >
                 查看全部
@@ -420,29 +426,6 @@ export function ProjectDetailPage() {
         </Card>
       </aside>
     </div>
-  )
-}
-
-/** 栏目计数行：放在表格 TableBody 末尾，跨整行右对齐展示「总共 x 条，展示 y 条」；无数据时不渲染 */
-function CountRow({
-  colSpan,
-  total,
-  displayed,
-}: {
-  colSpan: number
-  total: number
-  displayed: number
-}) {
-  if (total === 0) return null
-  return (
-    <TableRow>
-      <TableCell
-        colSpan={colSpan}
-        className="text-right text-xs text-foreground-muted"
-      >
-        总共 {total} 条，展示 {displayed} 条
-      </TableCell>
-    </TableRow>
   )
 }
 
@@ -1647,279 +1630,6 @@ function TestsPanel({
         </TableBody>
       </Table>
     </>
-  )
-}
-
-/** 新建/编辑测试：脚本位置支持从 .test.ts 文件中自动联想、搜索 */
-function TestFormDialog({
-  projectId,
-  test,
-  onSaved,
-}: {
-  projectId: number
-  /** 传入则为编辑，否则为新建 */
-  test?: ProjectTest
-  onSaved: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [code, setCode] = useState('')
-  const [description, setDescription] = useState('')
-  const [scriptPath, setScriptPath] = useState('')
-  const [scripts, setScripts] = useState<string[]>([])
-  // 运行设备：server/h5 本地直跑；android/ios 走 appium-agent 远程
-  const [device, setDevice] = useState<string>('server')
-  const [error, setError] = useState<string | null>(null)
-
-  // 打开时初始化表单，并拉取脚本文件列表供自动联想
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next)
-    if (next) {
-      setCode(test?.code ?? '')
-      setDescription(test?.description ?? '')
-      setScriptPath(test?.scriptPath ?? '')
-      setDevice(test?.device ?? 'server')
-      setError(null)
-      api
-        .listTestScripts(undefined, projectId)
-        .then(setScripts)
-        .catch(() => setScripts([]))
-    }
-  }
-
-  const submit = () => {
-    setError(null)
-    const saving = test
-      ? api.updateTest(test.id, { code, description, scriptPath, device })
-      : api.createTest({
-          projectId,
-          code,
-          description: description || undefined,
-          scriptPath,
-          device,
-        })
-    saving
-      .then(() => {
-        setOpen(false)
-        onSaved()
-      })
-      .catch((e: Error) => setError(e.message))
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {test ? (
-          <Button variant="outline" size="sm">
-            编辑
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm">添加测试</Button>
-        )}
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{test ? '编辑测试' : '添加测试'}</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1 text-sm">
-              编号（手工定义，项目内唯一）
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="如 TEST-001"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              描述（脚本测试的内容）
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="这个脚本测试什么…"
-                rows={3}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              脚本（输入关键字自动联想 .test.ts 文件）
-              <Autocomplete
-                items={scripts}
-                value={scriptPath}
-                onValueChange={(v) => setScriptPath(v as string)}
-                clearable
-              >
-                <AutocompleteInput
-                  placeholder="如 projects/active/pk/tests/xxx.test.ts"
-                  aria-label="脚本"
-                />
-                <AutocompleteContent>
-                  <AutocompleteEmpty>未找到匹配的脚本</AutocompleteEmpty>
-                  <AutocompleteList>
-                    {(item: string) => (
-                      <AutocompleteItem key={item} value={item}>
-                        {item}
-                      </AutocompleteItem>
-                    )}
-                  </AutocompleteList>
-                </AutocompleteContent>
-              </Autocomplete>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              运行设备（server/h5 本地直跑；android/ios 走 appium-agent 远程）
-              <Select
-                value={device}
-                onValueChange={(v) => setDevice(v as string)}
-                items={{
-                  server: 'server（后端/服务端）',
-                  h5: 'h5（前端页面）',
-                  android: 'Android（appium）',
-                  ios: 'iOS（appium）',
-                }}
-              >
-                <SelectTrigger className="w-56">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="server">
-                    server（后端/服务端）
-                  </SelectItem>
-                  <SelectItem value="h5">h5（前端页面）</SelectItem>
-                  <SelectItem value="android">Android（appium）</SelectItem>
-                  <SelectItem value="ios">iOS（appium）</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-            {error && <p className="text-sm">保存失败:{error}</p>}
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">取消</Button>
-          </DialogClose>
-          <Button size="sm" onClick={submit} disabled={!code.trim() || !scriptPath.trim()}>
-            保存
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/** 自动导入测试：扫描项目脚本目录下全部 .test.ts，过滤已登记的全部导入 */
-function ImportTestsButton({
-  projectId,
-  scriptsPath,
-  onImported,
-}: {
-  projectId: number
-  scriptsPath: string | null
-  onImported: () => void
-}) {
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-
-  const run = () => {
-    if (!scriptsPath) {
-      setMessage('请先在右侧设置项目的脚本目录，再执行自动导入')
-      return
-    }
-    setLoading(true)
-    setMessage(null)
-    api
-      .importTests(projectId)
-      .then((r) => {
-        setMessage(`已导入 ${r.created.length} 个，跳过 ${r.skipped} 个`)
-        onImported()
-      })
-      .catch((e: Error) => setMessage(`导入失败:${e.message}`))
-      .finally(() => setLoading(false))
-  }
-
-  return (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={run}
-        disabled={loading}
-        title="扫描脚本目录下的 .test.ts，未登记的全部导入（编号按文件名生成，描述待补充）"
-      >
-        {loading ? '导入中…' : '自动导入'}
-      </Button>
-      {message && <span className="text-sm text-foreground-muted">{message}</span>}
-    </>
-  )
-}
-
-/** 运行测试脚本：启动一次运行并跳转到运行详情页（实时进度/历史记录） */
-function RunTestButton({
-  test,
-  projectId,
-}: {
-  test: ProjectTest
-  projectId: number
-}) {
-  const navigate = useNavigate()
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const run = () => {
-    setLoading(true)
-    setError(null)
-    api
-      .startTestRun(test.id)
-      .then(() => navigate(`/projects/${projectId}/tests/${test.id}`))
-      .catch((e: Error) => {
-        setError(e.message)
-        setLoading(false)
-      })
-  }
-
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={run}
-      disabled={loading}
-      title={error ?? '启动一次脚本运行'}
-    >
-      {loading ? '启动中…' : '运行'}
-    </Button>
-  )
-}
-
-function DeleteTestButton({
-  test,
-  onDeleted,
-}: {
-  test: ProjectTest
-  onDeleted: () => void
-}) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>删除测试</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定删除测试「{test.code}」吗？只删除登记信息，不影响脚本文件本身。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogClose>
-            <Button variant="outline" size="sm">取消</Button>
-          </AlertDialogClose>
-          <AlertDialogClose>
-            <Button variant="destructive" onClick={onDeleted}>
-              确认删除
-            </Button>
-          </AlertDialogClose>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   )
 }
 
