@@ -46,8 +46,13 @@ class UpdateProjectDto {
   feishuWebhook?: string;
   /** 项目描述（Markdown），空串清除 */
   description?: string;
-  /** 人员：{frontend?, backend?, qa?}，空值移除键，{} / null 清除 */
-  resources?: { frontend?: string; backend?: string; qa?: string } | null;
+  /** 人员：{frontend?, backend?, qa?, client?}，空值移除键，{} / null 清除 */
+  resources?: {
+    frontend?: string;
+    backend?: string;
+    qa?: string;
+    client?: string;
+  } | null;
 }
 
 /** AI 用更新（.md 端点）：仅本地字段，刻意不含飞书同步覆盖的字段 */
@@ -58,8 +63,13 @@ class UpdateProjectMarkdownDto {
   feishuWebhook?: string;
   /** 项目描述（Markdown），空串清除 */
   description?: string;
-  /** 人员：{frontend?, backend?, qa?}，空值移除键，{} / null 清除 */
-  resources?: { frontend?: string; backend?: string; qa?: string } | null;
+  /** 人员：{frontend?, backend?, qa?, client?}，空值移除键，{} / null 清除 */
+  resources?: {
+    frontend?: string;
+    backend?: string;
+    qa?: string;
+    client?: string;
+  } | null;
 }
 
 class SyncFeishuDto {

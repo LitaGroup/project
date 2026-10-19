@@ -408,6 +408,10 @@ export function ProjectDetailPage() {
               <dt>测试</dt>
               <dd>{project.resources?.qa ?? '—'}</dd>
             </div>
+            <div className="flex justify-between pl-3">
+              <dt>客户端</dt>
+              <dd>{project.resources?.client ?? '—'}</dd>
+            </div>
           </dl>
           {/* 提测入口：固定在右侧面板最下面，不依赖编辑模式 */}
           <div className="border-t border-border px-6 py-4">
@@ -3928,7 +3932,7 @@ function ReleasesSection({ project }: { project: Project }) {
           {releases.length === 0 && (
             <TableRow>
               <TableCell colSpan={4}>
-                暂无提测记录，点右侧面板底部「提测」发起提测（状态将流转「提测中」并通知提测群与项目人员）
+                暂无提测记录，点右侧面板底部「提测」发起提测（状态将流转「测试中」并通知提测群与项目人员）
               </TableCell>
             </TableRow>
           )}
@@ -4000,7 +4004,7 @@ function ReleasesSection({ project }: { project: Project }) {
   )
 }
 
-/** 提测弹窗：内容/访问地址/代码分支/测试人员 + 提测时间（当前时间只读）；成功后状态流转「提测中」 */
+/** 提测弹窗：内容/访问地址/代码分支/测试人员 + 提测时间（当前时间只读）；成功后状态流转「测试中」 */
 function SubmitReleaseDialog({
   project,
   onSubmitted,

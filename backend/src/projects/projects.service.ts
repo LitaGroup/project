@@ -69,6 +69,7 @@ const MEMBER_LABELS: Record<string, string> = {
   frontend: '前端',
   backend: '后端',
   qa: '测试',
+  client: '客户端',
 };
 
 /** 项目表格分页响应（items 只含当前页，total/iterations/priorities 供分页与筛选用） */
@@ -317,10 +318,10 @@ export class ProjectsService {
       meta.push(`- 迭代周期：${project.iterationCycle}`);
     }
     if (project.resources) {
-      const { frontend, backend, qa } = project.resources;
-      if (frontend || backend || qa) {
+      const { frontend, backend, qa, client } = project.resources;
+      if (frontend || backend || qa || client) {
         meta.push(
-          `- 人员：前端 ${frontend ?? '-'} / 后端 ${backend ?? '-'} / 测试 ${qa ?? '-'}`,
+          `- 人员：前端 ${frontend ?? '-'} / 后端 ${backend ?? '-'} / 测试 ${qa ?? '-'} / 客户端 ${client ?? '-'}`,
         );
       }
     }
@@ -501,7 +502,7 @@ export class ProjectsService {
       '',
       ...(releaseLines.length > 0
         ? releaseLines
-        : ['（暂无；点「提测」或调用下方提测命令生成，状态将流转「提测中」）']),
+        : ['（暂无；点「提测」或调用下方提测命令生成，状态将流转「测试中」）']),
       '',
       `## 缺陷（${project.defects.length}）`,
       '',
@@ -540,7 +541,7 @@ export class ProjectsService {
       '修改项目配置（仅本地字段：脚本目录 / 飞书通知群 / 描述 / 人员，空串清除；脚本目录即上方导入扫描的子目录，相对脚本根目录）：',
       '',
       '```bash',
-      `curl -X POST /api/projects/${project.id}/update.md -H 'Content-Type: application/json' -d '{"scriptsPath": "projects/xxx", "resources": {"frontend": "张三", "backend": "李四", "qa": "王五"}}'`,
+      `curl -X POST /api/projects/${project.id}/update.md -H 'Content-Type: application/json' -d '{"scriptsPath": "projects/xxx", "resources": {"frontend": "张三", "backend": "李四", "qa": "王五", "client": "赵六"}}'`,
       '```',
       '',
       '写入/更新项目文档（按 projectId + fileName 判重 upsert：fileName 是稳定唯一标识，重复调用更新同一文档；title/type/description 选填，type 可选 需求/功能/测试/技术/接口/配置，缺省"技术"）：',
@@ -584,7 +585,7 @@ export class ProjectsService {
       `curl '/api/code-events.md?projectId=${project.id}'  # 监听到的提交/合并记录（时间倒序）`,
       '```',
       '',
-      '项目提测（创建提测记录，状态流转「提测中」，并通知提测群「H5 Release | 提测上线」+ 项目人员私聊；仅 testers 必填——至少 1 人且须为用户系统内用户，content/urls/branches 可空）：',
+      '项目提测（创建提测记录，状态流转「测试中」，并通知提测群「H5 Release | 提测上线」+ 项目人员私聊；仅 testers 必填——至少 1 人且须为用户系统内用户，content/urls/branches 可空）：',
       '',
       '```bash',
       `curl -X POST /api/projects/${project.id}/release.md -H 'Content-Type: application/json' -d '{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}]}'`,
@@ -652,7 +653,7 @@ export class ProjectsService {
       const members = this.normalizeMembers(input.resources);
       // 项目中不允许配置用户系统之外的用户（users 表 = 飞书登录落库）
       const names = new Set<string>();
-      for (const key of ['frontend', 'backend', 'qa'] as const) {
+      for (const key of ['frontend', 'backend', 'qa', 'client'] as const) {
         for (const name of splitMemberNames(members?.[key])) names.add(name);
       }
       if (names.size > 0) {
@@ -676,7 +677,12 @@ export class ProjectsService {
       scriptsPath?: string;
       feishuWebhook?: string;
       description?: string;
-      resources?: { frontend?: string; backend?: string; qa?: string } | null;
+      resources?: {
+        frontend?: string;
+        backend?: string;
+        qa?: string;
+        client?: string;
+      } | null;
     },
   ): Promise<string> {
     const project = await this.update(id, input);
@@ -765,13 +771,28 @@ export class ProjectsService {
     return normalized;
   }
 
-  /** 人员（resources 列）：{frontend?, backend?, qa?}，各值 trim、空值移除键；null/空对象清除 */
+  /** 人员（resources 列）：{frontend?, backend?, qa?, client?}，各值 trim、空值移除键；null/空对象清除 */
   private normalizeMembers(
-    resources: { frontend?: string; backend?: string; qa?: string } | null,
-  ): { frontend?: string; backend?: string; qa?: string } | null {
+    resources: {
+      frontend?: string;
+      backend?: string;
+      qa?: string;
+      client?: string;
+    } | null,
+  ): {
+    frontend?: string;
+    backend?: string;
+    qa?: string;
+    client?: string;
+  } | null {
     if (!resources || typeof resources !== 'object') return null;
-    const normalized: { frontend?: string; backend?: string; qa?: string } = {};
-    for (const key of ['frontend', 'backend', 'qa'] as const) {
+    const normalized: {
+      frontend?: string;
+      backend?: string;
+      qa?: string;
+      client?: string;
+    } = {};
+    for (const key of ['frontend', 'backend', 'qa', 'client'] as const) {
       const value = resources[key];
       if (typeof value === 'string' && value.trim()) {
         normalized[key] = value.trim();

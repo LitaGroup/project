@@ -89,7 +89,7 @@ describe('ReleasesService', () => {
     globalThis.fetch = realFetch;
   });
 
-  it('提测成功：创建记录 + 状态流转「提测中」+ 群与项目人员私聊通知', async () => {
+  it('提测成功：创建记录 + 状态流转「测试中」+ 群与项目人员私聊通知', async () => {
     const release = await service.submit(1, {
       content: ' 修复了登录问题 ',
       urls: [' https://staging.example.com ', ''],
@@ -113,12 +113,12 @@ describe('ReleasesService', () => {
     expect(sendUserCard).toHaveBeenCalledTimes(3); // 张三/李四/王五 去重后
   });
 
-  it('已是「提测中」的重复提测：仅追加记录，不改状态', async () => {
+  it('已是「测试中」的重复提测：仅追加记录，不改状态', async () => {
     const inTest = {
       findOne: () =>
         Promise.resolve(project({ status: ProjectStatus.IN_TEST })),
     };
-    // 覆盖 Project repo：项目已处于「提测中」
+    // 覆盖 Project repo：项目已处于「测试中」
     const moduleRef = await Test.createTestingModule({
       providers: [
         ReleasesService,

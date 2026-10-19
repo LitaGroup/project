@@ -30,7 +30,7 @@ class SubmitReleaseDto implements SubmitReleaseInput {
 export class ReleasesController {
   constructor(private readonly releasesService: ReleasesService) {}
 
-  /** 提测：创建提测记录 + 项目状态流转「提测中」+ 通知提测群与项目人员 */
+  /** 提测：创建提测记录 + 项目状态流转「测试中」+ 通知提测群与项目人员 */
   @Post(':id/release')
   submit(
     @Param('id', ParseIntPipe) id: number,

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DocumentType, ProjectStatus, ProjectType } from '../common/enums';
@@ -11,8 +12,8 @@ import { SyncState } from './sync-state.entity';
 const SYNC_KEY = 'projects:feishu';
 /** 首次同步只取最近 15 天有更新的记录 */
 const FIRST_SYNC_WINDOW_DAYS = 15;
-/** 后续增量同步只取最近 7 天有更新的记录 */
-const INCREMENTAL_WINDOW_DAYS = 7;
+/** 增量同步窗口缓冲：上次同步时间往前多取 1 小时，防时钟偏差漏单 */
+const SYNC_BUFFER_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** 默认项目源：研发项目管理多维表格（可用 FEISHU_PROJECT_SOURCE_URL 覆盖）。
@@ -71,17 +72,32 @@ export function extractDocLinks(value: unknown): string[] {
   return [...links];
 }
 
+/** 需求池同步的开发人员角色（resources 列结构） */
+export interface SyncResources {
+  frontend?: string;
+  backend?: string;
+  qa?: string;
+  client?: string;
+}
+
 /**
- * 飞书单选"需求状态" → 平台项目状态：
- * ✅ 已上线→已结束、正常→进行中、暂停→暂停；
- * 有风险/Delay/空值/乱填（如日期）一律归"计划中"。
+ * 需求池 → 平台项目状态（单向同步规则）：
+ * - 源状态为 关闭 / 暂停 / ✅ 已上线 时直接同步（→ 已关闭 / 暂停中 / 已发布）；
+ * - 其余状态（正常/有风险/Delay/空值/乱填等）按开发人员推导：
+ *   前端 / 后端 / 客户端 任一已分配 → 开发中，全未分配 → 待分配。
  */
-function toProjectStatus(value: unknown): ProjectStatus {
-  if (typeof value !== 'string') return ProjectStatus.PLANNED;
-  if (value.includes('已上线')) return ProjectStatus.FINISHED;
-  if (value === '正常') return ProjectStatus.IN_PROGRESS;
-  if (value === '暂停') return ProjectStatus.PAUSED;
-  return ProjectStatus.PLANNED;
+export function toProjectStatus(
+  value: unknown,
+  resources: SyncResources,
+): ProjectStatus {
+  if (typeof value === 'string') {
+    if (value.includes('关闭')) return ProjectStatus.FINISHED;
+    if (value.includes('暂停')) return ProjectStatus.PAUSED;
+    if (value.includes('已上线')) return ProjectStatus.PUBLISHED;
+  }
+  return resources.frontend || resources.backend || resources.client
+    ? ProjectStatus.IN_PROGRESS
+    : ProjectStatus.PLANNED;
 }
 
 /** 文本字段：segment 数组（含 mention）→ 纯文本 */
@@ -111,13 +127,15 @@ const ROLE_LINK_FIELDS = {
   frontend: '前端人员/新',
   backend: '后端资源/新',
   qa: '测试人员/新',
+  client: '客户端人员/新',
 } as const;
 
-/** 资源人员兜底：旧字段（前端/后端/测试人员；后端为文本备注、可能夹 mention） */
+/** 资源人员兜底：旧字段（前端/后端/测试/客户端人员；后端为文本备注、可能夹 mention） */
 const ROLE_LEGACY_FIELDS = {
   frontend: '前端人员',
   backend: '后端人员',
   qa: '测试人员',
+  client: '客户端人员',
 } as const;
 
 /** SingleLink 字段值 → 关联记录姓名列表（经 nameById 解析，顿号连接） */
@@ -168,6 +186,9 @@ export function toIterationCycle(value: unknown): string {
 export class ProjectSyncService {
   private readonly logger = new Logger(ProjectSyncService.name);
 
+  /** 上一轮同步未结束时不重入（cron 触发与手动同步可能重叠） */
+  private syncing = false;
+
   constructor(
     private readonly feishu: FeishuService,
     private readonly config: ConfigService,
@@ -178,7 +199,24 @@ export class ProjectSyncService {
     private readonly syncStates: Repository<SyncState>,
   ) {}
 
-  /** 从飞书多维表格增量同步项目；full=true 时忽略时间窗口全量扫描 */
+  /** 需求池 → 平台单向同步，每 1 小时自动增量一次；失败仅告警不中断 */
+  @Cron(CronExpression.EVERY_HOUR)
+  async scheduledSync(): Promise<void> {
+    if (this.syncing) return;
+    this.syncing = true;
+    try {
+      const result = await this.syncFromFeishu(false);
+      this.logger.log(
+        `定时同步完成：窗口 ${result.since} 起，同步 ${result.synced}/${result.scanned} 条`,
+      );
+    } catch (e) {
+      this.logger.warn(`定时同步失败: ${(e as Error).message}`);
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  /** 从需求池增量同步项目；full=true 时忽略时间窗口全量扫描 */
   async syncFromFeishu(full = false): Promise<SyncProjectsResult> {
     const sourceUrl =
       this.config.get<string>('FEISHU_PROJECT_SOURCE_URL') ??
@@ -186,8 +224,12 @@ export class ProjectSyncService {
     const { appToken, tableId, viewId } = await this.parseSource(sourceUrl);
 
     const state = await this.syncStates.findOne({ where: { key: SYNC_KEY } });
-    const windowDays = state ? INCREMENTAL_WINDOW_DAYS : FIRST_SYNC_WINDOW_DAYS;
-    const since = full ? 0 : Date.now() - windowDays * DAY_MS;
+    // 增量窗口 = 上次同步时间 - 1h 缓冲（lastSyncAt 仅成功后写入，失败自动补窗口）；首次取近 15 天
+    const since = full
+      ? 0
+      : state
+        ? state.lastSyncAt.getTime() - SYNC_BUFFER_MS
+        : Date.now() - FIRST_SYNC_WINDOW_DAYS * DAY_MS;
 
     const records = await this.feishu.searchBitableRecords(
       appToken,
@@ -286,14 +328,7 @@ export class ProjectSyncService {
     project.name = name;
     project.description = fullText !== name ? fullText : null;
     project.type = toProjectType(f['需求类型']);
-    // 「提测中」为平台本地流程态（飞书侧无对应值），同步时保留不覆盖
-    if (project.status !== ProjectStatus.IN_TEST) {
-      project.status = toProjectStatus(f['需求状态']);
-    }
-    project.priority = typeof f['优先级'] === 'string' ? f['优先级'] : null;
-    project.expectedReleaseAt = extractDate(f['理想上线时间']);
-    project.iterationCycle = toIterationCycle(f['w']);
-    const resources = {
+    const resources: SyncResources = {
       frontend:
         extractLinkedNames(f[ROLE_LINK_FIELDS.frontend], linkedNames) ??
         extractPeople(f[ROLE_LEGACY_FIELDS.frontend]),
@@ -303,10 +338,21 @@ export class ProjectSyncService {
       qa:
         extractLinkedNames(f[ROLE_LINK_FIELDS.qa], linkedNames) ??
         extractPeople(f[ROLE_LEGACY_FIELDS.qa]),
+      client:
+        extractLinkedNames(f[ROLE_LINK_FIELDS.client], linkedNames) ??
+        extractPeople(f[ROLE_LEGACY_FIELDS.client]),
     };
     project.resources = Object.values(resources).some(Boolean)
       ? resources
       : null;
+    // 「测试中」为平台本地流程态（飞书侧无对应值），同步时保留不覆盖；
+    // 其余状态按规则映射（关闭/暂停/已上线直接同步，其余按开发人员推导）
+    if (project.status !== ProjectStatus.IN_TEST) {
+      project.status = toProjectStatus(f['需求状态'], resources);
+    }
+    project.priority = typeof f['优先级'] === 'string' ? f['优先级'] : null;
+    project.expectedReleaseAt = extractDate(f['理想上线时间']);
+    project.iterationCycle = toIterationCycle(f['w']);
     await this.projects.save(project);
     await this.syncRequirementDocuments(project.id, f['需求'], fullText);
   }

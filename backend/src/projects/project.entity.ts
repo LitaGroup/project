@@ -46,9 +46,14 @@ export class Project {
   @Column({ type: 'varchar', length: 50, nullable: true })
   iterationCycle: string | null;
 
-  /** 资源：{ frontend?, backend?, qa? } */
+  /** 人员：{ frontend?, backend?, qa?, client? }（需求池同步含客户端人员） */
   @Column({ type: 'simple-json', nullable: true })
-  resources: { frontend?: string; backend?: string; qa?: string } | null;
+  resources: {
+    frontend?: string;
+    backend?: string;
+    qa?: string;
+    client?: string;
+  } | null;
 
   /** 飞书多维表格 record_id，增量同步判重用 */
   @Column({ type: 'varchar', length: 50, nullable: true, unique: true })

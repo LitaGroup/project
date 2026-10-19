@@ -48,7 +48,7 @@ export class ReleasesService {
   }
 
   /**
-   * 提测：创建提测记录并把项目状态流转为「提测中」。
+   * 提测：创建提测记录并把项目状态流转为「测试中」。
    * 测试人员至少 1 人且均须存在于用户系统（users 表，飞书登录落库），否则 400。
    * 通知（提测群 + 项目人员私聊）异步发送，失败仅告警不阻断提测。
    */
@@ -81,7 +81,7 @@ export class ReleasesService {
       }),
     );
 
-    // 状态流转为「提测中」（重复提测保持该状态，仅追加记录）
+    // 状态流转为「测试中」（重复提测保持该状态，仅追加记录）
     if (project.status !== ProjectStatus.IN_TEST) {
       project.status = ProjectStatus.IN_TEST;
       await this.projects.save(project);
@@ -294,14 +294,14 @@ export class ReleasesService {
     }
   }
 
-  /** 项目人员（resources 前端/后端/测试）+ 测试人员 去重后逐个私聊卡片 */
+  /** 项目人员（resources 前端/后端/测试/客户端）+ 测试人员 去重后逐个私聊卡片 */
   private async notifyMembers(
     release: ProjectRelease,
     project: Project,
     card: Record<string, unknown>,
   ): Promise<void> {
     const names = new Set(release.testers);
-    for (const key of ['frontend', 'backend', 'qa'] as const) {
+    for (const key of ['frontend', 'backend', 'qa', 'client'] as const) {
       for (const name of splitMemberNames(project.resources?.[key])) {
         names.add(name);
       }

@@ -1,8 +1,43 @@
+import { ProjectStatus } from '../common/enums';
 import {
   extractDocLinks,
   extractLinkedNames,
   toIterationCycle,
+  toProjectStatus,
 } from './project-sync.service';
+
+describe('toProjectStatus（需求池状态 → 平台项目状态）', () => {
+  const devs = { frontend: '张三' };
+  const noDevs = {};
+
+  it('关闭 / 暂停 / ✅ 已上线 直接同步，不看人员', () => {
+    expect(toProjectStatus('关闭', noDevs)).toBe(ProjectStatus.FINISHED);
+    expect(toProjectStatus('已关闭', devs)).toBe(ProjectStatus.FINISHED);
+    expect(toProjectStatus('暂停', devs)).toBe(ProjectStatus.PAUSED);
+    expect(toProjectStatus('✅ 已上线', noDevs)).toBe(ProjectStatus.PUBLISHED);
+  });
+
+  it('其余状态按开发人员推导：前端/后端/客户端 任一已分配 → 开发中', () => {
+    expect(toProjectStatus('正常', devs)).toBe(ProjectStatus.IN_PROGRESS);
+    expect(toProjectStatus('有风险', { backend: '李四' })).toBe(
+      ProjectStatus.IN_PROGRESS,
+    );
+    expect(toProjectStatus('Delay', { client: '王五' })).toBe(
+      ProjectStatus.IN_PROGRESS,
+    );
+  });
+
+  it('其余状态且开发人员全未分配（含仅测试/空值/非字符串）→ 待分配', () => {
+    expect(toProjectStatus('正常', noDevs)).toBe(ProjectStatus.PLANNED);
+    expect(toProjectStatus('有风险', { qa: '赵六' })).toBe(
+      ProjectStatus.PLANNED,
+    );
+    expect(toProjectStatus('', noDevs)).toBe(ProjectStatus.PLANNED);
+    expect(toProjectStatus(null, noDevs)).toBe(ProjectStatus.PLANNED);
+    expect(toProjectStatus(undefined, noDevs)).toBe(ProjectStatus.PLANNED);
+    expect(toProjectStatus(42, noDevs)).toBe(ProjectStatus.PLANNED);
+  });
+});
 
 describe('toIterationCycle（飞书 w 字段 → 迭代周期归一化）', () => {
   it('已是目标结构的保持不变', () => {

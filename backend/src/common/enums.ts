@@ -32,13 +32,15 @@ export enum ProjectType {
 }
 
 export enum ProjectStatus {
-  PLANNED = '计划中',
-  IN_PROGRESS = '进行中',
-  FINISHED = '已结束',
+  PLANNED = '待分配',
+  IN_PROGRESS = '开发中',
+  FINISHED = '已关闭',
   /** 飞书源表"需求状态"为「暂停」的项目（人工确认新增） */
-  PAUSED = '暂停',
+  PAUSED = '暂停中',
   /** 项目提测后的流程态（仅平台内产生；飞书同步不覆盖，见 project-sync.service） */
-  IN_TEST = '提测中',
+  IN_TEST = '测试中',
+  /** 已发布上线（飞书"✅ 已上线"同步映射，见 project-sync.service） */
+  PUBLISHED = '已发布',
 }
 
 /** 缺陷状态：平台侧统一为 开放/修复/关闭 */
