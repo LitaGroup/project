@@ -150,7 +150,7 @@ export enum CodeBranchCategory {
 }
 
 /**
- * 代码仓库的端（仓库列表展示/筛选用，与项目代码分支归类解耦）。
+ * 代码仓库的端（仓库列表展示/筛选用；新建项目代码分支未指定归类时按此推导默认归类）。
  */
 export enum RepoPlatform {
   FRONTEND = '前端',

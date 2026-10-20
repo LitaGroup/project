@@ -328,7 +328,7 @@ export interface GithubRepo {
   updatedAt: string
 }
 
-/** 仓库端（与后端 RepoPlatform 对应）：仓库列表展示/筛选用 */
+/** 仓库端（与后端 RepoPlatform 对应）：仓库列表展示/筛选，同时作为新建项目代码分支的默认归类来源 */
 export const REPO_PLATFORMS = ['前端', '后端', '安卓', '苹果', '其它'] as const
 export type RepoPlatform = (typeof REPO_PLATFORMS)[number]
 

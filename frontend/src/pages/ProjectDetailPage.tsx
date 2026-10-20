@@ -89,6 +89,7 @@ import {
   type ProjectTask,
   type ProjectType,
   type ReleaseBranch,
+  type RepoPlatform,
 } from '../lib/api'
 import {
   CodeBranchCategoryBadge,
@@ -3348,6 +3349,22 @@ function BranchesPanel({
   )
 }
 
+/** 仓库端 → 代码分支归类（与后端 repoPlatformToCategory 一致：前端仓库归为 H5，苹果 → IOS） */
+function repoPlatformCategory(platform: RepoPlatform): CodeBranchCategory {
+  switch (platform) {
+    case '后端':
+      return '后端'
+    case '前端':
+      return 'H5'
+    case '安卓':
+      return '安卓'
+    case '苹果':
+      return 'IOS'
+    default:
+      return '其它'
+  }
+}
+
 /** 新建/编辑代码分支：仓库联想（组织下搜索）→ 分支联想（该仓库全部分支）→ 归类 */
 function BranchFormDialog({
   projectId,
@@ -3365,8 +3382,28 @@ function BranchFormDialog({
   const [branchName, setBranchName] = useState('')
   const [branchOptions, setBranchOptions] = useState<string[]>([])
   const [category, setCategory] = useState<CodeBranchCategory>('其它')
+  /** 用户是否手动选过归类：未手动选择时新建不传 category，由后端按仓库登记的「端」推导 */
+  const [categoryTouched, setCategoryTouched] = useState(false)
   const [remark, setRemark] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  /** 新建分支时按仓库登记的「端」自动带上归类（仓库列表里维护），避免默认落到「其它」 */
+  const suggestCategory = (repoValue: string) => {
+    if (branch) return
+    const fullName = repoValue.trim()
+    if (!fullName) return
+    api
+      .listRepos({ q: fullName.split('/').pop() })
+      .then((list) => {
+        const matched = list.find(
+          (r) => r.fullName.toLowerCase() === fullName.toLowerCase(),
+        )
+        if (matched) setCategory(repoPlatformCategory(matched.platform))
+      })
+      .catch(() => {
+        /* 取不到时保持当前归类 */
+      })
+  }
 
   const loadBranchOptions = (repoValue: string) => {
     const repoName = repoValue.trim()
@@ -3386,6 +3423,7 @@ function BranchFormDialog({
       setRepo(branch?.repo ?? '')
       setBranchName(branch?.branch ?? '')
       setCategory(branch?.category ?? '其它')
+      setCategoryTouched(branch ? true : false)
       setRemark(branch?.remark ?? '')
       setError(null)
       setBranchOptions([])
@@ -3412,7 +3450,8 @@ function BranchFormDialog({
           projectId,
           repo: repo.trim(),
           branch: branchName.trim(),
-          category,
+          // 未手动选择归类时不传，由后端按仓库列表登记的「端」推导（避免默认写死「其它」）
+          category: categoryTouched ? category : undefined,
           remark: remark.trim() || undefined,
         })
     saving
@@ -3450,6 +3489,7 @@ function BranchFormDialog({
                   setRepo(next)
                   setBranchOptions([])
                   loadBranchOptions(next)
+                  suggestCategory(next)
                 }}
                 clearable
               >
@@ -3490,10 +3530,13 @@ function BranchFormDialog({
               </Autocomplete>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              归类（该仓库/分支属于哪一端）
+              归类（该仓库/分支属于哪一端，默认取仓库列表里登记的「端」）
               <Select
                 value={category}
-                onValueChange={(v) => setCategory(v as CodeBranchCategory)}
+                onValueChange={(v) => {
+                  setCategory(v as CodeBranchCategory)
+                  setCategoryTouched(true)
+                }}
               >
                 <SelectTrigger className="w-48">
                   <SelectValue />

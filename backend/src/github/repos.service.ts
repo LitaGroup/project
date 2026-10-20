@@ -85,6 +85,11 @@ export class ReposService {
     return repo;
   }
 
+  /** 按仓库全名查询（不抛错；供其他服务按仓库推导默认值） */
+  findByFullName(fullName: string): Promise<Repo | null> {
+    return this.repos.findOne({ where: { fullName } });
+  }
+
   /** 更新端/状态/备注（仓库本身信息随同步刷新，不允许手改） */
   async update(id: number, input: UpdateRepoInput): Promise<Repo> {
     const repo = await this.findOne(id);

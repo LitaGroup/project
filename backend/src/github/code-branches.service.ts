@@ -5,9 +5,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
-import { CodeBranchCategory } from '../common/enums';
+import { CodeBranchCategory, RepoPlatform } from '../common/enums';
 import { GithubService } from './github.service';
 import { ProjectBranch } from './project-branch.entity';
+import { ReposService } from './repos.service';
 
 export interface CreateCodeBranchInput {
   projectId: number;
@@ -37,6 +38,7 @@ export class CodeBranchesService {
     @InjectRepository(ProjectBranch)
     private readonly branches: Repository<ProjectBranch>,
     private readonly github: GithubService,
+    private readonly repos: ReposService,
   ) {}
 
   /** 按项目列出；不传 projectId 返回全部（全局视角），按仓库/分支排序 */
@@ -54,7 +56,7 @@ export class CodeBranchesService {
     // 状态「忽略」的仓库不再作为代码分支候选（存量登记不受影响）
     await this.github.assertRepoActive(repo);
     const branch = this.normalizeBranch(input.branch);
-    const category = this.normalizeCategory(input.category);
+    const category = await this.resolveCategory(repo, input.category);
     const remark = this.normalizeRemark(input.remark);
     await this.assertUnique(input.projectId, repo, branch);
     return this.branches.save(
@@ -145,9 +147,44 @@ export class CodeBranchesService {
     return category;
   }
 
+  /**
+   * 未显式指定归类时沿用仓库登记的「端」（仓库列表里维护），避免一律落到「其它」：
+   * 前端仓库 → H5、苹果 → IOS，其余同名映射。仓库未登记或端为「其它」时回退「其它」。
+   */
+  private async resolveCategory(
+    repo: string,
+    category: CodeBranchCategory | undefined,
+  ): Promise<CodeBranchCategory> {
+    if (category !== undefined && category !== null) {
+      return this.normalizeCategory(category);
+    }
+    const record = await this.repos.findByFullName(repo);
+    return record
+      ? repoPlatformToCategory(record.platform)
+      : CodeBranchCategory.OTHER;
+  }
+
   /** 备注：trim，空串 → null */
   private normalizeRemark(remark: string | undefined): string | null {
     const v = remark?.trim() ?? '';
     return v || null;
+  }
+}
+
+/** 仓库的「端」→ 代码分支归类（前端仓库归为 H5，苹果 → IOS，其它保持其它） */
+export function repoPlatformToCategory(
+  platform: RepoPlatform,
+): CodeBranchCategory {
+  switch (platform) {
+    case RepoPlatform.BACKEND:
+      return CodeBranchCategory.BACKEND;
+    case RepoPlatform.FRONTEND:
+      return CodeBranchCategory.H5;
+    case RepoPlatform.ANDROID:
+      return CodeBranchCategory.ANDROID;
+    case RepoPlatform.IOS:
+      return CodeBranchCategory.IOS;
+    default:
+      return CodeBranchCategory.OTHER;
   }
 }
