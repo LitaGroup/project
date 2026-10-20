@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Card,
@@ -53,6 +53,13 @@ import {
   SelectItem,
 } from '@appica/ui-react/select'
 import { Badge } from '@appica/ui-react/badge'
+import { DatePicker } from '@appica/ui-react/date-picker'
+import {
+  Tooltip,
+  TooltipProvider,
+  TooltipTrigger,
+  TooltipContent,
+} from '@appica/ui-react/tooltip'
 import { Switch } from '@appica/ui-react/switch'
 import {
   api,
@@ -114,8 +121,6 @@ export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [project, setProject] = useState<Project | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // 右侧详情卡的编辑模式：默认仅展示，点「编辑」后才出现编辑控件
-  const [editing, setEditing] = useState(false)
 
   const reload = useCallback(() => {
     if (!id) return
@@ -271,175 +276,128 @@ export function ProjectDetailPage() {
         </section>
       </div>
 
-      {/* 右侧：项目详情（默认仅展示，点「编辑」进入编辑模式） */}
+      {/* 右侧：项目详情（每个可编辑字段展示态带虚线下划线，hover 提示「点击编辑」，点击即编辑） */}
       <aside className="w-80 shrink-0">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between gap-2">
-              <span className="truncate">{project.name}</span>
-              <span className="flex shrink-0 items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setEditing((v) => !v)}
-                >
-                  {editing ? '完成' : '编辑'}
-                </Button>
+        <TooltipProvider>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-2">
+                <span className="truncate">{project.name}</span>
                 {/* Markdown 视图：后端 .md URL 规范（GET /api/projects/:id.md） */}
                 <a
                   href={`/api/projects/${project.id}.md`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-sm font-normal underline"
+                  className="shrink-0 text-sm font-normal underline"
                   title="Markdown 视图"
                 >
                   MD
                 </a>
-              </span>
-            </CardTitle>
-            <CardDescription className="flex items-start justify-between gap-2">
-              <span className="whitespace-pre-wrap">
-                {project.description ?? '暂无描述'}
-              </span>
-              {editing && (
+              </CardTitle>
+              <CardDescription>
                 <EditDescriptionDialog project={project} onSaved={reload} />
-              )}
-            </CardDescription>
-          </CardHeader>
-          <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
-            <div className="flex items-center justify-between">
-              <dt>类型</dt>
-              <dd>
-                {editing ? (
+              </CardDescription>
+            </CardHeader>
+            <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
+              <div className="flex items-center justify-between">
+                <dt>类型</dt>
+                <dd>
                   <ProjectTypeSelect project={project} onChanged={reload} />
-                ) : (
-                  <Badge variant="secondary">{project.type}</Badge>
-                )}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>状态</dt>
-              <dd>
-                {editing ? (
+                </dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt>状态</dt>
+                <dd>
                   <ProjectStatusSelect project={project} onChanged={reload} />
-                ) : (
-                  <StatusBadge status={project.status} />
-                )}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>预期发布</dt>
-              <dd>
-                {editing ? (
+                </dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt>预期发布</dt>
+                <dd>
                   <ExpectedReleaseInput project={project} onChanged={reload} />
-                ) : (
-                  (project.expectedReleaseAt ?? '未定')
-                )}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>迭代</dt>
-              <dd>
-                {editing ? (
+                </dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt>迭代</dt>
+                <dd>
                   <ProjectDictSelect
                     project={project}
                     field="iterationCycle"
                     suggestionsKey="iterations"
                     onChanged={reload}
                   />
-                ) : (
-                  <span
-                    className="block max-w-40 truncate"
-                    title={project.iterationCycle ?? ''}
-                  >
-                    {project.iterationCycle ?? '—'}
-                  </span>
-                )}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>优先级</dt>
-              <dd>
-                {editing ? (
+                </dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt>优先级</dt>
+                <dd>
                   <ProjectDictSelect
                     project={project}
                     field="priority"
                     suggestionsKey="priorities"
                     onChanged={reload}
                   />
-                ) : (
-                  (project.priority ?? '—')
-                )}
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt>来源</dt>
-              <dd>{project.feishuRecordId ? '飞书同步' : '手动创建'}</dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>脚本目录</dt>
-              <dd className="flex items-center gap-1">
-                <span className="max-w-40 truncate" title={project.scriptsPath ?? ''}>
-                  {project.scriptsPath ?? '—'}
-                </span>
-                {editing && (
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt>来源</dt>
+                <dd>{project.feishuRecordId ? '飞书同步' : '手动创建'}</dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt>脚本目录</dt>
+                <dd className="flex items-center gap-1">
                   <EditScriptsPathDialog project={project} onSaved={reload} />
-                )}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt>飞书通知群</dt>
-              <dd className="flex items-center gap-1">
-                <span className="max-w-40 truncate" title={project.feishuWebhook ?? ''}>
-                  {project.feishuWebhook ?? '—'}
-                </span>
-                {editing && (
+                </dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt>飞书通知群</dt>
+                <dd className="flex items-center gap-1">
                   <EditWebhookDialog project={project} onSaved={reload} />
-                )}
-              </dd>
+                </dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt>代码分支</dt>
+                <dd className="flex items-center gap-1">
+                  <span
+                    className="max-w-40 truncate"
+                    title={(project.projectBranches ?? [])
+                      .map((b) => `${b.repo}@${b.branch}`)
+                      .join('、')}
+                  >
+                    {project.projectBranches?.length
+                      ? `${project.projectBranches.length} 个`
+                      : '—'}
+                  </span>
+                  <ProjectBranchManageDialog project={project} onSaved={reload} />
+                </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt>资源</dt>
+                <dd>—</dd>
+              </div>
+              <div className="flex justify-between pl-3">
+                <dt>前端</dt>
+                <dd>{project.resources?.frontend ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between pl-3">
+                <dt>后端</dt>
+                <dd>{project.resources?.backend ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between pl-3">
+                <dt>测试</dt>
+                <dd>{project.resources?.qa ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between pl-3">
+                <dt>客户端</dt>
+                <dd>{project.resources?.client ?? '—'}</dd>
+              </div>
+            </dl>
+            {/* 提测入口：固定在右侧面板最下面 */}
+            <div className="border-t border-border px-6 py-4">
+              <SubmitReleaseDialog project={project} onSubmitted={reload} />
             </div>
-            <div className="flex items-center justify-between">
-              <dt>代码分支</dt>
-              <dd className="flex items-center gap-1">
-                <span
-                  className="max-w-40 truncate"
-                  title={(project.projectBranches ?? [])
-                    .map((b) => `${b.repo}@${b.branch}`)
-                    .join('、')}
-                >
-                  {project.projectBranches?.length
-                    ? `${project.projectBranches.length} 个`
-                    : '—'}
-                </span>
-                <ProjectBranchManageDialog project={project} onSaved={reload} />
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt>资源</dt>
-              <dd>—</dd>
-            </div>
-            <div className="flex justify-between pl-3">
-              <dt>前端</dt>
-              <dd>{project.resources?.frontend ?? '—'}</dd>
-            </div>
-            <div className="flex justify-between pl-3">
-              <dt>后端</dt>
-              <dd>{project.resources?.backend ?? '—'}</dd>
-            </div>
-            <div className="flex justify-between pl-3">
-              <dt>测试</dt>
-              <dd>{project.resources?.qa ?? '—'}</dd>
-            </div>
-            <div className="flex justify-between pl-3">
-              <dt>客户端</dt>
-              <dd>{project.resources?.client ?? '—'}</dd>
-            </div>
-          </dl>
-          {/* 提测入口：固定在右侧面板最下面，不依赖编辑模式 */}
-          <div className="border-t border-border px-6 py-4">
-            <SubmitReleaseDialog project={project} onSubmitted={reload} />
-          </div>
-        </Card>
+          </Card>
+        </TooltipProvider>
       </aside>
     </div>
   )
@@ -830,7 +788,40 @@ function DeleteCheckButton({
   )
 }
 
-/** 修改项目类型：下拉选择后立即保存（飞书同步项目下次同步会被飞书侧覆盖） */
+/**
+ * 可编辑字段的展示态：值下面一条虚线下划线，hover/聚焦时提示「点击编辑」，点击交给调用方进入编辑。
+ * 颜色用 Appica 角色 token（不写 hue 字面量）。
+ */
+function EditableValue({
+  children,
+  onClick,
+  className = '',
+  title = '点击编辑',
+}: {
+  children: ReactNode
+  onClick: () => void
+  className?: string
+  title?: string
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={onClick}
+            className={`cursor-pointer border-b border-dashed border-border-strong pb-0.5 text-left transition-colors hover:border-border-intense hover:text-foreground-intense ${className}`}
+          />
+        }
+      >
+        {children}
+      </TooltipTrigger>
+      <TooltipContent>{title}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** 展示项目类型；点击值展开下拉，选中后立即保存（飞书同步项目下次同步会被飞书侧覆盖） */
 function ProjectTypeSelect({
   project,
   onChanged,
@@ -838,6 +829,7 @@ function ProjectTypeSelect({
   project: Project
   onChanged: () => void
 }) {
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const change = (type: string) => {
@@ -851,28 +843,38 @@ function ProjectTypeSelect({
 
   return (
     <span className="flex flex-col items-end gap-1">
-      <Select
-        value={project.type}
-        onValueChange={(v) => change(v as string)}
-        items={Object.fromEntries(PROJECT_TYPES.map((t) => [t, t]))}
-      >
-        <SelectTrigger className="w-28">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {PROJECT_TYPES.map((t) => (
-            <SelectItem key={t} value={t}>
-              {t}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {editing ? (
+        <Select
+          defaultOpen
+          value={project.type}
+          onOpenChange={(open) => {
+            if (!open) setEditing(false)
+          }}
+          onValueChange={(v) => change(v as string)}
+          items={Object.fromEntries(PROJECT_TYPES.map((t) => [t, t]))}
+        >
+          <SelectTrigger className="w-28">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PROJECT_TYPES.map((t) => (
+              <SelectItem key={t} value={t}>
+                {t}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <EditableValue onClick={() => setEditing(true)}>
+          <Badge variant="secondary">{project.type}</Badge>
+        </EditableValue>
+      )}
       {error && <span className="text-xs">{error}</span>}
     </span>
   )
 }
 
-/** 修改项目状态：下拉选择后立即保存（飞书同步项目下次同步会被飞书侧覆盖） */
+/** 展示项目状态；点击值展开下拉，选中后立即保存（飞书同步项目下次同步会被飞书侧覆盖） */
 function ProjectStatusSelect({
   project,
   onChanged,
@@ -880,6 +882,7 @@ function ProjectStatusSelect({
   project: Project
   onChanged: () => void
 }) {
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const change = (status: string) => {
@@ -893,28 +896,52 @@ function ProjectStatusSelect({
 
   return (
     <span className="flex flex-col items-end gap-1">
-      <Select
-        value={project.status}
-        onValueChange={(v) => change(v as string)}
-        items={Object.fromEntries(PROJECT_STATUSES.map((s) => [s, s]))}
-      >
-        <SelectTrigger className="w-28">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {PROJECT_STATUSES.map((s) => (
-            <SelectItem key={s} value={s}>
-              {s}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {editing ? (
+        <Select
+          defaultOpen
+          value={project.status}
+          onOpenChange={(open) => {
+            if (!open) setEditing(false)
+          }}
+          onValueChange={(v) => change(v as string)}
+          items={Object.fromEntries(PROJECT_STATUSES.map((s) => [s, s]))}
+        >
+          <SelectTrigger className="w-28">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PROJECT_STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <EditableValue onClick={() => setEditing(true)}>
+          <StatusBadge status={project.status} />
+        </EditableValue>
+      )}
       {error && <span className="text-xs">{error}</span>}
     </span>
   )
 }
 
-/** 修改预期发布时间：日期选择后立即保存，清空则置为未定 */
+/** 后端 date 列（YYYY-MM-DD）解析为本地 Date，避免 new Date('YYYY-MM-DD') 按 UTC 解析产生跨天偏差 */
+function parseProjectDate(value: string | null | undefined): Date | undefined {
+  if (!value) return undefined
+  const [y, m, d] = value.split('-').map(Number)
+  if (!y || !m || !d) return undefined
+  return new Date(y, m - 1, d)
+}
+
+/** 本地 Date → 后端 date 列（YYYY-MM-DD，按本地年月日，避免 toISOString 的 UTC 偏移） */
+function formatProjectDate(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+/** 展示预期发布时间；点击值展开日期选择，选好后立即保存，清空则置为未定 */
 function ExpectedReleaseInput({
   project,
   onChanged,
@@ -922,9 +949,11 @@ function ExpectedReleaseInput({
   project: Project
   onChanged: () => void
 }) {
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const change = (value: string) => {
+  const change = (date: Date | undefined) => {
+    const value = date ? formatProjectDate(date) : ''
     if (value === (project.expectedReleaseAt ?? '')) return
     setError(null)
     api
@@ -935,19 +964,29 @@ function ExpectedReleaseInput({
 
   return (
     <span className="flex flex-col items-end gap-1">
-      <Input
-        type="date"
-        className="w-36"
-        value={project.expectedReleaseAt ?? ''}
-        onChange={(e) => change(e.target.value)}
-        title={error ?? '选择日期后立即保存；清空则置为未定'}
-      />
+      {editing ? (
+        <DatePicker
+          defaultOpen
+          size="sm"
+          className="w-40"
+          dateFormat="yyyy-MM-dd"
+          value={parseProjectDate(project.expectedReleaseAt)}
+          onValueChange={change}
+          onOpenChange={(open) => {
+            if (!open) setEditing(false)
+          }}
+        />
+      ) : (
+        <EditableValue onClick={() => setEditing(true)}>
+          {project.expectedReleaseAt ?? '未定'}
+        </EditableValue>
+      )}
       {error && <span className="text-xs">{error}</span>}
     </span>
   )
 }
 
-/** 修改迭代/优先级：下拉选择全平台已有取值（取自 /projects/page 的去重值），选中后立即保存，选"未设置"清除 */
+/** 展示迭代/优先级；点击值展开下拉（全平台已有取值，取自 /projects/page 的去重值），选中后立即保存，选"未设置"清除 */
 function ProjectDictSelect({
   project,
   field,
@@ -961,16 +1000,18 @@ function ProjectDictSelect({
   onChanged: () => void
 }) {
   const CLEAR = '__clear__'
+  const [editing, setEditing] = useState(false)
   const [options, setOptions] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  // 仅在编辑模式挂载，进入时拉取全平台已有取值
+  // 进入编辑态时拉取全平台已有取值
   useEffect(() => {
+    if (!editing) return
     api
       .listProjectPage({ page: 1, pageSize: 1 })
       .then((r) => setOptions(r[suggestionsKey]))
       .catch(() => setOptions([]))
-  }, [suggestionsKey])
+  }, [editing, suggestionsKey])
 
   const current = project[field] ?? ''
   // 当前值不在已有取值中时补进选项，避免触发器显示异常
@@ -989,32 +1030,44 @@ function ProjectDictSelect({
 
   return (
     <span className="flex flex-col items-end gap-1">
-      <Select
-        value={current || CLEAR}
-        onValueChange={(v) => change(v as string)}
-        items={{
-          [CLEAR]: '（未设置）',
-          ...Object.fromEntries(allOptions.map((o) => [o, o])),
-        }}
-      >
-        <SelectTrigger className="w-44">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={CLEAR}>（未设置）</SelectItem>
-          {allOptions.map((o) => (
-            <SelectItem key={o} value={o}>
-              {o}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {editing ? (
+        <Select
+          defaultOpen
+          value={current || CLEAR}
+          onOpenChange={(open) => {
+            if (!open) setEditing(false)
+          }}
+          onValueChange={(v) => change(v as string)}
+          items={{
+            [CLEAR]: '（未设置）',
+            ...Object.fromEntries(allOptions.map((o) => [o, o])),
+          }}
+        >
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={CLEAR}>（未设置）</SelectItem>
+            {allOptions.map((o) => (
+              <SelectItem key={o} value={o}>
+                {o}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <EditableValue onClick={() => setEditing(true)}>
+          <span className="block max-w-40 truncate" title={current}>
+            {current || '—'}
+          </span>
+        </EditableValue>
+      )}
       {error && <span className="text-xs">{error}</span>}
     </span>
   )
 }
 
-/** 设置项目的脚本目录（相对脚本根目录），登记检查时只在该子目录下联想 .check.ts */
+/** 设置项目的脚本目录（相对脚本根目录），登记检查时只在该子目录下联想 .check.ts；展示态点击值打开弹窗 */
 function EditScriptsPathDialog({
   project,
   onSaved,
@@ -1052,57 +1105,59 @@ function EditScriptsPathDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        <Button variant="ghost" size="sm">
-          设置
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>设置脚本目录</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1 text-sm">
-              脚本目录（相对脚本根目录，留空则扫描整个根目录）
-              <Autocomplete
-                items={dirs}
-                value={scriptsPath}
-                onValueChange={(v) => setScriptsPath(v as string)}
-                clearable
-              >
-                <AutocompleteInput
-                  placeholder="如 projects/active/pk"
-                  aria-label="脚本目录"
-                />
-                <AutocompleteContent>
-                  <AutocompleteEmpty>未找到匹配的目录</AutocompleteEmpty>
-                  <AutocompleteList>
-                    {(item: string) => (
-                      <AutocompleteItem key={item} value={item}>
-                        {item}
-                      </AutocompleteItem>
-                    )}
-                  </AutocompleteList>
-                </AutocompleteContent>
-              </Autocomplete>
-            </label>
-            {error && <p className="text-sm">保存失败:{error}</p>}
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">取消</Button>
-          </DialogClose>
-          <Button onClick={submit}>保存</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <>
+      <EditableValue onClick={() => handleOpenChange(true)}>
+        <span className="block max-w-40 truncate" title={project.scriptsPath ?? ''}>
+          {project.scriptsPath ?? '—'}
+        </span>
+      </EditableValue>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>设置脚本目录</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <div className="flex flex-col gap-4">
+              <label className="flex flex-col gap-1 text-sm">
+                脚本目录（相对脚本根目录，留空则扫描整个根目录）
+                <Autocomplete
+                  items={dirs}
+                  value={scriptsPath}
+                  onValueChange={(v) => setScriptsPath(v as string)}
+                  clearable
+                >
+                  <AutocompleteInput
+                    placeholder="如 projects/active/pk"
+                    aria-label="脚本目录"
+                  />
+                  <AutocompleteContent>
+                    <AutocompleteEmpty>未找到匹配的目录</AutocompleteEmpty>
+                    <AutocompleteList>
+                      {(item: string) => (
+                        <AutocompleteItem key={item} value={item}>
+                          {item}
+                        </AutocompleteItem>
+                      )}
+                    </AutocompleteList>
+                  </AutocompleteContent>
+                </Autocomplete>
+              </label>
+              {error && <p className="text-sm">保存失败:{error}</p>}
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <DialogClose>
+              <Button variant="outline" size="sm">取消</Button>
+            </DialogClose>
+            <Button onClick={submit}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
-/** 编辑项目描述（Markdown，空串清除） */
+/** 编辑项目描述（Markdown，空串清除）；展示态点击描述文本打开弹窗 */
 function EditDescriptionDialog({
   project,
   onSaved,
@@ -1134,42 +1189,45 @@ function EditDescriptionDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        <Button variant="ghost" size="sm">
-          编辑
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>编辑项目描述</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1 text-sm">
-              项目描述（Markdown，留空清除）
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="项目背景、目标、链接…"
-                rows={8}
-              />
-            </label>
-            {error && <p className="text-sm">保存失败:{error}</p>}
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">取消</Button>
-          </DialogClose>
-          <Button onClick={submit}>保存</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <>
+      <EditableValue
+        className="block w-full whitespace-pre-wrap"
+        onClick={() => handleOpenChange(true)}
+      >
+        {project.description ?? '暂无描述'}
+      </EditableValue>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑项目描述</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <div className="flex flex-col gap-4">
+              <label className="flex flex-col gap-1 text-sm">
+                项目描述（Markdown，留空清除）
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="项目背景、目标、链接…"
+                  rows={8}
+                />
+              </label>
+              {error && <p className="text-sm">保存失败:{error}</p>}
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <DialogClose>
+              <Button variant="outline" size="sm">取消</Button>
+            </DialogClose>
+            <Button onClick={submit}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
-/** 设置项目的飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送开始/结果通知 */
+/** 设置项目的飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送开始/结果通知；展示态点击值打开弹窗 */
 function EditWebhookDialog({
   project,
   onSaved,
@@ -1201,37 +1259,39 @@ function EditWebhookDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        <Button variant="ghost" size="sm">
-          设置
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>设置飞书通知群</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1 text-sm">
-              群机器人 webhook 的 secret（hook 地址最后一段，留空则走平台默认群）
-              <Input
-                value={webhook}
-                onChange={(e) => setWebhook(e.target.value)}
-                placeholder="如 e09e9672-1f50-4b65-a181-8750bae489fc"
-              />
-            </label>
-            {error && <p className="text-sm">保存失败:{error}</p>}
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">取消</Button>
-          </DialogClose>
-          <Button onClick={submit}>保存</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <>
+      <EditableValue onClick={() => handleOpenChange(true)}>
+        <span className="block max-w-40 truncate" title={project.feishuWebhook ?? ''}>
+          {project.feishuWebhook ?? '—'}
+        </span>
+      </EditableValue>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>设置飞书通知群</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <div className="flex flex-col gap-4">
+              <label className="flex flex-col gap-1 text-sm">
+                群机器人 webhook 的 secret（hook 地址最后一段，留空则走平台默认群）
+                <Input
+                  value={webhook}
+                  onChange={(e) => setWebhook(e.target.value)}
+                  placeholder="如 e09e9672-1f50-4b65-a181-8750bae489fc"
+                />
+              </label>
+              {error && <p className="text-sm">保存失败:{error}</p>}
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <DialogClose>
+              <Button variant="outline" size="sm">取消</Button>
+            </DialogClose>
+            <Button onClick={submit}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
