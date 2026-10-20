@@ -51,6 +51,8 @@ export class CodeBranchesService {
 
   async create(input: CreateCodeBranchInput): Promise<ProjectBranch> {
     const repo = this.github.normalizeRepo(input.repo);
+    // 状态「忽略」的仓库不再作为代码分支候选（存量登记不受影响）
+    await this.github.assertRepoActive(repo);
     const branch = this.normalizeBranch(input.branch);
     const category = this.normalizeCategory(input.category);
     const remark = this.normalizeRemark(input.remark);
@@ -74,7 +76,10 @@ export class CodeBranchesService {
     if (!record) throw new NotFoundException(`CodeBranch ${id} not found`);
     let repo = record.repo;
     let branch = record.branch;
-    if (input.repo !== undefined) repo = this.github.normalizeRepo(input.repo);
+    if (input.repo !== undefined) {
+      repo = this.github.normalizeRepo(input.repo);
+      if (repo !== record.repo) await this.github.assertRepoActive(repo);
+    }
     if (input.branch !== undefined) branch = this.normalizeBranch(input.branch);
     if (repo !== record.repo || branch !== record.branch) {
       await this.assertUnique(record.projectId, repo, branch, id);

@@ -5,7 +5,11 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
 import axios, { AxiosInstance } from 'axios';
+import { Repository } from 'typeorm';
+import { RepoStatus } from '../common/enums';
+import { Repo } from './repo.entity';
 
 /** 仓库搜索/分支联想的单次分页大小与页数上限（org 仓库 ≤ 500，分支 ≤ 500 足够联想用） */
 const PAGE_SIZE = 100;
@@ -48,7 +52,11 @@ export class GithubService {
   private readonly token: string | undefined;
   private reposCache: { at: number; repos: GithubRepo[] } | null = null;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    @InjectRepository(Repo)
+    private readonly repoRegistry: Repository<Repo>,
+  ) {
     this.token = config.get<string>('GITHUB_TOKEN')?.trim() || undefined;
     this.org = config.get<string>('GITHUB_ORG')?.trim() || 'LitaGroup';
     this.http = axios.create({
@@ -78,7 +86,10 @@ export class GithubService {
    */
   async searchRepos(q?: string): Promise<GithubRepo[]> {
     this.assertToken();
-    const repos = await this.listOrgRepos();
+    const [repos, ignored] = await Promise.all([
+      this.listOrgRepos(),
+      this.ignoredFullNames(),
+    ]);
     const keyword = q?.trim().toLowerCase();
     const matched = keyword
       ? repos.filter(
@@ -88,13 +99,17 @@ export class GithubService {
             (r.description ?? '').toLowerCase().includes(keyword),
         )
       : repos;
-    return matched.slice(0, 50);
+    // 状态「忽略」的仓库不再出现在联想候选
+    return matched
+      .filter((r) => !ignored.has(r.fullName.toLowerCase()))
+      .slice(0, 50);
   }
 
-  /** 仓库的分支名列表（按字母序，分页拉全供联想） */
+  /** 仓库的分支名列表（按字母序，分页拉全供联想；忽略的仓库直接拒绝） */
   async listBranches(repo: string): Promise<string[]> {
     this.assertToken();
     const full = this.normalizeRepo(repo);
+    await this.assertRepoActive(full);
     type BranchItem = { name: string };
     const pages = await this.paginate<BranchItem>(
       (page) =>
@@ -162,8 +177,8 @@ export class GithubService {
     return `${this.org}/${name}`;
   }
 
-  /** org 全量仓库清单（缓存 5 分钟），按最近更新倒序 */
-  private async listOrgRepos(): Promise<GithubRepo[]> {
+  /** org 全量仓库清单（缓存 5 分钟），按最近更新倒序（仓库登记同步复用） */
+  async listOrgRepos(): Promise<GithubRepo[]> {
     if (this.reposCache && Date.now() - this.reposCache.at < REPOS_CACHE_MS) {
       return this.reposCache.repos;
     }
@@ -198,6 +213,30 @@ export class GithubService {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     this.reposCache = { at: Date.now(), repos };
     return repos;
+  }
+
+  /** 仓库登记表里状态为「忽略」的仓库全名（小写），供联想过滤 */
+  private async ignoredFullNames(): Promise<Set<string>> {
+    try {
+      const rows = await this.repoRegistry.find({
+        where: { status: RepoStatus.IGNORED },
+        select: { fullName: true },
+      });
+      return new Set(rows.map((r) => r.fullName.toLowerCase()));
+    } catch {
+      // 登记表异常不应影响 GitHub 联想，退化为不过滤
+      return new Set();
+    }
+  }
+
+  /** 忽略的仓库不允许继续作为代码分支候选/登记（存量登记与监听保留） */
+  async assertRepoActive(fullName: string): Promise<void> {
+    const ignored = await this.ignoredFullNames();
+    if (ignored.has(fullName.toLowerCase())) {
+      throw new BadRequestException(
+        `仓库 ${fullName} 已被忽略，请先到「代码 - 仓库」列表恢复为有效`,
+      );
+    }
   }
 
   /** 未配置 token 直接拒绝，避免发出无鉴权请求 */

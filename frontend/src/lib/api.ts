@@ -328,6 +328,34 @@ export interface GithubRepo {
   updatedAt: string
 }
 
+/** 仓库端（与后端 RepoPlatform 对应）：仓库列表展示/筛选用 */
+export const REPO_PLATFORMS = ['前端', '后端', '安卓', '苹果', '其它'] as const
+export type RepoPlatform = (typeof REPO_PLATFORMS)[number]
+
+/** 仓库状态：忽略后不再出现在仓库联想与代码分支候选（存量登记保留） */
+export const REPO_STATUSES = ['有效', '忽略'] as const
+export type RepoStatus = (typeof REPO_STATUSES)[number]
+
+/** 代码仓库登记（组织仓库清单同步 + 平台侧维护的端/状态） */
+export interface Repo {
+  id: number
+  /** 仓库名（如 lita-android） */
+  name: string
+  /** 仓库全名（owner/name，如 LitaGroup/lita-android） */
+  fullName: string
+  description: string | null
+  htmlUrl: string | null
+  defaultBranch: string | null
+  language: string | null
+  platform: RepoPlatform
+  status: RepoStatus
+  /** 仓库最后被更新的时间（GitHub updated_at） */
+  lastUpdatedAt: string | null
+  remark: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 /** 项目代码分支：项目涉及修改的 GitHub 仓库与分支登记（登记后自动监听新提交/合并） */
 export interface ProjectBranch {
   id: number
@@ -1136,6 +1164,37 @@ export const api = {
   /** GitHub 分支联想：指定仓库的全部分支名 */
   listGithubBranches: (repo: string) =>
     request<string[]>(`/github/branches?repo=${encodeURIComponent(repo)}`),
+  /** 仓库登记列表（组织仓库清单 + 端/状态），可按 端/状态 筛选 + 关键字搜索 */
+  listRepos: (params?: {
+    platform?: RepoPlatform
+    status?: RepoStatus
+    q?: string
+  }) => {
+    const search = new URLSearchParams()
+    if (params?.platform) search.set('platform', params.platform)
+    if (params?.status) search.set('status', params.status)
+    if (params?.q) search.set('q', params.q)
+    const qs = search.toString()
+    return request<Repo[]>(`/repos${qs ? `?${qs}` : ''}`)
+  },
+  /** 立即同步组织仓库清单（刷新最后更新时间/补充新仓库） */
+  syncRepos: () =>
+    request<{ created: number; updated: number; total: number }>('/repos/sync', {
+      method: 'POST',
+    }),
+  /** 更新仓库的端/状态/备注（状态=忽略后不再出现在联想与代码分支候选） */
+  updateRepo: (
+    id: number,
+    input: Partial<{
+      platform: RepoPlatform
+      status: RepoStatus
+      remark: string
+    }>,
+  ) =>
+    request<Repo>(`/repos/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
   /** 代码分支登记：传 projectId 按项目过滤，不传返回全部 */
   listCodeBranches: (projectId?: number) =>
     request<ProjectBranch[]>(

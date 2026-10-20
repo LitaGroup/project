@@ -1,4 +1,7 @@
-import { docxBlocksToMarkdown } from './feishu-markdown';
+import {
+  docxBlocksToMarkdown,
+  feishuCommentsToMarkdown,
+} from './feishu-markdown';
 
 type Block = Parameters<typeof docxBlocksToMarkdown>[0][number];
 
@@ -469,5 +472,96 @@ describe('docxBlocksToMarkdown 非表格回归', () => {
     expect(docxBlocksToMarkdown(blocks)).toBe(
       '# 标题\n\n- 列表项\n\n*[图片暂不导入]*\n\n---',
     );
+  });
+});
+
+describe('feishuCommentsToMarkdown 评论导入', () => {
+  const now = new Date('2026-10-20T02:00:00Z');
+
+  it('无评论返回空串', () => {
+    expect(feishuCommentsToMarkdown([], new Map(), now)).toBe('');
+  });
+
+  it('评论追加为分割线 + 评论小节，含作者/时间/引用/回复', () => {
+    const md = feishuCommentsToMarkdown(
+      [
+        {
+          userId: 'ou_a',
+          createTime: 1610281603,
+          isSolved: true,
+          isWhole: false,
+          quote: '引用原文',
+          replies: [
+            {
+              userId: 'ou_a',
+              createTime: 1610281603,
+              text: '第一条评论',
+              imageCount: 0,
+            },
+            {
+              userId: 'ou_b',
+              createTime: 1610281900,
+              text: '第二条回复',
+              imageCount: 0,
+            },
+          ],
+        },
+      ],
+      new Map([
+        ['ou_a', '张三'],
+        ['ou_b', '李四'],
+      ]),
+      now,
+    );
+    expect(md).toContain('---\n\n## 评论');
+    expect(md).toContain(
+      '### 评论 1 · 张三 · 2021-01-10 20:26 · 划词评论 · 已解决',
+    );
+    expect(md).toContain('> 引用：引用原文');
+    expect(md).toContain('第一条评论');
+    expect(md).toContain('- **李四 · 2021-01-10 20:31**：第二条回复');
+    expect(md).toContain('导入时间 2026-10-20 10:00');
+  });
+
+  it('评论按创建时间正序，未解析到姓名时回退 open_id', () => {
+    const md = feishuCommentsToMarkdown(
+      [
+        {
+          userId: 'ou_late',
+          createTime: 200,
+          isSolved: false,
+          isWhole: true,
+          quote: '',
+          replies: [
+            {
+              userId: 'ou_late',
+              createTime: 200,
+              text: 'later',
+              imageCount: 0,
+            },
+          ],
+        },
+        {
+          userId: 'ou_early',
+          createTime: 100,
+          isSolved: false,
+          isWhole: true,
+          quote: '',
+          replies: [
+            {
+              userId: 'ou_early',
+              createTime: 100,
+              text: 'earlier',
+              imageCount: 1,
+            },
+          ],
+        },
+      ],
+      new Map(),
+      now,
+    );
+    expect(md.indexOf('earlier')).toBeLessThan(md.indexOf('later'));
+    expect(md).toContain('ou_early');
+    expect(md).toContain('[图片 1 张');
   });
 });

@@ -44,7 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
     key: 'projects',
     label: '项目',
     to: '/',
-    match: (p) => !p.startsWith('/admin'),
+    match: (p) => !p.startsWith('/admin') && !p.startsWith('/code'),
     items: [
       { to: '/', label: '概览', ready: true },
       { to: '/projects', label: '项目', ready: true },
@@ -61,6 +61,13 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/apps', label: 'APP', ready: true },
       { to: '/settings', label: '设置', ready: true },
     ],
+  },
+  {
+    key: 'code',
+    label: '代码',
+    to: '/code/repos',
+    match: (p) => p.startsWith('/code'),
+    items: [{ to: '/code/repos', label: '仓库', ready: true }],
   },
   {
     key: 'admin',

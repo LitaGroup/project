@@ -13,8 +13,11 @@ import { imageWebroot } from '../common/paths';
 import {
   bitableRecordsToMarkdown,
   docxBlocksToMarkdown,
+  feishuCommentsToMarkdown,
   sheetValuesToMarkdown,
   type BitableFieldMeta,
+  type FeishuComment,
+  type FeishuCommentReply,
 } from './feishu-markdown';
 
 /** 飞书资源类型，从 URL 解析得出 */
@@ -53,6 +56,34 @@ export interface FeishuContactUser {
   avatarUrl: string | null;
   /** 主部门名（取用户主部门 order，取不到则空） */
   department: string | null;
+}
+
+/** 评论回复内容元素（drive v1 评论接口） */
+interface RawCommentElement {
+  type?: string;
+  text_run?: { text?: string };
+  docs_link?: { url?: string };
+  person?: { user_id?: string };
+}
+
+/** 评论回复（接口原始结构，create_time 为秒级时间戳） */
+interface RawCommentReply {
+  reply_id?: string;
+  user_id?: string;
+  create_time?: number | string;
+  content?: { elements?: RawCommentElement[] };
+  extra?: { image_list?: string[] };
+}
+
+/** 评论（接口原始结构，含回复列表） */
+interface RawComment {
+  comment_id?: string;
+  user_id?: string;
+  create_time?: number | string;
+  is_solved?: boolean;
+  is_whole?: boolean;
+  quote?: string;
+  reply_list?: { replies?: RawCommentReply[] };
 }
 
 /** contact/v3/users 用户详情响应子集 */
@@ -189,8 +220,11 @@ export class FeishuService implements OnModuleInit {
       ? await this.resolveWiki(wikiMatch[1])
       : this.parseUrl(url);
     switch (ref.type) {
-      case 'docx':
-        return this.readDocx(ref.token);
+      case 'docx': {
+        // 旧版 /docs/ 链接的评论 file_type 为 doc，新版为 docx（影响评论接口参数）
+        const legacy = /(?:feishu\.cn|larksuite\.com)\/docs\//.test(url);
+        return this.readDocx(ref.token, legacy ? 'doc' : 'docx');
+      }
       case 'sheets':
         return this.readSheet(ref.token, query.get('sheet') ?? undefined);
       case 'bitable':
@@ -202,8 +236,14 @@ export class FeishuService implements OnModuleInit {
     }
   }
 
-  /** 新版文档：标题 + 块级转 Markdown；图片块下载到本地图片目录后以内链引用 */
-  async readDocx(documentId: string): Promise<FeishuReadResult> {
+  /**
+   * 新版文档：标题 + 块级转 Markdown；图片块下载到本地图片目录后以内链引用。
+   * 文档评论一并导入（追加在正文末尾，分割线 + 「评论」小节），无权限时降级跳过。
+   */
+  async readDocx(
+    documentId: string,
+    fileType: 'docx' | 'doc' = 'docx',
+  ): Promise<FeishuReadResult> {
     const meta = await this.request<{ document: { title: string } }>(
       'GET',
       `/docx/v1/documents/${documentId}`,
@@ -222,12 +262,136 @@ export class FeishuService implements OnModuleInit {
       pageToken = data.has_more ? data.page_token : undefined;
     } while (pageToken);
     const imageUrls = await this.downloadDocxImages(blocks);
+    const body = docxBlocksToMarkdown(blocks as never, imageUrls);
+    const comments = await this.docxCommentsMarkdown(documentId, fileType);
     return {
       type: 'docx',
       feishuKey: `docx:${documentId}`,
       title: meta.document.title,
-      content: docxBlocksToMarkdown(blocks as never, imageUrls),
+      content: comments ? `${body}\n\n${comments}` : body,
     };
+  }
+
+  /** 评论正文元素 → 纯文本（普通文本 / 云文档链接 / @人） */
+  private commentText(elements?: RawCommentElement[]): string {
+    return (elements ?? [])
+      .map((el) => {
+        if (el.text_run?.text) return el.text_run.text;
+        if (el.docs_link?.url) return el.docs_link.url;
+        if (el.person?.user_id) return `@${el.person.user_id}`;
+        return '';
+      })
+      .join('');
+  }
+
+  /** 归一化单条回复（接口 create_time 为秒级时间戳，兼容字符串） */
+  private mapCommentReply(raw: RawCommentReply): FeishuCommentReply {
+    const seconds = Number(raw.create_time);
+    return {
+      userId: raw.user_id ?? null,
+      createTime: Number.isFinite(seconds) ? seconds : null,
+      text: this.commentText(raw.content?.elements).trim(),
+      imageCount: raw.extra?.image_list?.length ?? 0,
+    };
+  }
+
+  /**
+   * 拉取云文档全部评论（分页拉全，含回复）。
+   * file_type：新版文档 docx / 旧版文档 doc / 电子表格 sheet。
+   * 失败（未开评论读权限、文档无权限等）抛错，由调用方降级。
+   */
+  async listComments(
+    fileToken: string,
+    fileType: 'docx' | 'doc' | 'sheet' = 'docx',
+  ): Promise<FeishuComment[]> {
+    const all: FeishuComment[] = [];
+    let pageToken: string | undefined;
+    do {
+      const data = await this.request<{
+        items?: RawComment[];
+        has_more: boolean;
+        page_token?: string;
+      }>('GET', `/drive/v1/files/${fileToken}/comments`, {
+        params: {
+          file_type: fileType,
+          user_id_type: 'open_id',
+          page_size: 100,
+          page_token: pageToken,
+        },
+      });
+      for (const raw of data.items ?? []) {
+        const replies = (raw.reply_list?.replies ?? []).map((r) =>
+          this.mapCommentReply(r),
+        );
+        const seconds = Number(raw.create_time);
+        all.push({
+          userId: raw.user_id ?? null,
+          createTime: Number.isFinite(seconds) ? seconds : null,
+          isSolved: !!raw.is_solved,
+          isWhole: raw.is_whole !== false,
+          quote: raw.quote?.trim() ?? '',
+          replies,
+        });
+      }
+      pageToken = data.has_more ? data.page_token : undefined;
+    } while (pageToken);
+    return all;
+  }
+
+  /** 评论人 open_id → 姓名缓存（跨同步复用；外部用户/无权限时回退显示 open_id） */
+  private readonly commentUserNameCache = new Map<string, string>();
+
+  /** 批量解析评论/回复人姓名（逐个补查，失败静默跳过） */
+  private async resolveCommentUserNames(
+    comments: FeishuComment[],
+  ): Promise<Map<string, string>> {
+    const ids = new Set<string>();
+    for (const comment of comments) {
+      if (comment.userId) ids.add(comment.userId);
+      for (const reply of comment.replies) {
+        if (reply.userId) ids.add(reply.userId);
+      }
+    }
+    const pending = [...ids].filter((id) => !this.commentUserNameCache.has(id));
+    await Promise.all(
+      pending.map(async (id, index) => {
+        try {
+          // 错峰请求，避免通讯录接口频控
+          await new Promise((resolve) => setTimeout(resolve, index * 100));
+          const user = await this.getContactUser(id);
+          if (user.name) this.commentUserNameCache.set(id, user.name);
+        } catch {
+          /* 外部用户或缺少通讯录读权限：保留 open_id 展示 */
+        }
+      }),
+    );
+    const names = new Map<string, string>();
+    for (const id of ids) {
+      const name = this.commentUserNameCache.get(id);
+      if (name) names.set(id, name);
+    }
+    return names;
+  }
+
+  /**
+   * 文档评论 → Markdown 片段（追加到正文末尾）。
+   * 评论导入为增强能力：无权限/接口失败只告警，返回空串，绝不阻断文档同步。
+   */
+  private async docxCommentsMarkdown(
+    documentId: string,
+    fileType: 'docx' | 'doc',
+  ): Promise<string> {
+    try {
+      const comments = await this.listComments(documentId, fileType);
+      if (comments.length === 0) return '';
+      const names = await this.resolveCommentUserNames(comments);
+      return feishuCommentsToMarkdown(comments, names);
+    } catch (e) {
+      this.logger.warn(
+        `飞书评论导入失败 ${documentId}: ${(e as Error).message}（需评论读权限 docs:document.comment:read / docs:doc:readonly）`,
+      );
+      return '';
+    }
   }
 
   /**

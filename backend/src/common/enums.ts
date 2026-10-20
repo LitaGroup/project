@@ -148,3 +148,22 @@ export enum CodeBranchCategory {
   IOS = 'IOS',
   OTHER = '其它',
 }
+
+/**
+ * 代码仓库的端（仓库列表展示/筛选用，与项目代码分支归类解耦）。
+ */
+export enum RepoPlatform {
+  FRONTEND = '前端',
+  BACKEND = '后端',
+  ANDROID = '安卓',
+  IOS = '苹果',
+  OTHER = '其它',
+}
+
+/**
+ * 代码仓库状态：有效（参与联想与代码分支登记）/ 忽略（不再出现在联想等候选，存量登记保留）。
+ */
+export enum RepoStatus {
+  ACTIVE = '有效',
+  IGNORED = '忽略',
+}

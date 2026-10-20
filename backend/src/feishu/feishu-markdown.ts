@@ -501,3 +501,140 @@ export function docxBlocksToMarkdown(
   }
   return lines.join('\n\n');
 }
+
+// ---- 文档评论（drive/v1/files/:token/comments） ----
+
+/** 飞书评论回复（裁剪后） */
+export interface FeishuCommentReply {
+  userId: string | null;
+  /** 创建时间：秒级时间戳（飞书评论接口单位） */
+  createTime: number | null;
+  text: string;
+  /** 回复附带的图片数量（接口暂不支持下载，仅标注） */
+  imageCount: number;
+}
+
+/** 飞书文档评论（一条评论 = 首个回复 + 若干追加回复） */
+export interface FeishuComment {
+  userId: string | null;
+  createTime: number | null;
+  isSolved: boolean;
+  isWhole: boolean;
+  /** 局部（划词）评论引用的原文，全文评论为空 */
+  quote: string;
+  replies: FeishuCommentReply[];
+}
+
+/** 北京时间 YYYY-MM-DD HH:mm（评论时间展示，秒级时间戳入参） */
+function commentTimeText(seconds: number | null): string {
+  if (seconds === null) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+    .format(new Date(seconds * 1000))
+    .replace(',', '');
+}
+
+function commentUserName(
+  id: string | null,
+  names: Map<string, string>,
+): string {
+  if (!id) return '飞书用户';
+  return names.get(id)?.trim() || id;
+}
+
+/**
+ * 飞书评论 → Markdown 片段，直接追加到文档末尾：
+ * 先以分割线 + 「评论」标题说明来源，再按时间列出评论正文与回复。
+ * 评论为空返回空串（调用方直接拼接）。
+ */
+export function feishuCommentsToMarkdown(
+  comments: FeishuComment[],
+  names: Map<string, string> = new Map(),
+  now: Date = new Date(),
+): string {
+  if (comments.length === 0) return '';
+  const sorted = [...comments].sort(
+    (a, b) => (a.createTime ?? 0) - (b.createTime ?? 0),
+  );
+  const lines: string[] = [
+    '---',
+    '',
+    '## 评论',
+    '',
+    `> 以下内容为飞书文档评论，导入时间 ${new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .format(now)
+      .replace(',', '')}，共 ${sorted.length} 条（只读，不回写飞书）。`,
+    '',
+  ];
+  sorted.forEach((comment, index) => {
+    const meta = [
+      commentUserName(comment.userId, names),
+      commentTimeText(comment.createTime),
+      comment.isWhole ? '全文评论' : '划词评论',
+      comment.isSolved ? '已解决' : null,
+    ].filter(Boolean);
+    lines.push(`### 评论 ${index + 1} · ${meta.join(' · ')}`);
+    lines.push('');
+    if (comment.quote) {
+      lines.push(...comment.quote.split(/\r?\n/).map((q) => `> 引用：${q}`));
+      lines.push('');
+    }
+    const [first, ...rest] = comment.replies;
+    if (first) {
+      lines.push(...replyLines(first));
+      lines.push('');
+    }
+    if (rest.length > 0) {
+      lines.push('**回复：**');
+      lines.push('');
+      rest.forEach((reply) => {
+        const head = [
+          commentUserName(reply.userId, names),
+          commentTimeText(reply.createTime),
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        const text = reply.text || (reply.imageCount > 0 ? '' : '（空）');
+        lines.push(`- **${head}**${text ? `：${text}` : ''}`);
+        if (reply.imageCount > 0) {
+          lines.push(
+            `  - *[图片 ${reply.imageCount} 张，飞书接口暂不支持下载]*`,
+          );
+        }
+      });
+      lines.push('');
+    }
+  });
+  return lines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
+}
+
+/** 评论首条回复（即评论正文）→ Markdown 行 */
+function replyLines(reply: FeishuCommentReply): string[] {
+  const lines: string[] = [];
+  const text = reply.text || (reply.imageCount > 0 ? '' : '（空）');
+  if (text) {
+    lines.push(...text.split(/\r?\n/).map((line) => (line.trim() ? line : '')));
+  }
+  if (reply.imageCount > 0) {
+    lines.push(`*[图片 ${reply.imageCount} 张，飞书接口暂不支持下载]*`);
+  }
+  return lines;
+}

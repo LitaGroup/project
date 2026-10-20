@@ -1,11 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
+import { Repository } from 'typeorm';
 import { GithubService } from './github.service';
+import { Repo } from './repo.entity';
 
 function createService(env: Record<string, string> = {}): GithubService {
   const config = {
     get: (key: string) => env[key],
   } as unknown as ConstructorParameters<typeof GithubService>[0];
-  return new GithubService(config);
+  // 单元测试只覆盖纯函数逻辑（归一化/配置），仓库登记表用空实现
+  const repoRegistry = {
+    find: () => Promise.resolve([]),
+  } as unknown as Repository<Repo>;
+  return new GithubService(config, repoRegistry);
 }
 
 describe('GithubService.normalizeRepo（仓库标识归一化）', () => {
