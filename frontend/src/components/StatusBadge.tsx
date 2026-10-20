@@ -17,6 +17,22 @@ export function StatusBadge({ status }: { status: ProjectStatus }) {
   return <Badge variant={variantByStatus[status] ?? 'soft'}>{status}</Badge>
 }
 
+/** 提测记录状态 → Badge variant：待冒烟黄 / 已通过绿 / 未通过红（未知兜底 soft） */
+const releaseVariantByStatus: Record<
+  string,
+  'warning' | 'success' | 'error' | 'soft'
+> = {
+  待冒烟: 'warning',
+  已通过: 'success',
+  未通过: 'error',
+}
+
+export function ReleaseStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={releaseVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+  )
+}
+
 /** 缺陷状态 → Badge variant：开放红 / 修复蓝 / 关闭绿（未知兜底 soft） */
 const defectVariantByStatus: Record<
   string,
@@ -51,8 +67,7 @@ export function DefectPriorityBadge({ priority }: { priority: string }) {
   )
 }
 
-/** 资源状态 → Badge variant：缺失红 / 草稿黄 / 确认绿 / 废弃淡（未知兜底 soft） */
-const resourceVariantByStatus: Record<
+/** 资源状态 → Badge variant：缺失红 / 草稿黄 / 确认绿 / 废弃淡（未知兜底 soft） */const resourceVariantByStatus: Record<
   string,
   'error' | 'success' | 'soft' | 'warning' | 'secondary'
 > = {

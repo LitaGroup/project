@@ -432,9 +432,11 @@ export class ProjectsService {
     // 提测记录：详情页仅展示最近 5 条，全量走 /api/releases.md
     const releaseLines = project.projectReleases.slice(0, 5).map((r) => {
       const parts = [
-        `**${beijingTime(r.createdAt)}**（id：${r.id}）提测人 ${r.operator ?? '—'}`,
+        `**${beijingTime(r.createdAt)}**（id：${r.id}）提测人 ${r.operator ?? '—'} — 状态：**${r.status ?? '待冒烟'}**`,
         `测试人员：${r.testers.join('、')}`,
       ];
+      if (r.verifier) parts.push(`判定人：${r.verifier}`);
+      if (r.verifiedAt) parts.push(`判定时间：${beijingTime(r.verifiedAt)}`);
       if (r.urls?.length) parts.push(`访问地址：${r.urls.join('、')}`);
       if (r.branches?.length) {
         parts.push(
@@ -589,7 +591,13 @@ export class ProjectsService {
       '',
       '```bash',
       `curl -X POST /api/projects/${project.id}/release.md -H 'Content-Type: application/json' -d '{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}]}'`,
-      `curl '/api/releases.md?projectId=${project.id}'  # 提测记录清单（时间倒序）`,
+      `curl '/api/releases.md?projectId=${project.id}'  # 提测记录清单（时间倒序，含状态/判定人/判定时间）`,
+      '```',
+      '',
+      '判定提测结果（由测试同学操作；新提测默认「待冒烟」，可改为「已通过」/「未通过」，改回「待冒烟」会清空判定人/判定时间以便重新冒烟）：',
+      '',
+      '```bash',
+      `curl -X POST /api/releases/{releaseId}/status.md -H 'Content-Type: application/json' -d '{"status": "已通过"}'`,
       '```',
       '',
     ].join('\n');

@@ -5,6 +5,7 @@ import { FeishuModule } from '../feishu/feishu.module';
 import { Project } from '../projects/project.entity';
 import { ProjectRelease } from './project-release.entity';
 import {
+  ReleaseRecordsController,
   ReleasesController,
   ReleasesMarkdownController,
 } from './releases.controller';
@@ -15,7 +16,11 @@ import { ReleasesService } from './releases.service';
     TypeOrmModule.forFeature([ProjectRelease, Project, User]),
     FeishuModule,
   ],
-  controllers: [ReleasesController, ReleasesMarkdownController],
+  controllers: [
+    ReleasesController,
+    ReleasesMarkdownController,
+    ReleaseRecordsController,
+  ],
   providers: [ReleasesService],
   exports: [ReleasesService],
 })

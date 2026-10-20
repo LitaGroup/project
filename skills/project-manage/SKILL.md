@@ -101,7 +101,7 @@ GET /api/projects/{id}.md
 - 用例（测试）清单：结构同检查（base 为 `/api/tests`）
 - 导出清单：结构同检查（base 为 `/api/exports`）；导出运行详情的 Markdown 视图含产物文件下载链接（`/export-files/{exportId}/{runId}/{file}`）
 - 任务清单：标题、cron、绑定的检查编号、开关状态、上次执行时间、下次执行时间、上次执行结果 + 详情链接、执行命令 `POST /api/tasks/{taskId}/run.md`、运行记录地址 `GET /api/tasks/{taskId}/runs`
-- 提测记录小节（最近 5 条）：时间 / 提测人 / 测试人员 / 内容摘要；全量清单地址 `GET /api/releases.md?projectId={id}`（见第 8 节）
+- 提测记录小节（最近 5 条）：时间 / 提测人 / 状态 / 判定人 / 判定时间 / 测试人员 / 内容摘要；全量清单地址 `GET /api/releases.md?projectId={id}`（见第 8 节）
 - 缺陷清单：每条含 id + 详情链接 `GET /api/defects/{id}.md` + 状态 + 预期 + 端 + 优先级 + 用例脚本；"缺陷"小节另附本项目全部缺陷清单地址 `GET /api/defects.md?projectId={id}`（见第 9 节）
 - 末尾"AI 操作"小节列出全部可用端点
 
@@ -263,7 +263,7 @@ curl -X PATCH {BASE}/api/milestones/{milestoneId} -H 'Content-Type: application/
 
 ### 8. 项目提测（Markdown）
 
-提测表示项目进入测试状态：创建一条提测记录，项目状态流转「测试中」，并向提测群「H5 Release | 提测上线」与项目人员（前端/后端/测试/客户端 + 测试人员）发飞书机器人卡片。允许重复提测（保持「测试中」仅追加记录）。
+提测表示项目进入测试状态：创建一条提测记录（默认状态「待冒烟」），项目状态流转「测试中」，并向提测群「H5 Release | 提测上线」与项目人员（前端/后端/测试/客户端 + 测试人员）发飞书机器人卡片。允许重复提测（保持「测试中」仅追加记录）。提测结果由测试同学判定为「已通过 / 未通过」（见 8.3）。
 
 #### 8.1 发起提测
 
@@ -284,7 +284,20 @@ Content-Type: application/json
 GET /api/releases.md?projectId={id}
 ```
 
-按提测时间倒序返回全部提测记录（时间 / 提测人 / 测试人员 / 访问地址 / 代码分支 / 内容摘要）；不传 `projectId` 返回全平台。
+按提测时间倒序返回全部提测记录（时间 / 提测人 / 状态 / 判定人 / 判定时间 / 测试人员 / 访问地址 / 代码分支 / 内容摘要）；不传 `projectId` 返回全平台。
+
+#### 8.3 判定提测结果（测试同学操作）
+
+```
+POST /api/releases/{releaseId}/status.md
+Content-Type: application/json
+
+{"status": "已通过"}
+```
+
+- 状态枚举：`待冒烟`（提测默认）/ `已通过` / `未通过`；`{releaseId}` 取自 8.2 清单的 `id`
+- 改为「已通过 / 未通过」时记录判定人（令牌对应用户）与判定时间；改回「待冒烟」会清空判定人/判定时间（重新冒烟），状态未变化时幂等返回
+- 响应为 text/markdown：项目 / 提测记录 / 提测人 / 测试人员 / 当前状态 / 判定人 / 判定时间 + 清单地址
 
 ### 9. 缺陷（Markdown）
 
@@ -376,5 +389,5 @@ curl -X DELETE {BASE}/api/code-branches/{id}
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

@@ -43,6 +43,16 @@ export enum ProjectStatus {
   PUBLISHED = '已发布',
 }
 
+/**
+ * 提测记录状态：提测后默认「待冒烟」，由测试同学判定「已通过 / 未通过」
+ * （可从已通过/未通过改回待冒烟重新冒烟，判定人/判定时间随之清空）。
+ */
+export enum ReleaseStatus {
+  PENDING = '待冒烟',
+  PASSED = '已通过',
+  FAILED = '未通过',
+}
+
 /** 缺陷状态：平台侧统一为 开放/修复/关闭 */
 export enum DefectStatus {
   OPEN = '开放',

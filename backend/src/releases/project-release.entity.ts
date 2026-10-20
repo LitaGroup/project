@@ -6,6 +6,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { ReleaseStatus } from '../common/enums';
 import { Project } from '../projects/project.entity';
 
 /** 提测单上的代码分支（仓库 + 分支，提测时快照，不关联 project_branches 登记） */
@@ -52,6 +53,18 @@ export class ProjectRelease {
   /** 提测人姓名（网页登录用户 / agent 令牌对应用户） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   operator: string | null;
+
+  /** 提测状态：提测默认「待冒烟」，由测试同学判定「已通过 / 未通过」 */
+  @Column({ type: 'varchar', length: 20, default: ReleaseStatus.PENDING })
+  status: string;
+
+  /** 判定人姓名（改为已通过/未通过时记录，改回待冒烟时清空） */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  verifier: string | null;
+
+  /** 判定时间（改为已通过/未通过时记录，改回待冒烟时清空） */
+  @Column({ type: 'datetime', nullable: true })
+  verifiedAt: Date | null;
 
   /** 提测时间 */
   @CreateDateColumn()

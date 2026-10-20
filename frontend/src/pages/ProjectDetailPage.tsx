@@ -69,6 +69,7 @@ import {
   MILESTONE_ACHIEVED,
   PROJECT_STATUSES,
   PROJECT_TYPES,
+  RELEASE_STATUSES,
   RESOURCE_STATUSES,
   RESOURCE_TYPE_OPTIONS,
   type CodeBranchCategory,
@@ -88,6 +89,7 @@ import {
   type ProjectTask,
   type ProjectType,
   type ReleaseBranch,
+  type ReleaseStatus,
   type RepoPlatform,
 } from '../lib/api'
 import {
@@ -95,6 +97,7 @@ import {
   DefectStatusBadge,
   DefectPriorityBadge,
   MilestoneStatusBadge,
+  ReleaseStatusBadge,
   ResourceStatusBadge,
   StatusBadge,
 } from '../components/StatusBadge'
@@ -268,7 +271,7 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <ReleasesSection project={project} />
+          <ReleasesSection project={project} onChanged={reload} />
         </section>
       </div>
 
@@ -3889,8 +3892,14 @@ function ProjectBranchManageDialog({
   )
 }
 
-/** 提测记录：项目提测历史（倒序），点行查看完整内容；提测入口在右侧面板最下面 */
-function ReleasesSection({ project }: { project: Project }) {
+/** 提测记录：项目提测历史（倒序），点行查看完整内容；状态列由测试同学直接判定 */
+function ReleasesSection({
+  project,
+  onChanged,
+}: {
+  project: Project
+  onChanged: () => void
+}) {
   const [selected, setSelected] = useState<ProjectRelease | null>(null)
   const releases = project.projectReleases ?? []
   const displayed = releases.slice(0, 10)
@@ -3912,6 +3921,7 @@ function ReleasesSection({ project }: { project: Project }) {
           <TableRow>
             <TableHead className="w-44">提测时间</TableHead>
             <TableHead className="w-28">提测人</TableHead>
+            <TableHead className="w-32">状态</TableHead>
             <TableHead className="w-56">测试人员</TableHead>
             <TableHead>提测内容</TableHead>
           </TableRow>
@@ -3931,6 +3941,10 @@ function ReleasesSection({ project }: { project: Project }) {
                 <TableCell className="max-w-28 truncate" title={r.operator ?? ''}>
                   {r.operator ?? '—'}
                 </TableCell>
+                {/* 状态判定：点击展开下拉（阻止冒泡，避免同时打开行详情） */}
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <ReleaseStatusSelect release={r} onChanged={onChanged} />
+                </TableCell>
                 <TableCell className="max-w-56 truncate" title={r.testers.join('、')}>
                   {r.testers.join('、')}
                 </TableCell>
@@ -3942,15 +3956,15 @@ function ReleasesSection({ project }: { project: Project }) {
           })}
           {releases.length === 0 && (
             <TableRow>
-              <TableCell colSpan={4}>
+              <TableCell colSpan={5}>
                 暂无提测记录，点右侧面板底部「提测」发起提测（状态将流转「测试中」并通知提测群与项目人员）
               </TableCell>
             </TableRow>
           )}
-          <CountRow colSpan={4} total={releases.length} displayed={displayed.length} />
+          <CountRow colSpan={5} total={releases.length} displayed={displayed.length} />
         </TableBody>
       </Table>
-      {/* 提测详情：完整内容 + 访问地址 + 代码分支 */}
+      {/* 提测详情：完整内容 + 访问地址 + 代码分支 + 冒烟结论 */}
       <Dialog open={selected !== null} onOpenChange={(o) => !o && setSelected(null)}>
         <DialogContent>
           <DialogHeader>
@@ -3967,6 +3981,24 @@ function ReleasesSection({ project }: { project: Project }) {
                   <dt className="shrink-0 text-foreground-muted">提测人</dt>
                   <dd>{selected.operator ?? '—'}</dd>
                 </div>
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="shrink-0 text-foreground-muted">状态</dt>
+                  <dd>
+                    <ReleaseStatusBadge status={selected.status} />
+                  </dd>
+                </div>
+                {selected.verifier && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="shrink-0 text-foreground-muted">判定人</dt>
+                    <dd>{selected.verifier}</dd>
+                  </div>
+                )}
+                {selected.verifiedAt && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="shrink-0 text-foreground-muted">判定时间</dt>
+                    <dd>{new Date(selected.verifiedAt).toLocaleString()}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between gap-4">
                   <dt className="shrink-0 text-foreground-muted">测试人员</dt>
                   <dd>{selected.testers.join('、')}</dd>
@@ -4012,6 +4044,52 @@ function ReleasesSection({ project }: { project: Project }) {
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+/** 提测状态判定下拉：待冒烟（默认）/ 已通过 / 未通过，改回待冒烟清空判定人/判定时间 */
+function ReleaseStatusSelect({
+  release,
+  onChanged,
+}: {
+  release: ProjectRelease
+  onChanged: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const change = (status: string) => {
+    if (status === release.status || saving) return
+    setSaving(true)
+    setError(null)
+    api
+      .updateReleaseStatus(release.id, status as ReleaseStatus)
+      .then(onChanged)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setSaving(false))
+  }
+
+  return (
+    <span className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+      <Select
+        value={release.status ?? '待冒烟'}
+        onValueChange={(v) => change(v as string)}
+        disabled={saving}
+        items={Object.fromEntries(RELEASE_STATUSES.map((s) => [s, s]))}
+      >
+        <SelectTrigger className="w-28">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {RELEASE_STATUSES.map((s) => (
+            <SelectItem key={s} value={s}>
+              {s}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {error && <span className="text-xs">{error}</span>}
+    </span>
   )
 }
 

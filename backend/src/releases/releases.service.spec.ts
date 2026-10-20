@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { ProjectStatus } from '../common/enums';
+import { ProjectStatus, ReleaseStatus } from '../common/enums';
 import { FeishuService } from '../feishu/feishu.service';
 import { Project } from '../projects/project.entity';
 import { User } from '../auth/user.entity';
@@ -12,6 +12,7 @@ import { ReleasesService } from './releases.service';
 describe('ReleasesService', () => {
   let service: ReleasesService;
   let releasesSave: jest.Mock;
+  let releasesFindOne: jest.Mock;
   let projectsSave: jest.Mock;
   let usersFind: jest.Mock;
   let sendUserCard: jest.Mock;
@@ -32,6 +33,7 @@ describe('ReleasesService', () => {
     releasesSave.mockImplementation((v: Partial<ProjectRelease>) =>
       Promise.resolve({ id: 9, createdAt: new Date(), ...v } as ProjectRelease),
     );
+    releasesFindOne = jest.fn();
     projectsSave = jest.fn();
     projectsSave.mockImplementation((v: Project) => Promise.resolve(v));
     // where.name 为 TypeORM In() FindOperator，取其 .value 还原姓名数组
@@ -57,6 +59,7 @@ describe('ReleasesService', () => {
           useValue: {
             create: (v: Partial<ProjectRelease>) => v,
             save: releasesSave,
+            findOne: releasesFindOne,
             delete: jest.fn(),
           },
         },
@@ -105,6 +108,7 @@ describe('ReleasesService', () => {
       { repo: 'LitaGroup/lita-h5', branch: 'test' },
     ]);
     expect(release.testers).toEqual(['王五']);
+    expect(release.status).toBe(ReleaseStatus.PENDING);
     expect(projectsSave).toHaveBeenCalledWith(
       expect.objectContaining({ status: ProjectStatus.IN_TEST }),
     );
@@ -127,6 +131,7 @@ describe('ReleasesService', () => {
           useValue: {
             create: (v: Partial<ProjectRelease>) => v,
             save: releasesSave,
+            findOne: releasesFindOne,
             delete: jest.fn(),
           },
         },
@@ -201,6 +206,65 @@ describe('ReleasesService', () => {
       releasesSave.mock.calls as Partial<ProjectRelease>[][]
     )[0][0];
     expect(saved.testers).toEqual(['王五', '赵六', '孙七']);
+  });
+
+  it('判定提测状态：已通过记录判定人与时间，改回待冒烟清空', async () => {
+    const release = {
+      id: 9,
+      projectId: 1,
+      status: ReleaseStatus.PENDING,
+      verifier: null,
+      verifiedAt: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      testers: ['王五'],
+      operator: null,
+      content: null,
+      urls: null,
+      branches: null,
+    } as ProjectRelease;
+    releasesFindOne.mockResolvedValue(release);
+
+    const passed = await service.updateStatus(9, ReleaseStatus.PASSED, '王五');
+    expect(passed.status).toBe(ReleaseStatus.PASSED);
+    expect(passed.verifier).toBe('王五');
+    expect(passed.verifiedAt).toBeInstanceOf(Date);
+
+    const failed = await service.updateStatus(9, ReleaseStatus.FAILED, '赵六');
+    expect(failed.status).toBe(ReleaseStatus.FAILED);
+    expect(failed.verifier).toBe('赵六');
+
+    const pending = await service.updateStatus(
+      9,
+      ReleaseStatus.PENDING,
+      '王五',
+    );
+    expect(pending.status).toBe(ReleaseStatus.PENDING);
+    expect(pending.verifier).toBeNull();
+    expect(pending.verifiedAt).toBeNull();
+  });
+
+  it('状态未变化时幂等返回，不刷新判定人/判定时间', async () => {
+    const verifiedAt = new Date('2026-01-02T00:00:00Z');
+    releasesFindOne.mockResolvedValue({
+      id: 9,
+      status: ReleaseStatus.PASSED,
+      verifier: '王五',
+      verifiedAt,
+    });
+    const release = await service.updateStatus(9, ReleaseStatus.PASSED, '赵六');
+    expect(release.verifier).toBe('王五');
+    expect(release.verifiedAt).toBe(verifiedAt);
+    expect(releasesSave).not.toHaveBeenCalled();
+  });
+
+  it('非法提测状态 → 400，记录不存在 → 404', async () => {
+    await expect(
+      service.updateStatus(9, '不存在' as ReleaseStatus, '王五'),
+    ).rejects.toThrow(BadRequestException);
+    releasesFindOne.mockResolvedValue(null);
+    await expect(
+      service.updateStatus(99, ReleaseStatus.PASSED, '王五'),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('removeByProject 按项目删除提测记录', async () => {

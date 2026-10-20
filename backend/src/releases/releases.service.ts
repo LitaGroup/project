@@ -7,7 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { In, Repository } from 'typeorm';
-import { ProjectStatus } from '../common/enums';
+import { ProjectStatus, ReleaseStatus } from '../common/enums';
 import { splitMemberNames } from '../common/names';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { FeishuService } from '../feishu/feishu.service';
@@ -17,10 +17,20 @@ import { ProjectRelease, ReleaseBranch } from './project-release.entity';
 
 /** 提测通知群「H5 Release | 提测上线」的群机器人 webhook（固定） */
 const RELEASE_WEBHOOK =
-  'https://open.feishu.cn/open-apis/bot/v2/hook/853d0ce7-a602-45b4-95c4-b16ed872fe3e';
+  'https://open.feishu.cn/open-apis/bot/v2/hook/819b2008-2cb9-4a2d-a44a-92d01cea83d9';
 
 /** 卡片内提测内容截断长度（lark_md 卡片过长会被飞书折叠/截断） */
 const CONTENT_CARD_MAX = 800;
+
+/** 提测状态可选值（待冒烟 / 已通过 / 未通过） */
+export const RELEASE_STATUS_VALUES: string[] = Object.values(ReleaseStatus);
+
+/** 读库状态归一：历史行或异常值为空时按「待冒烟」处理 */
+function releaseStatusOf(status?: string | null): ReleaseStatus {
+  return RELEASE_STATUS_VALUES.includes(status ?? '')
+    ? (status as ReleaseStatus)
+    : ReleaseStatus.PENDING;
+}
 
 export interface SubmitReleaseInput {
   content?: string;
@@ -78,6 +88,10 @@ export class ReleasesService {
         branches: branches.length > 0 ? branches : null,
         testers,
         operator: operator?.trim() || null,
+        // 新提测一律「待冒烟」，由测试同学判定通过与否
+        status: ReleaseStatus.PENDING,
+        verifier: null,
+        verifiedAt: null,
       }),
     );
 
@@ -98,6 +112,71 @@ export class ReleasesService {
       where: projectId === undefined ? {} : { projectId },
       order: { createdAt: 'DESC', id: 'DESC' },
     });
+  }
+
+  /**
+   * 测试同学判定提测结果：待冒烟 → 已通过 / 未通过（也可改回待冒烟重新冒烟）。
+   * 判定为已通过/未通过时记录判定人与判定时间；改回待冒烟时清空。
+   * 状态未变化幂等返回（不刷新判定时间）。
+   */
+  async updateStatus(
+    id: number,
+    status: ReleaseStatus,
+    operator?: string | null,
+  ): Promise<ProjectRelease> {
+    if (!RELEASE_STATUS_VALUES.includes(status)) {
+      throw new BadRequestException(
+        `提测状态非法：${status ?? '（空）'}，可选值：${RELEASE_STATUS_VALUES.join('、')}`,
+      );
+    }
+    const release = await this.releases.findOne({ where: { id } });
+    if (!release) throw new NotFoundException(`Release ${id} not found`);
+
+    if (releaseStatusOf(release.status) === status) return release;
+
+    const now = new Date();
+    release.status = status;
+    if (status === ReleaseStatus.PENDING) {
+      release.verifier = null;
+      release.verifiedAt = null;
+    } else {
+      release.verifier = operator?.trim() || null;
+      release.verifiedAt = now;
+    }
+    return this.releases.save(release);
+  }
+
+  /** AI 用：判定提测结果并返回 Markdown 结果 */
+  async updateStatusMarkdown(
+    id: number,
+    status: ReleaseStatus,
+    operator?: string | null,
+  ): Promise<string> {
+    const release = await this.updateStatus(id, status, operator);
+    const project = await this.projects.findOne({
+      where: { id: release.projectId },
+    });
+    return [
+      mdFrontmatter({
+        update: release.verifiedAt ?? release.createdAt,
+        title: `提测记录 #${release.id} - ${releaseStatusOf(release.status)}`,
+      }),
+      '# 提测状态已更新',
+      '',
+      `- 项目：${project?.name ?? `#${release.projectId}`}（#${release.projectId}）`,
+      `- 提测记录：id ${release.id}（提测时间 ${beijingTime(release.createdAt)}）`,
+      `- 提测人：${release.operator ?? '—'}`,
+      `- 测试人员：${release.testers.join('、')}`,
+      `- 当前状态：**${releaseStatusOf(release.status)}**`,
+      release.verifier ? `- 判定人：${release.verifier}` : null,
+      release.verifiedAt
+        ? `- 判定时间：${beijingTime(release.verifiedAt)}`
+        : null,
+      `- 提测记录清单：GET /api/releases.md?projectId=${release.projectId}`,
+      '',
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n');
   }
 
   /** AI 用：提测并返回 Markdown 结果 */
@@ -130,6 +209,7 @@ export class ReleasesService {
           : '—'
       }`,
       `- 提测内容：${release.content ? '已记录（见项目详情）' : '—'}`,
+      `- 提测状态：**${releaseStatusOf(release.status)}**（由测试同学判定「已通过 / 未通过」）`,
       `- 已通知：提测群「H5 Release | 提测上线」+ 项目人员私聊（发送失败仅告警，不影响提测）`,
       `- 阅读地址：GET /api/projects/${release.projectId}.md`,
       `- 提测记录：GET /api/releases.md?projectId=${release.projectId}`,
@@ -143,9 +223,12 @@ export class ReleasesService {
     const title =
       projectId === undefined ? '提测记录' : `提测记录（项目 #${projectId}）`;
     const lines = items.map((r) => {
-      const head = `- **${beijingTime(r.createdAt)}**（id：${r.id}）提测人 ${r.operator ?? '—'}`;
+      const status = releaseStatusOf(r.status);
+      const head = `- **${beijingTime(r.createdAt)}**（id：${r.id}）提测人 ${r.operator ?? '—'} — 状态：**${status}**`;
       const detail = [
         `测试人员：${r.testers.join('、')}`,
+        r.verifier ? `判定人：${r.verifier}` : null,
+        r.verifiedAt ? `判定时间：${beijingTime(r.verifiedAt)}` : null,
         r.urls?.length ? `访问地址：${r.urls.join('、')}` : null,
         r.branches?.length
           ? `代码分支：${r.branches.map((b) => `\`${b.repo}\` @ \`${b.branch}\``).join('、')}`
@@ -159,6 +242,7 @@ export class ReleasesService {
       `# ${title}`,
       '',
       `共 ${items.length} 条（按提测时间倒序）。提测：\`POST /api/projects/{projectId}/release.md\`，body \`{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}]}\`（仅 testers 必填且须为用户系统内用户）`,
+      `判定提测结果（由测试同学操作）：\`POST /api/releases/{id}/status.md\`，body \`{"status": "已通过" | "未通过" | "待冒烟"}\`——新提测默认「待冒烟」，改回「待冒烟」会清空判定人/判定时间以便重新冒烟`,
       '',
       ...(lines.length > 0 ? lines : ['（暂无提测记录）']),
       '',

@@ -5,8 +5,11 @@ export type ProjectType = (typeof PROJECT_TYPES)[number]
 export const PROJECT_STATUSES = ['待分配', '开发中', '已关闭', '暂停中', '测试中', '已发布'] as const
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
 
-/** 与后端 DefectStatus 对应，平台侧统一为 开放/修复/关闭 */
-export const DEFECT_STATUSES = ['开放', '修复', '关闭'] as const
+/** 提测记录状态（与后端 ReleaseStatus 对应）：提测默认待冒烟，由测试同学判定 已通过/未通过 */
+export const RELEASE_STATUSES = ['待冒烟', '已通过', '未通过'] as const
+export type ReleaseStatus = (typeof RELEASE_STATUSES)[number]
+
+/** 与后端 DefectStatus 对应，平台侧统一为 开放/修复/关闭 */export const DEFECT_STATUSES = ['开放', '修复', '关闭'] as const
 export type DefectStatus = (typeof DEFECT_STATUSES)[number]
 
 /** 缺陷端：只保留这四类，非规范值统一为"未知"（默认） */
@@ -415,6 +418,12 @@ export interface ProjectRelease {
   testers: string[]
   /** 提测人姓名 */
   operator: string | null
+  /** 提测状态：待冒烟（默认）/ 已通过 / 未通过（由测试同学判定） */
+  status: ReleaseStatus
+  /** 判定人姓名（已通过/未通过时记录，待冒烟为空） */
+  verifier: string | null
+  /** 判定时间（已通过/未通过时记录，待冒烟为空） */
+  verifiedAt: string | null
   /** 提测时间 */
   createdAt: string
 }
@@ -1262,6 +1271,12 @@ export const api = {
   /** 提测记录列表（倒序） */
   listReleases: (projectId: number) =>
     request<ProjectRelease[]>(`/projects/${projectId}/releases`),
+  /** 判定提测结果（测试同学操作）：待冒烟 → 已通过 / 未通过，改回待冒烟清空判定人/时间 */
+  updateReleaseStatus: (releaseId: number, status: ReleaseStatus) =>
+    request<ProjectRelease>(`/releases/${releaseId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   /** 用户系统全量名单（项目人员/提测测试人员等场景选择用户，亦供管理端用户列表页展示） */
   listUsers: () =>
     request<{ users: PlatformUser[] }>('/auth/users').then((r) => r.users),
