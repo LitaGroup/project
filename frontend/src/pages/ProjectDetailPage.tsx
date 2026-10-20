@@ -72,7 +72,6 @@ import {
   RESOURCE_STATUSES,
   RESOURCE_TYPE_OPTIONS,
   type CodeBranchCategory,
-  type CodeEvent,
   type Defect,
   type DocumentType,
   type GithubRepo,
@@ -207,10 +206,6 @@ export function ProjectDetailPage() {
             </div>
           </div>
           <BranchesPanel project={project} onChanged={reload} />
-        </section>
-
-        <section>
-          <CodeEventsSection project={project} />
         </section>
 
         <section>
@@ -3891,101 +3886,6 @@ function ProjectBranchManageDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-/** 代码提交板块：本项目登记的 仓库+分支 监听到的提交/合并记录（独立拉取，倒序前 20 条） */
-function CodeEventsSection({ project }: { project: Project }) {
-  const [events, setEvents] = useState<CodeEvent[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const reload = useCallback(() => {
-    api
-      .listCodeEvents({ projectId: project.id, limit: 20 })
-      .then(setEvents)
-      .catch((e: Error) => setError(e.message))
-  }, [project.id])
-
-  useEffect(reload, [reload])
-
-  const list = events ?? []
-  return (
-    <>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-xl font-semibold">代码提交</h2>
-        <div className="flex items-center gap-2">
-          <Link
-            to={`/commits?projectId=${project.id}`}
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            查看全部
-          </Link>
-          <Button variant="outline" size="sm" onClick={reload}>
-            刷新
-          </Button>
-        </div>
-      </div>
-      {error && <p className="mb-2 text-sm">加载失败:{error}</p>}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-44">提交时间</TableHead>
-            <TableHead className="w-52">仓库</TableHead>
-            <TableHead className="w-32">分支</TableHead>
-            <TableHead>提交信息</TableHead>
-            <TableHead className="w-28">作者</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {list.map((e) => {
-            const firstLine = (e.message.split('\n')[0] ?? '').trim()
-            return (
-              <TableRow key={e.id}>
-                <TableCell>{new Date(e.committedAt).toLocaleString()}</TableCell>
-                <TableCell className="max-w-52 truncate" title={e.repo}>
-                  {e.repo}
-                </TableCell>
-                <TableCell>
-                  <span className="flex items-center gap-1">
-                    {e.branch}
-                    {e.isMerge && (
-                      <Badge variant="info" title="合并提交（parents > 1）">
-                        合并
-                      </Badge>
-                    )}
-                  </span>
-                </TableCell>
-                <TableCell className="max-w-md truncate" title={e.message}>
-                  {e.url ? (
-                    <a
-                      href={e.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline"
-                    >
-                      {firstLine}
-                    </a>
-                  ) : (
-                    firstLine
-                  )}
-                </TableCell>
-                <TableCell className="max-w-28 truncate" title={e.author ?? ''}>
-                  {e.author ?? '—'}
-                </TableCell>
-              </TableRow>
-            )
-          })}
-          {list.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={5}>
-                暂无提交记录，登记「代码分支」后平台每分钟监听新提交/合并（含
-                test/main/stable）
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </>
   )
 }
 
