@@ -398,6 +398,22 @@ export function ProjectDetailPage() {
                 )}
               </dd>
             </div>
+            <div className="flex items-center justify-between">
+              <dt>代码分支</dt>
+              <dd className="flex items-center gap-1">
+                <span
+                  className="max-w-40 truncate"
+                  title={(project.projectBranches ?? [])
+                    .map((b) => `${b.repo}@${b.branch}`)
+                    .join('、')}
+                >
+                  {project.projectBranches?.length
+                    ? `${project.projectBranches.length} 个`
+                    : '—'}
+                </span>
+                <ProjectBranchManageDialog project={project} onSaved={reload} />
+              </dd>
+            </div>
             <div className="flex justify-between">
               <dt>资源</dt>
               <dd>—</dd>
@@ -3490,6 +3506,288 @@ function DeleteCodeBranchButton({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+/** 右侧面板「分支」管理弹窗：展示已登记的 仓库+分支 列表（可删除），支持一次添加多行；同一仓库仅支持登记一个分支 */
+function ProjectBranchManageDialog({
+  project,
+  onSaved,
+}: {
+  project: Project
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState<{ repo: string; branch: string }[]>([])
+  const [repoOptions, setRepoOptions] = useState<string[]>([])
+  const [reposState, setReposState] = useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  )
+  const [branchOptions, setBranchOptions] = useState<Record<string, string[]>>(
+    {},
+  )
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const registered = project.projectBranches ?? []
+
+  const loadBranchOptions = (repo: string) => {
+    const name = repo.trim()
+    if (!name) return
+    api
+      .listGithubBranches(name)
+      .then((list) => setBranchOptions((m) => ({ ...m, [name]: list })))
+      .catch(() => setBranchOptions((m) => ({ ...m, [name]: [] })))
+  }
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setRows([{ repo: '', branch: '' }])
+      setError(null)
+      setDeletingId(null)
+      setBranchOptions({})
+      setReposState('loading')
+      api
+        .searchGithubRepos()
+        .then((repos: GithubRepo[]) => {
+          setRepoOptions(repos.map((r) => r.fullName))
+          setReposState('ready')
+        })
+        .catch(() => setReposState('error'))
+    }
+  }
+
+  const updateRow = (
+    i: number,
+    patch: Partial<{ repo: string; branch: string }>,
+  ) => setRows((list) => list.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+
+  const remove = (b: ProjectBranch) => {
+    setError(null)
+    setDeletingId(b.id)
+    api
+      .deleteCodeBranch(b.id)
+      .then(onSaved)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setDeletingId(null))
+  }
+
+  const validate = (): string | null => {
+    const filled = rows.filter((r) => r.repo.trim() || r.branch.trim())
+    if (filled.length === 0) return '请先填写要登记的仓库与分支'
+    if (filled.some((r) => !r.repo.trim() || !r.branch.trim())) {
+      return '仓库与分支需同时填写'
+    }
+    if (reposState === 'loading') return '正在加载 GitHub 仓库列表，请稍候重试'
+    if (reposState === 'error') {
+      return '无法加载 GitHub 仓库列表，请检查 GitHub 集成配置'
+    }
+    for (const r of filled) {
+      const repo = r.repo.trim()
+      if (!repoOptions.includes(repo)) {
+        return `仓库不存在或不属于组织：${repo}`
+      }
+      const opts = branchOptions[repo]
+      if (opts && !opts.includes(r.branch.trim())) {
+        return `分支不存在：${repo} @ ${r.branch.trim()}`
+      }
+    }
+    const seen = new Set<string>()
+    for (const r of filled) {
+      const repo = r.repo.trim()
+      if (seen.has(repo)) return `同一仓库仅支持登记一个分支：${repo}`
+      seen.add(repo)
+      const existed = registered.find((b) => b.repo === repo)
+      if (existed) {
+        return `仓库 ${repo} 已登记分支 ${existed.branch}，同一仓库仅支持一个分支`
+      }
+    }
+    return null
+  }
+
+  const submit = async () => {
+    setError(null)
+    const message = validate()
+    if (message) {
+      setError(message)
+      return
+    }
+    const filled = rows
+      .filter((r) => r.repo.trim() && r.branch.trim())
+      .map((r) => ({ repo: r.repo.trim(), branch: r.branch.trim() }))
+    setSaving(true)
+    try {
+      for (const r of filled) {
+        await api.createCodeBranch({ projectId: project.id, ...r })
+      }
+      setOpen(false)
+      onSaved()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger
+        render={
+          <button
+            type="button"
+            className="cursor-pointer text-sm font-normal underline"
+          />
+        }
+      >
+        分支
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>代码分支</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <span className="text-sm">
+                已登记（同一仓库仅支持一个分支）
+              </span>
+              {registered.map((b) => (
+                <div key={b.id} className="flex items-center gap-2 text-sm">
+                  <a
+                    href={`https://github.com/${b.repo}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 truncate underline"
+                    title={b.repo}
+                  >
+                    {b.repo}
+                  </a>
+                  <Badge variant="secondary">{b.branch}</Badge>
+                  <CodeBranchCategoryBadge category={b.category} />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={deletingId === b.id}
+                    onClick={() => remove(b)}
+                  >
+                    删除
+                  </Button>
+                </div>
+              ))}
+              {registered.length === 0 && (
+                <p className="text-foreground-muted">暂无登记，可在下方添加</p>
+              )}
+            </div>
+            <label className="flex flex-col gap-2 text-sm">
+              添加新分支（可添加多行，保存后逐条登记）
+              <div className="flex flex-col gap-2">
+                {rows.map((row, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Autocomplete
+                        items={repoOptions}
+                        value={row.repo}
+                        onValueChange={(v) => {
+                          const next = v as string
+                          updateRow(i, {
+                            repo: next,
+                            branch: row.repo === next ? row.branch : '',
+                          })
+                          loadBranchOptions(next)
+                        }}
+                        clearable
+                      >
+                        <AutocompleteInput
+                          placeholder="仓库，如 LitaGroup/lita-h5"
+                          aria-label={`仓库 ${i + 1}`}
+                        />
+                        <AutocompleteContent>
+                          <AutocompleteEmpty>未找到匹配的仓库</AutocompleteEmpty>
+                          <AutocompleteList>
+                            {(item: string) => (
+                              <AutocompleteItem key={item} value={item}>
+                                {item}
+                              </AutocompleteItem>
+                            )}
+                          </AutocompleteList>
+                        </AutocompleteContent>
+                      </Autocomplete>
+                    </div>
+                    <div className="w-40 shrink-0">
+                      <Autocomplete
+                        items={branchOptions[row.repo.trim()] ?? []}
+                        value={row.branch}
+                        onValueChange={(v) => updateRow(i, { branch: v as string })}
+                        clearable
+                      >
+                        <AutocompleteInput
+                          placeholder="分支，如 test"
+                          aria-label={`分支 ${i + 1}`}
+                        />
+                        <AutocompleteContent>
+                          <AutocompleteEmpty>
+                            {row.repo.trim()
+                              ? '未找到匹配的分支（可直接输入）'
+                              : '先填写仓库'}
+                          </AutocompleteEmpty>
+                          <AutocompleteList>
+                            {(item: string) => (
+                              <AutocompleteItem key={item} value={item}>
+                                {item}
+                              </AutocompleteItem>
+                            )}
+                          </AutocompleteList>
+                        </AutocompleteContent>
+                      </Autocomplete>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setRows((list) => list.filter((_, j) => j !== i))
+                      }
+                    >
+                      移除
+                    </Button>
+                  </div>
+                ))}
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setRows((list) => [...list, { repo: '', branch: '' }])
+                    }
+                  >
+                    添加一行
+                  </Button>
+                </div>
+                {reposState === 'error' && rows.length > 0 && (
+                  <p className="text-foreground-muted">
+                    无法加载 GitHub 仓库列表（请检查 GitHub 集成配置）
+                  </p>
+                )}
+              </div>
+            </label>
+            {error && <p className="text-sm">{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">取消</Button>
+          </DialogClose>
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={saving || !rows.some((r) => r.repo.trim() && r.branch.trim())}
+          >
+            {saving ? '保存中…' : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
