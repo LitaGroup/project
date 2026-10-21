@@ -118,10 +118,10 @@ export class ProjectsController {
     return this.projectsService.findPage(query);
   }
 
-  /** 从飞书多维表格同步项目（默认增量：首次近 15 天、后续近 7 天；full=true 全量） */
+  /** 从飞书多维表格同步项目（手动固定取近 15 天有更新的记录；full=true 全量） */
   @Post('sync-feishu')
   syncFromFeishu(@Body() dto?: SyncFeishuDto): Promise<SyncProjectsResult> {
-    return this.projectSyncService.syncFromFeishu(!!dto?.full);
+    return this.projectSyncService.syncFromFeishu(!!dto?.full, true);
   }
 
   /** Markdown 视图（须声明在 :id 之前，避免 :id 匹配到带 .md 后缀的路径） */

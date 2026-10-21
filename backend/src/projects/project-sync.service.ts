@@ -12,6 +12,8 @@ import { SyncState } from './sync-state.entity';
 const SYNC_KEY = 'projects:feishu';
 /** 首次同步只取最近 15 天有更新的记录 */
 const FIRST_SYNC_WINDOW_DAYS = 15;
+/** 手动同步固定取最近 15 天有更新的记录（不走增量窗口，便于补拉近期变更） */
+const MANUAL_SYNC_WINDOW_DAYS = 15;
 /** 增量同步窗口缓冲：上次同步时间往前多取 1 小时，防时钟偏差漏单 */
 const SYNC_BUFFER_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -216,20 +218,23 @@ export class ProjectSyncService {
     }
   }
 
-  /** 从需求池增量同步项目；full=true 时忽略时间窗口全量扫描 */
-  async syncFromFeishu(full = false): Promise<SyncProjectsResult> {
+  /** 从需求池同步项目：定时为增量（上次同步时间 - 1h 缓冲，首次近 15 天）；手动固定取近 15 天；full=true 全量 */
+  async syncFromFeishu(full = false, manual = false): Promise<SyncProjectsResult> {
     const sourceUrl =
       this.config.get<string>('FEISHU_PROJECT_SOURCE_URL') ??
       DEFAULT_PROJECT_SOURCE_URL;
     const { appToken, tableId, viewId } = await this.parseSource(sourceUrl);
 
     const state = await this.syncStates.findOne({ where: { key: SYNC_KEY } });
-    // 增量窗口 = 上次同步时间 - 1h 缓冲（lastSyncAt 仅成功后写入，失败自动补窗口）；首次取近 15 天
+    // 增量窗口 = 上次同步时间 - 1h 缓冲（lastSyncAt 仅成功后写入，失败自动补窗口）；
+    // 首次取近 15 天；手动同步固定取近 15 天；full 忽略窗口全量扫描
     const since = full
       ? 0
-      : state
-        ? state.lastSyncAt.getTime() - SYNC_BUFFER_MS
-        : Date.now() - FIRST_SYNC_WINDOW_DAYS * DAY_MS;
+      : manual
+        ? Date.now() - MANUAL_SYNC_WINDOW_DAYS * DAY_MS
+        : state
+          ? state.lastSyncAt.getTime() - SYNC_BUFFER_MS
+          : Date.now() - FIRST_SYNC_WINDOW_DAYS * DAY_MS;
 
     const records = await this.feishu.searchBitableRecords(
       appToken,
