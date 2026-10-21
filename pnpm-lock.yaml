@@ -154,8 +154,8 @@ importers:
   frontend:
     dependencies:
       '@appica/ui-react':
-        specifier: ^1.1.0
-        version: 1.1.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)
+        specifier: ^1.3.0
+        version: 1.3.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)
       '@bytemd/plugin-gfm':
         specifier: ^1.22.0
         version: 1.22.0(bytemd@1.22.0(supports-color@8.1.1))(supports-color@8.1.1)
@@ -239,8 +239,8 @@ packages:
     resolution: {integrity: sha512-/PZmyAlb2NGWPikRRuiWLdfHQd8Wrx6lX4HqvTcaDhlU43M3T0ud4PH2T3QDp7BzHYY92xtD8iPxX2asg67G1A==}
     engines: {node: ^18.19.1 || ^20.11.1 || >=22.0.0, npm: ^6.11.0 || ^7.5.6 || >=8.0.0, yarn: '>= 1.13.0'}
 
-  '@appica/ui-react@1.1.0':
-    resolution: {integrity: sha512-pLUXibrtLxQRSGG7XqazKy3N3nmhE1hHLe0hLFS/BOEPbzNzQ0m7Lyw/WlJQhN4rSxJCG6oo2iYCJ1GyAEWiPg==}
+  '@appica/ui-react@1.3.0':
+    resolution: {integrity: sha512-0M9uQ4MDp5Wdvts+aR6Z+00xe8fFcqupLYtOZ+0pwD5KCnhxyV2bQalyvxbfffHWrlyB9vAS1svwPhvziSl0Gw==}
     engines: {node: '>=20'}
     peerDependencies:
       '@types/react': ^19.0.0
@@ -403,9 +403,8 @@ packages:
     peerDependencies:
       '@babel/core': ^7.0.0-0
 
-  '@babel/runtime@7.29.7':
-    resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
-    engines: {node: '>=6.9.0'}
+  '@babel/runtime@8.0.7':
+    resolution: {integrity: sha512-k0hagDDq/6w4v+0Sp4wFvIz/yswH5O7Va6aRTnD7N62Tnborp4X+YB+H3XUcWVSR4aE47WPEXiIIZchBs0GmYg==}
 
   '@babel/template@7.29.7':
     resolution: {integrity: sha512-puq+Gf35oI24FeN11LkoUQFqv9uwNeWpxXZi/Ji3rRIoKAzKnxRaZ+Gkj0vKS9ZCiTESfng1N9LyOyXvo+m+Gg==}
@@ -419,8 +418,8 @@ packages:
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
-  '@base-ui/react@1.7.0':
-    resolution: {integrity: sha512-j+8QjX44C32jrXD/qyEAGpFr70FRpGL2CY61mQd9nBPWN737CK0xxD1ceJ055rW4RtdvFDT1e7otzdlfxvsYug==}
+  '@base-ui/react@1.9.0':
+    resolution: {integrity: sha512-S8CSYosASBKtpL8SWUfS78rFElfLijiCgA7oHOK22jCJ95FULsYyKwBNFOgudt0RA+/7yNc7F81bOvQnRgbBiQ==}
     engines: {node: '>=14.0.0'}
     peerDependencies:
       '@date-fns/tz': ^1.2.0
@@ -436,8 +435,8 @@ packages:
       date-fns:
         optional: true
 
-  '@base-ui/utils@0.3.2':
-    resolution: {integrity: sha512-oWy1aq/I2GmYjpl4PhEAhzflF8VPGKgZeq0xAWTbfD5KBWyxcN0ZP2+WHSUm/5Z6lVMBDLReLcoXwSYoRc/zNQ==}
+  '@base-ui/utils@0.5.0':
+    resolution: {integrity: sha512-dYGGcEttjkYiMoa5nHm8vLaJ2UcuTWxo3BFAwOYXeRg/q7UVVvA6cacEIXEs3FgBfK1CGtW1ptElqs7wsx+t9A==}
     peerDependencies:
       '@types/react': ^17 || ^18 || ^19
       react: ^17 || ^18 || ^19
@@ -2183,54 +2182,54 @@ packages:
   electron-to-chromium@1.5.411:
     resolution: {integrity: sha512-gglkxzokjHfawpGxq75XdBV2/l3BAPzrsMs70qgaZdTW5rpV1tC4MdgJVP9fN126bODA4ZJQkn1wryEzJyQXIg==}
 
-  embla-carousel-accessibility@9.0.0-rc02:
-    resolution: {integrity: sha512-i5Q2+MgCgbHyFTx5RaMkcldKaf7rYUXKm66IstPxSB8j2+gyncy5WyHOqKkZv6yPedygLF1XY4HOOPfFGx2YyQ==}
+  embla-carousel-accessibility@9.0.0-rc04:
+    resolution: {integrity: sha512-RkfHGMchy4kabQ7kUbhtGvLXWbC/WaNDdz6tyjewp7GViZ45N/emGn3TvJdGb4/2XypB9dUftysCFERd4dJZGQ==}
     peerDependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-auto-height@9.0.0-rc02:
-    resolution: {integrity: sha512-BfYtpxPMJN+KjYdyWwlkPzo5IQvM4SZvw3Yvb+K1EZ1OOddiqAW8DmP8301XlQ1/2e+kyUS8kw9AnqImU5RsUw==}
+  embla-carousel-auto-height@9.0.0-rc04:
+    resolution: {integrity: sha512-Q2rg4sRCACOO+rcqNMzs+8Wl7toSAtpkz/GG1BLbWu7bvjYeoL7P+I2ENsHw/BfS9OmdKe62IRGekbXhxA4VCA==}
     peerDependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-auto-scroll@9.0.0-rc02:
-    resolution: {integrity: sha512-np1uEHeagZKm+1A6cdTaufgUooxxE2I+wfzoJ4S5OxfyRLj+mOBeJG18HOrrusK+FiDcsZ+6ZkLgFVh2z3/K8Q==}
+  embla-carousel-auto-scroll@9.0.0-rc04:
+    resolution: {integrity: sha512-sZmcmFi0hE5FqHHtjFOhJwQnTn4pM4OvAZUCPFW1uI68ayn2C9H4BBIkmoPAGwvT7cQ5y+FxUveZh5KmF0YOGQ==}
     peerDependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-autoplay@9.0.0-rc02:
-    resolution: {integrity: sha512-xmHUL/dVL0EN9Tf6EeWirc1eEYEr8uxEG4l4QxzRPrUbHhshTzPcKfB0DatAmOI6rcTldqQsslbffNqQmg9E3Q==}
+  embla-carousel-autoplay@9.0.0-rc04:
+    resolution: {integrity: sha512-vPwfNzpkhvkBaSZD72Q9zLdfIxGTNa+jiCb0iS2AHAmzDH0q5DEpZp4cIDrBm3Q6f6TOv7y429OFcT26PdiQCg==}
     peerDependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-class-names@9.0.0-rc02:
-    resolution: {integrity: sha512-BYfYe2OnUvP4IyniFaiY+UDtrcYAOQi5M9k3LLKPOWxYC/G1eMPQ3FrnFlvAuMZCPqxPE0H9z2f4yJzYaVpYcQ==}
+  embla-carousel-class-names@9.0.0-rc04:
+    resolution: {integrity: sha512-t/iUBcc1Je6SCpzMWJEu1Pzx5KjXS9U7C5pPnr6EEmvFgk3uZlIB3cMlxi2B8uJNI5lRiGzCSYl+sIQ4SB2XFA==}
     peerDependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-fade@9.0.0-rc02:
-    resolution: {integrity: sha512-k65hqC7I482aSJPfKFkAuBbVDsDLo/AgD9nTHtROCSNz///7xs2oKZcxsoRol70ZVWzb//KHVZ1BkJr7LQhKWg==}
+  embla-carousel-fade@9.0.0-rc04:
+    resolution: {integrity: sha512-6xShKjfeas37+Tw7gfsPkr/R4MHnZ4Ook+h+ts5VqnmfnzEQ+Ux78NB1+xlCwm8QfxY2GyZ0IExaA7/ZySTRBQ==}
     peerDependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-react@9.0.0-rc02:
-    resolution: {integrity: sha512-DpcD0kTv6L31KvBcrx5d57E6T2rP/YceTGAdq7llkpKFdfM1of8YotHVEQTNIU3I9o5mjE/QxLi1ndJmm1DikA==}
+  embla-carousel-react@9.0.0-rc04:
+    resolution: {integrity: sha512-qdqNfM7bGmOPG50uo9ldaL8Yz6ODCN/IzNYzO+8Sux10a1D6FwAq95qOW9ZCXG+kueAAlLQOhF4uVIW35M0Bsg==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.1 || ^18.0.0 || ^19.0.0 || ^19.0.0-rc
 
-  embla-carousel-reactive-utils@9.0.0-rc02:
-    resolution: {integrity: sha512-H1c+yUbcVST9eJoGU+05L1vSDyBs0hf/Gf1OadHYIJ3asBfyvn6oaGCs2wXq1D8/f09y0wwCxeRxT9UZU/TxJA==}
+  embla-carousel-reactive-utils@9.0.0-rc04:
+    resolution: {integrity: sha512-38m/mPUs/VAqANCRlMzqz9mAY+vm4tOWHmqOu2cegO+Otm4PMZlt/yuZua8CH3z0kNFLS23hAkq7WAXNkYC1pA==}
     peerDependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-wheel-gestures@9.0.0-rc01:
-    resolution: {integrity: sha512-mFLzP98am00JfPle7k4gTTrAQkQ667g5muGfuyxOQVtTGsau76M3bWRSEHAZ+6d7dmUBdwzepH5ZeAbVa1e/+Q==}
+  embla-carousel-wheel-gestures@9.0.0-rc02:
+    resolution: {integrity: sha512-Df7m3QPvXL22KtezOmyi1ODYxOF88tpe6aOoEXcKIjxeM+RzmEiYoYM9wD0KWgJd59XziBNEazb+4Jb/vTLRJw==}
     engines: {node: '>=10'}
     peerDependencies:
-      embla-carousel: ^9.0.0 || ~9.0.0-rc01
+      embla-carousel: ^9.0.0 || ~9.0.0-rc03
 
-  embla-carousel@9.0.0-rc02:
-    resolution: {integrity: sha512-GOQBX6v5cNk/ptfuHUoHhW9rvl5KeSGsBoppaUqtihu2kDmQAyzvnH/95r3TaSScFSJTj68V9AM6E5nq3jUVcQ==}
+  embla-carousel@9.0.0-rc04:
+    resolution: {integrity: sha512-17JjAySlf/Sj0AawBmusMjap+SgGa+Yw0HpNCSnNs2v3Mj/wXNUdzpBAGv9uBizyYR/QcxG+pjXbHHg7xoE/iA==}
 
   emittery@0.13.1:
     resolution: {integrity: sha512-DeWwawk6r5yR9jFgnDKYt4sLS0LmHJJi3ZOnb5/JdbYwj3nW+FxQnHIjhBKz8YLC7oRNPVM9NQ47I3CVx34eqQ==}
@@ -2490,8 +2489,8 @@ packages:
     resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
     engines: {node: '>= 0.6'}
 
-  framer-motion@13.1.0:
-    resolution: {integrity: sha512-QSZrF0Id3QGuHJ+OL+9PSY9pk86C8ERFalwAGSchzTm65+ZoGH/RM26lmEARLljcHj2lqhv0jZOOks+EI3COOw==}
+  framer-motion@14.4.0:
+    resolution: {integrity: sha512-HtO1fxord2rnXYRyr1laG4uY7+OtgwDc9Szcg1wlMq/LF7BO3/S7a+KEo691U7pSi+i0ueRuRqaD1UaLEmZHuQ==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -3413,14 +3412,14 @@ packages:
     resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
     engines: {node: '>=16 || 14 >=14.17'}
 
-  motion-dom@13.0.0:
-    resolution: {integrity: sha512-Xk+SJas70uMAUIApg+m3lZDShxI3LBFHq7mFGbBKoRXc2PVPDyAKmzN64Bbzt4CZdP/CItTiJxWtn4TA0v53Ng==}
+  motion-dom@14.4.0:
+    resolution: {integrity: sha512-1q8RyHSdr5COpzrv3JgJ9XRjOO88ZN9CwflpkGgyO/SR/SNRP/dD6EU8SEo092kcKY34IzHC5diJPKrQRMA8lQ==}
 
-  motion-utils@13.0.0:
-    resolution: {integrity: sha512-7DnN7TmbLcYXcG4RVadXIihWlyuM9afoUww8Y5Agg431kGKiuL2/OMyP4mJ5wLz+pvN3t5ySClLOaVXJ+wekRQ==}
+  motion-utils@14.1.1:
+    resolution: {integrity: sha512-3VvN5Uvf8B6qG+OfOui6Nht5EWp+vLuU3IqcAj7ItZGKqtmTjCebl5sGZF7/08gEHRnEl1AP/fIwbcEyVrcQGQ==}
 
-  motion@13.1.0:
-    resolution: {integrity: sha512-qtvscq59uCPdWnNW4SdSkrxR+BS/QYsa923bx7ocA+4p+ZGNbbVQwkSnG4aukB81QWjtl3AxX36plxNyZLmHCA==}
+  motion@14.4.0:
+    resolution: {integrity: sha512-JJTIdeNjtF2zi/py0ndRKxQF+8z2pcDUgJYXul7zqbhMvyTLRsPFR9ifE/j4cFCpCMlehQVJkTwd7BZFiPKgQg==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -3679,8 +3678,8 @@ packages:
     resolution: {integrity: sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==}
     engines: {node: '>= 0.10'}
 
-  react-day-picker@10.0.1:
-    resolution: {integrity: sha512-eNh6BlwcYInWaJtRv18mXQ06Ys/H6rdTZAnTaSdOYJuTpwP1JMCHNd1FDRadA+gbeinq+psdULN5Xnowy9mV8w==}
+  react-day-picker@10.0.2:
+    resolution: {integrity: sha512-QetiKtZWE9Uaw/pM/SYNv6WPYOTRnSJ2puL0GgwkmUFMIwiY0dtjH1W4B7DOVXVNQM0ZOClGpH/heOfBSzWeiA==}
     engines: {node: '>=18'}
     peerDependencies:
       '@types/react': '>=16.8.0'
@@ -3758,8 +3757,8 @@ packages:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
     engines: {node: '>=0.10.0'}
 
-  reselect@5.2.0:
-    resolution: {integrity: sha512-AgZ3UOZm3YndfrJ4OYjgrT7bmCm/1iqkjvEfH/oYjzh6PD2qw4QuT3jjnXIrpdt4MTpMXclMT3lXbmRY+XRakw==}
+  reselect@5.3.0:
+    resolution: {integrity: sha512-XGoLeRAVzUTcJ1qkxPQhDJyIZ5d6zzZD9nT7AEZOaaU9UbWclhycElmhO+VD5bFeLuzhPBaOV2oXC8uG35ZSpg==}
 
   resolve-cwd@3.0.0:
     resolution: {integrity: sha512-OrZaX2Mb+rJCpH/6CpSqt9xFVpN++x01XnN2ie9g6P5/3xelLAkXWVADpdz1IHD/KFfEXyE6V0U01OQ3UO2rEg==}
@@ -4000,8 +3999,8 @@ packages:
     resolution: {integrity: sha512-eNRKgb3z66Yp3D2CixVujOUvXLFUTij/zVnV8KRyvFdQwpz7I5DS8UfRkTeLzb64u+dkzDSdelE24izu+zSSUg==}
     engines: {node: ^14.18.0 || >=16.0.0}
 
-  tailwind-merge@3.6.0:
-    resolution: {integrity: sha512-uxL7qAVQriqRQPAyK3pj66VqskWqoZ37PW94jwOTwNfq/z9oyu1V+eqrZqtR2+fCiXdYOZe/Modt8GtvqNzu+w==}
+  tailwind-merge@3.7.0:
+    resolution: {integrity: sha512-XPPUyAc+cvspz3lHTcR/QgPfW2A0lv/xQNIjX3HGhLR+Nq2lHaLq5MtTesHn8GUr3W3DguT2KT5x3NVgRtYwmA==}
 
   tailwindcss@4.3.3:
     resolution: {integrity: sha512-gOhV3P7ufE62QDGg1zVaTgCR+EtPv92k2nIhVcVKcLmxT1sUBsQGhnZj175j+MqRt4zLF7ic+sCYjfhxMxj7YQ==}
@@ -4308,8 +4307,8 @@ packages:
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
 
-  use-sync-external-store@1.6.0:
-    resolution: {integrity: sha512-Pp6GSwGP/NrPIrxVFAIkOQeyw8lFenOHijQWkUTrDvrF4ALqylP2C/KCkeS9dpUM3KvYRQhna5vt7IL95+ZQ9w==}
+  use-sync-external-store@1.7.0:
+    resolution: {integrity: sha512-6L+EeigHMQhdaIPNIFUKwfWJSwWFQ8gJbJ2DLOs5sDIegTwR9fRxvnM3uciHKjIZhFz+KAv2emhWMRvDmMcY8A==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
@@ -4415,8 +4414,8 @@ packages:
       webpack-cli:
         optional: true
 
-  wheel-gestures@2.2.48:
-    resolution: {integrity: sha512-f+Gy33Oa5Z14XY9679Zze+7VFhbsQfBFXodnU2x589l4kxGM9L5Y8zETTmcMR5pWOPQyRv4Z0lNax6xCO0NSlA==}
+  wheel-gestures@2.3.0:
+    resolution: {integrity: sha512-6b+PIXuKIy0ibVnF04GoijGKGIDwjlYSK7bCgicuQwPLivfjoLeCCK0bwbjyOdrStDTNPlyGFixIj0d0kZzwiQ==}
     engines: {node: '>=18'}
 
   which@2.0.2:
@@ -4563,26 +4562,26 @@ snapshots:
     transitivePeerDependencies:
       - chokidar
 
-  '@appica/ui-react@1.1.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)':
+  '@appica/ui-react@1.3.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(tailwindcss@4.3.3)':
     dependencies:
-      '@base-ui/react': 1.7.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(date-fns@4.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@base-ui/react': 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(date-fns@4.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       class-variance-authority: 0.7.1
       clsx: 2.1.1
       date-fns: 4.4.0
-      embla-carousel: 9.0.0-rc02
-      embla-carousel-accessibility: 9.0.0-rc02(embla-carousel@9.0.0-rc02)
-      embla-carousel-auto-height: 9.0.0-rc02(embla-carousel@9.0.0-rc02)
-      embla-carousel-auto-scroll: 9.0.0-rc02(embla-carousel@9.0.0-rc02)
-      embla-carousel-autoplay: 9.0.0-rc02(embla-carousel@9.0.0-rc02)
-      embla-carousel-class-names: 9.0.0-rc02(embla-carousel@9.0.0-rc02)
-      embla-carousel-fade: 9.0.0-rc02(embla-carousel@9.0.0-rc02)
-      embla-carousel-react: 9.0.0-rc02(react@19.2.8)
-      embla-carousel-wheel-gestures: 9.0.0-rc01(embla-carousel@9.0.0-rc02)
-      motion: 13.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      embla-carousel: 9.0.0-rc04
+      embla-carousel-accessibility: 9.0.0-rc04(embla-carousel@9.0.0-rc04)
+      embla-carousel-auto-height: 9.0.0-rc04(embla-carousel@9.0.0-rc04)
+      embla-carousel-auto-scroll: 9.0.0-rc04(embla-carousel@9.0.0-rc04)
+      embla-carousel-autoplay: 9.0.0-rc04(embla-carousel@9.0.0-rc04)
+      embla-carousel-class-names: 9.0.0-rc04(embla-carousel@9.0.0-rc04)
+      embla-carousel-fade: 9.0.0-rc04(embla-carousel@9.0.0-rc04)
+      embla-carousel-react: 9.0.0-rc04(react@19.2.8)
+      embla-carousel-wheel-gestures: 9.0.0-rc02(embla-carousel@9.0.0-rc04)
+      motion: 14.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
-      react-day-picker: 10.0.1(@types/react@19.2.18)(react@19.2.8)
+      react-day-picker: 10.0.2(@types/react@19.2.18)(react@19.2.8)
       react-dom: 19.2.8(react@19.2.8)
-      tailwind-merge: 3.6.0
+      tailwind-merge: 3.7.0
     optionalDependencies:
       '@types/react': 19.2.18
       tailwindcss: 4.3.3
@@ -4753,7 +4752,7 @@ snapshots:
       '@babel/core': 7.29.7(supports-color@8.1.1)
       '@babel/helper-plugin-utils': 7.29.7
 
-  '@babel/runtime@7.29.7': {}
+  '@babel/runtime@8.0.7': {}
 
   '@babel/template@7.29.7':
     dependencies:
@@ -4778,28 +4777,28 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@base-ui/react@1.7.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(date-fns@4.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@base-ui/react@1.9.0(@date-fns/tz@1.5.0)(@types/react@19.2.18)(date-fns@4.4.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@babel/runtime': 7.29.7
-      '@base-ui/utils': 0.3.2(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@babel/runtime': 8.0.7
+      '@base-ui/utils': 0.5.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@floating-ui/react-dom': 2.1.9(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@floating-ui/utils': 0.2.12
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
-      use-sync-external-store: 1.6.0(react@19.2.8)
+      use-sync-external-store: 1.7.0(react@19.2.8)
     optionalDependencies:
       '@date-fns/tz': 1.5.0
       '@types/react': 19.2.18
       date-fns: 4.4.0
 
-  '@base-ui/utils@0.3.2(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@base-ui/utils@0.5.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 8.0.7
       '@floating-ui/utils': 0.2.12
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
-      reselect: 5.2.0
-      use-sync-external-store: 1.6.0(react@19.2.8)
+      reselect: 5.3.0
+      use-sync-external-store: 1.7.0(react@19.2.8)
     optionalDependencies:
       '@types/react': 19.2.18
 
@@ -6551,46 +6550,46 @@ snapshots:
 
   electron-to-chromium@1.5.411: {}
 
-  embla-carousel-accessibility@9.0.0-rc02(embla-carousel@9.0.0-rc02):
+  embla-carousel-accessibility@9.0.0-rc04(embla-carousel@9.0.0-rc04):
     dependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-auto-height@9.0.0-rc02(embla-carousel@9.0.0-rc02):
+  embla-carousel-auto-height@9.0.0-rc04(embla-carousel@9.0.0-rc04):
     dependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-auto-scroll@9.0.0-rc02(embla-carousel@9.0.0-rc02):
+  embla-carousel-auto-scroll@9.0.0-rc04(embla-carousel@9.0.0-rc04):
     dependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-autoplay@9.0.0-rc02(embla-carousel@9.0.0-rc02):
+  embla-carousel-autoplay@9.0.0-rc04(embla-carousel@9.0.0-rc04):
     dependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-class-names@9.0.0-rc02(embla-carousel@9.0.0-rc02):
+  embla-carousel-class-names@9.0.0-rc04(embla-carousel@9.0.0-rc04):
     dependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-fade@9.0.0-rc02(embla-carousel@9.0.0-rc02):
+  embla-carousel-fade@9.0.0-rc04(embla-carousel@9.0.0-rc04):
     dependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-react@9.0.0-rc02(react@19.2.8):
+  embla-carousel-react@9.0.0-rc04(react@19.2.8):
     dependencies:
-      embla-carousel: 9.0.0-rc02
-      embla-carousel-reactive-utils: 9.0.0-rc02(embla-carousel@9.0.0-rc02)
+      embla-carousel: 9.0.0-rc04
+      embla-carousel-reactive-utils: 9.0.0-rc04(embla-carousel@9.0.0-rc04)
       react: 19.2.8
 
-  embla-carousel-reactive-utils@9.0.0-rc02(embla-carousel@9.0.0-rc02):
+  embla-carousel-reactive-utils@9.0.0-rc04(embla-carousel@9.0.0-rc04):
     dependencies:
-      embla-carousel: 9.0.0-rc02
+      embla-carousel: 9.0.0-rc04
 
-  embla-carousel-wheel-gestures@9.0.0-rc01(embla-carousel@9.0.0-rc02):
+  embla-carousel-wheel-gestures@9.0.0-rc02(embla-carousel@9.0.0-rc04):
     dependencies:
-      embla-carousel: 9.0.0-rc02
-      wheel-gestures: 2.2.48
+      embla-carousel: 9.0.0-rc04
+      wheel-gestures: 2.3.0
 
-  embla-carousel@9.0.0-rc02: {}
+  embla-carousel@9.0.0-rc04: {}
 
   emittery@0.13.1: {}
 
@@ -6896,10 +6895,10 @@ snapshots:
 
   forwarded@0.2.0: {}
 
-  framer-motion@13.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  framer-motion@14.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
-      motion-dom: 13.0.0
-      motion-utils: 13.0.0
+      motion-dom: 14.4.0
+      motion-utils: 14.1.1
       tslib: 2.8.1
     optionalDependencies:
       react: 19.2.8
@@ -8108,15 +8107,15 @@ snapshots:
 
   minipass@7.1.3: {}
 
-  motion-dom@13.0.0:
+  motion-dom@14.4.0:
     dependencies:
-      motion-utils: 13.0.0
+      motion-utils: 14.1.1
 
-  motion-utils@13.0.0: {}
+  motion-utils@14.1.1: {}
 
-  motion@13.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  motion@14.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
-      framer-motion: 13.1.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      framer-motion: 14.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       tslib: 2.8.1
     optionalDependencies:
       react: 19.2.8
@@ -8354,7 +8353,7 @@ snapshots:
       iconv-lite: 0.7.3
       unpipe: 1.0.0
 
-  react-day-picker@10.0.1(@types/react@19.2.18)(react@19.2.8):
+  react-day-picker@10.0.2(@types/react@19.2.18)(react@19.2.8):
     dependencies:
       '@date-fns/tz': 1.5.0
       date-fns: 4.4.0
@@ -8443,7 +8442,7 @@ snapshots:
 
   require-from-string@2.0.2: {}
 
-  reselect@5.2.0: {}
+  reselect@5.3.0: {}
 
   resolve-cwd@3.0.0:
     dependencies:
@@ -8721,7 +8720,7 @@ snapshots:
     dependencies:
       '@pkgr/core': 0.3.6
 
-  tailwind-merge@3.6.0: {}
+  tailwind-merge@3.7.0: {}
 
   tailwindcss@4.3.3: {}
 
@@ -8984,7 +8983,7 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  use-sync-external-store@1.6.0(react@19.2.8):
+  use-sync-external-store@1.7.0(react@19.2.8):
     dependencies:
       react: 19.2.8
 
@@ -9095,7 +9094,7 @@ snapshots:
       - postcss
       - uglify-js
 
-  wheel-gestures@2.2.48: {}
+  wheel-gestures@2.3.0: {}
 
   which@2.0.2:
     dependencies:
