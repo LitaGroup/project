@@ -1,6 +1,6 @@
 import GithubSlugger from 'github-slugger'
 
-export interface TocItem {
+export interface DocHeading {
   /** 标题层级 1-6 */
   level: number
   /** 行内链接/HTML 已剥离的标题文本（用于展示与生成 slug，与渲染后的 textContent 一致） */
@@ -25,9 +25,9 @@ export function slugifyHeading(text: string, slugger: GithubSlugger): string {
 }
 
 /** 解析 Markdown 中的 ATX 标题（跳过围栏代码块），顺序与渲染后的 h1-h6 一致 */
-export function parseDocHeadings(markdown: string): TocItem[] {
+export function parseDocHeadings(markdown: string): DocHeading[] {
   const slugger = new GithubSlugger()
-  const items: TocItem[] = []
+  const items: DocHeading[] = []
   // 当前所处围栏代码块的开始标记（``` 或 ~~~），用于跳过代码块内的 # 注释行
   let fence: string | null = null
   for (const line of markdown.split('\n')) {

@@ -1,43 +1,46 @@
-import type { TocItem } from '../lib/doc-toc'
+import { Toc, TocList, TocItem, TocLink } from '@appica/ui-react/toc'
+import type { MouseEvent } from 'react'
+import type { DocHeading } from '../lib/doc-toc'
 
-/** 文档右侧目录导航：按标题层级缩进，滚动跟随高亮，点击滚动到对应标题 */
+/** 文档右侧目录导航：基于组件库 Table of Content（自带 scroll-spy 高亮与活动指示条）。
+    外层需用 key={锚点注入轮次} 控制（重）挂载——Toc 只在注册时 getElementById，
+    而预览区标题 id 由 MutationObserver 异步注入，注入完成后挂载才能观察到目标 */
 export function DocToc({
   items,
-  activeSlug,
   onSelect,
 }: {
-  items: TocItem[]
-  activeSlug: string | null
+  items: DocHeading[]
   onSelect: (slug: string) => void
 }) {
-  if (items.length === 0) return null
-  // 以文档中最小的标题层级为基准缩进，避免 h2 开头的文档整体缩进一格
+  // 以文档中最小的标题层级为基准映射到组件的 depth（2-6），保证最浅层级顶格
   const minLevel = Math.min(...items.map((item) => item.level))
+  // 点击拦截：编辑页签下预览隐藏、原生锚点无法滚动，统一走 scrollToHeading（内部会先切预览）
+  const handleClick = (event: MouseEvent<HTMLElement>) => {
+    const link = (event.target as HTMLElement | null)?.closest?.('a[href^="#"]')
+    if (!link) return
+    event.preventDefault()
+    onSelect(decodeURIComponent(link.getAttribute('href')!.slice(1)))
+  }
   return (
-    <nav aria-label="文档目录" className="hidden w-60 shrink-0 overflow-auto py-1 lg:block">
+    <Toc
+      aria-label="文档目录"
+      onClick={handleClick}
+      className="hidden w-56 shrink-0 overflow-auto py-1 lg:block"
+    >
       <p className="px-2 pb-1 text-xs font-medium text-foreground-muted">目录</p>
-      <ul className="flex flex-col gap-0.5">
-        {items.map((item) => {
-          const active = item.slug === activeSlug
-          return (
-            <li key={item.slug}>
-              <button
-                type="button"
-                title={item.text}
-                onClick={() => onSelect(item.slug)}
-                className={`block w-full truncate rounded py-1 pr-2 text-left text-xs leading-5 hover:text-foreground-intense ${
-                  active
-                    ? 'bg-background-muted font-medium text-foreground-intense'
-                    : 'text-foreground-muted'
-                }`}
-                style={{ paddingLeft: 8 + (item.level - minLevel) * 12 }}
-              >
-                {item.text}
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-    </nav>
+      <TocList>
+        {items.map((item) => (
+          <TocItem key={item.slug}>
+            <TocLink
+              href={`#${item.slug}`}
+              depth={Math.min(6, item.level - minLevel + 2)}
+              className="truncate"
+            >
+              {item.text}
+            </TocLink>
+          </TocItem>
+        ))}
+      </TocList>
+    </Toc>
   )
 }

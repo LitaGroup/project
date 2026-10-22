@@ -30,29 +30,22 @@ const plugins = [gfm()]
 /** 预览区标题选择器：仅取 markdown-body 直接子级（排除引用块内的标题，与目录解析口径一致） */
 const HEADING_SELECTOR = '.markdown-body > :is(h1, h2, h3, h4, h5, h6)'
 
-/** 从元素向上找第一个可滚动祖先（预览区滚动容器由 bytemd CSS 决定，运行时探测最稳妥） */
-function findScrollParent(el: HTMLElement): HTMLElement | null {
-  let current = el.parentElement
-  while (current) {
-    const { overflowY } = window.getComputedStyle(current)
-    if ((overflowY === 'auto' || overflowY === 'scroll') && current.scrollHeight > current.clientHeight) {
-      return current
-    }
-    current = current.parentElement
-  }
-  return null
-}
-
 /** 给预览区标题补 GitHub 风格锚点 id 与悬停 # 链接（幂等，供 MutationObserver 反复调用）。
-    slug 直接对渲染后的 textContent 计算（与目录侧对行内剥离后文本计算的结果一致） */
-function applyHeadingAnchors(box: HTMLElement, onAnchorClick: (slug: string) => void) {
+    slug 直接对渲染后的 textContent 计算（与目录侧对行内剥离后文本计算的结果一致）。
+    返回本轮是否产生了修改（设置了 id 或新增锚点）——Toc 的 scroll-spy 只在挂载时按
+    id 查找目标，标题 id 注入/重建后需要据此重挂载目录 */
+function applyHeadingAnchors(box: HTMLElement, onAnchorClick: (slug: string) => void): boolean {
   const preview = box.querySelector<HTMLElement>('.bytemd-preview')
-  if (!preview) return
+  if (!preview) return false
   const slugger = new GithubSlugger()
+  let changed = false
   for (const el of preview.querySelectorAll<HTMLElement>(HEADING_SELECTOR)) {
     const slug = slugger.slug(el.textContent ?? '')
     if (!slug) continue
-    if (el.id !== slug) el.id = slug
+    if (el.id !== slug) {
+      el.id = slug
+      changed = true
+    }
     if (el.querySelector('.doc-heading-anchor')) continue
     const anchor = document.createElement('a')
     anchor.className = 'doc-heading-anchor'
@@ -64,7 +57,9 @@ function applyHeadingAnchors(box: HTMLElement, onAnchorClick: (slug: string) => 
       onAnchorClick(slug)
     })
     el.appendChild(anchor)
+    changed = true
   }
+  return changed
 }
 
 export function DocumentDetailPage() {
@@ -76,9 +71,9 @@ export function DocumentDetailPage() {
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const editorBoxRef = useRef<HTMLDivElement>(null)
-  // 正文标题目录（随编辑实时更新）与滚动跟随高亮的当前标题
+  // 正文标题目录（随编辑实时更新）；锚点注入轮次——Toc 组件据此（重）挂载以观察到已注入 id 的标题
   const headings = useMemo(() => parseDocHeadings(draft), [draft])
-  const [activeSlug, setActiveSlug] = useState<string | null>(null)
+  const [anchorEpoch, setAnchorEpoch] = useState(0)
   const isFeishu = doc?.source === '飞书'
   const isApipost = doc?.source === 'apipost'
   const isExternal = isFeishu || isApipost
@@ -132,7 +127,6 @@ export function DocumentDetailPage() {
       ).find((el) => el.id === slug)
       if (target && target.offsetParent !== null) {
         target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        setActiveSlug(slug)
         return
       }
       // 预览尚未渲染出锚点（切页签/长文档渲染需要时间），短暂重试
@@ -173,69 +167,30 @@ export function DocumentDetailPage() {
     }
   }, [doc, isApipost, scrollToHeading])
 
-  // 预览区标题锚点 + 滚动高亮：ByteMD 未暴露渲染钩子，用 MutationObserver 在预览重渲染后补锚点；
-  // scroll 不冒泡，用捕获阶段监听容器以接住内层滚动
+  // 预览区标题锚点：ByteMD 未暴露渲染钩子，用 MutationObserver 在预览重渲染后补 id 与 # 链接；
+  // 有改动时递增 anchorEpoch 让右侧 Toc 重挂载（Toc 只在挂载时按 id 查找观察目标）
   useEffect(() => {
     if (!doc || isApipost) return
     const box = editorBoxRef.current
     if (!box) return
-    setActiveSlug(null)
 
     let applyRaf = 0
     const applyAnchors = () => {
       applyRaf = 0
-      applyHeadingAnchors(box, handleAnchorClick)
+      if (applyHeadingAnchors(box, handleAnchorClick)) {
+        setAnchorEpoch((epoch) => epoch + 1)
+      }
     }
     const scheduleApply = () => {
       if (!applyRaf) applyRaf = requestAnimationFrame(applyAnchors)
     }
 
-    let scrollRaf = 0
-    const updateActive = () => {
-      scrollRaf = 0
-      const preview = box.querySelector<HTMLElement>('.bytemd-preview')
-      if (!preview || preview.offsetParent === null) return
-      const headingEls = Array.from(preview.querySelectorAll<HTMLElement>(HEADING_SELECTOR)).filter(
-        (el) => el.id,
-      )
-      if (headingEls.length === 0) return
-      const reference = findScrollParent(headingEls[0]) ?? preview
-      const top = reference.getBoundingClientRect().top
-      let current = headingEls[0].id
-      for (const el of headingEls) {
-        if (el.getBoundingClientRect().top - top <= 96) current = el.id
-        else break
-      }
-      // 滚动到底时高亮最后一个标题（末段不足一屏时保持反馈）
-      if (
-        reference.scrollTop + reference.clientHeight >=
-        reference.scrollHeight - 2
-      ) {
-        current = headingEls[headingEls.length - 1].id
-      }
-      setActiveSlug(current)
-    }
-    const onScroll = () => {
-      if (!scrollRaf) scrollRaf = requestAnimationFrame(updateActive)
-    }
-    const onClick = (event: MouseEvent) => {
-      // 切换编辑/预览页签后重新定位高亮
-      if ((event.target as HTMLElement | null)?.closest?.('.bytemd-toolbar-tab')) {
-        window.setTimeout(onScroll, 50)
-      }
-    }
-
     const observer = new MutationObserver(scheduleApply)
     observer.observe(box, { childList: true, subtree: true })
     applyAnchors()
-    box.addEventListener('scroll', onScroll, { capture: true, passive: true })
-    box.addEventListener('click', onClick, { capture: true })
     return () => {
       observer.disconnect()
-      box.removeEventListener('scroll', onScroll, { capture: true })
-      box.removeEventListener('click', onClick, { capture: true })
       if (applyRaf) cancelAnimationFrame(applyRaf)
-      if (scrollRaf) cancelAnimationFrame(scrollRaf)
     }
   }, [doc, isApipost, handleAnchorClick])
 
@@ -389,8 +344,10 @@ export function DocumentDetailPage() {
                   }}
                 />
               </div>
-              {/* 右侧标题目录：滚动跟随高亮，点击滚动定位 */}
-              <DocToc items={headings} activeSlug={activeSlug} onSelect={handleTocSelect} />
+              {/* 右侧标题目录：组件库 Toc（scroll-spy 高亮），锚点注入完成后挂载并随改动重挂载 */}
+              {anchorEpoch > 0 && (
+                <DocToc key={anchorEpoch} items={headings} onSelect={handleTocSelect} />
+              )}
             </div>
             {isFeishu && (
               <p className="text-sm text-foreground-muted">
