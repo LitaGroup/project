@@ -16,6 +16,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "bytemd": "^1.22.0",
     "github-markdown-css": "^5.9.0",
+    "github-slugger": "^2.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",

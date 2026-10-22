@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import GithubSlugger from 'github-slugger'
 import { Editor } from '@bytemd/react'
 import gfm from '@bytemd/plugin-gfm'
 import zhHans from 'bytemd/locales/zh_Hans.json'
@@ -19,10 +20,52 @@ import {
   AlertDialogClose,
 } from '@appica/ui-react/alert-dialog'
 import { api, documentSourceLabel, type DocumentType, type ProjectDocument } from '../lib/api'
+import { parseDocHeadings } from '../lib/doc-toc'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { ApipostDocViewer } from '../components/ApipostDocViewer'
+import { DocToc } from '../components/DocToc'
 
 const plugins = [gfm()]
+
+/** 预览区标题选择器：仅取 markdown-body 直接子级（排除引用块内的标题，与目录解析口径一致） */
+const HEADING_SELECTOR = '.markdown-body > :is(h1, h2, h3, h4, h5, h6)'
+
+/** 从元素向上找第一个可滚动祖先（预览区滚动容器由 bytemd CSS 决定，运行时探测最稳妥） */
+function findScrollParent(el: HTMLElement): HTMLElement | null {
+  let current = el.parentElement
+  while (current) {
+    const { overflowY } = window.getComputedStyle(current)
+    if ((overflowY === 'auto' || overflowY === 'scroll') && current.scrollHeight > current.clientHeight) {
+      return current
+    }
+    current = current.parentElement
+  }
+  return null
+}
+
+/** 给预览区标题补 GitHub 风格锚点 id 与悬停 # 链接（幂等，供 MutationObserver 反复调用）。
+    slug 直接对渲染后的 textContent 计算（与目录侧对行内剥离后文本计算的结果一致） */
+function applyHeadingAnchors(box: HTMLElement, onAnchorClick: (slug: string) => void) {
+  const preview = box.querySelector<HTMLElement>('.bytemd-preview')
+  if (!preview) return
+  const slugger = new GithubSlugger()
+  for (const el of preview.querySelectorAll<HTMLElement>(HEADING_SELECTOR)) {
+    const slug = slugger.slug(el.textContent ?? '')
+    if (!slug) continue
+    if (el.id !== slug) el.id = slug
+    if (el.querySelector('.doc-heading-anchor')) continue
+    const anchor = document.createElement('a')
+    anchor.className = 'doc-heading-anchor'
+    anchor.href = `#${encodeURIComponent(slug)}`
+    anchor.textContent = '#'
+    anchor.title = '复制标题链接'
+    anchor.addEventListener('click', (event) => {
+      event.preventDefault()
+      onAnchorClick(slug)
+    })
+    el.appendChild(anchor)
+  }
+}
 
 export function DocumentDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -33,6 +76,12 @@ export function DocumentDetailPage() {
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const editorBoxRef = useRef<HTMLDivElement>(null)
+  // 正文标题目录（随编辑实时更新）与滚动跟随高亮的当前标题
+  const headings = useMemo(() => parseDocHeadings(draft), [draft])
+  const [activeSlug, setActiveSlug] = useState<string | null>(null)
+  const isFeishu = doc?.source === '飞书'
+  const isApipost = doc?.source === 'apipost'
+  const isExternal = isFeishu || isApipost
 
   const reload = useCallback(() => {
     if (!id) return
@@ -57,21 +106,141 @@ export function DocumentDetailPage() {
       .catch(() => setProjectName(null))
   }, [doc?.projectId])
 
-  // 飞书文档进入后默认切到「预览」页签（ByteMD 未提供默认页签 prop，
-  // 模拟点击页签走内部状态，后续重渲染不会被重置）；非飞书文档保持默认「编辑」
+  // 所有文档进入后默认切到「预览」页签（ByteMD 未提供默认页签 prop，
+  // 模拟点击页签走内部状态，后续重渲染不会被重置）
   useEffect(() => {
-    if (!doc || doc.source !== '飞书') return
+    if (!doc || isApipost) return
     const previewTab =
       editorBoxRef.current?.querySelectorAll('.bytemd-toolbar-tab')[1]
     if (previewTab instanceof HTMLElement) previewTab.click()
-  }, [doc])
+  }, [doc, isApipost])
+
+  // 滚动到指定标题：预览页签未显示时先切到预览，再轮询等渲染完成后平滑滚动
+  const scrollToHeading = useCallback((slug: string) => {
+    const box = editorBoxRef.current
+    if (!box || !slug) return
+    const preview = box.querySelector<HTMLElement>('.bytemd-preview')
+    if (!preview || preview.offsetParent === null) {
+      const previewTab = box.querySelectorAll('.bytemd-toolbar-tab')[1]
+      if (previewTab instanceof HTMLElement) previewTab.click()
+    }
+    let attempts = 0
+    const tryScroll = () => {
+      attempts += 1
+      const target = Array.from(
+        box.querySelectorAll<HTMLElement>(HEADING_SELECTOR),
+      ).find((el) => el.id === slug)
+      if (target && target.offsetParent !== null) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        setActiveSlug(slug)
+        return
+      }
+      // 预览尚未渲染出锚点（切页签/长文档渲染需要时间），短暂重试
+      if (attempts < 20) window.setTimeout(tryScroll, 120)
+    }
+    tryScroll()
+  }, [])
+
+  // 标题悬停 # 链接点击：地址栏带上锚点（replaceState 不产生历史记录）+ 复制完整链接 + 滚动定位
+  const handleAnchorClick = useCallback(
+    (slug: string) => {
+      window.history.replaceState(null, '', `#${encodeURIComponent(slug)}`)
+      const url = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(slug)}`
+      void navigator.clipboard?.writeText(url).catch(() => {})
+      scrollToHeading(slug)
+    },
+    [scrollToHeading],
+  )
+
+  // 目录点击：与锚点一致更新地址栏并滚动（不复制）
+  const handleTocSelect = useCallback(
+    (slug: string) => {
+      window.history.replaceState(null, '', `#${encodeURIComponent(slug)}`)
+      scrollToHeading(slug)
+    },
+    [scrollToHeading],
+  )
+
+  // URL 带 #锚点 进入时，默认预览后滚动到对应标题（如 /documents/98#2-进度刷新消息box_bless_refresh）
+  useEffect(() => {
+    if (!doc || isApipost) return
+    const raw = window.location.hash.replace(/^#/, '')
+    if (!raw) return
+    try {
+      scrollToHeading(decodeURIComponent(raw))
+    } catch {
+      scrollToHeading(raw)
+    }
+  }, [doc, isApipost, scrollToHeading])
+
+  // 预览区标题锚点 + 滚动高亮：ByteMD 未暴露渲染钩子，用 MutationObserver 在预览重渲染后补锚点；
+  // scroll 不冒泡，用捕获阶段监听容器以接住内层滚动
+  useEffect(() => {
+    if (!doc || isApipost) return
+    const box = editorBoxRef.current
+    if (!box) return
+    setActiveSlug(null)
+
+    let applyRaf = 0
+    const applyAnchors = () => {
+      applyRaf = 0
+      applyHeadingAnchors(box, handleAnchorClick)
+    }
+    const scheduleApply = () => {
+      if (!applyRaf) applyRaf = requestAnimationFrame(applyAnchors)
+    }
+
+    let scrollRaf = 0
+    const updateActive = () => {
+      scrollRaf = 0
+      const preview = box.querySelector<HTMLElement>('.bytemd-preview')
+      if (!preview || preview.offsetParent === null) return
+      const headingEls = Array.from(preview.querySelectorAll<HTMLElement>(HEADING_SELECTOR)).filter(
+        (el) => el.id,
+      )
+      if (headingEls.length === 0) return
+      const reference = findScrollParent(headingEls[0]) ?? preview
+      const top = reference.getBoundingClientRect().top
+      let current = headingEls[0].id
+      for (const el of headingEls) {
+        if (el.getBoundingClientRect().top - top <= 96) current = el.id
+        else break
+      }
+      // 滚动到底时高亮最后一个标题（末段不足一屏时保持反馈）
+      if (
+        reference.scrollTop + reference.clientHeight >=
+        reference.scrollHeight - 2
+      ) {
+        current = headingEls[headingEls.length - 1].id
+      }
+      setActiveSlug(current)
+    }
+    const onScroll = () => {
+      if (!scrollRaf) scrollRaf = requestAnimationFrame(updateActive)
+    }
+    const onClick = (event: MouseEvent) => {
+      // 切换编辑/预览页签后重新定位高亮
+      if ((event.target as HTMLElement | null)?.closest?.('.bytemd-toolbar-tab')) {
+        window.setTimeout(onScroll, 50)
+      }
+    }
+
+    const observer = new MutationObserver(scheduleApply)
+    observer.observe(box, { childList: true, subtree: true })
+    applyAnchors()
+    box.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    box.addEventListener('click', onClick, { capture: true })
+    return () => {
+      observer.disconnect()
+      box.removeEventListener('scroll', onScroll, { capture: true })
+      box.removeEventListener('click', onClick, { capture: true })
+      if (applyRaf) cancelAnimationFrame(applyRaf)
+      if (scrollRaf) cancelAnimationFrame(scrollRaf)
+    }
+  }, [doc, isApipost, handleAnchorClick])
 
   if (error) return <p>加载失败:{error}</p>
   if (!doc) return <p>加载中…</p>
-
-  const isFeishu = doc.source === '飞书'
-  const isApipost = doc.source === 'apipost'
-  const isExternal = isFeishu || isApipost
 
   const handleSave = () => {
     setSaving(true)
@@ -200,24 +369,28 @@ export function DocumentDetailPage() {
           </>
         ) : (
           <>
-            <div
-              ref={editorBoxRef}
-              className="doc-editor min-h-0 flex-1 overflow-auto rounded-md border border-border-strong bg-background"
-            >
-              {/* 统一用 Editor；飞书导入的文档正文不允许本地修改：readOnly 禁用编辑、默认预览页签，内容变更走「更新同步」。
-                  key 保证切换文档时编辑器重新挂载，页签/只读状态不串文档 */}
-              <Editor
-                key={doc.id}
-                mode="tab"
-                value={draft}
-                plugins={plugins}
-                locale={zhHans}
-                editorConfig={isFeishu ? { readOnly: true } : undefined}
-                onChange={(v) => {
-                  setDraft(v)
-                  setDirty(true)
-                }}
-              />
+            <div className="flex min-h-0 flex-1 gap-4">
+              <div
+                ref={editorBoxRef}
+                className="doc-editor min-h-0 flex-1 overflow-auto rounded-md border border-border-strong bg-background"
+              >
+                {/* 统一用 Editor；飞书导入的文档正文不允许本地修改：readOnly 禁用编辑，内容变更走「更新同步」。
+                    key 保证切换文档时编辑器重新挂载，页签/只读状态不串文档 */}
+                <Editor
+                  key={doc.id}
+                  mode="tab"
+                  value={draft}
+                  plugins={plugins}
+                  locale={zhHans}
+                  editorConfig={isFeishu ? { readOnly: true } : undefined}
+                  onChange={(v) => {
+                    setDraft(v)
+                    setDirty(true)
+                  }}
+                />
+              </div>
+              {/* 右侧标题目录：滚动跟随高亮，点击滚动定位 */}
+              <DocToc items={headings} activeSlug={activeSlug} onSelect={handleTocSelect} />
             </div>
             {isFeishu && (
               <p className="text-sm text-foreground-muted">
