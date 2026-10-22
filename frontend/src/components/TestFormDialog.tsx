@@ -86,14 +86,8 @@ export function TestFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {test ? (
-          <Button variant="outline" size="sm">
-            编辑
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm">添加测试</Button>
-        )}
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+        {test ? '编辑' : '添加测试'}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

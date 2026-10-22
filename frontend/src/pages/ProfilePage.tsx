@@ -155,11 +155,7 @@ export LITA_PROJECT_TOKEN=${tokenValue}`
               {copied ? '已复制' : '复制'}
             </Button>
             <AlertDialog>
-              <AlertDialogTrigger>
-                <Button variant="outline" size="sm" disabled={!token}>
-                  重置
-                </Button>
-              </AlertDialogTrigger>
+              <AlertDialogTrigger render={<Button variant="outline" size="sm" disabled={!token} />}>重置</AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>重置 Agent 访问令牌</AlertDialogTitle>

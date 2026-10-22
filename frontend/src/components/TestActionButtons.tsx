@@ -105,11 +105,7 @@ export function DeleteTestButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除测试</AlertDialogTitle>

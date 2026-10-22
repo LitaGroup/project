@@ -282,11 +282,7 @@ function DeleteDefectButton({
   const [error, setError] = useState<string | null>(null)
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除缺陷</AlertDialogTitle>

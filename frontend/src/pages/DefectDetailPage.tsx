@@ -723,11 +723,7 @@ function EditContentDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        <Button variant="outline" size="sm" className="w-full">
-          编辑内容
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button variant="outline" size="sm" className="w-full" />}>编辑内容</DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>编辑缺陷内容</DialogTitle>
@@ -882,11 +878,7 @@ function AddRecordDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        <Button variant="outline" size="sm">
-          添加记录
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>添加记录</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>添加变更记录</DialogTitle>

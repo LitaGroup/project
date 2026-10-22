@@ -570,14 +570,8 @@ function CheckFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {check ? (
-          <Button variant="outline" size="sm">
-            编辑
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm">添加检查</Button>
-        )}
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+        {check ? '编辑' : '添加检查'}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -760,11 +754,7 @@ function DeleteCheckButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除检查</AlertDialogTitle>
@@ -1468,9 +1458,7 @@ function CreateDocumentDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger>
-        <Button variant="outline" size="sm">创建文档</Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>创建文档</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>创建文档</DialogTitle>
@@ -1573,9 +1561,7 @@ function ImportDocumentDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger>
-        <Button size="sm">导入文档</Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="sm" />}>导入文档</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>导入文档</DialogTitle>
@@ -1843,14 +1829,8 @@ function ExportFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {exportItem ? (
-          <Button variant="outline" size="sm">
-            编辑
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm">添加导出</Button>
-        )}
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+        {exportItem ? '编辑' : '添加导出'}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -2007,11 +1987,7 @@ function DeleteExportButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除导出</AlertDialogTitle>
@@ -2254,14 +2230,8 @@ export function TaskFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {task ? (
-          <Button variant="outline" size="sm">
-            编辑
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm">添加任务</Button>
-        )}
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+        {task ? '编辑' : '添加任务'}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -2340,11 +2310,7 @@ export function DeleteTaskButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除任务</AlertDialogTitle>
@@ -2501,11 +2467,7 @@ function DeleteDefectButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除缺陷</AlertDialogTitle>
@@ -2744,14 +2706,8 @@ function ResourceFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {resource ? (
-          <Button variant="outline" size="sm">
-            编辑
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm">添加资源</Button>
-        )}
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+        {resource ? '编辑' : '添加资源'}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -2919,11 +2875,7 @@ function DeleteResourceButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除资源</AlertDialogTitle>
@@ -3132,14 +3084,8 @@ function MilestoneFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {milestone ? (
-          <Button variant="outline" size="sm">
-            编辑
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm">添加节点</Button>
-        )}
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+        {milestone ? '编辑' : '添加节点'}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -3235,11 +3181,7 @@ function DeleteMilestoneButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除节点</AlertDialogTitle>
@@ -3557,14 +3499,8 @@ function BranchFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {branch ? (
-          <Button variant="outline" size="sm">
-            编辑
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm">添加分支</Button>
-        )}
+      <DialogTrigger render={<Button variant="outline" size="sm" />}>
+        {branch ? '编辑' : '添加分支'}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -3680,11 +3616,7 @@ function DeleteCodeBranchButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除代码分支</AlertDialogTitle>
@@ -4319,9 +4251,7 @@ function SubmitReleaseDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        <Button className="w-full">提测</Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button className="w-full" />}>提测</DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>项目提测</DialogTitle>

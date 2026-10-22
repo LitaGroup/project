@@ -416,9 +416,7 @@ function CreateProjectDialog({ onCreated }: { onCreated: () => void }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger>
-        <Button size="sm">新建项目</Button>
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="sm" />}>新建项目</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>新建项目</DialogTitle>
@@ -484,11 +482,7 @@ function DeleteProjectButton({
 }) {
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
-        <Button variant="outline" size="sm">
-          删除
-        </Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>删除项目</AlertDialogTitle>

@@ -56,7 +56,7 @@ export function NewDefectDialog({
 }: {
   projects: Pick<Project, 'id' | 'name'>[]
   preset?: NewDefectPreset
-  trigger?: React.ReactNode
+  trigger?: React.ReactElement
   onCreated?: (defect: Defect) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -129,11 +129,7 @@ export function NewDefectDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger>
-        {trigger ?? (
-          <Button size="sm">新建缺陷</Button>
-        )}
-      </DialogTrigger>
+      <DialogTrigger render={trigger ?? <Button size="sm">新建缺陷</Button>} />
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>新建缺陷</DialogTitle>
