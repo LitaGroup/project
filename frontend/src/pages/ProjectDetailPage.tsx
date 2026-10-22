@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Card,
@@ -3280,7 +3280,7 @@ function BranchesPanel({
         <TableHeader>
           <TableRow>
             <TableHead>仓库</TableHead>
-            <TableHead className="w-40">分支</TableHead>
+            <TableHead className="w-56">分支</TableHead>
             <TableHead className="w-20 text-center">归类</TableHead>
             <TableHead>备注</TableHead>
             <TableHead className="w-32 text-center">操作</TableHead>
@@ -3289,7 +3289,7 @@ function BranchesPanel({
         <TableBody>
           {branches.map((b) => (
             <TableRow key={b.id}>
-              <TableCell className="max-w-xs truncate" title={b.repo}>
+              <TableCell className="max-w-48 truncate" title={b.repo}>
                 <a
                   href={`https://github.com/${b.repo}`}
                   target="_blank"
@@ -3305,7 +3305,7 @@ function BranchesPanel({
               <TableCell className="text-center">
                 <CodeBranchCategoryBadge category={b.category} />
               </TableCell>
-              <TableCell className="max-w-md truncate" title={b.remark ?? ''}>
+              <TableCell className="max-w-lg truncate" title={b.remark ?? ''}>
                 {b.remark ?? '—'}
               </TableCell>
               <TableCell className="text-center">
@@ -3363,6 +3363,99 @@ function repoPlatformCategory(platform: RepoPlatform): CodeBranchCategory {
   }
 }
 
+/**
+ * GitHub 仓库候选（弹窗用）：打开时装载最近更新的前 50 条作初始候选；
+ * 输入时防抖走服务端联想（后端带 q 在全量清单里匹配，久未更新的仓库也能命中，
+ * 如按更新时间排在 50 名之外的 funbit-api）。联想结果经 filteredItems 渲染。
+ * confirmExists 供提交校验：初始候选只是白名单的子集，不能直接 includes 判存在。
+ */
+function useGithubRepoCandidates() {
+  const [repoOptions, setRepoOptions] = useState<string[]>([])
+  const [reposState, setReposState] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle')
+  /** 是否有生效的联想结果（null = 未联想，展示初始候选） */
+  const [repoResults, setRepoResults] = useState<string[] | null>(null)
+  /** 见过的仓库全名（小写）：初始候选与每次联想结果并入，提交校验先查它 */
+  const knownRef = useRef<Set<string>>(new Set())
+  const timerRef = useRef<number | null>(null)
+  const seqRef = useRef(0)
+
+  const absorb = (repos: GithubRepo[]) => {
+    for (const r of repos) knownRef.current.add(r.fullName.toLowerCase())
+  }
+
+  /** 弹窗打开时装载初始候选（最近更新前 50 条） */
+  const load = useCallback(() => {
+    setReposState('loading')
+    api
+      .searchGithubRepos()
+      .then((repos: GithubRepo[]) => {
+        setRepoOptions(repos.map((r) => r.fullName))
+        absorb(repos)
+        setReposState('ready')
+      })
+      .catch(() => setReposState('error'))
+  }, [])
+
+  /** 输入联想：300ms 防抖；清空输入回到初始候选 */
+  const search = useCallback((q: string) => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+    const keyword = q.trim()
+    if (!keyword) {
+      seqRef.current += 1
+      setRepoResults(null)
+      return
+    }
+    timerRef.current = window.setTimeout(() => {
+      const seq = ++seqRef.current
+      api
+        .searchGithubRepos(keyword)
+        .then((repos: GithubRepo[]) => {
+          if (seq !== seqRef.current) return
+          absorb(repos)
+          setRepoResults(repos.map((r) => r.fullName))
+        })
+        .catch(() => {
+          // 联想失败回退初始候选的本地过滤，不阻塞输入
+          if (seq !== seqRef.current) return
+          setRepoResults(null)
+        })
+    }, 300)
+  }, [])
+
+  /** 提交校验兜底：没见过仓库名时实时查一次（粘贴后直接提交等未触发联想的场景） */
+  const confirmExists = useCallback(async (fullName: string) => {
+    const key = fullName.trim().toLowerCase()
+    if (!key) return false
+    if (knownRef.current.has(key)) return true
+    try {
+      const repos = await api.searchGithubRepos(fullName.trim())
+      absorb(repos)
+      return repos.some((r) => r.fullName.toLowerCase() === key)
+    } catch {
+      return false
+    }
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+    },
+    [],
+  )
+
+  return {
+    repoOptions,
+    reposState,
+    /** 渲染用：有联想结果时给 Autocomplete 的 filteredItems，否则 undefined 走内置过滤 */
+    repoFilteredItems: repoResults ?? undefined,
+    load,
+    search,
+    confirmExists,
+  }
+}
+
 /** 新建/编辑代码分支：仓库联想（组织下搜索）→ 分支联想（该仓库全部分支）→ 归类 */
 function BranchFormDialog({
   projectId,
@@ -3376,7 +3469,12 @@ function BranchFormDialog({
 }) {
   const [open, setOpen] = useState(false)
   const [repo, setRepo] = useState('')
-  const [repoOptions, setRepoOptions] = useState<string[]>([])
+  const {
+    repoOptions,
+    repoFilteredItems,
+    load: loadRepoOptions,
+    search: searchRepoOptions,
+  } = useGithubRepoCandidates()
   const [branchName, setBranchName] = useState('')
   const [branchOptions, setBranchOptions] = useState<string[]>([])
   const [category, setCategory] = useState<CodeBranchCategory>('其它')
@@ -3425,10 +3523,7 @@ function BranchFormDialog({
       setRemark(branch?.remark ?? '')
       setError(null)
       setBranchOptions([])
-      api
-        .searchGithubRepos()
-        .then((repos: GithubRepo[]) => setRepoOptions(repos.map((r) => r.fullName)))
-        .catch(() => setRepoOptions([]))
+      loadRepoOptions()
       if (branch?.repo) loadBranchOptions(branch.repo)
     }
   }
@@ -3481,10 +3576,12 @@ function BranchFormDialog({
               仓库（输入过滤，可选组织 LitaGroup 下任意仓库）
               <Autocomplete
                 items={repoOptions}
+                filteredItems={repoFilteredItems}
                 value={repo}
                 onValueChange={(v) => {
                   const next = v as string
                   setRepo(next)
+                  searchRepoOptions(next)
                   setBranchOptions([])
                   loadBranchOptions(next)
                   suggestCategory(next)
@@ -3620,10 +3717,14 @@ function ProjectBranchManageDialog({
 }) {
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<{ repo: string; branch: string }[]>([])
-  const [repoOptions, setRepoOptions] = useState<string[]>([])
-  const [reposState, setReposState] = useState<'loading' | 'ready' | 'error'>(
-    'loading',
-  )
+  const {
+    repoOptions,
+    reposState,
+    repoFilteredItems,
+    load: loadRepoOptions,
+    search: searchRepoOptions,
+    confirmExists,
+  } = useGithubRepoCandidates()
   const [branchOptions, setBranchOptions] = useState<Record<string, string[]>>(
     {},
   )
@@ -3649,14 +3750,7 @@ function ProjectBranchManageDialog({
       setError(null)
       setDeletingId(null)
       setBranchOptions({})
-      setReposState('loading')
-      api
-        .searchGithubRepos()
-        .then((repos: GithubRepo[]) => {
-          setRepoOptions(repos.map((r) => r.fullName))
-          setReposState('ready')
-        })
-        .catch(() => setReposState('error'))
+      loadRepoOptions()
     }
   }
 
@@ -3681,18 +3775,14 @@ function ProjectBranchManageDialog({
     if (filled.some((r) => !r.repo.trim() || !r.branch.trim())) {
       return '仓库与分支需同时填写'
     }
-    if (reposState === 'loading') return '正在加载 GitHub 仓库列表，请稍候重试'
     if (reposState === 'error') {
       return '无法加载 GitHub 仓库列表，请检查 GitHub 集成配置'
     }
+    if (reposState !== 'ready') return '正在加载 GitHub 仓库列表，请稍候重试'
     for (const r of filled) {
-      const repo = r.repo.trim()
-      if (!repoOptions.includes(repo)) {
-        return `仓库不存在或不属于组织：${repo}`
-      }
-      const opts = branchOptions[repo]
+      const opts = branchOptions[r.repo]
       if (opts && !opts.includes(r.branch.trim())) {
-        return `分支不存在：${repo} @ ${r.branch.trim()}`
+        return `分支不存在：${r.repo} @ ${r.branch.trim()}`
       }
     }
     const seen = new Set<string>()
@@ -3720,6 +3810,12 @@ function ProjectBranchManageDialog({
       .map((r) => ({ repo: r.repo.trim(), branch: r.branch.trim() }))
     setSaving(true)
     try {
+      // 仓库存在性不靠初始候选（仅最近更新前 50 条）includes 判断，逐个实时确认
+      for (const r of filled) {
+        if (!(await confirmExists(r.repo))) {
+          throw new Error(`仓库不存在或不属于组织：${r.repo}`)
+        }
+      }
       for (const r of filled) {
         await api.createCodeBranch({ projectId: project.id, ...r })
       }
@@ -3789,6 +3885,7 @@ function ProjectBranchManageDialog({
                     <div className="flex-1">
                       <Autocomplete
                         items={repoOptions}
+                        filteredItems={repoFilteredItems}
                         value={row.repo}
                         onValueChange={(v) => {
                           const next = v as string
@@ -3796,6 +3893,7 @@ function ProjectBranchManageDialog({
                             repo: next,
                             branch: row.repo === next ? row.branch : '',
                           })
+                          searchRepoOptions(next)
                           loadBranchOptions(next)
                         }}
                         clearable
@@ -4107,10 +4205,15 @@ function SubmitReleaseDialog({
   const [branches, setBranches] = useState<ReleaseBranch[]>([])
   const [testers, setTesters] = useState<string[]>([])
   const [userNames, setUserNames] = useState<string[]>([])
-  // GitHub 仓库候选（组织内），用于代码分支联想与校验
-  const [repoOptions, setRepoOptions] = useState<string[]>([])
-  // 仓库列表加载状态：idle/loading/ready/error（error 时无从校验，禁止提交带分支的提测）
-  const [reposState, setReposState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  // GitHub 仓库候选（组织内）：输入联想 + 提交校验（见 useGithubRepoCandidates）
+  const {
+    repoOptions,
+    reposState,
+    repoFilteredItems,
+    load: loadRepoOptions,
+    search: searchRepoOptions,
+    confirmExists,
+  } = useGithubRepoCandidates()
   // 各仓库的分支候选（key = 仓库全名），供分支联想与校验
   const [branchOptions, setBranchOptions] = useState<Record<string, string[]>>({})
   const [submittedAt, setSubmittedAt] = useState('')
@@ -4147,15 +4250,7 @@ function SubmitReleaseDialog({
       setSubmittedAt(new Date().toLocaleString())
       setError(null)
       setBranchOptions({})
-      setRepoOptions([])
-      setReposState('loading')
-      api
-        .searchGithubRepos()
-        .then((repos) => {
-          setRepoOptions(repos.map((r) => r.fullName))
-          setReposState('ready')
-        })
-        .catch(() => setReposState('error'))
+      loadRepoOptions()
       for (const b of initial) loadBranchOptions(b.repo)
       api
         .listUsers()
@@ -4176,12 +4271,10 @@ function SubmitReleaseDialog({
         return '代码分支需同时选择仓库与分支'
       }
     }
-    if (reposState === 'loading') return '正在加载 GitHub 仓库列表，请稍候重试'
     if (reposState === 'error') {
       return '无法加载 GitHub 仓库列表，请检查 GitHub 集成配置后再选择代码分支'
     }
-    const badRepo = rows.find((b) => !repoOptions.includes(b.repo.trim()))
-    if (badRepo) return `仓库不存在或不属于组织：${badRepo.repo.trim()}`
+    if (reposState !== 'ready') return '正在加载 GitHub 仓库列表，请稍候重试'
     for (const b of rows) {
       const opts = branchOptions[b.repo.trim()]
       if (opts && !opts.includes(b.branch.trim())) {
@@ -4191,7 +4284,7 @@ function SubmitReleaseDialog({
     return null
   }
 
-  const submit = () => {
+  const submit = async () => {
     setError(null)
     const branchError = validateBranches()
     if (branchError) {
@@ -4199,8 +4292,15 @@ function SubmitReleaseDialog({
       return
     }
     setSaving(true)
-    api
-      .submitRelease(project.id, {
+    try {
+      // 仓库存在性不靠初始候选（仅最近更新前 50 条）includes 判断，逐个实时确认
+      for (const b of branches) {
+        const repo = b.repo.trim()
+        if (repo && !(await confirmExists(repo))) {
+          throw new Error(`仓库不存在或不属于组织：${repo}`)
+        }
+      }
+      await api.submitRelease(project.id, {
         content: content.trim() || undefined,
         urls: urls.map((u) => u.trim()).filter(Boolean),
         branches: branches
@@ -4208,12 +4308,13 @@ function SubmitReleaseDialog({
           .map((b) => ({ repo: b.repo.trim(), branch: b.branch.trim() })),
         testers: validTesters,
       })
-      .then(() => {
-        setOpen(false)
-        onSubmitted()
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setSaving(false))
+      setOpen(false)
+      onSubmitted()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -4292,6 +4393,7 @@ function SubmitReleaseDialog({
                     <div className="flex-1">
                       <Autocomplete
                         items={repoOptions}
+                        filteredItems={repoFilteredItems}
                         value={branch.repo}
                         onValueChange={(v) => {
                           const next = v as string
@@ -4306,6 +4408,7 @@ function SubmitReleaseDialog({
                                 : b,
                             ),
                           )
+                          searchRepoOptions(next)
                           loadBranchOptions(next)
                         }}
                         clearable
