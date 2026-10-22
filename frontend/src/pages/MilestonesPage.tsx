@@ -10,6 +10,12 @@ import {
 } from '@appica/ui-react/table'
 import { Input } from '@appica/ui-react/input'
 import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
+import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -64,37 +70,49 @@ export function MilestonesPage() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">节点</h1>
       </div>
-      <div className="mb-4 flex gap-2">
-        <ProjectFilterSelect
-          projects={projects}
-          value={projectFilter}
-          onChange={setProjectFilter}
-        />
-        <Input
+      <Toolbar aria-label="节点筛选" className="mb-4">
+        <ToolbarInput
           className="w-64"
-          placeholder="搜索内容…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          render={
+            <Input
+              placeholder="搜索内容…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索节点内容"
+            />
+          }
         />
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as string)}
-          items={statusItems}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="状态" />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.keys(statusItems).map((s) => (
-              <SelectItem key={s} value={s}>
-                {statusItems[s]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        <ToolbarGroup aria-label="筛选">
+          <ProjectFilterSelect
+            projects={projects}
+            value={projectFilter}
+            onChange={setProjectFilter}
+          />
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as string)}
+            items={statusItems}
+          >
+            <ToolbarButton
+              className="w-36"
+              render={
+                <SelectTrigger aria-label="按状态筛选">
+                  <SelectValue placeholder="状态" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              {Object.keys(statusItems).map((s) => (
+                <SelectItem key={s} value={s}>
+                  {statusItems[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ToolbarGroup>
+      </Toolbar>
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
       <Table hoverableRows>
         <TableHeader>

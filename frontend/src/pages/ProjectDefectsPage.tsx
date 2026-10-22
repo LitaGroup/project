@@ -10,6 +10,12 @@ import {
 } from '@appica/ui-react/table'
 import { Input } from '@appica/ui-react/input'
 import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
+import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -132,64 +138,86 @@ export function ProjectDefectsPage() {
           onCreated={reload}
         />
       </div>
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Input
+      <Toolbar aria-label="缺陷筛选" className="mb-4">
+        <ToolbarInput
           className="w-64"
-          placeholder="搜索预期或实际描述…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          render={
+            <Input
+              placeholder="搜索预期或实际描述…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索预期或实际描述"
+            />
+          }
         />
-        <Select
-          value={platformFilter}
-          onValueChange={(v) => setPlatformFilter(v as string)}
-          items={platformItems}
-        >
-          <SelectTrigger className="w-32">
-            <SelectValue placeholder="端" />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.keys(platformItems).map((p) => (
-              <SelectItem key={p} value={p}>
-                {platformItems[p]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as string)}
-          items={statusItems}
-        >
-          <SelectTrigger className="w-32">
-            <SelectValue placeholder="状态" />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.keys(statusItems).map((s) => (
-              <SelectItem key={s} value={s}>
-                {statusItems[s]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={priorityFilter}
-          onValueChange={(v) => setPriorityFilter(v as string)}
-          items={priorityItems}
-        >
-          <SelectTrigger className="w-32">
-            <SelectValue placeholder="优先级" />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.keys(priorityItems).map((p) => (
-              <SelectItem key={p} value={p}>
-                {priorityItems[p]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        <ToolbarGroup aria-label="筛选">
+          <Select
+            value={platformFilter}
+            onValueChange={(v) => setPlatformFilter(v as string)}
+            items={platformItems}
+          >
+            <ToolbarButton
+              className="w-32"
+              render={
+                <SelectTrigger aria-label="按端筛选">
+                  <SelectValue placeholder="端" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              {Object.keys(platformItems).map((p) => (
+                <SelectItem key={p} value={p}>
+                  {platformItems[p]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as string)}
+            items={statusItems}
+          >
+            <ToolbarButton
+              className="w-32"
+              render={
+                <SelectTrigger aria-label="按状态筛选">
+                  <SelectValue placeholder="状态" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              {Object.keys(statusItems).map((s) => (
+                <SelectItem key={s} value={s}>
+                  {statusItems[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={priorityFilter}
+            onValueChange={(v) => setPriorityFilter(v as string)}
+            items={priorityItems}
+          >
+            <ToolbarButton
+              className="w-32"
+              render={
+                <SelectTrigger aria-label="按优先级筛选">
+                  <SelectValue placeholder="优先级" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              {Object.keys(priorityItems).map((p) => (
+                <SelectItem key={p} value={p}>
+                  {priorityItems[p]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ToolbarGroup>
+      </Toolbar>
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
       <Table hoverableRows>
         <TableHeader>

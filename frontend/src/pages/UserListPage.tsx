@@ -8,6 +8,7 @@ import {
   TableCell,
 } from '@appica/ui-react/table'
 import { Input } from '@appica/ui-react/input'
+import { Toolbar, ToolbarInput } from '@appica/ui-react/toolbar'
 import { Badge } from '@appica/ui-react/badge'
 import {
   Avatar,
@@ -46,16 +47,21 @@ export function UserListPage() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">用户列表</h1>
       </div>
-      <div className="mb-4 flex gap-2">
-        <Input
+      <Toolbar aria-label="用户搜索" className="mb-4">
+        <ToolbarInput
           className="w-64"
-          placeholder="搜索姓名、部门、邮箱…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          render={
+            <Input
+              placeholder="搜索姓名、部门、邮箱…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索姓名、部门或邮箱"
+            />
+          }
         />
-      </div>
+      </Toolbar>
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
       <Table hoverableRows>
         <TableHeader>

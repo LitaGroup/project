@@ -9,6 +9,7 @@ import {
   TableCell,
 } from '@appica/ui-react/table'
 import { Input } from '@appica/ui-react/input'
+import { Toolbar, ToolbarInput } from '@appica/ui-react/toolbar'
 import { api, type Project, type ProjectCheck } from '../lib/api'
 import { ProjectFilterSelect } from '../components/ProjectFilterSelect'
 import { useProjectIdParam } from '../components/useProjectIdParam'
@@ -48,21 +49,26 @@ export function ChecksPage() {
         <h1 className="text-2xl font-semibold">检查</h1>
       </div>
 
-      <div className="mb-4 flex gap-2">
+      <Toolbar aria-label="检查筛选" className="mb-4">
+        <ToolbarInput
+          className="w-64"
+          render={
+            <Input
+              placeholder="搜索编号 / 描述 / 脚本名…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索编号、描述或脚本名"
+            />
+          }
+        />
         <ProjectFilterSelect
           projects={projects}
           value={projectFilter}
           onChange={setProjectFilter}
         />
-        <Input
-          className="w-64"
-          placeholder="搜索编号 / 描述 / 脚本名…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
-        />
-      </div>
+      </Toolbar>
 
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
 

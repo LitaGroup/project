@@ -219,7 +219,10 @@ export class ProjectSyncService {
   }
 
   /** 从需求池同步项目：定时为增量（上次同步时间 - 1h 缓冲，首次近 15 天）；手动固定取近 15 天；full=true 全量 */
-  async syncFromFeishu(full = false, manual = false): Promise<SyncProjectsResult> {
+  async syncFromFeishu(
+    full = false,
+    manual = false,
+  ): Promise<SyncProjectsResult> {
     const sourceUrl =
       this.config.get<string>('FEISHU_PROJECT_SOURCE_URL') ??
       DEFAULT_PROJECT_SOURCE_URL;

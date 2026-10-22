@@ -8,6 +8,12 @@ import {
   TableCell,
 } from '@appica/ui-react/table'
 import { Input } from '@appica/ui-react/input'
+import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
 import { Button } from '@appica/ui-react/button'
 import {
   Select,
@@ -111,48 +117,65 @@ export function ReposPage() {
           {syncing ? '同步中…' : '同步'}
         </Button>
       </div>
-      <div className="mb-4 flex gap-2">
-        <Input
+      <Toolbar aria-label="仓库筛选" className="mb-4">
+        <ToolbarInput
           className="w-72"
-          placeholder="搜索 仓库名 / 描述…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          render={
+            <Input
+              placeholder="搜索 仓库名 / 描述…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索仓库名或描述"
+            />
+          }
         />
-        <Select
-          value={platformFilter}
-          onValueChange={(v) => setPlatformFilter(v as string)}
-          items={platformItems}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="端" />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.keys(platformItems).map((p) => (
-              <SelectItem key={p} value={p}>
-                {platformItems[p]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as string)}
-          items={statusItems}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="状态" />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.keys(statusItems).map((s) => (
-              <SelectItem key={s} value={s}>
-                {statusItems[s]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        <ToolbarGroup aria-label="筛选">
+          <Select
+            value={platformFilter}
+            onValueChange={(v) => setPlatformFilter(v as string)}
+            items={platformItems}
+          >
+            <ToolbarButton
+              className="w-36"
+              render={
+                <SelectTrigger aria-label="按端筛选">
+                  <SelectValue placeholder="端" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              {Object.keys(platformItems).map((p) => (
+                <SelectItem key={p} value={p}>
+                  {platformItems[p]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as string)}
+            items={statusItems}
+          >
+            <ToolbarButton
+              className="w-36"
+              render={
+                <SelectTrigger aria-label="按状态筛选">
+                  <SelectValue placeholder="状态" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              {Object.keys(statusItems).map((s) => (
+                <SelectItem key={s} value={s}>
+                  {statusItems[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ToolbarGroup>
+      </Toolbar>
       {error && <p className="mb-4 text-sm">操作失败:{error}</p>}
       <Table hoverableRows>
         <TableHeader>

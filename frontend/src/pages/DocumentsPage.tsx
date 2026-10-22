@@ -11,6 +11,12 @@ import {
 import { Badge } from '@appica/ui-react/badge'
 import { Input } from '@appica/ui-react/input'
 import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
+import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -63,63 +69,80 @@ export function DocumentsPage() {
         <h1 className="text-2xl font-semibold">文档</h1>
       </div>
 
-      <div className="mb-4 flex gap-2">
-        <ProjectFilterSelect
-          projects={projects}
-          value={projectFilter}
-          onChange={setProjectFilter}
-        />
-        <Input
+      <Toolbar aria-label="文档筛选" className="mb-4">
+        <ToolbarInput
           className="w-64"
-          placeholder="搜索标题…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          render={
+            <Input
+              placeholder="搜索标题…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索文档标题"
+            />
+          }
         />
-        <Select
-          value={typeFilter}
-          onValueChange={(v) => setTypeFilter(v as string)}
-          items={{
-            all: '不限类型',
-            ...Object.fromEntries(DOCUMENT_TYPES.map((t) => [t, t])),
-          }}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="类型" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">不限类型</SelectItem>
-            {DOCUMENT_TYPES.map((t) => (
-              <SelectItem key={t} value={t}>
-                {t}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={sourceFilter}
-          onValueChange={(v) => setSourceFilter(v as string)}
-          items={{
-            all: '不限来源',
-            ...Object.fromEntries(
-              DOCUMENT_SOURCES.map((s) => [s, documentSourceLabel(s)]),
-            ),
-          }}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="来源" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">不限来源</SelectItem>
-            {DOCUMENT_SOURCES.map((s) => (
-              <SelectItem key={s} value={s}>
-                {documentSourceLabel(s)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        <ToolbarGroup aria-label="筛选">
+          <ProjectFilterSelect
+            projects={projects}
+            value={projectFilter}
+            onChange={setProjectFilter}
+          />
+          <Select
+            value={typeFilter}
+            onValueChange={(v) => setTypeFilter(v as string)}
+            items={{
+              all: '不限类型',
+              ...Object.fromEntries(DOCUMENT_TYPES.map((t) => [t, t])),
+            }}
+          >
+            <ToolbarButton
+              className="w-36"
+              render={
+                <SelectTrigger aria-label="按类型筛选">
+                  <SelectValue placeholder="类型" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限类型</SelectItem>
+              {DOCUMENT_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={sourceFilter}
+            onValueChange={(v) => setSourceFilter(v as string)}
+            items={{
+              all: '不限来源',
+              ...Object.fromEntries(
+                DOCUMENT_SOURCES.map((s) => [s, documentSourceLabel(s)]),
+              ),
+            }}
+          >
+            <ToolbarButton
+              className="w-36"
+              render={
+                <SelectTrigger aria-label="按来源筛选">
+                  <SelectValue placeholder="来源" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限来源</SelectItem>
+              {DOCUMENT_SOURCES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {documentSourceLabel(s)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ToolbarGroup>
+      </Toolbar>
 
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
 

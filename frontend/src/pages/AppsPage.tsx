@@ -16,6 +16,12 @@ import {
 } from '@appica/ui-react/select'
 import { Input } from '@appica/ui-react/input'
 import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
+import {
   Card,
   CardHeader,
   CardTitle,
@@ -101,7 +107,10 @@ const PLATFORM_FILTERS = ['android', 'ios'] as const
 /** 产品筛选项（文件名第一段） */
 const PRODUCT_FILTERS = ['lita', 'lite'] as const
 
-/** 通用筛选下拉：value 与展示文案不一致（all → 不限X），须传 items 映射 */
+/**
+ * 工具栏筛选下拉：value 与展示文案不一致（all → 不限X），须传 items 映射；
+ * 触发器经 ToolbarButton 组合进工具栏漫游焦点，须在 Toolbar 内使用。
+ */
 function FilterSelect({
   value,
   onChange,
@@ -121,9 +130,14 @@ function FilterSelect({
   }
   return (
     <Select value={value} onValueChange={(v) => onChange(v as string)} items={items}>
-      <SelectTrigger className={className ?? 'w-36'}>
-        <SelectValue />
-      </SelectTrigger>
+      <ToolbarButton
+        className={className ?? 'w-36'}
+        render={
+          <SelectTrigger aria-label={allLabel.replace('不限', '按')}>
+            <SelectValue />
+          </SelectTrigger>
+        }
+      />
       <SelectContent>
         <SelectItem value="all">{allLabel}</SelectItem>
         {options.map((o) => (
@@ -220,34 +234,41 @@ export function AppsPage() {
           </Button>
         </div>
 
-      <div className="mb-4 flex gap-2">
-        <FilterSelect
-          value={productFilter}
-          onChange={setProductFilter}
-          options={PRODUCT_FILTERS}
-          allLabel="不限产品"
-        />
-        <FilterSelect
-          value={envFilter}
-          onChange={setEnvFilter}
-          options={ENV_FILTERS}
-          allLabel="不限环境"
-        />
-        <FilterSelect
-          value={platformFilter}
-          onChange={setPlatformFilter}
-          options={PLATFORM_FILTERS}
-          allLabel="不限平台"
-        />
-        <Input
+      <Toolbar aria-label="APP 筛选" className="mb-4">
+        <ToolbarInput
           className="w-56"
-          placeholder="搜索版本号…"
-          clearable
-          value={versionQuery}
-          onChange={(e) => setVersionQuery(e.target.value)}
-          onClear={() => setVersionQuery('')}
+          render={
+            <Input
+              placeholder="搜索版本号…"
+              clearable
+              value={versionQuery}
+              onChange={(e) => setVersionQuery(e.target.value)}
+              onClear={() => setVersionQuery('')}
+              aria-label="搜索版本号"
+            />
+          }
         />
-      </div>
+        <ToolbarGroup aria-label="筛选">
+          <FilterSelect
+            value={productFilter}
+            onChange={setProductFilter}
+            options={PRODUCT_FILTERS}
+            allLabel="不限产品"
+          />
+          <FilterSelect
+            value={envFilter}
+            onChange={setEnvFilter}
+            options={ENV_FILTERS}
+            allLabel="不限环境"
+          />
+          <FilterSelect
+            value={platformFilter}
+            onChange={setPlatformFilter}
+            options={PLATFORM_FILTERS}
+            allLabel="不限平台"
+          />
+        </ToolbarGroup>
+      </Toolbar>
 
       {error && <p className="mb-4 text-sm">操作失败：{error}</p>}
 

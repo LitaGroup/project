@@ -9,6 +9,12 @@ import {
   TableCell,
 } from '@appica/ui-react/table'
 import { Input } from '@appica/ui-react/input'
+import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import {
@@ -88,37 +94,49 @@ export function CommitsPage() {
           刷新
         </Button>
       </div>
-      <div className="mb-4 flex gap-2">
-        <ProjectFilterSelect
-          projects={projects}
-          value={projectFilter}
-          onChange={setProjectFilter}
-        />
-        <Input
+      <Toolbar aria-label="提交筛选" className="mb-4">
+        <ToolbarInput
           className="w-72"
-          placeholder="搜索 提交信息 / 作者 / 仓库…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          render={
+            <Input
+              placeholder="搜索 提交信息 / 作者 / 仓库…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索提交信息、作者或仓库"
+            />
+          }
         />
-        <Select
-          value={branchFilter}
-          onValueChange={(v) => setBranchFilter(v as string)}
-          items={branchItems}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="分支" />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.keys(branchItems).map((b) => (
-              <SelectItem key={b} value={b}>
-                {branchItems[b]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        <ToolbarGroup aria-label="筛选">
+          <ProjectFilterSelect
+            projects={projects}
+            value={projectFilter}
+            onChange={setProjectFilter}
+          />
+          <Select
+            value={branchFilter}
+            onValueChange={(v) => setBranchFilter(v as string)}
+            items={branchItems}
+          >
+            <ToolbarButton
+              className="w-36"
+              render={
+                <SelectTrigger aria-label="按分支筛选">
+                  <SelectValue placeholder="分支" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              {Object.keys(branchItems).map((b) => (
+                <SelectItem key={b} value={b}>
+                  {branchItems[b]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ToolbarGroup>
+      </Toolbar>
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
       <Table hoverableRows>
         <TableHeader>

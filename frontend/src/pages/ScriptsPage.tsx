@@ -10,6 +10,7 @@ import {
 } from '@appica/ui-react/table'
 import { Badge } from '@appica/ui-react/badge'
 import { Input } from '@appica/ui-react/input'
+import { Toolbar, ToolbarInput } from '@appica/ui-react/toolbar'
 import { api, type Project } from '../lib/api'
 
 interface ScriptRow {
@@ -79,16 +80,21 @@ export function ScriptsPage() {
         <h1 className="text-2xl font-semibold">脚本</h1>
       </div>
 
-      <div className="mb-4 flex gap-2">
-        <Input
+      <Toolbar aria-label="脚本搜索" className="mb-4">
+        <ToolbarInput
           className="w-64"
-          placeholder="搜索脚本路径…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          render={
+            <Input
+              placeholder="搜索脚本路径…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索脚本路径"
+            />
+          }
         />
-      </div>
+      </Toolbar>
 
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
 

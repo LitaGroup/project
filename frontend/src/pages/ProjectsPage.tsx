@@ -32,6 +32,12 @@ import {
 } from '@appica/ui-react/dialog'
 import { Input } from '@appica/ui-react/input'
 import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
+import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -124,114 +130,141 @@ export function ProjectsPage() {
         </div>
       </div>
 
-      <div className="mb-4 flex gap-2">
-        <Input
+      <Toolbar aria-label="项目筛选" className="mb-4">
+        <ToolbarInput
           className="w-64"
-          placeholder="搜索标题…"
-          clearable
-          value={keyword}
-          onChange={(e) => {
-            setKeyword(e.target.value)
-            setPage(1)
-          }}
-          onClear={() => {
-            setKeyword('')
-            setPage(1)
-          }}
+          render={
+            <Input
+              placeholder="搜索标题…"
+              clearable
+              value={keyword}
+              onChange={(e) => {
+                setKeyword(e.target.value)
+                setPage(1)
+              }}
+              onClear={() => {
+                setKeyword('')
+                setPage(1)
+              }}
+              aria-label="搜索项目标题"
+            />
+          }
         />
-        <Select
-          value={iterationFilter}
-          onValueChange={(v) => {
-            setIterationFilter(v as string)
-            setPage(1)
-          }}
-          items={{
-            all: '不限迭代',
-            ...Object.fromEntries(iterations.map((it) => [it, it])),
-          }}
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="迭代" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">不限迭代</SelectItem>
-            {iterations.map((it) => (
-              <SelectItem key={it} value={it}>
-                {it}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => {
-            setStatusFilter(v as string)
-            setPage(1)
-          }}
-          items={{
-            all: '不限状态',
-            ...Object.fromEntries(PROJECT_STATUSES.map((s) => [s, s])),
-          }}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="状态" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">不限状态</SelectItem>
-            {PROJECT_STATUSES.map((s: ProjectStatus) => (
-              <SelectItem key={s} value={s}>
-                {s}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={typeFilter}
-          onValueChange={(v) => {
-            setTypeFilter(v as string)
-            setPage(1)
-          }}
-          items={{
-            all: '不限类型',
-            ...Object.fromEntries(PROJECT_TYPES.map((t) => [t, t])),
-          }}
-        >
-          <SelectTrigger className="w-32">
-            <SelectValue placeholder="类型" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">不限类型</SelectItem>
-            {PROJECT_TYPES.map((t) => (
-              <SelectItem key={t} value={t}>
-                {t}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={priorityFilter}
-          onValueChange={(v) => {
-            setPriorityFilter(v as string)
-            setPage(1)
-          }}
-          items={{
-            all: '不限优先级',
-            ...Object.fromEntries(priorities.map((pr) => [pr, pr])),
-          }}
-        >
-          <SelectTrigger className="w-32">
-            <SelectValue placeholder="优先级" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">不限优先级</SelectItem>
-            {priorities.map((pr) => (
-              <SelectItem key={pr} value={pr}>
-                {pr}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        <ToolbarGroup aria-label="筛选">
+          <Select
+            value={iterationFilter}
+            onValueChange={(v) => {
+              setIterationFilter(v as string)
+              setPage(1)
+            }}
+            items={{
+              all: '不限迭代',
+              ...Object.fromEntries(iterations.map((it) => [it, it])),
+            }}
+          >
+            <ToolbarButton
+              className="w-48"
+              render={
+                <SelectTrigger aria-label="按迭代筛选">
+                  <SelectValue placeholder="迭代" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限迭代</SelectItem>
+              {iterations.map((it) => (
+                <SelectItem key={it} value={it}>
+                  {it}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => {
+              setStatusFilter(v as string)
+              setPage(1)
+            }}
+            items={{
+              all: '不限状态',
+              ...Object.fromEntries(PROJECT_STATUSES.map((s) => [s, s])),
+            }}
+          >
+            <ToolbarButton
+              className="w-36"
+              render={
+                <SelectTrigger aria-label="按状态筛选">
+                  <SelectValue placeholder="状态" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限状态</SelectItem>
+              {PROJECT_STATUSES.map((s: ProjectStatus) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={typeFilter}
+            onValueChange={(v) => {
+              setTypeFilter(v as string)
+              setPage(1)
+            }}
+            items={{
+              all: '不限类型',
+              ...Object.fromEntries(PROJECT_TYPES.map((t) => [t, t])),
+            }}
+          >
+            <ToolbarButton
+              className="w-32"
+              render={
+                <SelectTrigger aria-label="按类型筛选">
+                  <SelectValue placeholder="类型" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限类型</SelectItem>
+              {PROJECT_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={priorityFilter}
+            onValueChange={(v) => {
+              setPriorityFilter(v as string)
+              setPage(1)
+            }}
+            items={{
+              all: '不限优先级',
+              ...Object.fromEntries(priorities.map((pr) => [pr, pr])),
+            }}
+          >
+            <ToolbarButton
+              className="w-32"
+              render={
+                <SelectTrigger aria-label="按优先级筛选">
+                  <SelectValue placeholder="优先级" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限优先级</SelectItem>
+              {priorities.map((pr) => (
+                <SelectItem key={pr} value={pr}>
+                  {pr}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </ToolbarGroup>
+      </Toolbar>
 
       {error && <p className="mb-4 text-sm">操作失败:{error}</p>}
 

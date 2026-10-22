@@ -9,6 +9,7 @@ import {
   TableCell,
 } from '@appica/ui-react/table'
 import { Input } from '@appica/ui-react/input'
+import { Toolbar, ToolbarInput } from '@appica/ui-react/toolbar'
 import { api, type Project, type ProjectTest } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { CountRow } from '../components/CountRow'
@@ -84,16 +85,21 @@ export function ProjectTestsPage() {
           <TestFormDialog projectId={projectId} onSaved={reload} />
         </div>
       </div>
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Input
+      <Toolbar aria-label="用例搜索" className="mb-4">
+        <ToolbarInput
           className="w-64"
-          placeholder="搜索编号、描述或脚本…"
-          clearable
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onClear={() => setKeyword('')}
+          render={
+            <Input
+              placeholder="搜索编号、描述或脚本…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索编号、描述或脚本"
+            />
+          }
         />
-      </div>
+      </Toolbar>
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
       <Table hoverableRows>
         <TableHeader>
