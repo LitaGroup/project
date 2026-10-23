@@ -48,6 +48,35 @@
   opacity: 0.9;
 }
 
+/* 文档预览 YAML frontmatter 卡片：正文开头由 AI 写入的 frontmatter（--- 键值 ---）按 CommonMark
+   会被渲染成「分隔线 + 键值挤成的 setext 大标题」，DocumentDetailPage 在预览 DOM 层将其
+   替换为下面的键值卡片（applyFrontmatterCard）。角色 token 取色，深浅色自适应 */
+.doc-editor .markdown-body .doc-frontmatter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-background-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.doc-frontmatter-row {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+.doc-frontmatter-key {
+  flex: none;
+  color: var(--color-foreground-muted);
+}
+.doc-frontmatter-value {
+  color: var(--color-foreground);
+  word-break: break-word;
+}
+
 /* 检查运行详情页终端面板：Gruvbox Dark 主题。
    有意脱离角色 token —— 模拟真实终端配色是产品需求，非 UI 组件，故允许固定色值。 */
 .terminal-gruvbox {
