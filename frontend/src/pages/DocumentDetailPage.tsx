@@ -65,11 +65,12 @@ function applyHeadingAnchors(box: HTMLElement, onAnchorClick: (slug: string) => 
 /** YAML 风格键值行（key: value），用于识别 frontmatter 内容 */
 const YAML_KV_RE = /^[A-Za-z0-9_-]+\s*:/
 
-/** 把预览区开头的 YAML frontmatter 替换为键值卡片（幂等，供 MutationObserver 反复调用）。
+/** 把预览区开头的 YAML frontmatter 替换为键值表格（幂等，供 MutationObserver 反复调用）。
     ByteMD 按 CommonMark 渲染、不识别 frontmatter：正文开头的 `---` 变分隔线，
     键值段落被结尾的 `---` 变成 setext 大标题，键值全挤在一行里，观感凌乱。
-    这里在 DOM 层识别「首个元素为分隔线、其后是纯键值行的标题/段落」结构，重建为键值卡片。 */
-function applyFrontmatterCard(box: HTMLElement): boolean {
+    这里在 DOM 层识别「首个元素为分隔线、其后是纯键值行的标题/段落」结构，
+    重建为两列键值表格（基础样式沿用 github-markdown-css，与正文表格观感一致）。 */
+function applyFrontmatterTable(box: HTMLElement): boolean {
   const body = box.querySelector<HTMLElement>('.bytemd-preview .markdown-body')
   if (!body) return false
   const first = body.firstElementChild
@@ -89,16 +90,16 @@ function applyFrontmatterCard(box: HTMLElement): boolean {
     .filter(Boolean)
   if (lines.length === 0 || !lines.every((line) => YAML_KV_RE.test(line))) return false
 
-  const card = document.createElement('div')
-  card.className = 'doc-frontmatter'
+  const table = document.createElement('table')
+  table.className = 'doc-frontmatter'
+  const tbody = document.createElement('tbody')
   for (const line of lines) {
     const i = line.indexOf(':')
-    const row = document.createElement('div')
-    row.className = 'doc-frontmatter-row'
-    const key = document.createElement('span')
+    const tr = document.createElement('tr')
+    const key = document.createElement('td')
     key.className = 'doc-frontmatter-key'
-    key.textContent = line.slice(0, i + 1)
-    const val = document.createElement('span')
+    key.textContent = line.slice(0, i)
+    const val = document.createElement('td')
     val.className = 'doc-frontmatter-value'
     // 值去掉 YAML 对称包裹引号（仅一层），展示更干净
     val.textContent = line
@@ -106,10 +107,11 @@ function applyFrontmatterCard(box: HTMLElement): boolean {
       .trim()
       .replace(/^"(.*)"$/, '$1')
       .replace(/^'(.*)'$/, '$1')
-    row.append(key, val)
-    card.append(row)
+    tr.append(key, val)
+    tbody.append(tr)
   }
-  second.replaceWith(card)
+  table.append(tbody)
+  second.replaceWith(table)
   first.remove()
   return true
 }
@@ -220,7 +222,7 @@ export function DocumentDetailPage() {
   }, [doc, isApipost, scrollToHeading])
 
   // 预览区 DOM 后处理：ByteMD 未暴露渲染钩子，用 MutationObserver 在预览重渲染后
-  // 先把开头 frontmatter 换成键值卡片、再补标题 id 与 # 链接；
+  // 先把开头 frontmatter 换成键值表格、再补标题 id 与 # 链接；
   // 有改动时递增 anchorEpoch 让右侧 Toc 重挂载（Toc 只在挂载时按 id 查找观察目标）
   useEffect(() => {
     if (!doc || isApipost) return
@@ -230,8 +232,8 @@ export function DocumentDetailPage() {
     let applyRaf = 0
     const applyAnchors = () => {
       applyRaf = 0
-      // frontmatter 先于锚点：其键值"伪标题"不应被注入 # 链接（马上会被卡片整体替换）
-      const fmChanged = applyFrontmatterCard(box)
+      // frontmatter 先于锚点：其键值"伪标题"不应被注入 # 链接（马上会被表格整体替换）
+      const fmChanged = applyFrontmatterTable(box)
       if (applyHeadingAnchors(box, handleAnchorClick) || fmChanged) {
         setAnchorEpoch((epoch) => epoch + 1)
       }
