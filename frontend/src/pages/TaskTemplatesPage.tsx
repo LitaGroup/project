@@ -50,7 +50,7 @@ export function TaskTemplatesPage() {
         <div>
           <h1 className="text-2xl font-semibold">任务包</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            定义一类任务的描述、输入、输出与默认处理机器人，新建任务时可一键填充
+            沉淀一类任务的可复用定义：描述、输入、输出与默认处理机器人
           </p>
         </div>
         <Link

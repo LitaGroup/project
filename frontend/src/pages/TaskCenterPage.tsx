@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Card,
 } from '@appica/ui-react/card'
-import { Button } from '@appica/ui-react/button'
+import { buttonVariants } from '@appica/ui-react/button'
 import { Input } from '@appica/ui-react/input'
 import {
   Table,
@@ -15,16 +15,6 @@ import {
 } from '@appica/ui-react/table'
 import { Toolbar, ToolbarInput } from '@appica/ui-react/toolbar'
 import {
-  Dialog,
-  DialogTrigger,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogBody,
-  DialogFooter,
-  DialogClose,
-} from '@appica/ui-react/dialog'
-import {
   Select,
   SelectTrigger,
   SelectValue,
@@ -34,25 +24,24 @@ import {
 import {
   api,
   TASK_TYPES,
-  TASK_STATUSES,
+  TASK_SUB_STATUSES,
   type TaskPackage,
   type TaskOverview,
-  type TaskStatus,
-  type TaskTemplate,
+  type TaskSubStatus,
   type TaskType,
   type Worker,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
-import { MarkdownField } from '../components/MarkdownField'
-import type { MarkdownEditorHandle } from '../components/MarkdownEditor'
 
-/** 阶段分组：概览卡片按阶段汇总 */
-const STAGE_GROUPS: { label: string; statuses: TaskStatus[] }[] = [
-  { label: '创建', statuses: ['草稿', '待补材料', '待调度'] },
-  { label: '分发', statuses: ['待确认', '已派发'] },
-  { label: '执行', statuses: ['执行中', '待验收'] },
-  { label: '交付', statuses: ['内部完成', '已交付'] },
-  { label: '终态', statuses: ['维护中', '已取消'] },
+/** 主状态分组：概览卡片按主状态汇总，并展示子状态构成 */
+const STAGE_GROUPS: {
+  label: string
+  status: string
+  subStatuses: TaskSubStatus[]
+}[] = [
+  { label: '等待中', status: '等待中', subStatuses: ['待识别', '待反馈', '待验收'] },
+  { label: '进行中', status: '进行中', subStatuses: ['识别中', '执行中'] },
+  { label: '已结束', status: '已结束', subStatuses: ['完成', '取消'] },
 ]
 
 /** 任务概览：阶段统计 + 任务树列表 + 新建（任务处理中心首页） */
@@ -60,7 +49,6 @@ export function TaskCenterPage() {
   const [overview, setOverview] = useState<TaskOverview | null>(null)
   const [tasks, setTasks] = useState<TaskPackage[] | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
-  const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [typeFilter, setTypeFilter] = useState<string>('all')
@@ -74,7 +62,10 @@ export function TaskCenterPage() {
     api
       .listTaskPackages({
         q: keyword.trim() || undefined,
-        status: statusFilter === 'all' ? undefined : (statusFilter as TaskStatus),
+        subStatus:
+          statusFilter === 'all'
+            ? undefined
+            : (statusFilter as TaskSubStatus),
         type: typeFilter === 'all' ? undefined : (typeFilter as TaskType),
       })
       .then(setTasks)
@@ -91,10 +82,6 @@ export function TaskCenterPage() {
       .listWorkers({ role: '工作者' })
       .then(setWorkers)
       .catch(() => undefined)
-    api
-      .listTaskTemplates()
-      .then(setTemplates)
-      .catch(() => undefined)
   }, [])
 
   const workerName = new Map(workers.map((w) => [w.id, w.name]))
@@ -105,28 +92,36 @@ export function TaskCenterPage() {
         <div>
           <h1 className="text-2xl font-semibold">任务概览</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            任务由机器人执行，责任人验收；调度器负责识别拆解与分配建议
+            任务由机器人执行、责任人验收；系统调度机器人负责识别任务并分配机器人与工作计划
           </p>
         </div>
-        <NewTaskDialog
-          workers={workers}
-          templates={templates}
-          onCreated={reload}
-        />
+        <Link
+          to="/tasks/new"
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        >
+          新建任务
+        </Link>
       </div>
 
-      {/* 阶段统计卡 */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      {/* 主状态统计卡 + 子状态构成 */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         {STAGE_GROUPS.map((group) => {
-          const count = group.statuses.reduce(
-            (sum, s) => sum + (overview?.statuses[s] ?? 0),
-            0,
-          )
+          const count = overview?.statuses[group.status] ?? 0
           return (
             <Card key={group.label}>
-              <div className="px-6 pb-6">
+              <div className="px-6 pb-5">
                 <p className="text-xs text-foreground-muted">{group.label}</p>
                 <p className="mt-1 text-2xl font-semibold">{count}</p>
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-foreground-muted">
+                  {group.subStatuses.map((subStatus) => (
+                    <span key={subStatus}>
+                      {subStatus}{' '}
+                      <span className="font-medium text-foreground-intense">
+                        {overview?.subStatuses[subStatus] ?? 0}
+                      </span>
+                    </span>
+                  ))}
+                </div>
               </div>
             </Card>
           )
@@ -155,7 +150,7 @@ export function TaskCenterPage() {
           onValueChange={(v) => setStatusFilter(v as string)}
           items={{
             all: '全部状态',
-            ...Object.fromEntries(TASK_STATUSES.map((s) => [s, s])),
+            ...Object.fromEntries(TASK_SUB_STATUSES.map((s) => [s, s])),
           }}
         >
           <SelectTrigger className="w-36">
@@ -163,7 +158,7 @@ export function TaskCenterPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部状态</SelectItem>
-            {TASK_STATUSES.map((s) => (
+            {TASK_SUB_STATUSES.map((s) => (
               <SelectItem key={s} value={s}>
                 {s}
               </SelectItem>
@@ -241,7 +236,7 @@ function TaskRows({
         </TableCell>
         <TableCell>{task.type}</TableCell>
         <TableCell>
-          <TaskStatusBadge status={task.status} />
+          <TaskStatusBadge status={task.status} subStatus={task.subStatus} />
         </TableCell>
         <TableCell>
           {task.agentId ? (workerName.get(task.agentId) ?? `#${task.agentId}`) : '—'}
@@ -261,7 +256,7 @@ function TaskRows({
           </TableCell>
           <TableCell>{child.type}</TableCell>
           <TableCell>
-            <TaskStatusBadge status={child.status} />
+            <TaskStatusBadge status={child.status} subStatus={child.subStatus} />
           </TableCell>
           <TableCell>
             {child.agentId
@@ -272,211 +267,5 @@ function TaskRows({
         </TableRow>
       ))}
     </>
-  )
-}
-
-/** 新建任务弹窗：可按任务包填充，再调整标题/类型/描述/输入/输出/机器人 */
-export function NewTaskDialog({
-  workers,
-  templates,
-  onCreated,
-}: {
-  workers: Worker[]
-  templates: TaskTemplate[]
-  onCreated: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [templateId, setTemplateId] = useState('')
-  const [title, setTitle] = useState('')
-  const [type, setType] = useState<TaskType>('其它')
-  const [description, setDescription] = useState('')
-  const [input, setInput] = useState('')
-  const [outputSpec, setOutputSpec] = useState('')
-  const [agentId, setAgentId] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [editorEpoch, setEditorEpoch] = useState(0)
-  const descriptionRef = useRef<MarkdownEditorHandle>(null)
-  const inputRef = useRef<MarkdownEditorHandle>(null)
-  const outputSpecRef = useRef<MarkdownEditorHandle>(null)
-
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next)
-    if (next) {
-      setTemplateId('')
-      setTitle('')
-      setType('其它')
-      setDescription('')
-      setInput('')
-      setOutputSpec('')
-      setAgentId('')
-      setError(null)
-      setEditorEpoch((n) => n + 1)
-    }
-  }
-
-  /** 选择任务包：填充描述/输入/输出/处理机器人（标题为空时用任务包名兜底） */
-  const applyTemplate = (id: string) => {
-    setTemplateId(id)
-    const template = templates.find((t) => String(t.id) === id)
-    if (!template) return
-    setDescription(template.description ?? '')
-    setInput(template.input ?? '')
-    setOutputSpec(template.outputSpec ?? '')
-    setAgentId(template.agentId ? String(template.agentId) : '')
-    setTitle((prev) => (prev.trim() ? prev : template.name))
-    // 编辑器为非受控组件：换 key 重新挂载以载入任务包内容
-    setEditorEpoch((n) => n + 1)
-  }
-
-  const submit = () => {
-    setError(null)
-    // 取编辑器当前内容：onChange 有防抖，避免刚输入就保存丢字
-    const descriptionText =
-      descriptionRef.current?.getMarkdown() ?? description
-    const inputText = inputRef.current?.getMarkdown() ?? input
-    const outputSpecText = outputSpecRef.current?.getMarkdown() ?? outputSpec
-    api
-      .createTaskPackage({
-        title,
-        type,
-        description: descriptionText.trim() || null,
-        input: inputText.trim() || null,
-        outputSpec: outputSpecText.trim() || null,
-        agentId: agentId ? Number(agentId) : null,
-      })
-      .then(() => {
-        setOpen(false)
-        onCreated()
-      })
-      .catch((e: Error) => setError(e.message))
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button size="sm" />}>新建任务</DialogTrigger>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>新建任务</DialogTitle>
-        </DialogHeader>
-        <DialogBody className="overflow-y-auto">
-          <div className="flex flex-col gap-4">
-            <label className="flex flex-col gap-1 text-sm">
-              任务包（可选，选择后自动填充）
-              <Select
-                value={templateId || 'none'}
-                onValueChange={(v) =>
-                  applyTemplate(v === 'none' ? '' : (v as string))
-                }
-                items={{
-                  none: '不使用任务包',
-                  ...Object.fromEntries(
-                    templates.map((t) => [String(t.id), t.name]),
-                  ),
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">不使用任务包</SelectItem>
-                  {templates.map((t) => (
-                    <SelectItem key={t.id} value={String(t.id)}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              标题
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="如：产出 8 月活动榜单接口的技术设计"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              任务类型
-              <Select
-                value={type}
-                onValueChange={(v) => setType(v as TaskType)}
-                items={Object.fromEntries(TASK_TYPES.map((t) => [t, t]))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TASK_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-            <MarkdownField
-              label="任务描述（这类任务要做什么）"
-              value={description}
-              onChange={setDescription}
-              handleRef={descriptionRef}
-              editorKey={`description:${editorEpoch}`}
-              heightClassName="h-40"
-            />
-            <MarkdownField
-              label="任务输入（提供什么材料/上下文）"
-              value={input}
-              onChange={setInput}
-              handleRef={inputRef}
-              editorKey={`input:${editorEpoch}`}
-              heightClassName="h-40"
-            />
-            <MarkdownField
-              label="明确输出（要交付什么）"
-              value={outputSpec}
-              onChange={setOutputSpec}
-              handleRef={outputSpecRef}
-              editorKey={`outputSpec:${editorEpoch}`}
-              heightClassName="h-40"
-            />
-            <label className="flex flex-col gap-1 text-sm">
-              指定机器人（可留空：由调度器分配）
-              <Select
-                value={agentId || 'none'}
-                onValueChange={(v) =>
-                  setAgentId(v === 'none' ? '' : (v as string))
-                }
-                items={{
-                  none: '不指定（调度器分配）',
-                  ...Object.fromEntries(workers.map((w) => [String(w.id), w.name])),
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">不指定（调度器分配）</SelectItem>
-                  {workers.map((w) => (
-                    <SelectItem key={w.id} value={String(w.id)}>
-                      {w.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-            {error && <p className="text-sm">保存失败:{error}</p>}
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">
-              取消
-            </Button>
-          </DialogClose>
-          <Button size="sm" onClick={submit} disabled={!title.trim()}>
-            保存
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }

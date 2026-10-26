@@ -2,10 +2,13 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnApplicationBootstrap,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsSelect, Repository } from 'typeorm';
+import { FindOptionsSelect, IsNull, Not, Repository } from 'typeorm';
 import { DocumentSource, DocumentType } from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
 import { ApipostService } from '../apipost/apipost.service';
@@ -14,6 +17,7 @@ import {
   type SwaggerSpec,
 } from '../apipost/apipost-markdown';
 import { FeishuService } from '../feishu/feishu.service';
+import { KnowledgeService } from '../knowledge/knowledge.service';
 import { Document } from './document.entity';
 
 /**
@@ -28,6 +32,7 @@ export const DOCUMENT_LIST_SELECT: FindOptionsSelect<Document> = {
   fileName: true,
   description: true,
   remark: true,
+  knowledgeId: true,
   feishuUrl: true,
   feishuToken: true,
   apipostUrl: true,
@@ -42,13 +47,60 @@ function isExternalSource(source: DocumentSource): boolean {
 }
 
 @Injectable()
-export class DocumentsService {
+export class DocumentsService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(DocumentsService.name);
+
   constructor(
     @InjectRepository(Document)
     private readonly documents: Repository<Document>,
     private readonly feishu: FeishuService,
     private readonly apipost: ApipostService,
+    private readonly knowledge: KnowledgeService,
   ) {}
+
+  onApplicationBootstrap(): void {
+    if (!this.knowledge.isEnabled) return;
+    // 等知识库模块完成初始化后再回填，避免构造函数/启动钩子顺序耦合
+    setTimeout(() => void this.backfillKnowledge(), 3_000).unref();
+  }
+
+  /**
+   * 存量文档回填：普通 Markdown 文档迁移后清空 PostgreSQL 正文，
+   * APIPOST 保留原始 JSON，只把转换后的 Markdown 放入知识库。
+   */
+  async backfillKnowledge(): Promise<void> {
+    if (!this.knowledge.isEnabled) return;
+    try {
+      const pending = await this.documents.find({
+        where: [
+          { knowledgeId: IsNull() },
+          {
+            source: Not(DocumentSource.APIPOST),
+            content: Not(IsNull()),
+          },
+        ],
+      });
+      if (pending.length === 0) return;
+      let ok = 0;
+      let failed = 0;
+      for (const doc of pending) {
+        try {
+          const synced = await this.syncKnowledge(doc);
+          if (synced.knowledgeId) ok += 1;
+          else failed += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      this.logger.log(
+        `文档知识库回填完成：成功 ${ok}，失败 ${failed}，总数 ${pending.length}`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `文档知识库回填失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
   /** 按项目列出文档；不传 projectId 时返回全部（全局列表页用）。不含正文 */
   findByProject(projectId?: number): Promise<Document[]> {
@@ -59,10 +111,48 @@ export class DocumentsService {
     });
   }
 
-  async findOne(id: number): Promise<Document> {
+  private async getEntity(id: number): Promise<Document> {
     const doc = await this.documents.findOne({ where: { id } });
     if (!doc) throw new NotFoundException(`Document ${id} not found`);
     return doc;
+  }
+
+  /**
+   * 对外读取：普通文档正文从知识库取，APIPOST 仍返回原始 swagger JSON。
+   * 未配置知识库时完全保持旧行为；已配置但不可用且本地无兜底正文时明确报 503。
+   */
+  private async hydrate(doc: Document): Promise<Document> {
+    if (doc.source === DocumentSource.APIPOST) return doc;
+    if (this.knowledge.isEnabled) {
+      if (!doc.knowledgeId && doc.content !== null) {
+        doc = await this.syncKnowledge(doc);
+      }
+      if (doc.knowledgeId) {
+        const node = await this.knowledge.getProjectDocument(
+          doc.projectId,
+          doc.id,
+        );
+        if (node) return { ...doc, content: node.content };
+        if (doc.content === null) {
+          throw new ServiceUnavailableException(
+            `文档 ${doc.id} 的知识库正文不存在，请检查知识库同步状态`,
+          );
+        }
+      }
+      return doc;
+    }
+    if (doc.knowledgeId && doc.content === null) {
+      throw new ServiceUnavailableException(
+        this.knowledge.isConfigured
+          ? this.knowledge.disabledMessage
+          : '文档正文存储在知识库，但知识库未配置',
+      );
+    }
+    return doc;
+  }
+
+  async findOne(id: number): Promise<Document> {
+    return this.hydrate(await this.getEntity(id));
   }
 
   /** Markdown 视图（GET /documents/:id.md）：标题 + 元信息 + 正文 */
@@ -73,6 +163,12 @@ export class DocumentsService {
     if (doc.remark) meta.push(`- 备注：${doc.remark}`);
     if (doc.feishuUrl) meta.push(`- 原始链接：${doc.feishuUrl}`);
     if (doc.apipostUrl) meta.push(`- 原始链接：${doc.apipostUrl}`);
+    if (this.knowledge.isEnabled) {
+      meta.push(
+        `- 知识路径：/project/${doc.projectId}/document/${doc.id}`,
+        `- 知识视图：${this.knowledge.projectDocumentMdUrl(doc.projectId, doc.id)}`,
+      );
+    }
     meta.push(`- 更新时间：${doc.updatedAt.toISOString()}`);
     return [
       mdFrontmatter({
@@ -103,16 +199,57 @@ export class DocumentsService {
     }
   }
 
+  /**
+   * 写入知识库：成功回写 knowledgeId，并清空普通文档的 PostgreSQL 正文。
+   * 知识库未配置/暂不可用时保留旧 PostgreSQL 正文，后续回填会再次同步。
+   */
+  private async syncKnowledge(doc: Document): Promise<Document> {
+    if (!this.knowledge.isEnabled) return doc;
+    const markdown =
+      doc.source === DocumentSource.APIPOST
+        ? this.markdownBody(doc)
+        : (doc.content ?? '');
+    try {
+      const synced = await this.knowledge.upsertProjectDocument({
+        projectId: doc.projectId,
+        documentId: doc.id,
+        title: doc.title,
+        content: markdown,
+      });
+      if (!synced) return doc;
+      const node = await this.knowledge.getProjectDocument(
+        doc.projectId,
+        doc.id,
+      );
+      doc.knowledgeId = node?.id ?? doc.knowledgeId;
+      if (doc.source !== DocumentSource.APIPOST) doc.content = null;
+      await this.documents.save(doc);
+      return doc;
+    } catch (error) {
+      this.logger.warn(
+        `文档 ${doc.id} 同步知识库失败，保留 PostgreSQL 正文待重试：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return doc;
+    }
+  }
+
   /** 平台内直接编写（无外部来源，source 记为 '-'） */
-  createMarkdown(input: {
+  async createMarkdown(input: {
     projectId: number;
     title: string;
     type: DocumentType;
     content?: string;
   }): Promise<Document> {
-    return this.documents.save(
-      this.documents.create({ ...input, source: DocumentSource.MARKDOWN }),
+    const doc = await this.documents.save(
+      this.documents.create({
+        ...input,
+        source: DocumentSource.MARKDOWN,
+        content: input.content ?? '',
+      }),
     );
+    return this.hydrate(await this.syncKnowledge(doc));
   }
 
   /**
@@ -141,7 +278,9 @@ export class DocumentsService {
     if (input.description !== undefined) {
       entity.description = input.description || null;
     }
-    return this.documents.save(entity);
+    return this.hydrate(
+      await this.syncKnowledge(await this.documents.save(entity)),
+    );
   }
 
   /**
@@ -169,7 +308,9 @@ export class DocumentsService {
     if (input.description !== undefined) {
       entity.description = input.description || null;
     }
-    return this.documents.save(entity);
+    return this.hydrate(
+      await this.syncKnowledge(await this.documents.save(entity)),
+    );
   }
 
   /**
@@ -210,7 +351,11 @@ export class DocumentsService {
         existing.description = input.description || null;
       }
       existing.content = input.content;
-      return { doc: await this.documents.save(existing), created: false };
+      const saved = await this.documents.save(existing);
+      return {
+        doc: await this.hydrate(await this.syncKnowledge(saved)),
+        created: false,
+      };
     }
     const doc = await this.documents.save(
       this.documents.create({
@@ -223,35 +368,45 @@ export class DocumentsService {
         description: input.description || null,
       }),
     );
-    return { doc, created: true };
+    return {
+      doc: await this.hydrate(await this.syncKnowledge(doc)),
+      created: true,
+    };
   }
 
   /** 本地修改正文：仅允许 Markdown 编写的文档；外部导入（飞书/apipost）的文档只允许源同步更新 */
   async updateContent(id: number, content: string): Promise<Document> {
-    const doc = await this.findOne(id);
+    const doc = await this.getEntity(id);
     if (isExternalSource(doc.source)) {
       throw new ForbiddenException(
         '外部导入的文档不允许本地修改，请使用更新同步',
       );
     }
     doc.content = content;
-    return this.documents.save(doc);
+    const saved = await this.documents.save(doc);
+    return this.hydrate(await this.syncKnowledge(saved));
   }
 
   /** 备注（为后续 AI 阅读准备），任何来源都可编辑 */
   async updateRemark(id: number, remark: string): Promise<Document> {
-    const doc = await this.findOne(id);
+    const doc = await this.getEntity(id);
     doc.remark = remark;
-    return this.documents.save(doc);
+    return this.hydrate(await this.documents.save(doc));
   }
 
   async remove(id: number): Promise<void> {
-    const doc = await this.findOne(id);
+    const doc = await this.getEntity(id);
+    if (this.knowledge.isEnabled) {
+      await this.knowledge.removeProjectDocument(doc.id);
+    }
     await this.documents.remove(doc);
   }
 
   /** 删除项目时的应用层级联清理（测试库无物理外键） */
   async removeByProject(projectId: number): Promise<void> {
+    if (this.knowledge.isEnabled) {
+      await this.knowledge.removeProject(projectId);
+    }
     await this.documents.delete({ projectId });
   }
 }

@@ -51,11 +51,11 @@ export class Defect {
   testScript: string | null;
 
   /** 修复时间：状态置"修复"（研发已修复）时记录 */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   fixedAt: Date | null;
 
   /** 验证时间：脚本回归通过自动关闭、或人工确认关闭时记录 */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   verifiedAt: Date | null;
 
   // 测试库账号无 REFERENCES 权限，暂不建物理外键；获得授权后可移除该选项

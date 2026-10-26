@@ -47,7 +47,7 @@ export class Schedule {
   enabled: boolean;
 
   /** 最近一次触发时间 */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   lastRunAt: Date | null;
 
   /** 已运行次数（任务触发累计，含失败） */

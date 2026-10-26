@@ -8,7 +8,7 @@ import {
 
 /**
  * 任务流转/操作事件（append-only，不可编辑删除）。
- * operator 为空表示系统动作（调度器/执行回调）。
+ * operator 为空表示系统动作（调度机器人/执行回调）。
  */
 @Entity('task_events')
 @Index(['taskId'])
@@ -19,7 +19,7 @@ export class TaskEvent {
   @Column()
   taskId: number;
 
-  /** 事件类型：状态变更 / 操作 / 系统 */
+  /** 事件类型：状态变更 / 操作 / 系统 / 反馈 */
   @Column({ length: 20 })
   type: string;
 

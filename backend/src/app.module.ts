@@ -3,6 +3,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { homedir } from 'os';
+import { resolve } from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppVersionsModule } from './app-versions/app-versions.module';
@@ -14,6 +16,7 @@ import { WorkersModule } from './workers/workers.module';
 import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './auth/auth.guard';
 import { ProjectsModule } from './projects/projects.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ChecksModule } from './checks/checks.module';
 import { SchedulesModule } from './schedules/schedules.module';
@@ -31,17 +34,27 @@ import { ReleasesModule } from './releases/releases.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      // 优先级：进程环境变量 > backend/.env > ~/.env（Nest 按数组顺序合并，先出现者优先）
+      envFilePath: [resolve(process.cwd(), '.env'), resolve(homedir(), '.env')],
+    }),
     ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        type: 'mysql' as const,
+        type: 'postgres' as const,
         host: config.get<string>('DB_HOST', '127.0.0.1'),
-        port: config.get<number>('DB_PORT', 3306),
-        username: config.get<string>('DB_USER', 'root'),
-        password: config.get<string>('DB_PASSWORD', ''),
-        database: config.get<string>('DB_NAME', 'ai_pmp'),
+        port: config.get<number>('DB_PORT', 5432),
+        username: config.get<string>('DB_USER', 'postgres'),
+        password:
+          config.get<string>('DB_PASSWORD') ||
+          config.get<string>('PROJECT_PG_PASSWORD', ''),
+        database: config.get<string>('DB_NAME', 'project'),
+        ssl:
+          config.get<string>('DB_SSL') === 'true'
+            ? { rejectUnauthorized: false }
+            : undefined,
         autoLoadEntities: true,
         // 仅开发期使用，生产前必须切换为 migrations
         synchronize: config.get<string>('NODE_ENV') !== 'production',
@@ -49,6 +62,7 @@ import { ReleasesModule } from './releases/releases.module';
     }),
     ProjectsModule,
     AuthModule,
+    KnowledgeModule,
     DocumentsModule,
     ChecksModule,
     SchedulesModule,

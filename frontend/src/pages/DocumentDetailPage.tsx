@@ -15,6 +15,7 @@ import {
 } from '@appica/ui-react/alert-dialog'
 import { api, documentSourceLabel, type DocumentType, type ProjectDocument } from '../lib/api'
 import { parseDocHeadings } from '../lib/doc-toc'
+import { prefersReducedMotion } from '../lib/motion'
 import {
   splitFrontmatter,
   composeFrontmatter,
@@ -101,7 +102,10 @@ export function DocumentDetailPage() {
         box.querySelectorAll<HTMLElement>(HEADING_SELECTOR),
       ).find((el) => el.id === slug)
       if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        target.scrollIntoView({
+          behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+          block: 'start',
+        })
         return
       }
       if (attempts < 20) window.setTimeout(tryScroll, 120)

@@ -7,6 +7,6 @@ export class SyncState {
   @PrimaryColumn({ type: 'varchar', length: 100 })
   key: string;
 
-  @Column({ type: 'datetime' })
+  @Column({ type: 'timestamp' })
   lastSyncAt: Date;
 }

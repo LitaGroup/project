@@ -132,6 +132,123 @@ export interface Milestone {
   updatedAt: string
 }
 
+/** 平台内文档同步映射到知识库的固定路径 */
+export function documentKnowledgePath(projectId: number, documentId: number): string {
+  return `/project/${projectId}/document/${documentId}`
+}
+
+export const KNOWLEDGE_NODE_KINDS = ['directory', 'article'] as const
+export type KnowledgeNodeKind = (typeof KNOWLEDGE_NODE_KINDS)[number]
+export type KnowledgeNodeSource = 'native' | 'project-document' | 'system'
+export type KnowledgeIndexStatus = 'pending' | 'ready' | 'error'
+export type KnowledgeSearchSource = 'project' | 'feishu' | 'all'
+
+export interface KnowledgeNode {
+  id: string
+  kind: KnowledgeNodeKind
+  path: string
+  parentPath: string
+  name: string
+  title: string
+  content: string | null
+  source: KnowledgeNodeSource
+  sourceDocumentId: number | null
+  contentHash: string
+  indexStatus: KnowledgeIndexStatus
+  indexError: string | null
+  indexAttempts: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type KnowledgeNodeSummary = Omit<
+  KnowledgeNode,
+  'content' | 'contentHash' | 'indexError' | 'indexAttempts'
+>
+
+export interface KnowledgeDirectory {
+  path: string
+  title: string
+  parentPath: string | null
+  directories: KnowledgeNodeSummary[]
+  articles: KnowledgeNodeSummary[]
+}
+
+export interface KnowledgeSearchResult {
+  nodeId: string
+  title: string
+  path: string
+  headingPath: string
+  content: string
+  score: number
+  matchedBy: 'vector' | 'fulltext' | 'hybrid'
+  updatedAt: string
+}
+
+export interface KnowledgeProjectSearchPage {
+  page: number
+  pageSize: number
+  hasMore: boolean
+  mode: 'hybrid' | 'fulltext'
+  results: KnowledgeSearchResult[]
+  error?: string
+}
+
+export interface KnowledgeFeishuResult {
+  token: string
+  title: string
+  url: string | null
+  docsType: string
+  entityType: string
+  summary: string
+  ownerName: string | null
+  ownerId: string | null
+  updateTime: number | null
+  createTime: number | null
+  markdownUrl: string | null
+}
+
+export interface KnowledgeFeishuSearchPage {
+  page: number
+  pageSize: number
+  hasMore: boolean
+  total: number
+  results: KnowledgeFeishuResult[]
+  error?: string
+}
+
+export interface KnowledgeSearchResponse {
+  query: string
+  source: KnowledgeSearchSource
+  path: string
+  page: number
+  pageSize: number
+  mode: 'hybrid' | 'fulltext'
+  results: KnowledgeSearchResult[]
+  project?: KnowledgeProjectSearchPage
+  feishu?: KnowledgeFeishuSearchPage
+}
+
+/** 知识路径逐段编码，保留层级 */
+export function encodeKnowledgePath(path: string): string {
+  const segments = path.split('/').filter(Boolean)
+  return segments.map((s) => encodeURIComponent(s)).join('/')
+}
+
+/** 知识网页地址：目录必须带结尾 /，文章不带 */
+export function knowledgeWebPath(path: string, directory = false): string {
+  const encoded = encodeKnowledgePath(path)
+  if (!encoded) return '/docs/detail/'
+  return `/docs/detail/${encoded}${directory ? '/' : ''}`
+}
+
+/** 知识 Markdown 地址：接口约定目录为 `/.md`，文章为 `.md` */
+export function knowledgeMdPath(path: string, directory = false): string {
+  const encoded = encodeKnowledgePath(path)
+  if (!encoded) return '/api/docs/detail/.md'
+  return `/api/docs/detail/${encoded}${directory ? '/.md' : '.md'}`
+}
+
 export interface ProjectDocument {
   id: number
   title: string
@@ -686,7 +803,7 @@ export type WorkerKind = (typeof WORKER_KINDS)[number]
 export const WORKER_ROLES = ['工作者', '调度器'] as const
 export type WorkerRole = (typeof WORKER_ROLES)[number]
 
-export const WORKER_RUNTIMES = ['opencode', 'pi'] as const
+export const WORKER_RUNTIMES = ['opencode'] as const
 export type WorkerRuntime = (typeof WORKER_RUNTIMES)[number]
 
 export const WORKER_LIVE_STATUSES = ['空闲中', '工作中', '等待中', '验收中'] as const
@@ -705,20 +822,21 @@ export const TASK_TYPES = [
 ] as const
 export type TaskType = (typeof TASK_TYPES)[number]
 
-export const TASK_STATUSES = [
-  '草稿',
-  '待补材料',
-  '待调度',
-  '待确认',
-  '已派发',
-  '执行中',
-  '待验收',
-  '内部完成',
-  '已交付',
-  '维护中',
-  '已取消',
-] as const
+/** 任务主状态：等待中 / 进行中 / 已结束 */
+export const TASK_STATUSES = ['等待中', '进行中', '已结束'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
+
+/** 任务子状态：与主状态严格对应（等待中：待识别/待反馈/待验收；进行中：识别中/执行中；已结束：完成/取消） */
+export const TASK_SUB_STATUSES = [
+  '待识别',
+  '待反馈',
+  '待验收',
+  '识别中',
+  '执行中',
+  '完成',
+  '取消',
+] as const
+export type TaskSubStatus = (typeof TASK_SUB_STATUSES)[number]
 
 /** 执行器：实际执行任务的工具实例（本期 opencode server） */
 export interface ExecutorProviderModel {
@@ -762,7 +880,7 @@ export interface WorkerTaskDef {
   how?: string
 }
 
-/** 机器人（工作者/调度器统一）：附工位路径与实时状态（服务端实时计算） */
+/** 机器人（工作者/调度机器人统一）：附工位路径与实时状态（服务端实时计算） */
 export interface Worker {
   id: number
   name: string
@@ -780,6 +898,8 @@ export interface Worker {
   ownerName: string | null
   materials: string | null
   enabled: boolean
+  /** 系统机器人（id < 1000，由代码内置，网页不可新增/删除） */
+  system: boolean
   /** 工位路径 {WORKER_BASE_DIR}/worker/{id}（未配置 env 为 null） */
   workdir: string | null
   liveStatus: WorkerLiveStatus
@@ -788,7 +908,35 @@ export interface Worker {
   updatedAt: string
 }
 
-/** 任务包缺失材料条目 */
+/** 可调试 Agent（仅启用、执行器在线且模型配置完整的机器人） */
+export interface WorkerDebugOption {
+  id: number
+  name: string
+  intro: string | null
+  executorName: string
+  providerId: string
+  modelId: string
+}
+
+export interface WorkerDebugMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  status: 'running' | 'complete' | 'error'
+  createdAt: string
+}
+
+/** 调试对话快照；同一用户 + 机器人复用 sessionId 实现多轮上下文 */
+export interface WorkerDebugSnapshot {
+  worker: WorkerDebugOption
+  sessionId: string | null
+  status: 'idle' | 'running'
+  messages: WorkerDebugMessage[]
+  error: string | null
+  updatedAt: string
+}
+
+/** 任务待反馈事项（需要用户补充/确认什么） */
 export interface TaskMissingItem {
   item: string
   reason?: string
@@ -805,7 +953,7 @@ export interface TaskEvent {
   createdAt: string
 }
 
-/** 调度方案（PI 调度器产出） */
+/** 调度方案（调度机器人产出，历史保留） */
 export interface PlanSubtask {
   title: string
   type: string
@@ -842,7 +990,16 @@ export interface TaskPackage {
   input: string | null
   outputSpec: string | null
   missingItems: TaskMissingItem[] | null
+  /** 主状态：等待中 / 进行中 / 已结束 */
   status: TaskStatus
+  /** 子状态：待识别 / 待反馈 / 待验收 / 识别中 / 执行中 / 完成 / 取消 */
+  subStatus: TaskSubStatus
+  /** 调度机器人识别产出的工作计划（Markdown） */
+  workPlan: string | null
+  /** 待反馈/待验收提醒次数（3 次未处理自动收尾） */
+  remindCount: number
+  /** 最近一次提醒时间 */
+  lastRemindedAt: string | null
   agentId: number | null
   schedulerId: number | null
   executorId: number | null
@@ -862,10 +1019,78 @@ export interface TaskPackage {
   liveLines?: string[]
 }
 
+/** 任务看板 SSE（GET /api/tasks/stream）：初始快照 + 增量事件 */
+export type TaskRealtimeMessage =
+  | { type: 'snapshot'; tasks: TaskPackage[]; at: number }
+  | { type: 'task.upsert'; task: TaskPackage; at: number }
+  | { type: 'task.line'; taskId: number; line: string; at: number }
+  | { type: 'task.delete'; ids: number[]; at: number }
+  | { type: 'ping'; at: number }
+
+/** 任务聊天发送方：用户 / 机器人 / 调度机器人 / 系统 */
+export interface TaskChatSender {
+  id: string
+  name: string
+  kind: 'user' | 'worker' | 'scheduler' | 'system'
+  workerId?: number
+  roleLabel?: string
+}
+
+/** 机器人执行过程中的工具调用（详情页对话内联展示） */
+export interface TaskChatTool {
+  id: string
+  name: string
+  status: 'running' | 'success' | 'error'
+  detail?: string
+}
+
+/** 任务详情页聊天消息（来自 GET /api/tasks/:id/chat + SSE 增量） */
+export interface TaskChatMessage {
+  id: string
+  taskId: number
+  role: 'user' | 'assistant' | 'system'
+  sender: TaskChatSender
+  /** Markdown 正文；工具调用消息可能为空 */
+  content: string
+  createdAt: string
+  status: 'running' | 'complete' | 'error'
+  /** message=普通对话气泡；event=居中流转事件 */
+  kind: 'message' | 'event'
+  tools?: TaskChatTool[]
+  meta?: Record<string, unknown>
+}
+
+/** PIPELINE 阶段：主任务或子任务 + 分配的机器人与调度机器人 */
+export interface TaskPipelineStage {
+  task: TaskPackage
+  agent: TaskChatSender | null
+  scheduler: TaskChatSender | null
+}
+
+/** 任务详情页聊天初始快照 */
+export interface TaskChatSnapshot {
+  task: TaskPackage
+  rootTask: TaskPackage
+  pipeline: TaskPipelineStage[]
+  messages: TaskChatMessage[]
+}
+
+/** 任务聊天 SSE 推送 */
+export type TaskChatStreamMessage =
+  | { type: 'ready'; at: number }
+  | { type: 'message.upsert'; message: TaskChatMessage; at: number }
+  | { type: 'stage.upsert'; stage: TaskPipelineStage; at: number }
+  | { type: 'stage.delete'; ids: number[]; at: number }
+  | { type: 'refresh'; at: number }
+  | { type: 'ping'; at: number }
+
 export interface TaskOverview {
   total: number
   roots: number
+  /** 按主状态计数 */
   statuses: Record<string, number>
+  /** 按子状态计数 */
+  subStatuses: Record<string, number>
 }
 
 /** 任务包：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
@@ -1599,14 +1824,42 @@ export const api = {
     }),
   deleteWorker: (id: number) =>
     request<void>(`/workers/${id}`, { method: 'DELETE' }),
-  /** AI 优化角色 PROMPT：结构补全 + 清晰化（PI Agent / DeepSeek） */
-  optimizeWorkerPrompt: (prompt: string) =>
+  /** AI 优化角色 PROMPT：结构补全 + 清晰化（统一走 opencode 等执行器） */
+  optimizeWorkerPrompt: (input: {
+    prompt: string
+    workerId?: number | null
+    executorId?: number | null
+    providerId?: string | null
+    modelId?: string | null
+  }) =>
     request<{ prompt: string }>('/workers/optimize-prompt', {
       method: 'POST',
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(input),
     }).then((r) => r.prompt),
   /** 工作概览卡片数据（实时状态，前端轮询） */
   listWorkersLive: () => request<Worker[]>('/workers/live'),
+  /** 可调试 Agent：启用、执行器在线且模型配置完整 */
+  listWorkerDebugWorkers: () =>
+    request<WorkerDebugOption[]>('/workers/debug/workers'),
+  /** 当前用户与机器人的调试会话快照 */
+  getWorkerDebugSnapshot: (workerId: number) =>
+    request<WorkerDebugSnapshot>(`/workers/${workerId}/debug`),
+  /** 发送一轮消息；立即返回 running，轮询快照取得最终回复 */
+  sendWorkerDebugMessage: (workerId: number, content: string) =>
+    request<WorkerDebugSnapshot>(`/workers/${workerId}/debug/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  /** 中断当前轮次，保留 opencode 会话与多轮上下文 */
+  interruptWorkerDebug: (workerId: number) =>
+    request<WorkerDebugSnapshot>(`/workers/${workerId}/debug/interrupt`, {
+      method: 'POST',
+    }),
+  /** 清空对话并解绑旧会话；下一条消息创建新会话 */
+  resetWorkerDebug: (workerId: number) =>
+    request<WorkerDebugSnapshot>(`/workers/${workerId}/debug/reset`, {
+      method: 'POST',
+    }),
 
   /** 任务包列表 */
   listTaskTemplates: () => request<TaskTemplate[]>('/task-templates'),
@@ -1646,20 +1899,25 @@ export const api = {
   listTaskPackages: (params?: {
     q?: string
     status?: TaskStatus
+    subStatus?: TaskSubStatus
     type?: TaskType
     rootOnly?: boolean
   }) => {
     const qs = new URLSearchParams()
     if (params?.q) qs.set('q', params.q)
     if (params?.status) qs.set('status', params.status)
+    if (params?.subStatus) qs.set('subStatus', params.subStatus)
     if (params?.type) qs.set('type', params.type)
     if (params?.rootOnly === false) qs.set('rootOnly', 'false')
     const q = qs.toString()
     return request<TaskPackage[]>(`/tasks${q ? `?${q}` : ''}`)
   },
   getTaskPackage: (id: number) => request<TaskPackage>(`/tasks/${id}`),
+  /** 任务详情页聊天快照：当前任务 + 所属 PIPELINE + 对话消息 */
+  getTaskChat: (id: number) => request<TaskChatSnapshot>(`/tasks/${id}/chat`),
   createTaskPackage: (input: {
-    title: string
+    /** 可空：按任务描述首行生成临时标题，调度机器人识别后覆盖 */
+    title?: string
     type?: TaskType
     description?: string | null
     input?: string | null
@@ -1680,6 +1938,7 @@ export const api = {
       description: string | null
       input: string | null
       outputSpec: string | null
+      workPlan: string | null
       agentId: number | null
       result: string | null
       missingItems: TaskMissingItem[] | null
@@ -1691,45 +1950,82 @@ export const api = {
     }),
   deleteTaskPackage: (id: number) =>
     request<void>(`/tasks/${id}`, { method: 'DELETE' }),
-  /** 提交调度：草稿/待补材料 → 待调度 */
+  /** 重新识别：等待中-待反馈 → 等待中-待识别（LOOP 下一轮自动处理） */
   submitTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/submit`, { method: 'POST' }),
-  /** 材料补齐：待补材料 → 待调度 */
-  resolveTaskMissing: (id: number) =>
-    request<TaskPackage>(`/tasks/${id}/resolved`, { method: 'POST' }),
-  /** AI 调度（识别/审查/拆解/分配） */
-  scheduleTask: (id: number) =>
-    request<TaskPackage>(`/tasks/${id}/schedule`, { method: 'POST' }),
-  /** 派发（执行中可重新派发） */
-  dispatchTask: (id: number) =>
-    request<TaskPackage>(`/tasks/${id}/dispatch`, { method: 'POST' }),
+  /** 提交反馈并重新识别（反馈正文追加到任务描述） */
+  provideTaskFeedback: (id: number, content?: string) =>
+    request<TaskPackage>(`/tasks/${id}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  /** 人工标记待反馈（补充需要用户提供/确认的事项） */
+  markTaskMissing: (id: number, items: TaskMissingItem[]) =>
+    request<TaskPackage>(`/tasks/${id}/missing`, {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
   /** 中断执行 */
   interruptTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/interrupt`, { method: 'POST' }),
-  /** 验收通过：待验收 → 内部完成 */
+  /** 验收通过：等待中-待验收 → 已结束-完成 */
   acceptTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/accept`, { method: 'POST' }),
-  /** 交付：内部完成 → 已交付 */
-  deliverTask: (id: number, result?: string) =>
-    request<TaskPackage>(`/tasks/${id}/deliver`, {
-      method: 'POST',
-      body: JSON.stringify({ result }),
-    }),
-  /** 归档：已交付 → 维护中（终态） */
-  archiveTask: (id: number) =>
-    request<TaskPackage>(`/tasks/${id}/archive`, { method: 'POST' }),
-  /** 取消（任意非终态） */
+  /** 取消（任意未结束任务） */
   cancelTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/cancel`, { method: 'POST' }),
-  /** 任务当前待确认调度方案 */
-  getTaskPlan: (id: number) => request<DispatchPlan | null>(`/tasks/${id}/plan`),
-  /** 确认调度方案（物化子任务并派发） */
-  confirmTaskPlan: (planId: number) =>
-    request<TaskPackage>(`/tasks/plans/${planId}/confirm`, { method: 'POST' }),
-  /** 驳回调度方案（打回待调度） */
-  rejectTaskPlan: (planId: number, reason?: string) =>
-    request<TaskPackage>(`/tasks/plans/${planId}/reject`, {
+  /** 知识目录（目录地址以 /detail/.../ 结尾） */
+  getKnowledgeDirectory: (path: string) =>
+    request<KnowledgeDirectory>(`/docs/detail${knowledgeApiSuffix(path, true)}`),
+  getKnowledgeArticle: (path: string) =>
+    request<KnowledgeNode>(`/docs/detail${knowledgeApiSuffix(path, false)}`),
+  getKnowledgeNode: (id: string) => request<KnowledgeNode>(`/docs/nodes/${id}`),
+  createKnowledgeNode: (input: {
+    kind: KnowledgeNodeKind
+    parentPath: string
+    name: string
+    title?: string
+    content?: string
+  }) =>
+    request<KnowledgeNode>('/docs/nodes', {
       method: 'POST',
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify(input),
     }),
+  updateKnowledgeNode: (
+    id: string,
+    input: Partial<{
+      title: string
+      content: string
+      name: string
+      parentPath: string
+    }>,
+  ) =>
+    request<KnowledgeNode>(`/docs/nodes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteKnowledgeNode: (id: string, recursive = false) =>
+    request<void>(`/docs/nodes/${id}${recursive ? '?recursive=true' : ''}`, {
+      method: 'DELETE',
+    }),
+  searchKnowledge: (params: {
+    q: string
+    source?: KnowledgeSearchSource
+    path?: string
+    page?: number
+    pageSize?: number
+  }) => {
+    const qs = new URLSearchParams({ q: params.q })
+    qs.set('source', params.source ?? 'project')
+    if (params.path && params.path !== '/') qs.set('path', params.path)
+    if (params.page) qs.set('page', String(params.page))
+    if (params.pageSize) qs.set('pageSize', String(params.pageSize))
+    return request<KnowledgeSearchResponse>(`/docs/search?${qs.toString()}`)
+  },
+}
+
+function knowledgeApiSuffix(path: string, directory: boolean): string {
+  const encoded = encodeKnowledgePath(path)
+  if (!encoded) return directory ? '/' : ''
+  return `/${encoded}${directory ? '/' : ''}`
 }

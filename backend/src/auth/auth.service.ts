@@ -33,6 +33,19 @@ export interface FeishuUserInfo {
   email: string | null;
 }
 
+/** 飞书 OAuth 用户令牌（用于代表用户搜索云文档） */
+export interface FeishuOAuthTokens {
+  accessToken: string;
+  refreshToken: string | null;
+  /** 访问令牌过期时间 */
+  expiresAt: Date;
+}
+
+export interface FeishuLoginResult {
+  info: FeishuUserInfo;
+  tokens: FeishuOAuthTokens;
+}
+
 /** 飞书应用凭据（网页登录直接依赖，不同于 tenant token 的 Lita 来源） */
 interface FeishuAppCredential {
   appId: string;
@@ -81,8 +94,18 @@ export class AuthService {
 
   /** 授权码换用户信息：POST authen/v2/oauth/token → GET authen/v1/user_info */
   async exchangeCodeForUser(code: string): Promise<FeishuUserInfo> {
+    return (await this.exchangeCodeForLogin(code)).info;
+  }
+
+  /**
+   * 登录授权码换取用户信息和 OAuth 令牌。
+   * user_access_token 用于代表用户搜索其可见飞书云文档；refresh_token 用于过期自动续期。
+   */
+  async exchangeCodeForLogin(code: string): Promise<FeishuLoginResult> {
     const { appId, appSecret, redirectUri } = this.getFeishuCredential();
     let accessToken: string;
+    let refreshToken: string | null = null;
+    let expiresIn = 7200;
     try {
       const { data } = await this.http.post<{
         code?: number;
@@ -90,6 +113,8 @@ export class AuthService {
         error?: string;
         error_description?: string;
         access_token?: string;
+        refresh_token?: string;
+        expires_in?: number;
       }>('/authen/v2/oauth/token', {
         grant_type: 'authorization_code',
         client_id: appId,
@@ -103,6 +128,10 @@ export class AuthService {
         );
       }
       accessToken = data.access_token;
+      refreshToken = data.refresh_token ?? null;
+      if (typeof data.expires_in === 'number' && data.expires_in > 0) {
+        expiresIn = data.expires_in;
+      }
     } catch (e) {
       if (e instanceof BadRequestException) throw e;
       if (axios.isAxiosError(e) && e.response) {
@@ -115,11 +144,21 @@ export class AuthService {
       }
       throw e;
     }
-    return this.fetchUserInfo(accessToken);
+    return {
+      info: await this.fetchUserInfo(accessToken),
+      tokens: {
+        accessToken,
+        refreshToken,
+        expiresAt: new Date(Date.now() + expiresIn * 1000),
+      },
+    };
   }
 
   /** 按 open_id upsert 用户；尚无管理员时首个登录用户自动授予管理员；每次登录刷新姓名/头像/邮箱/部门与 lastLoginAt */
-  async upsertFeishuUser(info: FeishuUserInfo): Promise<User> {
+  async upsertFeishuUser(
+    info: FeishuUserInfo,
+    tokens?: FeishuOAuthTokens,
+  ): Promise<User> {
     // 部门查不到（无通讯录权限等）为 null，更新时保留旧值
     const department = await this.feishu.getUserDepartment(info.openId);
     const existing = await this.usersRepo.findOne({
@@ -132,6 +171,7 @@ export class AuthService {
       existing.department = department ?? existing.department;
       existing.unionId = info.unionId ?? existing.unionId;
       existing.lastLoginAt = new Date();
+      this.applyFeishuTokens(existing, tokens);
       const user = await this.usersRepo.save(existing);
       await this.sendWelcome(user);
       return user;
@@ -152,12 +192,79 @@ export class AuthService {
       enabled: true,
       lastLoginAt: new Date(),
     });
+    this.applyFeishuTokens(user, tokens);
     this.logger.log(
       `新用户登录落库: ${user.name}（open_id=${info.openId}，角色=${user.role}）`,
     );
     const saved = await this.usersRepo.save(user);
     await this.sendWelcome(saved);
     return saved;
+  }
+
+  private applyFeishuTokens(user: User, tokens?: FeishuOAuthTokens): void {
+    if (!tokens) return;
+    user.feishuAccessToken = tokens.accessToken;
+    user.feishuRefreshToken = tokens.refreshToken;
+    user.feishuTokenExpiresAt = tokens.expiresAt;
+  }
+
+  /**
+   * 取用户可用于飞书搜索的 user_access_token。
+   * 令牌未过期直接返回；过期时用 refresh_token 自动续期；都没有则要求重新登录授权。
+   */
+  async getFeishuAccessToken(userId: number): Promise<string> {
+    const user = await this.usersRepo
+      .createQueryBuilder('user')
+      .addSelect(['user.feishuAccessToken', 'user.feishuRefreshToken'])
+      .where('user.id = :id', { id: userId })
+      .getOne();
+    if (!user) throw new UnauthorizedException('用户不存在');
+    const valid =
+      user.feishuAccessToken &&
+      (!user.feishuTokenExpiresAt ||
+        user.feishuTokenExpiresAt.getTime() > Date.now() + 5 * 60 * 1000);
+    if (valid) return user.feishuAccessToken as string;
+    if (!user.feishuRefreshToken) {
+      throw new BadRequestException(
+        '飞书用户授权已过期，请重新通过飞书登录后再搜索飞书文档',
+      );
+    }
+    const { appId, appSecret } = this.getFeishuCredential();
+    try {
+      const { data } = await this.http.post<{
+        access_token?: string;
+        refresh_token?: string;
+        expires_in?: number;
+        error?: string;
+        error_description?: string;
+      }>('/authen/v2/oauth/token', {
+        grant_type: 'refresh_token',
+        client_id: appId,
+        client_secret: appSecret,
+        refresh_token: user.feishuRefreshToken,
+      });
+      if (!data.access_token) {
+        throw new Error(
+          data.error_description ?? data.error ?? '飞书未返回新的访问令牌',
+        );
+      }
+      const expiresIn =
+        typeof data.expires_in === 'number' && data.expires_in > 0
+          ? data.expires_in
+          : 7200;
+      user.feishuAccessToken = data.access_token;
+      user.feishuRefreshToken = data.refresh_token ?? user.feishuRefreshToken;
+      user.feishuTokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
+      await this.usersRepo.save(user);
+      return data.access_token;
+    } catch (e) {
+      this.logger.warn(
+        `飞书 user_access_token 刷新失败（用户 ${userId}）: ${(e as Error).message}`,
+      );
+      throw new BadRequestException(
+        '飞书用户授权已失效，请重新通过飞书登录后再搜索飞书文档',
+      );
+    }
   }
 
   /**

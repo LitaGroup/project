@@ -14,8 +14,7 @@ import {
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import type { AuthedRequest } from '../auth/auth.guard';
-import { TaskStatus, TaskType } from '../common/enums';
-import { DispatchPlan } from './dispatch-plan.entity';
+import { TaskStatus, TaskSubStatus, TaskType } from '../common/enums';
 import { Task, TaskMissingItem } from './task.entity';
 import {
   CreateTaskInput,
@@ -23,10 +22,11 @@ import {
   TaskOverview,
   UpdateTaskInput,
 } from './tasks.service';
+import { TaskChatService } from './task-chat.service';
 import { TaskDispatchService } from './task-dispatch.service';
 
 class CreateTaskDto implements CreateTaskInput {
-  title: string;
+  title?: string;
   type?: TaskType;
   description?: string | null;
   input?: string | null;
@@ -34,6 +34,7 @@ class CreateTaskDto implements CreateTaskInput {
   agentId?: number | null;
   schedulerId?: number | null;
   parentId?: number | null;
+  submitForScheduling?: boolean;
 }
 
 class UpdateTaskDto implements UpdateTaskInput {
@@ -42,6 +43,7 @@ class UpdateTaskDto implements UpdateTaskInput {
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
+  workPlan?: string | null;
   agentId?: number | null;
   result?: string | null;
   missingItems?: TaskMissingItem[] | null;
@@ -51,12 +53,8 @@ class MarkMissingDto {
   items: TaskMissingItem[];
 }
 
-class RejectPlanDto {
-  reason?: string;
-}
-
-class DeliverDto {
-  result?: string;
+class FeedbackDto {
+  content?: string;
 }
 
 @Controller('tasks')
@@ -64,6 +62,7 @@ export class TasksController {
   constructor(
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
+    private readonly taskChat: TaskChatService,
   ) {}
 
   /** 概览统计（任务概览页顶部卡片） */
@@ -72,20 +71,40 @@ export class TasksController {
     return this.tasksService.overview();
   }
 
-  /** 任务列表（默认根任务树；q=编号/标题，status/type 筛选，rootOnly=false 展开全部） */
+  /** 任务列表（默认根任务树；q=编号/标题，status/subStatus/type 筛选，rootOnly=false 展开全部） */
   @Get()
   findAll(
     @Query('q') q?: string,
     @Query('status') status?: TaskStatus,
+    @Query('subStatus') subStatus?: TaskSubStatus,
     @Query('type') type?: TaskType,
     @Query('rootOnly') rootOnly?: string,
   ) {
     return this.tasksService.findAll({
       q,
       status: status || undefined,
+      subStatus: subStatus || undefined,
       type: type || undefined,
       rootOnly: rootOnly === 'false' ? false : undefined,
     });
+  }
+
+  /** 看板实时流（SSE）：初始全量快照 + 任务快照/输出增量/删除事件 */
+  @Sse('stream')
+  boardStream(): Observable<MessageEvent> {
+    return this.tasksService.streamBoard();
+  }
+
+  /** 任务详情页聊天快照：当前任务 + 所属 PIPELINE + 对话消息 */
+  @Get(':id/chat')
+  chatSnapshot(@Param('id', ParseIntPipe) id: number) {
+    return this.taskChat.snapshot(id);
+  }
+
+  /** 任务详情页聊天 SSE：机器人输出/工具调用/阶段状态实时推送 */
+  @Sse(':id/chat/stream')
+  chatStream(@Param('id', ParseIntPipe) id: number): Observable<MessageEvent> {
+    return this.taskChat.stream(id);
   }
 
   /** 详情：任务 + 子任务 + 事件时间线 + 实时输出行 */
@@ -119,15 +138,29 @@ export class TasksController {
     return this.tasksService.remove(id, req.user?.name ?? null);
   }
 
-  // ===== 流程动作 =====
+  // ===== 等待中状态动作 =====
 
-  /** 提交调度：草稿/待补材料 → 待调度 */
+  /** 重新识别：待反馈 → 待识别（LOOP 自动处理） */
   @Post(':id/submit')
   submit(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
-    return this.tasksService.submitForSchedule(id, req.user?.name ?? null);
+    return this.tasksService.requeueForIdentify(id, req.user?.name ?? null);
   }
 
-  /** 标记待补材料（调度器产出，人工亦可） */
+  /** 提交反馈并重新识别（反馈正文追加到任务描述） */
+  @Post(':id/feedback')
+  feedback(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: FeedbackDto,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.tasksService.provideFeedback(
+      id,
+      dto.content?.trim() || null,
+      req.user?.name ?? null,
+    );
+  }
+
+  /** 人工标记待反馈（补充需要用户提供/确认的事项） */
   @Post(':id/missing')
   markMissing(
     @Param('id', ParseIntPipe) id: number,
@@ -136,92 +169,22 @@ export class TasksController {
     return this.tasksService.markMissing(id, dto.items ?? [], null);
   }
 
-  /** 材料补齐：待补材料 → 待调度 */
-  @Post(':id/resolved')
-  resolveMissing(
-    @Param('id', ParseIntPipe) id: number,
-    @Req() req: AuthedRequest,
-  ) {
-    return this.tasksService.resolveMissing(id, req.user?.name ?? null);
-  }
-
-  /** AI 调度：识别/材料审查/拆解/分配 → 待补材料 或 待确认方案 */
-  @Post(':id/schedule')
-  schedule(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
-    return this.tasksService.schedule(id, req.user?.name ?? null);
-  }
-
-  /** 派发（人工分配后直接派发；执行中可重新派发） */
-  @Post(':id/dispatch')
-  dispatch(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
-    return this.dispatchService.dispatch(id, req.user?.name ?? null);
-  }
-
-  /** 中断执行 */
+  /** 中断执行中的机器人会话（任务保持进行中-执行中，可重新派发或取消） */
   @Post(':id/interrupt')
   interrupt(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
     return this.dispatchService.interrupt(id, req.user?.name ?? null);
   }
 
-  /** 验收通过：待验收 → 内部完成 */
+  /** 验收通过：等待中-待验收 → 已结束-完成 */
   @Post(':id/accept')
   accept(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
     return this.tasksService.accept(id, req.user?.name ?? null);
   }
 
-  /** 交付：内部完成 → 已交付 */
-  @Post(':id/deliver')
-  deliver(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: DeliverDto,
-    @Req() req: AuthedRequest,
-  ) {
-    return this.tasksService.deliver(id, req.user?.name ?? null, dto.result);
-  }
-
-  /** 归档：已交付 → 维护中（终态） */
-  @Post(':id/archive')
-  archive(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
-    return this.tasksService.archive(id, req.user?.name ?? null);
-  }
-
-  /** 取消（任意非终态） */
+  /** 取消（任意未结束任务） */
   @Post(':id/cancel')
   cancel(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
     return this.tasksService.cancel(id, req.user?.name ?? null);
-  }
-
-  // ===== 调度方案 =====
-
-  /** 任务当前待确认方案 */
-  @Get(':id/plan')
-  pendingPlan(
-    @Param('id', ParseIntPipe) id: number,
-  ): Promise<DispatchPlan | null> {
-    return this.tasksService.pendingPlan(id);
-  }
-
-  /** 确认调度方案（物化子任务并派发） */
-  @Post('plans/:planId/confirm')
-  confirmPlan(
-    @Param('planId', ParseIntPipe) planId: number,
-    @Req() req: AuthedRequest,
-  ) {
-    return this.tasksService.confirmPlan(planId, req.user?.name ?? null);
-  }
-
-  /** 驳回调度方案（打回待调度） */
-  @Post('plans/:planId/reject')
-  rejectPlan(
-    @Param('planId', ParseIntPipe) planId: number,
-    @Body() dto: RejectPlanDto,
-    @Req() req: AuthedRequest,
-  ) {
-    return this.tasksService.rejectPlan(
-      planId,
-      dto.reason?.trim() || '',
-      req.user?.name ?? null,
-    );
   }
 
   /** 实时输出流（SSE）：执行器事件行 + 状态推送 */

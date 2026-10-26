@@ -16,8 +16,8 @@ import {
   WorkerRole,
   WorkerRuntime,
 } from '../common/enums';
-import { PiSchedulerService } from '../pi/pi-scheduler.service';
 import { Worker } from './worker.entity';
+import { OptimizePromptInput, WorkerAiService } from './worker-ai.service';
 import {
   CreateWorkerInput,
   UpdateWorkerInput,
@@ -59,8 +59,12 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   enabled?: boolean;
 }
 
-class OptimizePromptDto {
+class OptimizePromptDto implements OptimizePromptInput {
   prompt?: string;
+  workerId?: number | null;
+  executorId?: number | null;
+  providerId?: string | null;
+  modelId?: string | null;
 }
 
 /** 工作概览的卡片数据（前端 5s 轮询） */
@@ -77,24 +81,26 @@ export interface WorkerLiveCard {
   liveStatus: WorkerLiveStatus;
   activeTask: WorkerView['activeTask'];
   workdir: string | null;
+  /** 系统机器人（id < 1000，代码内置） */
+  system: boolean;
 }
 
 @Controller('workers')
 export class WorkersController {
   constructor(
     private readonly workersService: WorkersService,
-    private readonly piScheduler: PiSchedulerService,
+    private readonly workerAi: WorkerAiService,
   ) {}
 
-  /** AI 优化角色 PROMPT：结构补全 + 清晰化，返回 Markdown 正文 */
+  /** AI 优化角色 PROMPT：结构补全 + 清晰化，返回 Markdown 正文（走执行器） */
   @Post('optimize-prompt')
   async optimizePrompt(
     @Body() dto: OptimizePromptDto,
   ): Promise<{ prompt: string }> {
-    return { prompt: await this.piScheduler.optimizePrompt(dto.prompt ?? '') };
+    return { prompt: await this.workerAi.optimizePrompt(dto) };
   }
 
-  /** 工作概览：全部机器人的实时状态卡片（含调度器） */
+  /** 工作概览：全部机器人的实时状态卡片（含系统调度机器人） */
   @Get('live')
   live(): Promise<WorkerLiveCard[]> {
     return this.workersService.findAll().then((list) =>
@@ -111,6 +117,7 @@ export class WorkersController {
         liveStatus: w.liveStatus,
         activeTask: w.activeTask,
         workdir: w.workdir,
+        system: w.system,
       })),
     );
   }

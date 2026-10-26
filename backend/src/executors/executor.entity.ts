@@ -66,10 +66,10 @@ export class Executor {
   @Column({ type: 'simple-json', nullable: true })
   providersCache: ExecutorProvider[] | null;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   providersSyncedAt: Date | null;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   lastCheckedAt: Date | null;
 
   @CreateDateColumn()

@@ -101,14 +101,14 @@ export class TaskTemplatesService {
     }
   }
 
-  /** 处理机器人须存在、启用且为工作者（调度器不承接任务） */
+  /** 处理机器人须存在、启用且为工作者（调度机器人不承接任务） */
   private async assertWorker(agentId: number | null): Promise<void> {
     if (!agentId) return;
     const worker = await this.workers.findOne({ where: { id: agentId } });
     if (!worker) throw new BadRequestException('处理机器人不存在');
     if (!worker.enabled) throw new BadRequestException('处理机器人已停用');
     if (worker.role === WorkerRole.SCHEDULER) {
-      throw new BadRequestException('调度器不承接任务，请选择工作者');
+      throw new BadRequestException('调度机器人不承接任务，请选择工作者');
     }
   }
 }

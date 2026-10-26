@@ -10,21 +10,20 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
-import { TaskStatus, WorkerRuntime } from '../common/enums';
+import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
 import {
   OpencodeEvent,
   OpencodeEventHub,
 } from '../executors/opencode-event-hub.service';
-import { FeishuService } from '../feishu/feishu.service';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
-
-/** 活跃状态（实时流持续到任务离开该集合） */
-const STREAMING_STATUSES = [TaskStatus.DISPATCHED, TaskStatus.EXECUTING];
+import { TaskChatService } from './task-chat.service';
+import { TaskNotifyService } from './task-notify.service';
+import { TaskRealtimeService } from './task-realtime.service';
 
 /** 终态快照预留：实时输出缓冲在进程内保留（P1 不做 TTL 清理，重启后由任务历史承担） */
 
@@ -54,7 +53,9 @@ export class TaskDispatchService implements OnModuleInit {
     private readonly workers: Repository<Worker>,
     private readonly workersService: WorkersService,
     private readonly eventHub: OpencodeEventHub,
-    private readonly feishuService: FeishuService,
+    private readonly taskNotify: TaskNotifyService,
+    private readonly taskRealtime: TaskRealtimeService,
+    private readonly taskChat: TaskChatService,
   ) {}
 
   /** opencodeSessionId → taskId 路由缓存（未命中回库查） */
@@ -71,23 +72,31 @@ export class TaskDispatchService implements OnModuleInit {
 
   onModuleInit(): void {
     this.eventHub.onEvent((event) => {
-      void this.handleEvent(event);
+      void this.handleEvent(event).catch((e: Error) => {
+        this.logger.warn(
+          `处理执行器事件失败（${event.type || event.id}）: ${e.message}`,
+        );
+      });
     });
   }
 
   /**
-   * 派发：待调度/执行中的任务（重新派发）→ 建工位 → 建会话 → 发 prompt。
-   * 成功后任务标「执行中」并绑定会话；子任务由调度确认流程批量调用。
+   * 派发：调度机器人识别完成的「进行中-识别中」任务，或执行中的重新派发。
+   * 链路：建工位 → 建会话 → 发 prompt；成功后任务进入「进行中-执行中」。
    */
   async dispatch(taskId: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(taskId);
     if (
-      ![TaskStatus.PENDING_SCHEDULE, TaskStatus.EXECUTING].includes(task.status)
+      task.status !== TaskStatus.RUNNING ||
+      ![TaskSubStatus.IDENTIFYING, TaskSubStatus.EXECUTING].includes(
+        task.subStatus,
+      )
     ) {
       throw new NotFoundException(
-        `任务 ${task.code} 当前状态「${task.status}」不可派发`,
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可派发`,
       );
     }
+    const wasExecuting = task.subStatus === TaskSubStatus.EXECUTING;
     if (!task.agentId)
       throw new NotFoundException(`任务 ${task.code} 未分配机器人`);
     const worker = await this.workers.findOne({ where: { id: task.agentId } });
@@ -135,8 +144,7 @@ export class TaskDispatchService implements OnModuleInit {
       location: { directory: workdir },
     });
 
-    // 4. 落派发状态并绑定会话
-    task.status = TaskStatus.DISPATCHED;
+    // 4. 绑定会话（状态仍为 识别中/执行中，prompt 成功后再进入执行中）
     task.executorId = executor.id;
     task.opencodeSessionId = session.id;
     await this.tasks.save(task);
@@ -150,23 +158,36 @@ export class TaskDispatchService implements OnModuleInit {
     this.sessionRoutes.set(`${executor.id}:${session.id}`, task.id);
     this.pushLine(task.id, `▶ 已派发给 ${worker.name}（会话 ${session.id}）`);
 
-    // 5. 发 prompt（角色定义 + 技能内联 + 任务输入/输出要求）
+    // 5. 发 prompt（角色定义 + 技能内联 + 工作计划 + 任务输入/输出要求）
     const text = this.buildPrompt(task, worker);
     await client.prompt(session.id, { text });
     this.pushLine(task.id, '▶ 任务指令已下发');
 
     // 6. 执行中
-    task.status = TaskStatus.EXECUTING;
+    task.status = TaskStatus.RUNNING;
+    task.subStatus = TaskSubStatus.EXECUTING;
     const saved = await this.tasks.save(task);
-    await this.addEvent(task.id, '状态变更', '状态变更：已派发 → 执行中', null);
+    if (!wasExecuting) {
+      await this.addEvent(
+        task.id,
+        '状态变更',
+        '状态变更：进行中-识别中 → 进行中-执行中',
+        null,
+      );
+    }
     return saved;
   }
 
   /** 中断执行（会话 interrupt + 事件；任务保持执行中，可重新派发或取消） */
   async interrupt(taskId: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(taskId);
-    if (task.status !== TaskStatus.EXECUTING) {
-      throw new NotFoundException(`任务 ${task.code} 当前不在执行中`);
+    if (
+      task.status !== TaskStatus.RUNNING ||
+      task.subStatus !== TaskSubStatus.EXECUTING
+    ) {
+      throw new NotFoundException(
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不在执行中`,
+      );
     }
     if (task.opencodeSessionId && task.executorId) {
       const executor = await this.executors.findOne({
@@ -184,6 +205,7 @@ export class TaskDispatchService implements OnModuleInit {
     }
     this.pushLine(taskId, '■ 已人工中断');
     await this.addEvent(taskId, '操作', '人工中断执行', operator);
+    await this.taskChat.finishTask(taskId);
     return this.mustFind(taskId);
   }
 
@@ -228,11 +250,18 @@ export class TaskDispatchService implements OnModuleInit {
       // 兜底轮询任务状态：离开活跃状态（待验收等）即完成流
       const poll = setInterval(() => {
         void this.tasks
-          .findOne({ where: { id: taskId }, select: { status: true } })
+          .findOne({
+            where: { id: taskId },
+            select: { status: true, subStatus: true },
+          })
           .then((task) => {
             if (done) return;
-            subscriber.next({ data: { status: task?.status ?? null } });
-            if (!task || !STREAMING_STATUSES.includes(task.status)) finish();
+            subscriber.next({
+              data: {
+                status: task ? `${task.status}-${task.subStatus}` : null,
+              },
+            });
+            if (!task || task.subStatus !== TaskSubStatus.EXECUTING) finish();
           })
           .catch(() => finish());
       }, 2000);
@@ -274,23 +303,28 @@ export class TaskDispatchService implements OnModuleInit {
       }
       case event.type === 'session.tool.input.started': {
         this.pushLine(taskId, `🔧 调用工具 ${str('name') || '?'}`);
+        await this.taskChat.toolStarted(taskId, str('name') || '工具');
         break;
       }
       case event.type === 'session.tool.success': {
         this.pushLine(taskId, '✓ 工具执行成功');
+        this.taskChat.toolFinished(taskId, true);
         break;
       }
       case event.type === 'session.tool.failed': {
         this.pushLine(taskId, '✗ 工具执行失败');
+        this.taskChat.toolFinished(taskId, false);
         break;
       }
       case event.type === 'session.text.started': {
         this.bufferOf(taskId).set(messageId, '');
+        await this.taskChat.beginText(taskId);
         break;
       }
       case event.type === 'session.text.delta': {
         const buffers = this.bufferOf(taskId);
         buffers.set(messageId, (buffers.get(messageId) ?? '') + str('delta'));
+        await this.taskChat.appendText(taskId, str('delta'));
         break;
       }
       case event.type === 'session.text.ended': {
@@ -299,6 +333,7 @@ export class TaskDispatchService implements OnModuleInit {
           const clipped = text.length > 4000 ? `${text.slice(0, 4000)}…` : text;
           this.pushLine(taskId, `💬 ${clipped.replace(/\n/g, '\n💬 ')}`);
         }
+        this.taskChat.endText(taskId);
         break;
       }
       case event.type === 'session.step.failed': {
@@ -320,6 +355,10 @@ export class TaskDispatchService implements OnModuleInit {
         const error = data.error as
           { type?: string; message?: string } | undefined;
         this.pushLine(taskId, `✗ 执行失败：${error?.message ?? event.type}`);
+        await this.taskChat.failTask(
+          taskId,
+          `执行失败：${[error?.type, error?.message].filter(Boolean).join(' ') || event.type}`,
+        );
         await this.addEvent(
           taskId,
           '系统',
@@ -345,7 +384,11 @@ export class TaskDispatchService implements OnModuleInit {
   /** 会话执行完成：取累积文本（兜底读消息）→ 落 result → 待验收 + 通知责任人 */
   private async finalizeSuccess(taskId: number): Promise<void> {
     const task = await this.mustFind(taskId);
-    if (task.status !== TaskStatus.EXECUTING) return;
+    if (
+      task.status !== TaskStatus.RUNNING ||
+      task.subStatus !== TaskSubStatus.EXECUTING
+    )
+      return;
     const buffers = this.textBuffers.get(taskId);
     const accumulated = [...(buffers?.values() ?? [])]
       .map((t) => t.trim())
@@ -357,65 +400,37 @@ export class TaskDispatchService implements OnModuleInit {
         where: { id: task.executorId },
       });
       if (executor) {
-        resultText = await this.fetchLastAssistantText(
-          new OpencodeClient(executor),
-          task.opencodeSessionId,
-        );
+        resultText = await new OpencodeClient(executor)
+          .lastAssistantText(task.opencodeSessionId)
+          .catch((e: Error) => {
+            this.logger.warn(
+              `取会话 ${task.opencodeSessionId} 最终回复失败: ${e.message}`,
+            );
+            return null;
+          });
       }
     }
-    task.status = TaskStatus.PENDING_ACCEPT;
+    task.status = TaskStatus.WAITING;
+    task.subStatus = TaskSubStatus.PENDING_ACCEPT;
     task.result = resultText ?? task.result;
+    // 立即提醒一次：先记提醒次数（LOOP 30 分钟内不重复打扰，也避免通知期间被重复扫描）
+    task.remindCount = 1;
+    task.lastRemindedAt = new Date();
     await this.tasks.save(task);
     this.pushLine(taskId, '✔ 执行完成，待验收');
     await this.addEvent(
       taskId,
       '状态变更',
-      '状态变更：执行中 → 待验收（会话完成）',
+      '状态变更：进行中-执行中 → 等待中-待验收（会话完成）',
       null,
     );
-    await this.notifyOwner(
+    await this.taskChat.finishTask(taskId);
+    await this.taskNotify.notifyTaskOwner(
       task,
+      'accept',
       `任务待验收：${task.code} ${task.title}`,
       '机器人已完成执行，请到平台验收产出',
     );
-  }
-
-  /** 消息兜底：列表找最后一条 assistant → 取详情 content 文本分段 */
-  private async fetchLastAssistantText(
-    client: OpencodeClient,
-    sessionId: string,
-  ): Promise<string | null> {
-    interface ListMessage {
-      id?: string;
-      type?: string;
-      text?: string;
-    }
-    type Detail = { content?: Array<{ type?: string; text?: string }> };
-    try {
-      const json = (await client.messages(sessionId)) as
-        ListMessage[] | { data?: ListMessage[] };
-      const list: ListMessage[] = Array.isArray(json)
-        ? json
-        : (json.data ?? []);
-      // 列表项 text 可能为空：取最后一条 assistant 的详情
-      for (let i = list.length - 1; i >= 0; i--) {
-        const m = list[i];
-        if (m?.type !== 'assistant' || !m.id) continue;
-        const raw = (await client.message(sessionId, m.id)) as
-          Detail | { data?: Detail };
-        const detail = (raw as { data?: Detail }).data ?? (raw as Detail);
-        const text = (detail.content ?? [])
-          .filter((p) => p.type === 'text' && p.text?.trim())
-          .map((p) => p.text!.trim())
-          .join('\n\n');
-        if (text) return text;
-      }
-    } catch (e) {
-      this.logger.warn(
-        `取会话 ${sessionId} 最终回复失败: ${(e as Error).message}`,
-      );
-    }
-    return null;
   }
 
   /**
@@ -425,7 +440,7 @@ export class TaskDispatchService implements OnModuleInit {
   @Cron('20 */2 * * * *')
   async reconcileExecuting(): Promise<void> {
     const running = await this.tasks.find({
-      where: { status: TaskStatus.EXECUTING },
+      where: { status: TaskStatus.RUNNING, subStatus: TaskSubStatus.EXECUTING },
       select: { id: true, executorId: true, opencodeSessionId: true },
     });
     for (const task of running) {
@@ -486,6 +501,9 @@ export class TaskDispatchService implements OnModuleInit {
         task.outputSpec?.trim()
           ? `\n# 输出要求\n\n${task.outputSpec.trim()}`
           : '',
+        task.workPlan?.trim()
+          ? `\n# 工作计划\n\n${task.workPlan.trim()}\n\n请按计划执行；如需调整，请在最终产出中说明原因。`
+          : '',
       ].join('\n'),
     );
     return sections.join('\n\n---\n\n');
@@ -524,54 +542,12 @@ export class TaskDispatchService implements OnModuleInit {
       `会话请求权限（${type}），请在平台批复`,
       null,
     );
-    await this.notifyOwner(
+    await this.taskNotify.notifyTaskOwner(
       task,
+      'notice',
       `任务等待授权：${task.code} ${task.title}`,
       '执行中会话请求工具权限，请到任务详情批复',
     );
-  }
-
-  /** 责任人飞书卡片（失败仅告警） */
-  private async notifyOwner(
-    task: Task,
-    title: string,
-    desc: string,
-  ): Promise<void> {
-    if (!task.agentId) return;
-    try {
-      const worker = await this.workers.findOne({
-        where: { id: task.agentId },
-      });
-      if (!worker) return;
-      const openId = await this.workersService.ownerOpenId(worker);
-      if (!openId) return;
-      await this.feishuService.sendUserCard(openId, {
-        elements: [
-          {
-            tag: 'div',
-            text: {
-              tag: 'lark_md',
-              content: `**${title}**\n**说明**：${desc}`,
-            },
-          },
-          {
-            tag: 'action',
-            actions: [
-              {
-                tag: 'button',
-                text: { tag: 'plain_text', content: '打开任务详情' },
-                type: 'primary',
-                url: `{APP_URL}/tasks/${task.id}`,
-              },
-            ],
-          },
-        ],
-      });
-    } catch (e) {
-      this.logger.warn(
-        `任务 ${task.code} 责任人通知失败: ${(e as Error).message}`,
-      );
-    }
   }
 
   /** 追加一行实时输出并广播 */
@@ -583,6 +559,7 @@ export class TaskDispatchService implements OnModuleInit {
         .get(taskId)!;
     entry.lines.push(line);
     entry.emitter.emit('line');
+    this.taskRealtime.lineAppended(taskId, line);
     // 终态后 TTL 清理由 stream 轮询触发；此处对超长缓冲截断
     if (entry.lines.length > 2000) entry.lines.splice(0, 500);
   }
@@ -603,6 +580,8 @@ export class TaskDispatchService implements OnModuleInit {
         meta: meta ?? null,
       }),
     );
+    // 任务字段/状态通常在记事件前已落库，这里统一广播一次最新快照
+    this.taskRealtime.taskChanged(taskId);
   }
 
   async mustFind(taskId: number): Promise<Task> {

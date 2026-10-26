@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import {
   TaskStatus,
+  TaskSubStatus,
   WorkerKind,
   WorkerLiveStatus,
   WorkerRole,
@@ -18,6 +19,8 @@ import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Executor } from '../executors/executor.entity';
 import { Worker, WorkerSkill, WorkerTaskDef } from './worker.entity';
+import { SYSTEM_WORKER_ID_LIMIT, isSystemWorkerId } from './system-workers';
+import { ensureWorkerSequenceFloor } from './system-workers.service';
 
 export interface CreateWorkerInput {
   name: string;
@@ -40,6 +43,8 @@ export type UpdateWorkerInput = Partial<CreateWorkerInput>;
 
 /** 机器人视图：实体 + 工位路径 + 实时状态 + 当前任务（均不落库实时推导） */
 export interface WorkerView extends Worker {
+  /** 系统机器人（id < 1000，由代码内置，网页不可新增/删除） */
+  system: boolean;
   /** 工位路径 {WORKER_BASE_DIR}/worker/{id}；未配置 WORKER_BASE_DIR 为 null */
   workdir: string | null;
   liveStatus: WorkerLiveStatus;
@@ -52,17 +57,16 @@ export interface WorkerView extends Worker {
   } | null;
 }
 
-/** 活跃状态（互斥优先级：执行中 > 待验收 > 已派发等待） */
-const ACTIVE_STATUSES = [
-  TaskStatus.DISPATCHED,
-  TaskStatus.EXECUTING,
-  TaskStatus.PENDING_ACCEPT,
-];
+/** 未结束任务（互斥优先级：执行中 > 待验收 > 其他等待） */
+const ACTIVE_STATUSES = [TaskStatus.WAITING, TaskStatus.RUNNING];
 
 @Injectable()
 export class WorkersService {
   /** 工位根目录（执行器机器上的路径约定，环境变量 WORKER_BASE_DIR） */
   private readonly workerBaseDir: string | null;
+
+  /** 自定义机器人 ID 起点是否已校正（只调整一次序列） */
+  private idFloorEnsured = false;
 
   constructor(
     @InjectRepository(Worker)
@@ -98,7 +102,7 @@ export class WorkersService {
       },
       order: { id: 'ASC' },
     });
-    const live = await this.liveByWorker(workers.map((w) => w.id));
+    const live = await this.liveByWorker(workers);
     return workers.map((w) => this.toView(w, live));
   }
 
@@ -110,37 +114,64 @@ export class WorkersService {
 
   async findOneView(id: number): Promise<WorkerView> {
     const worker = await this.findOne(id);
-    const live = await this.liveByWorker([id]);
+    const live = await this.liveByWorker([worker]);
     return this.toView(worker, live);
   }
 
-  /** 实时状态推导：执行中 > 待验收 > 已派发（等待） > 空闲 */
+  /**
+   * 实时状态推导：工作者按名下任务 执行中 > 待验收 > 已派发（等待） > 空闲；
+   * 调度机器人按正在识别（schedulerId）的任务显示工作中。
+   */
   private async liveByWorker(
-    ids: number[],
+    workers: Worker[],
   ): Promise<Map<number, { status: WorkerLiveStatus; task: Task | null }>> {
     const map = new Map<
       number,
       { status: WorkerLiveStatus; task: Task | null }
     >();
-    if (ids.length === 0) return map;
+    if (workers.length === 0) return map;
+    const ids = workers.map((w) => w.id);
     const activeTasks = await this.tasks.find({
-      where: { agentId: In(ids), status: In(ACTIVE_STATUSES) },
+      where: [
+        { agentId: In(ids), status: In(ACTIVE_STATUSES) },
+        { schedulerId: In(ids), status: In(ACTIVE_STATUSES) },
+      ],
       order: { updatedAt: 'DESC' },
     });
-    for (const id of ids) {
-      const own = activeTasks.filter((t) => t.agentId === id);
-      const executing = own.find((t) => t.status === TaskStatus.EXECUTING);
-      const accepting = own.find((t) => t.status === TaskStatus.PENDING_ACCEPT);
-      const dispatched = own.find((t) => t.status === TaskStatus.DISPATCHED);
-      const current = executing ?? accepting ?? dispatched ?? null;
-      const status = executing
+    for (const worker of workers) {
+      const own = activeTasks.filter((t) => t.agentId === worker.id);
+      const executing = own.find(
+        (t) => t.subStatus === TaskSubStatus.EXECUTING,
+      );
+      const accepting = own.find(
+        (t) => t.subStatus === TaskSubStatus.PENDING_ACCEPT,
+      );
+      const waiting = own.find((t) =>
+        [
+          TaskSubStatus.PENDING_IDENTIFY,
+          TaskSubStatus.PENDING_FEEDBACK,
+          TaskSubStatus.IDENTIFYING,
+        ].includes(t.subStatus),
+      );
+      const identifying =
+        worker.role === WorkerRole.SCHEDULER
+          ? activeTasks.find(
+              (t) =>
+                t.schedulerId === worker.id &&
+                t.subStatus === TaskSubStatus.IDENTIFYING,
+            )
+          : undefined;
+      const current = identifying ?? executing ?? accepting ?? waiting ?? null;
+      const status = identifying
         ? WorkerLiveStatus.WORKING
-        : accepting
-          ? WorkerLiveStatus.ACCEPTING
-          : dispatched
-            ? WorkerLiveStatus.WAITING
-            : WorkerLiveStatus.IDLE;
-      map.set(id, { status, task: current });
+        : executing
+          ? WorkerLiveStatus.WORKING
+          : accepting
+            ? WorkerLiveStatus.ACCEPTING
+            : waiting
+              ? WorkerLiveStatus.WAITING
+              : WorkerLiveStatus.IDLE;
+      map.set(worker.id, { status, task: current });
     }
     return map;
   }
@@ -152,6 +183,7 @@ export class WorkersService {
     const entry = live.get(worker.id);
     return {
       ...worker,
+      system: isSystemWorkerId(worker.id),
       workdir:
         worker.kind === WorkerKind.AGENT ? this.workdirOf(worker.id) : null,
       liveStatus: entry?.status ?? WorkerLiveStatus.IDLE,
@@ -169,14 +201,23 @@ export class WorkersService {
   async create(input: CreateWorkerInput): Promise<WorkerView> {
     const name = input.name?.trim();
     if (!name) throw new BadRequestException('名称不能为空');
+    if (input.role === WorkerRole.SCHEDULER) {
+      throw new BadRequestException(
+        '调度机器人为系统机器人，只能通过代码内置，网页不能创建',
+      );
+    }
+    if (input.runtime && input.runtime !== WorkerRuntime.OPENCODE) {
+      throw new BadRequestException('机器人运行时统一为 opencode');
+    }
     const exists = await this.workers.findOne({ where: { name } });
     if (exists) throw new BadRequestException(`名称「${name}」已存在`);
+    await this.ensureCustomWorkerIdFloor();
     const worker = this.workers.create({
       name,
       intro: input.intro?.trim() || null,
       kind: input.kind ?? WorkerKind.AGENT,
-      role: input.role ?? WorkerRole.WORKER,
-      runtime: input.runtime ?? WorkerRuntime.OPENCODE,
+      role: WorkerRole.WORKER,
+      runtime: WorkerRuntime.OPENCODE,
       executorId: input.executorId ?? null,
       providerId: input.providerId?.trim() || null,
       modelId: input.modelId?.trim() || null,
@@ -189,7 +230,21 @@ export class WorkersService {
     await this.assertConfig(worker);
     await this.resolveOwner(worker, input.ownerUserId ?? null);
     const saved = await this.workers.save(worker);
+    if (saved.id < SYSTEM_WORKER_ID_LIMIT) {
+      // 理论上 ensureCustomWorkerIdFloor 已保证；兜底避免自定义机器人占用系统 ID 段
+      await this.workers.delete({ id: saved.id });
+      throw new BadRequestException(
+        `自定义机器人 ID 必须从 ${SYSTEM_WORKER_ID_LIMIT} 开始，请稍后重试`,
+      );
+    }
     return this.findOneView(saved.id);
+  }
+
+  /** 首次创建自定义机器人前，把自增起点抬到系统 ID 段之外 */
+  private async ensureCustomWorkerIdFloor(): Promise<void> {
+    if (this.idFloorEnsured) return;
+    await ensureWorkerSequenceFloor(this.workers);
+    this.idFloorEnsured = true;
   }
 
   async update(id: number, input: UpdateWorkerInput): Promise<WorkerView> {
@@ -203,8 +258,16 @@ export class WorkersService {
     }
     if (input.intro !== undefined) worker.intro = input.intro?.trim() || null;
     if (input.kind !== undefined) worker.kind = input.kind;
-    if (input.role !== undefined) worker.role = input.role;
-    if (input.runtime !== undefined) worker.runtime = input.runtime;
+    if (input.role !== undefined && input.role !== worker.role) {
+      throw new BadRequestException('机器人角色由系统维护，不能修改');
+    }
+    if (
+      input.runtime !== undefined &&
+      input.runtime !== WorkerRuntime.OPENCODE
+    ) {
+      throw new BadRequestException('机器人运行时统一为 opencode');
+    }
+    worker.runtime = WorkerRuntime.OPENCODE;
     if (input.executorId !== undefined) {
       worker.executorId = input.executorId ?? null;
     }
@@ -234,9 +297,14 @@ export class WorkersService {
     return this.findOneView(id);
   }
 
-  /** 删除机器人（已分配未完结任务时会拒绝） */
+  /** 删除机器人（系统机器人不可删除；已分配未完结任务时会拒绝） */
   async remove(id: number): Promise<void> {
     const worker = await this.findOne(id);
+    if (isSystemWorkerId(worker.id)) {
+      throw new BadRequestException(
+        '系统机器人由代码内置，不能在网页删除（可停用）',
+      );
+    }
     const active = await this.tasks.count({
       where: { agentId: id, status: In(ACTIVE_STATUSES) },
     });
@@ -250,25 +318,26 @@ export class WorkersService {
     await this.workers.remove(worker);
   }
 
-  /** 配置校验：按 runtime 区分（调度器 P1 固定走 PI） */
+  /** 配置校验：所有机器人统一走执行器（opencode），调度机器人也不例外；停用的机器人允许配置不完整 */
   private async assertConfig(worker: Worker): Promise<void> {
-    if (worker.role === WorkerRole.SCHEDULER) {
-      // 调度器跑平台进程内 PI，供应商/模型走 PI 侧
-      worker.runtime = WorkerRuntime.PI;
+    if (worker.runtime !== WorkerRuntime.OPENCODE) {
+      throw new BadRequestException('机器人运行时统一为 opencode');
     }
-    if (worker.runtime === WorkerRuntime.OPENCODE) {
-      if (!worker.executorId) {
-        throw new BadRequestException('runtime=opencode 须选择执行器');
-      }
+    if (worker.executorId) {
       const executor = await this.executors.findOne({
         where: { id: worker.executorId },
       });
       if (!executor) {
         throw new BadRequestException('执行器不存在');
       }
+    } else if (worker.enabled) {
+      throw new BadRequestException('启用中的机器人须选择执行器');
     }
-    if (!worker.modelId?.trim() || !worker.providerId?.trim()) {
-      throw new BadRequestException('须选择供应商与模型');
+    if (
+      worker.enabled &&
+      (!worker.modelId?.trim() || !worker.providerId?.trim())
+    ) {
+      throw new BadRequestException('启用中的机器人须选择供应商与模型');
     }
   }
 

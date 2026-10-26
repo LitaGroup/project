@@ -51,13 +51,25 @@ export class User {
   enabled: boolean;
 
   /** 最近登录时间 */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   lastLoginAt: Date | null;
 
   /** agent 访问令牌：agent 调 .md 端点时经 X-Agent-Token 头或 ?token= 提供（个人中心可重置，空=尚未发放） */
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 64, nullable: true })
   agentToken: string | null;
+
+  /** 飞书 user_access_token：仅用于代表用户搜索其可见云文档，禁止出参（select:false） */
+  @Column({ type: 'text', nullable: true, select: false })
+  feishuAccessToken: string | null;
+
+  /** 飞书 OAuth refresh_token：访问令牌过期后自动续期（同样禁止出参） */
+  @Column({ type: 'text', nullable: true, select: false })
+  feishuRefreshToken: string | null;
+
+  /** 飞书 user_access_token 过期时间（本地时钟） */
+  @Column({ type: 'timestamp', nullable: true })
+  feishuTokenExpiresAt: Date | null;
 
   @CreateDateColumn()
   createdAt: Date;

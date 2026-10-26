@@ -54,7 +54,7 @@ export class Resource {
   prefix: string | null;
 
   /** 多语言：同步缓存的文案 Markdown 表格（经 Lita word/sheet 接口拉取填充） */
-  @Column({ type: 'longtext', nullable: true })
+  @Column({ type: 'text', nullable: true })
   content: string | null;
 
   /** 备注 */

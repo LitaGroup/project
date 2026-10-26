@@ -2,27 +2,32 @@ import {
   BadRequestException,
   Injectable,
   Logger,
+  MessageEvent,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Observable } from 'rxjs';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
 import {
-  DispatchPlanStatus,
   TaskStatus,
+  TaskSubStatus,
   TaskType,
   WorkerRole,
 } from '../common/enums';
 import { WorkerView, WorkersService } from '../workers/workers.service';
-import { PiSchedulerService } from '../pi/pi-scheduler.service';
 import { User } from '../auth/user.entity';
 import { Worker } from '../workers/worker.entity';
-import { DispatchPlan, DispatchPlanContent } from './dispatch-plan.entity';
 import { Task, TaskMissingItem } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskDispatchService } from './task-dispatch.service';
+import {
+  TaskRealtimeEvent,
+  TaskRealtimeService,
+} from './task-realtime.service';
 
 export interface CreateTaskInput {
-  title: string;
+  /** 标题（可空：按任务描述首行推导，调度机器人识别后会覆盖） */
+  title?: string;
   type?: TaskType;
   description?: string | null;
   input?: string | null;
@@ -31,6 +36,27 @@ export interface CreateTaskInput {
   schedulerId?: number | null;
   parentId?: number | null;
   createdById?: number | null;
+  /** 兼容旧客户端字段：新流程创建后始终进入「等待中-待识别」 */
+  submitForScheduling?: boolean;
+}
+
+/** 无标题新建时，从任务描述首个有效行推导临时标题（去掉常见 Markdown 标记，最长 200 字） */
+function deriveTaskTitle(description: string): string {
+  for (const raw of description.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || /^[-*_=]{3,}$/.test(line)) continue;
+    const plain = line
+      .replace(/^#{1,6}\s*/, '')
+      .replace(/^>\s*/, '')
+      .replace(/^[-*+]\s+/, '')
+      .replace(/^\d+[.)]\s+/, '')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/[*_`~]/g, '')
+      .trim();
+    if (plain && !/^[-*_=]+$/.test(plain)) return plain.slice(0, 200);
+  }
+  return '';
 }
 
 export interface UpdateTaskInput {
@@ -39,29 +65,19 @@ export interface UpdateTaskInput {
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
+  workPlan?: string | null;
   agentId?: number | null;
   result?: string | null;
   missingItems?: TaskMissingItem[] | null;
 }
 
-/** 概览统计（按状态计数） */
+/** 概览统计（按主状态与子状态计数） */
 export interface TaskOverview {
   total: number;
   roots: number;
   statuses: Record<string, number>;
+  subStatuses: Record<string, number>;
 }
-
-/** 非终态（可取消） */
-const CANCELABLE = [
-  TaskStatus.DRAFT,
-  TaskStatus.MISSING_MATERIALS,
-  TaskStatus.PENDING_SCHEDULE,
-  TaskStatus.PENDING_CONFIRM,
-  TaskStatus.DISPATCHED,
-  TaskStatus.EXECUTING,
-  TaskStatus.PENDING_ACCEPT,
-  TaskStatus.INTERNAL_DONE,
-];
 
 @Injectable()
 export class TasksService {
@@ -72,24 +88,23 @@ export class TasksService {
     private readonly tasks: Repository<Task>,
     @InjectRepository(TaskEvent)
     private readonly events: Repository<TaskEvent>,
-    @InjectRepository(DispatchPlan)
-    private readonly plans: Repository<DispatchPlan>,
     @InjectRepository(User)
     private readonly users: Repository<User>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
     private readonly workersService: WorkersService,
-    private readonly piScheduler: PiSchedulerService,
     private readonly dispatchService: TaskDispatchService,
+    private readonly taskRealtime: TaskRealtimeService,
   ) {}
 
   /**
-   * 任务列表（默认只返回根任务；q 匹配编号/标题，status/type 精确筛选；
+   * 任务列表（默认只返回根任务；q 匹配编号/标题，status/subStatus/type 精确筛选；
    * rootOnly=false 时返回全部）。每个根任务附 children 树。
    */
   async findAll(params: {
     q?: string;
     status?: TaskStatus;
+    subStatus?: TaskSubStatus;
     type?: TaskType;
     rootOnly?: boolean;
   }): Promise<Array<Task & { children?: Task[] }>> {
@@ -99,6 +114,10 @@ export class TasksService {
     }
     if (params.status)
       qb.andWhere('t.status = :status', { status: params.status });
+    if (params.subStatus)
+      qb.andWhere('t.subStatus = :subStatus', {
+        subStatus: params.subStatus,
+      });
     if (params.type) qb.andWhere('t.type = :type', { type: params.type });
     const q = params.q?.trim().toLowerCase();
     if (q) {
@@ -121,11 +140,137 @@ export class TasksService {
         list.push(c);
         byParent.set(c.parentId!, list);
       }
-      return roots.map((r) =>
-        Object.assign(r, { children: byParent.get(r.id) ?? [] }),
-      );
+      return roots.map((r) => {
+        const children = byParent.get(r.id) ?? [];
+        for (const child of children) {
+          Object.assign(child, { liveLines: this.recentLiveLines(child.id) });
+        }
+        return Object.assign(r, {
+          children,
+          liveLines: this.recentLiveLines(r.id),
+        });
+      });
     }
-    return roots;
+    // 平铺列表（看板用）：附带执行中任务的实时输出，避免前端逐个拉详情
+    return roots.map((r) =>
+      Object.assign(r, { liveLines: this.recentLiveLines(r.id) }),
+    );
+  }
+
+  /** 单个任务列表快照（SSE 任务变更推送用，不含详情事件时间线） */
+  async findOneForList(
+    id: number,
+  ): Promise<(Task & { liveLines: string[] }) | null> {
+    const task = await this.tasks.findOne({ where: { id } });
+    if (!task) return null;
+    return Object.assign(task, { liveLines: this.recentLiveLines(id) });
+  }
+
+  /** 列表快照只保留最近 60 行输出，完整输出仍走详情/任务级 SSE */
+  private recentLiveLines(id: number): string[] {
+    const lines = this.dispatchService.liveLines(id);
+    return lines.length > 60 ? lines.slice(-60) : lines;
+  }
+
+  /**
+   * 任务看板 SSE：连接后先推全量快照，随后按事件推任务快照、实时输出增量与删除。
+   * 断线重连会重新收到快照，因此不依赖前端定时补偿。
+   */
+  streamBoard(): Observable<MessageEvent> {
+    return new Observable<MessageEvent>((subscriber) => {
+      let closed = false;
+      let ready = false;
+      let draining = false;
+      const queue: TaskRealtimeEvent[] = [];
+
+      const send = (data: Record<string, unknown>): void => {
+        if (!closed) subscriber.next({ data });
+      };
+
+      const handle = async (event: TaskRealtimeEvent): Promise<void> => {
+        try {
+          if (event.type === 'line') {
+            send({
+              type: 'task.line',
+              taskId: event.taskId,
+              line: event.line,
+              at: Date.now(),
+            });
+            return;
+          }
+          if (event.type === 'deleted') {
+            send({
+              type: 'task.delete',
+              ids: [...new Set(event.ids)],
+              at: Date.now(),
+            });
+            return;
+          }
+          const task = await this.findOneForList(event.taskId);
+          if (task) {
+            send({ type: 'task.upsert', task, at: Date.now() });
+          } else {
+            send({
+              type: 'task.delete',
+              ids: [event.taskId],
+              at: Date.now(),
+            });
+          }
+        } catch (e) {
+          this.logger.warn(
+            `任务看板 SSE 推送失败（taskId=${'taskId' in event ? event.taskId : event.ids.join(',')}）: ${(e as Error).message}`,
+          );
+        }
+      };
+
+      const drain = async (): Promise<void> => {
+        if (draining || !ready) return;
+        draining = true;
+        try {
+          while (queue.length > 0 && !closed) {
+            const event = queue.shift();
+            if (event) await handle(event);
+          }
+        } finally {
+          draining = false;
+        }
+      };
+
+      const enqueue = (event: TaskRealtimeEvent): void => {
+        if (closed) return;
+        queue.push(event);
+        if (ready) void drain();
+      };
+
+      const eventsSub = this.taskRealtime.events$.subscribe({
+        next: enqueue,
+        error: (e: Error) => {
+          if (!closed) subscriber.error(e);
+        },
+      });
+      const heartbeat = setInterval(() => {
+        send({ type: 'ping', at: Date.now() });
+      }, 20_000);
+
+      void (async () => {
+        try {
+          const tasks = await this.findAll({ rootOnly: false });
+          if (closed) return;
+          send({ type: 'snapshot', tasks, at: Date.now() });
+          ready = true;
+          void drain();
+        } catch (e) {
+          if (!closed) subscriber.error(e);
+        }
+      })();
+
+      return () => {
+        closed = true;
+        clearInterval(heartbeat);
+        eventsSub.unsubscribe();
+        queue.length = 0;
+      };
+    });
   }
 
   /** 详情：任务 + 子任务 + 事件时间线（倒序，上限 100）+ 实时输出行 */
@@ -155,40 +300,58 @@ export class TasksService {
     });
   }
 
-  /** 概览统计：全量按状态计数 + 根任务数 */
+  /** 概览统计：按主状态与子状态计数 + 根任务数 */
   async overview(): Promise<TaskOverview> {
-    const rows = await this.tasks
-      .createQueryBuilder('t')
-      .select('t.status', 'status')
-      .addSelect('COUNT(*)', 'n')
-      .groupBy('t.status')
-      .getRawMany<{ status: string; n: string }>();
+    const [rows, subRows] = await Promise.all([
+      this.tasks
+        .createQueryBuilder('t')
+        .select('t.status', 'status')
+        .addSelect('COUNT(*)', 'n')
+        .groupBy('t.status')
+        .getRawMany<{ status: string; n: string }>(),
+      this.tasks
+        .createQueryBuilder('t')
+        .select('t.subStatus', 'subStatus')
+        .addSelect('COUNT(*)', 'n')
+        .groupBy('t.subStatus')
+        .getRawMany<{ subStatus: string; n: string }>(),
+    ]);
     const statuses: Record<string, number> = {};
     let total = 0;
     for (const row of rows) {
       statuses[row.status] = Number(row.n);
       total += Number(row.n);
     }
+    const subStatuses: Record<string, number> = {};
+    for (const row of subRows) {
+      subStatuses[row.subStatus] = Number(row.n);
+    }
     const roots = await this.tasks.count({ where: { parentId: IsNull() } });
-    return { total, roots, statuses };
+    return { total, roots, statuses, subStatuses };
   }
 
   async create(input: CreateTaskInput): Promise<Task> {
-    const title = input.title?.trim();
-    if (!title) throw new BadRequestException('标题不能为空');
+    const description = input.description?.trim() || null;
+    // 未填标题时取描述首行作为临时标题；调度机器人识别成功后会覆盖
+    const title =
+      input.title?.trim() ||
+      (description ? deriveTaskTitle(description) : '') ||
+      (description ? '新任务' : '');
+    if (!title) throw new BadRequestException('标题或任务描述不能为空');
     if (input.agentId) await this.assertWorker(input.agentId);
     const task = await this.tasks.save(
       this.tasks.create({
         title,
         type: input.type ?? TaskType.OTHER,
-        description: input.description?.trim() || null,
+        description,
         input: input.input?.trim() || null,
         outputSpec: input.outputSpec?.trim() || null,
         agentId: input.agentId ?? null,
         schedulerId: input.schedulerId ?? null,
         parentId: input.parentId ?? null,
         createdById: input.createdById ?? null,
-        status: TaskStatus.DRAFT,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_IDENTIFY,
       }),
     );
     // 编号按 id 生成；根任务 rootId 指向自身
@@ -196,12 +359,17 @@ export class TasksService {
     task.rootId = input.parentId
       ? (await this.mustFind(input.parentId)).rootId
       : task.id;
+    const operator = await this.operatorName(input.createdById ?? null);
     const saved = await this.tasks.save(task);
     await this.addEvent(
       saved.id,
       '操作',
-      `创建任务「${saved.title}」`,
-      await this.operatorName(input.createdById ?? null),
+      `创建任务「${saved.title}」，进入等待中-待识别`,
+      operator,
+      {
+        title: saved.title,
+        description: saved.description,
+      },
     );
     return saved;
   }
@@ -225,6 +393,9 @@ export class TasksService {
     if (input.outputSpec !== undefined) {
       task.outputSpec = input.outputSpec?.trim() || null;
     }
+    if (input.workPlan !== undefined) {
+      task.workPlan = input.workPlan?.trim() || null;
+    }
     if (input.agentId !== undefined) {
       if (input.agentId) await this.assertWorker(input.agentId);
       task.agentId = input.agentId ?? null;
@@ -236,420 +407,177 @@ export class TasksService {
         : null;
     }
     const saved = await this.tasks.save(task);
-    await this.addEvent(id, '操作', `更新任务信息`, operator);
+    await this.addEvent(id, '操作', '更新任务信息', operator);
     return saved;
   }
 
   /** 删除根任务：级联删子任务、事件、方案（无物理外键，应用层处理） */
   async remove(id: number, operator: string | null): Promise<void> {
     const task = await this.mustFind(id);
-    if (task.status === TaskStatus.EXECUTING) {
-      throw new BadRequestException('任务执行中，先中断或等待完成再删除');
+    if (task.status === TaskStatus.RUNNING) {
+      throw new BadRequestException('任务进行中，先中断/取消或等待完成再删除');
     }
     const children = await this.tasks.find({ where: { rootId: id } });
     const ids = children.map((c) => c.id);
     if (ids.length > 0) {
       await this.events.delete({ taskId: In(ids) });
-      await this.plans.delete({ taskId: In(ids) });
       await this.tasks.delete({ id: In(ids) });
     }
     await this.events.delete({ taskId: id });
-    await this.plans.delete({ taskId: id });
     await this.tasks.delete({ id });
     this.logger.log(
       `任务 ${task.code} 已删除（operator=${operator ?? 'system'}，级联 ${ids.length} 子任务）`,
     );
+    this.taskRealtime.tasksDeleted([...new Set([id, ...ids])]);
   }
 
-  // ===== 状态流转动作 =====
+  // ===== 等待中状态的人工动作 =====
 
-  /** 提交调度：草稿/待补材料 → 待调度（材料齐备） */
-  async submitForSchedule(id: number, operator: string | null): Promise<Task> {
+  /** 重新识别：等待中-待反馈 → 等待中-待识别（LOOP 下一轮自动处理） */
+  async requeueForIdentify(id: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(id);
     if (
-      ![TaskStatus.DRAFT, TaskStatus.MISSING_MATERIALS].includes(task.status)
+      task.status !== TaskStatus.WAITING ||
+      task.subStatus !== TaskSubStatus.PENDING_FEEDBACK
     ) {
       throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可提交调度`,
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可重新识别`,
       );
     }
-    const from = task.status;
-    task.status = TaskStatus.PENDING_SCHEDULE;
+    task.subStatus = TaskSubStatus.PENDING_IDENTIFY;
+    task.missingItems = null;
+    task.remindCount = 0;
+    task.lastRemindedAt = null;
     const saved = await this.tasks.save(task);
-    await this.addEvent(id, '状态变更', `状态变更：${from} → 待调度`, operator);
+    await this.addEvent(
+      id,
+      '操作',
+      '状态变更：等待中-待反馈 → 等待中-待识别（重新识别）',
+      operator,
+    );
     return saved;
   }
 
-  /** 标记待补材料（调度器材料审查产出） */
+  /**
+   * 提交用户反馈并重新识别：反馈正文追加到任务描述（下次识别的输入），
+   * 清空待反馈清单并回到待识别。
+   */
+  async provideFeedback(
+    id: number,
+    content: string | null,
+    operator: string | null,
+  ): Promise<Task> {
+    const task = await this.mustFind(id);
+    if (
+      task.status !== TaskStatus.WAITING ||
+      task.subStatus !== TaskSubStatus.PENDING_FEEDBACK
+    ) {
+      throw new BadRequestException(
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可提交反馈`,
+      );
+    }
+    const text = content?.trim();
+    if (text) {
+      task.description = [task.description?.trim(), text]
+        .filter(Boolean)
+        .join('\n\n');
+    }
+    task.subStatus = TaskSubStatus.PENDING_IDENTIFY;
+    task.missingItems = null;
+    task.remindCount = 0;
+    task.lastRemindedAt = null;
+    const saved = await this.tasks.save(task);
+    if (text) {
+      await this.addEvent(id, '反馈', text, operator, { feedback: text });
+    }
+    await this.addEvent(
+      id,
+      '操作',
+      text ? '提交反馈并重新识别' : '重新提交识别',
+      operator,
+    );
+    return saved;
+  }
+
+  /** 人工标记待反馈（调度机器人自动识别失败时由 LOOP 内部调用，也可人工补充） */
   async markMissing(
     id: number,
     items: TaskMissingItem[],
     schedulerId: number | null,
   ): Promise<Task> {
     const task = await this.mustFind(id);
-    if (task.status !== TaskStatus.PENDING_SCHEDULE) {
+    if (task.status !== TaskStatus.WAITING) {
       throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可标记缺失`,
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可标记待反馈`,
       );
     }
-    task.status = TaskStatus.MISSING_MATERIALS;
+    task.subStatus = TaskSubStatus.PENDING_FEEDBACK;
     task.missingItems = items;
+    task.remindCount = 0;
+    task.lastRemindedAt = null;
+    if (schedulerId) task.schedulerId = schedulerId;
     const saved = await this.tasks.save(task);
     await this.addEvent(
       id,
       '状态变更',
-      `状态变更：待调度 → 待补材料（缺失 ${items.length} 项：${items.map((i) => i.item).join('、')}）`,
+      `状态变更：等待中-待识别 → 等待中-待反馈（需反馈 ${items.length} 项：${items.map((i) => i.item).join('、')}）`,
       null,
       { schedulerId },
     );
     return saved;
   }
 
-  /** 待补材料 → 待调度（补齐后清除缺失清单） */
-  async resolveMissing(id: number, operator: string | null): Promise<Task> {
-    const task = await this.mustFind(id);
-    if (task.status !== TaskStatus.MISSING_MATERIALS) {
-      throw new BadRequestException(`任务 ${task.code} 当前不在待补材料状态`);
-    }
-    task.status = TaskStatus.PENDING_SCHEDULE;
-    task.missingItems = null;
-    const saved = await this.tasks.save(task);
-    await this.addEvent(
-      id,
-      '状态变更',
-      '状态变更：待补材料 → 待调度（材料已补齐）',
-      operator,
-    );
-    return saved;
-  }
-
-  /** 保存调度方案并转「待确认」（PI 调度产出；schedule 动作由 PiSchedulerService 调用） */
-  async savePlan(
-    taskId: number,
-    content: DispatchPlanContent,
-    schedulerId: number | null,
-  ): Promise<DispatchPlan> {
-    const task = await this.mustFind(taskId);
-    if (task.status !== TaskStatus.PENDING_SCHEDULE) {
-      throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可生成调度方案`,
-      );
-    }
-    const plan = await this.plans.save(
-      this.plans.create({
-        taskId,
-        schedulerId,
-        plan: content,
-        status: DispatchPlanStatus.PENDING,
-      }),
-    );
-    if (task.schedulerId !== schedulerId) {
-      task.schedulerId = schedulerId;
-      await this.tasks.save(task);
-    }
-    const summary = content.missingItems?.length
-      ? `材料缺失 ${content.missingItems.length} 项`
-      : `拆解 ${content.subtasks?.length ?? 0} 个子任务`;
-    await this.addEvent(
-      taskId,
-      '系统',
-      `调度方案已生成（${summary}），待确认`,
-      null,
-      {
-        planId: plan.id,
-      },
-    );
-    return plan;
-  }
-
-  /** 管理员确认方案：物化子任务并逐个派发 */
-  async confirmPlan(planId: number, operator: string | null): Promise<Task> {
-    const plan = await this.plans.findOne({ where: { id: planId } });
-    if (!plan) throw new NotFoundException(`DispatchPlan ${planId} not found`);
-    if (plan.status !== DispatchPlanStatus.PENDING) {
-      throw new BadRequestException('该方案已被处理');
-    }
-    const task = await this.mustFind(plan.taskId);
-    if (task.status !== TaskStatus.PENDING_CONFIRM) {
-      throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可确认方案`,
-      );
-    }
-    plan.status = DispatchPlanStatus.CONFIRMED;
-    plan.operator = operator;
-    plan.operatedAt = new Date();
-    await this.plans.save(plan);
-
-    const subtasks = plan.plan.subtasks ?? [];
-    await this.addEvent(
-      task.id,
-      '操作',
-      `确认调度方案（${subtasks.length} 个子任务）`,
-      operator,
-      {
-        planId: plan.id,
-      },
-    );
-
-    // 单任务方案：直接分配根任务并派发
-    if (subtasks.length <= 1) {
-      const sub = subtasks[0];
-      if (sub?.agentId) {
-        task.agentId = sub.agentId;
-      }
-      // dispatch 接受待调度/执行中；调度器已完成分配，置待调度后直接派发
-      task.status = TaskStatus.PENDING_SCHEDULE;
-      await this.tasks.save(task);
-      await this.addEvent(
-        task.id,
-        '状态变更',
-        '状态变更：待确认 → 待调度（方案确认，准备派发）',
-        operator,
-      );
-      return this.dispatchService.dispatch(task.id, operator);
-    }
-
-    // 多任务方案：物化子任务并逐个自动派发（派发失败停留在待调度，人工兜底）
-    task.status = TaskStatus.DISPATCHED;
-    await this.tasks.save(task);
-    await this.addEvent(
-      task.id,
-      '状态变更',
-      '状态变更：待确认 → 已派发',
-      operator,
-    );
-    for (let i = 0; i < subtasks.length; i++) {
-      const sub = subtasks[i];
-      const type = (Object.values(TaskType) as string[]).includes(sub.type)
-        ? (sub.type as TaskType)
-        : TaskType.OTHER;
-      const child = await this.create({
-        title: sub.title,
-        type,
-        input: sub.input ?? null,
-        outputSpec: sub.outputSpec ?? null,
-        agentId: sub.agentId ?? null,
-        parentId: task.id,
-        createdById: null,
-      });
-      await this.addEvent(
-        child.id,
-        '系统',
-        `由调度方案物化（方案 #${plan.id}）`,
-        null,
-      );
-      if (!child.agentId) continue;
-      // 物化后直接进入待调度再派发（调度器已完成分配，无需再次调度）
-      child.status = TaskStatus.PENDING_SCHEDULE;
-      await this.tasks.save(child);
-      try {
-        await this.dispatchService.dispatch(child.id, operator);
-      } catch (e) {
-        this.logger.warn(
-          `子任务 ${child.code} 自动派发失败: ${(e as Error).message}`,
-        );
-        await this.addEvent(
-          child.id,
-          '系统',
-          `自动派发失败：${(e as Error).message}（可人工重派）`,
-          null,
-        );
-      }
-    }
-    return this.mustFind(task.id);
-  }
-
-  /** 驳回方案：打回待调度（可调整材料/分配后重新调度） */
-  async rejectPlan(
-    planId: number,
-    reason: string,
-    operator: string | null,
-  ): Promise<Task> {
-    const plan = await this.plans.findOne({ where: { id: planId } });
-    if (!plan) throw new NotFoundException(`DispatchPlan ${planId} not found`);
-    if (plan.status !== DispatchPlanStatus.PENDING) {
-      throw new BadRequestException('该方案已被处理');
-    }
-    const task = await this.mustFind(plan.taskId);
-    if (task.status !== TaskStatus.PENDING_CONFIRM) {
-      throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可驳回方案`,
-      );
-    }
-    plan.status = DispatchPlanStatus.REJECTED;
-    plan.operator = operator;
-    plan.operatedAt = new Date();
-    await this.plans.save(plan);
-    task.status = TaskStatus.PENDING_SCHEDULE;
-    await this.tasks.save(task);
-    await this.addEvent(
-      task.id,
-      '操作',
-      `驳回调度方案${reason ? `：${reason}` : ''}`,
-      operator,
-      {
-        planId: plan.id,
-      },
-    );
-    return this.mustFind(task.id);
-  }
-
-  /** 待确认方案的读取（任务详情页用） */
-  async pendingPlan(taskId: number): Promise<DispatchPlan | null> {
-    return (
-      (await this.plans.findOne({
-        where: { taskId, status: DispatchPlanStatus.PENDING },
-        order: { id: 'DESC' },
-      })) ?? null
-    );
-  }
-
-  /** 验收：待验收 → 内部完成（责任人验收通过） */
+  /** 验收：等待中-待验收 → 已结束-完成 */
   async accept(id: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(id);
-    if (task.status !== TaskStatus.PENDING_ACCEPT) {
+    if (
+      task.status !== TaskStatus.WAITING ||
+      task.subStatus !== TaskSubStatus.PENDING_ACCEPT
+    ) {
       throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可验收`,
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可验收`,
       );
     }
-    task.status = TaskStatus.INTERNAL_DONE;
-    task.acceptedAt = new Date();
+    const now = new Date();
+    task.status = TaskStatus.FINISHED;
+    task.subStatus = TaskSubStatus.COMPLETED;
+    task.acceptedAt = now;
     task.acceptedBy = operator;
+    task.deliveredAt = now;
     const saved = await this.tasks.save(task);
     await this.addEvent(
       id,
       '状态变更',
-      '状态变更：待验收 → 内部完成',
+      '状态变更：等待中-待验收 → 已结束-完成',
       operator,
     );
-    await this.maybeAdvanceParent(saved);
     return saved;
   }
 
-  /** 交付：内部完成 → 已交付（可附最终产出） */
-  async deliver(
-    id: number,
-    operator: string | null,
-    result?: string,
-  ): Promise<Task> {
-    const task = await this.mustFind(id);
-    if (task.status !== TaskStatus.INTERNAL_DONE) {
-      throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可交付`,
-      );
-    }
-    task.status = TaskStatus.DELIVERED;
-    task.deliveredAt = new Date();
-    if (result !== undefined && result !== null && result.trim()) {
-      task.result = result.trim();
-    }
-    const saved = await this.tasks.save(task);
-    await this.addEvent(
-      id,
-      '状态变更',
-      '状态变更：内部完成 → 已交付',
-      operator,
-    );
-    await this.maybeAdvanceParent(saved);
-    return saved;
-  }
-
-  /** 归档：已交付 → 维护中（终态） */
-  async archive(id: number, operator: string | null): Promise<Task> {
-    const task = await this.mustFind(id);
-    if (task.status !== TaskStatus.DELIVERED) {
-      throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可归档`,
-      );
-    }
-    task.status = TaskStatus.ARCHIVED;
-    task.archivedAt = new Date();
-    const saved = await this.tasks.save(task);
-    await this.addEvent(
-      id,
-      '状态变更',
-      '状态变更：已交付 → 维护中（终态）',
-      operator,
-    );
-    await this.maybeAdvanceParent(saved);
-    return saved;
-  }
-
-  /** 取消：非终态均可取消（执行中先中断会话） */
+  /** 取消：任意未结束任务可取消（执行中先中断会话） */
   async cancel(id: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(id);
-    if (!CANCELABLE.includes(task.status)) {
+    if (task.status === TaskStatus.FINISHED) {
       throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可取消`,
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可取消`,
       );
     }
-    if (task.status === TaskStatus.EXECUTING) {
+    if (
+      task.status === TaskStatus.RUNNING &&
+      task.subStatus === TaskSubStatus.EXECUTING
+    ) {
       await this.dispatchService.interrupt(id, operator).catch(() => undefined);
     }
-    const from = task.status;
-    task.status = TaskStatus.CANCELED;
+    const from = `${task.status}-${task.subStatus}`;
+    task.status = TaskStatus.FINISHED;
+    task.subStatus = TaskSubStatus.CANCELED;
     task.canceledAt = new Date();
     const saved = await this.tasks.save(task);
-    await this.addEvent(id, '状态变更', `状态变更：${from} → 已取消`, operator);
-    await this.maybeAdvanceParent(saved);
-    return saved;
-  }
-
-  /**
-   * AI 调度：待调度任务 → PI 调度器（识别/材料审查/拆解/分配）。
-   * 有缺失 → 「待补材料」；否则方案落库 → 「待确认」（等管理员确认派发）。
-   */
-  async schedule(taskId: number, operator: string | null): Promise<Task> {
-    const task = await this.mustFind(taskId);
-    if (task.status !== TaskStatus.PENDING_SCHEDULE) {
-      throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}」不可调度`,
-      );
-    }
-    // 调度器：任务指定的优先，否则取唯一启用的调度器
-    let scheduler: WorkerView | null = null;
-    if (task.schedulerId) {
-      scheduler = await this.workersService.findOneView(task.schedulerId);
-    } else {
-      const schedulers = await this.workersService.findAll({
-        role: WorkerRole.SCHEDULER,
-      });
-      scheduler = schedulers.find((s) => s.enabled) ?? null;
-    }
-    if (!scheduler || !scheduler.enabled) {
-      throw new BadRequestException('没有可用的调度器，请先在「调度器」页配置');
-    }
-    const roster = (
-      await this.workersService.findAll({ role: WorkerRole.WORKER })
-    ).filter((w) => w.enabled);
-    if (roster.length === 0) {
-      throw new BadRequestException('没有可用的机器人，请先在「机器人」页配置');
-    }
-
     await this.addEvent(
-      taskId,
-      '系统',
-      `开始 AI 调度（调度器：${scheduler.name}，候选机器人 ${roster.length} 个）`,
-      operator,
-    );
-    const content = await this.piScheduler.schedule(task, scheduler, roster);
-
-    if (content.missingItems?.length) {
-      const saved = await this.markMissing(
-        taskId,
-        content.missingItems,
-        scheduler.id,
-      );
-      return saved;
-    }
-    await this.savePlan(taskId, content, scheduler.id);
-    task.status = TaskStatus.PENDING_CONFIRM;
-    const saved = await this.tasks.save(task);
-    await this.addEvent(
-      taskId,
+      id,
       '状态变更',
-      '状态变更：待调度 → 待确认（AI 调度方案已产出）',
-      null,
+      `状态变更：${from} → 已结束-取消`,
+      operator,
     );
     return saved;
   }
@@ -664,42 +592,29 @@ export class TasksService {
     return user?.name ?? null;
   }
 
-  /**
-   * 工作流聚合流转：子任务全部收尾（内部完成/已交付/维护中/已取消）后，
-   * 父任务（已派发）自动进入「待验收」，由责任人验收整体工作流。
-   */
-  private async maybeAdvanceParent(child: Task): Promise<void> {
-    if (!child.parentId) return;
-    const parent = await this.tasks.findOne({ where: { id: child.parentId } });
-    if (!parent || parent.status !== TaskStatus.DISPATCHED) return;
-    const siblings = await this.tasks.find({
-      where: { parentId: parent.id },
-      select: { id: true, status: true },
-    });
-    const done = new Set<string>([
-      TaskStatus.INTERNAL_DONE,
-      TaskStatus.DELIVERED,
-      TaskStatus.ARCHIVED,
-      TaskStatus.CANCELED,
-    ]);
-    if (siblings.some((s) => !done.has(s.status))) return;
-    parent.status = TaskStatus.PENDING_ACCEPT;
-    await this.tasks.save(parent);
-    await this.addEvent(
-      parent.id,
-      '状态变更',
-      '状态变更：已派发 → 待验收（子任务全部完成，待整体验收）',
-      null,
-    );
-  }
-
   private async assertWorker(agentId: number): Promise<void> {
     const worker = await this.workers.findOne({ where: { id: agentId } });
     if (!worker) throw new BadRequestException('机器人不存在');
     if (!worker.enabled) throw new BadRequestException('机器人已停用');
     if (worker.role === WorkerRole.SCHEDULER) {
-      throw new BadRequestException('调度器不承接任务，请分配给工作者');
+      throw new BadRequestException('调度机器人不承接任务，请分配给工作者');
     }
+  }
+
+  /** 系统调度机器人候选（LOOP 使用；指定优先，否则取第一个启用的调度机器人） */
+  async findScheduler(candidateId: number | null): Promise<WorkerView | null> {
+    if (candidateId) {
+      try {
+        const scheduler = await this.workersService.findOneView(candidateId);
+        if (scheduler?.enabled) return scheduler;
+      } catch {
+        // 指定调度机器人已被删除：回退到第一个启用的调度机器人
+      }
+    }
+    const schedulers = await this.workersService.findAll({
+      role: WorkerRole.SCHEDULER,
+    });
+    return schedulers.find((s) => s.enabled) ?? null;
   }
 
   async addEvent(

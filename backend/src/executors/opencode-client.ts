@@ -197,6 +197,35 @@ export class OpencodeClient {
     return this.request(`/api/session/${sessionId}/message/${messageId}`);
   }
 
+  /**
+   * 会话最后一条 assistant 消息的文本。
+   * 消息列表项的 text 可能为空，需取单条详情读取 content 分段。
+   */
+  async lastAssistantText(sessionId: string): Promise<string | null> {
+    interface ListMessage {
+      id?: string;
+      type?: string;
+      text?: string;
+    }
+    type Detail = { content?: Array<{ type?: string; text?: string }> };
+    const json = (await this.messages(sessionId)) as
+      ListMessage[] | { data?: ListMessage[] };
+    const list: ListMessage[] = Array.isArray(json) ? json : (json.data ?? []);
+    for (let i = list.length - 1; i >= 0; i--) {
+      const message = list[i];
+      if (message?.type !== 'assistant' || !message.id) continue;
+      const raw = (await this.message(sessionId, message.id)) as
+        Detail | { data?: Detail };
+      const detail = (raw as { data?: Detail }).data ?? (raw as Detail);
+      const text = (detail.content ?? [])
+        .filter((part) => part.type === 'text' && part.text?.trim())
+        .map((part) => part.text!.trim())
+        .join('\n\n');
+      if (text) return text;
+    }
+    return null;
+  }
+
   /** 会话信息（outcome=运行结果，time.idle=空闲时间；重启后对账用） */
   async session(sessionId: string): Promise<{
     id: string;

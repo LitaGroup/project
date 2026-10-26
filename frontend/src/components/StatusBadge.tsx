@@ -121,26 +121,36 @@ export function CodeBranchCategoryBadge({ category }: { category: string }) {
   )
 }
 
-/** 任务包状态 → Badge variant（创建=淡/分发=蓝/执行=青/验收=黄/交付=绿/终态=淡） */
-const taskStatusVariant: Record<
+/** 任务子状态 → Badge variant（待识别蓝/待反馈黄/待验收黄/识别中·执行中主色/完成绿/取消淡） */
+const taskSubStatusVariant: Record<
   string,
   'info' | 'success' | 'warning' | 'error' | 'soft' | 'primary' | 'secondary'
 > = {
-  草稿: 'soft',
-  待补材料: 'warning',
-  待调度: 'info',
-  待确认: 'warning',
-  已派发: 'info',
-  执行中: 'primary',
+  待识别: 'info',
+  待反馈: 'warning',
   待验收: 'warning',
-  内部完成: 'success',
-  已交付: 'success',
-  维护中: 'secondary',
-  已取消: 'soft',
+  识别中: 'primary',
+  执行中: 'primary',
+  完成: 'success',
+  取消: 'soft',
 }
 
-export function TaskStatusBadge({ status }: { status: string }) {
-  return <Badge variant={taskStatusVariant[status] ?? 'soft'}>{status}</Badge>
+/** 任务状态 Badge：展示子状态，title 中带主状态 */
+export function TaskStatusBadge({
+  status,
+  subStatus,
+}: {
+  status?: string
+  subStatus: string
+}) {
+  return (
+    <Badge
+      variant={taskSubStatusVariant[subStatus] ?? 'soft'}
+      title={status ? `${status}-${subStatus}` : subStatus}
+    >
+      {subStatus}
+    </Badge>
+  )
 }
 
 /** 机器人实时状态 → Badge variant：空闲淡 / 工作中绿 / 等待黄 / 验收蓝 */

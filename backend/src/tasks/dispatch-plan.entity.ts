@@ -21,7 +21,7 @@ export interface PlanSubtask {
   agentName?: string;
 }
 
-/** 调度方案内容（PI 调度器结构化输出） */
+/** 调度方案内容（调度机器人结构化输出，历史保留） */
 export interface DispatchPlanContent {
   /** 任务识别结果 */
   identification: {
@@ -36,7 +36,7 @@ export interface DispatchPlanContent {
   subtasks?: PlanSubtask[];
 }
 
-/** AI 调度方案：调度器产出 → 管理员确认（物化子任务并派发）/ 驳回（打回重调度） */
+/** AI 调度方案：调度机器人产出 → 管理员确认（物化子任务并派发）/ 驳回（打回重调度；历史保留） */
 @Entity('dispatch_plans')
 @Index(['taskId'])
 export class DispatchPlan {
@@ -47,7 +47,7 @@ export class DispatchPlan {
   @Column()
   taskId: number;
 
-  /** 产出方案的调度器（workers.id，可空=人工） */
+  /** 产出方案的调度机器人（workers.id，可空=人工；历史保留） */
   @Column({ type: 'int', nullable: true })
   schedulerId: number | null;
 
@@ -65,7 +65,7 @@ export class DispatchPlan {
   @Column({ type: 'varchar', length: 100, nullable: true })
   operator: string | null;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   operatedAt: Date | null;
 
   @CreateDateColumn()

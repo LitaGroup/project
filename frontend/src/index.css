@@ -4,6 +4,13 @@
 /* Appica UI 规则：必须扫描组件库类名，否则组件无样式。路径相对本文件，勿改成裸包名。 */
 @source '../node_modules/@appica/ui-react/dist';
 
+/* 现有 CSS 呼吸动画在系统「减少动态效果」时关闭；Framer Motion 动画由 MotionConfig 处理。 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse {
+    animation: none;
+  }
+}
+
 /* Milkdown（Crepe）Markdown 编辑器：
    - 背景透明，跟随容器/页面背景（主题自带白底）
    - 字号与页面正文一致、内边距收紧（Crepe 默认 60px 120px，页面内容区放不下）
@@ -121,6 +128,116 @@
 }
 .md-editor-appica .milkdown .ProseMirror ::selection {
   background: var(--selection-color);
+}
+
+/* 任务详情页聊天 Markdown（assistant-ui MarkdownTextPrimitive 输出原生 HTML）：
+   与 Milkdown 只读视图保持一致的排版，颜色/圆角全部走 Appica 角色 token */
+.task-chat-markdown {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.task-chat-markdown > :first-child {
+  margin-top: 0;
+}
+.task-chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+.task-chat-markdown :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--foreground-intense);
+  font-family: inherit;
+  font-weight: 600;
+  margin: 12px 0 6px;
+}
+.task-chat-markdown h1 {
+  font-size: 1.25rem;
+}
+.task-chat-markdown h2 {
+  font-size: 1.125rem;
+}
+.task-chat-markdown h3 {
+  font-size: 1rem;
+}
+.task-chat-markdown :is(h4, h5, h6) {
+  font-size: 0.875rem;
+}
+.task-chat-markdown p {
+  margin: 0.4em 0;
+}
+.task-chat-markdown :is(ul, ol) {
+  margin: 0.4em 0;
+  padding-left: 1.25rem;
+}
+.task-chat-markdown ul {
+  list-style: disc;
+}
+.task-chat-markdown ol {
+  list-style: decimal;
+}
+.task-chat-markdown li {
+  margin: 0.15em 0;
+}
+.task-chat-markdown a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.task-chat-markdown strong {
+  font-weight: 600;
+}
+.task-chat-markdown code {
+  color: var(--foreground-intense);
+  background: var(--background-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+.task-chat-markdown pre {
+  background: var(--background-muted);
+  border-radius: var(--radius-md);
+  margin: 0.5em 0;
+  padding: 0.65rem 0.8rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.task-chat-markdown pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+.task-chat-markdown blockquote {
+  color: var(--foreground-muted);
+  border-left: 2px solid var(--border-strong);
+  margin: 0.5em 0;
+  padding-left: 0.75rem;
+}
+.task-chat-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0.8em 0;
+}
+.task-chat-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+  font-size: 0.8125rem;
+}
+.task-chat-markdown :is(th, td) {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+}
+.task-chat-markdown th {
+  background: var(--background-muted);
+  color: var(--foreground-intense);
+  font-weight: 600;
+}
+.task-chat-markdown img {
+  max-width: 100%;
+  border-radius: var(--radius-md);
 }
 
 /* 检查运行详情页终端面板：Gruvbox Dark 主题。

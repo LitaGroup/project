@@ -72,7 +72,7 @@ export class CodeEventsService {
       qb.andWhere('e.branch = :branch', { branch: query.branch.trim() });
     }
     if (query.q?.trim()) {
-      qb.andWhere('(e.message LIKE :q OR e.author LIKE :q)', {
+      qb.andWhere('(e.message ILIKE :q OR e.author ILIKE :q)', {
         q: `%${query.q.trim()}%`,
       });
     }

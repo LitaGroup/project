@@ -8,6 +8,7 @@ import {
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { Badge } from '@appica/ui-react/badge'
 import { Button, buttonVariants } from '@appica/ui-react/button'
 import {
   AlertDialog,
@@ -22,7 +23,10 @@ import {
 import { api, type Executor, type Worker } from '../lib/api'
 import { WorkerLiveBadge } from '../components/StatusBadge'
 
-/** 机器人管理：工作者列表 + 新建/编辑（独立页面）/删除 */
+/**
+ * 机器人管理：系统机器人（id < 1000，代码内置）+ 自定义机器人（id >= 1000）。
+ * 调度机器人属于系统机器人，与工作者在同一列表维护；网页新建的均为自定义工作者。
+ */
 export function WorkersPage() {
   const [workers, setWorkers] = useState<Worker[] | null>(null)
   const [executors, setExecutors] = useState<Executor[]>([])
@@ -30,7 +34,7 @@ export function WorkersPage() {
 
   const reload = useCallback(() => {
     api
-      .listWorkers({ role: '工作者' })
+      .listWorkers()
       .then(setWorkers)
       .catch((e: Error) => setError(e.message))
     api.listExecutors().then(setExecutors).catch(() => undefined)
@@ -46,7 +50,8 @@ export function WorkersPage() {
         <div>
           <h1 className="text-2xl font-semibold">机器人</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            机器人的负责人对机器人的产出结果负责
+            统一管理调度机器人与工作者：系统机器人（ID &lt; 1000）由代码内置、不可删除；
+            网页新建的自定义机器人从 ID 1000 开始
           </p>
         </div>
         <Link
@@ -62,6 +67,7 @@ export function WorkersPage() {
         <TableHeader>
           <TableRow>
             <TableHead>名称</TableHead>
+            <TableHead className="w-28">类型</TableHead>
             <TableHead className="w-24">状态</TableHead>
             <TableHead className="w-32">执行器</TableHead>
             <TableHead className="w-48">模型</TableHead>
@@ -74,8 +80,14 @@ export function WorkersPage() {
           {(workers ?? []).map((w) => (
             <TableRow key={w.id}>
               <TableCell className="max-w-64">
-                <p className="truncate font-medium" title={w.name}>
-                  {w.name}
+                <p className="flex items-center gap-2 truncate font-medium" title={w.name}>
+                  <span className="truncate">{w.name}</span>
+                  <span className="text-xs font-normal text-foreground-muted">#{w.id}</span>
+                  {w.system && (
+                    <Badge variant="soft" size="sm">
+                      系统
+                    </Badge>
+                  )}
                 </p>
                 {w.intro && (
                   <p
@@ -86,13 +98,14 @@ export function WorkersPage() {
                   </p>
                 )}
               </TableCell>
+              <TableCell>{w.role}</TableCell>
               <TableCell>
                 <WorkerLiveBadge status={w.liveStatus} />
               </TableCell>
               <TableCell>
                 {w.executorId
                   ? (executorName.get(w.executorId) ?? `#${w.executorId}`)
-                  : '内置 PI'}
+                  : '未配置'}
               </TableCell>
               <TableCell className="truncate text-xs" title={`${w.providerId}/${w.modelId}`}>
                 {w.providerId ?? '-'}/{w.modelId ?? '-'}
@@ -107,14 +120,20 @@ export function WorkersPage() {
                   >
                     编辑
                   </Link>
-                  <DeleteWorkerButton worker={w} onDeleted={reload} />
+                  {w.system ? (
+                    <span className="self-center text-xs text-foreground-muted">
+                      系统内置
+                    </span>
+                  ) : (
+                    <DeleteWorkerButton worker={w} onDeleted={reload} />
+                  )}
                 </div>
               </TableCell>
             </TableRow>
           ))}
           {workers !== null && workers.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7}>暂无机器人</TableCell>
+              <TableCell colSpan={8}>暂无机器人</TableCell>
             </TableRow>
           )}
         </TableBody>

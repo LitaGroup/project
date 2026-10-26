@@ -19,12 +19,44 @@ import {
   DropdownMenuSeparator,
   DropdownMenuItem,
 } from '@appica/ui-react/dropdown-menu'
+import {
+  Activity,
+  Briefcase,
+  Bug,
+  CalendarClock,
+  ChartPie,
+  CircleCheck,
+  ClipboardList,
+  Cpu,
+  DeviceMobile,
+  FileCode,
+  FileExport,
+  FileSearch,
+  FileText,
+  Folder,
+  GitCommit,
+  GitFork,
+  LayoutDashboard,
+  ListCheck,
+  Book,
+  Package,
+  Robot,
+  Settings,
+  TimelineEvent,
+  Users,
+  Wrench,
+} from '@appica/icons-react'
+import type { IconComponent } from '@appica/icons-react'
+import { LayoutGroup, m } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
+import { PageTransition } from './PageTransition'
+import { navIndicatorTransition } from '../lib/motion'
 
 /** 左侧导航项 */
 interface NavItem {
   to: string
   label: string
+  icon: IconComponent
   ready: boolean
 }
 
@@ -45,22 +77,25 @@ const NAV_SECTIONS: NavSection[] = [
     label: '项目',
     to: '/',
     match: (p) =>
-      !p.startsWith('/admin') && !p.startsWith('/code') && !p.startsWith('/tasks'),
+      !p.startsWith('/admin') &&
+      !p.startsWith('/code') &&
+      !p.startsWith('/tasks') &&
+      !p.startsWith('/docs'),
     items: [
-      { to: '/', label: '概览', ready: true },
-      { to: '/projects', label: '项目', ready: true },
-      { to: '/tests', label: '用例', ready: true },
-      { to: '/checks', label: '检查', ready: true },
-      { to: '/exports', label: '导出', ready: true },
-      { to: '/defects', label: '缺陷', ready: true },
-      { to: '/documents', label: '文档', ready: true },
-      { to: '/resources', label: '资源', ready: true },
-      { to: '/milestones', label: '节点', ready: true },
-      { to: '/commits', label: '提交', ready: true },
-      { to: '/scripts', label: '脚本', ready: true },
-      { to: '/schedules', label: '定时任务', ready: true },
-      { to: '/apps', label: 'APP', ready: true },
-      { to: '/settings', label: '设置', ready: true },
+      { to: '/', label: '概览', icon: LayoutDashboard, ready: true },
+      { to: '/projects', label: '项目', icon: Briefcase, ready: true },
+      { to: '/tests', label: '用例', icon: ListCheck, ready: true },
+      { to: '/checks', label: '检查', icon: CircleCheck, ready: true },
+      { to: '/exports', label: '导出', icon: FileExport, ready: true },
+      { to: '/defects', label: '缺陷', icon: Bug, ready: true },
+      { to: '/documents', label: '文档', icon: FileText, ready: true },
+      { to: '/resources', label: '资源', icon: Folder, ready: true },
+      { to: '/milestones', label: '节点', icon: TimelineEvent, ready: true },
+      { to: '/commits', label: '提交', icon: GitCommit, ready: true },
+      { to: '/scripts', label: '脚本', icon: FileCode, ready: true },
+      { to: '/schedules', label: '定时任务', icon: CalendarClock, ready: true },
+      { to: '/apps', label: 'APP', icon: DeviceMobile, ready: true },
+      { to: '/settings', label: '设置', icon: Settings, ready: true },
     ],
   },
   {
@@ -69,12 +104,23 @@ const NAV_SECTIONS: NavSection[] = [
     to: '/tasks',
     match: (p) => p.startsWith('/tasks'),
     items: [
-      { to: '/tasks', label: '任务概览', ready: true },
-      { to: '/tasks/live', label: '工作概览', ready: true },
-      { to: '/tasks/templates', label: '任务包', ready: true },
-      { to: '/tasks/workers', label: '机器人', ready: true },
-      { to: '/tasks/schedulers', label: '调度器', ready: true },
-      { to: '/tasks/executors', label: '执行器', ready: true },
+      { to: '/tasks/list', label: '任务', icon: ClipboardList, ready: true },
+      { to: '/tasks', label: '任务概览', icon: ChartPie, ready: true },
+      { to: '/tasks/live', label: '工作概览', icon: Activity, ready: true },
+      { to: '/tasks/templates', label: '任务包', icon: Package, ready: true },
+      { to: '/tasks/workers', label: '机器人', icon: Robot, ready: true },
+      { to: '/tasks/debug', label: '调试', icon: Wrench, ready: true },
+      { to: '/tasks/executors', label: '执行器', icon: Cpu, ready: true },
+    ],
+  },
+  {
+    key: 'knowledge',
+    label: '知识',
+    to: '/docs/detail/',
+    match: (p) => p.startsWith('/docs'),
+    items: [
+      { to: '/docs/detail/', label: '知识库', icon: Book, ready: true },
+      { to: '/docs/search', label: '搜索', icon: FileSearch, ready: true },
     ],
   },
   {
@@ -82,14 +128,14 @@ const NAV_SECTIONS: NavSection[] = [
     label: '代码',
     to: '/code/repos',
     match: (p) => p.startsWith('/code'),
-    items: [{ to: '/code/repos', label: '仓库', ready: true }],
+    items: [{ to: '/code/repos', label: '仓库', icon: GitFork, ready: true }],
   },
   {
     key: 'admin',
     label: '管理',
     to: '/admin/users',
     match: (p) => p.startsWith('/admin'),
-    items: [{ to: '/admin/users', label: '用户列表', ready: true }],
+    items: [{ to: '/admin/users', label: '用户列表', icon: Users, ready: true }],
   },
 ]
 
@@ -168,24 +214,35 @@ export function Layout() {
           >
             AI 项目管理平台
           </Link>
-          <nav className="flex items-center gap-1">
-            {NAV_SECTIONS.map((section) => {
-              const active = section.key === activeSection.key
-              return (
-                <Link
-                  key={section.key}
-                  to={section.to}
-                  className={
-                    active
-                      ? 'rounded-[var(--radius-md)] bg-background-muted px-3 py-1.5 text-sm font-medium text-foreground-intense'
-                      : 'rounded-[var(--radius-md)] px-3 py-1.5 text-sm text-foreground-muted hover:text-foreground-intense'
-                  }
-                >
-                  {section.label}
-                </Link>
-              )
-            })}
-          </nav>
+          <LayoutGroup id="top-navigation">
+            <nav className="flex items-center gap-1">
+              {NAV_SECTIONS.map((section) => {
+                const active = section.key === activeSection.key
+                return (
+                  <Link
+                    key={section.key}
+                    to={section.to}
+                    aria-current={active ? 'page' : undefined}
+                    className={`relative isolate rounded-[var(--radius-md)] px-3 py-1.5 text-sm ${
+                      active
+                        ? 'font-medium text-foreground-intense'
+                        : 'text-foreground-muted hover:text-foreground-intense'
+                    }`}
+                  >
+                    {active && (
+                      <m.span
+                        aria-hidden
+                        layoutId="top-navigation-active"
+                        className="absolute inset-0 rounded-[var(--radius-md)] bg-background-muted"
+                        transition={navIndicatorTransition}
+                      />
+                    )}
+                    <span className="relative">{section.label}</span>
+                  </Link>
+                )
+              })}
+            </nav>
+          </LayoutGroup>
         </div>
         <UserArea />
       </header>
@@ -202,8 +259,11 @@ export function Layout() {
                     disabled={!item.ready}
                     render={<NavLink to={item.to} end={item.to === '/'} />}
                   >
-                    <span className="flex w-full items-center justify-between">
-                      {item.label}
+                    <span className="flex w-full items-center justify-between gap-2">
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <item.icon size={18} className="shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </span>
                       {!item.ready && <Badge variant="soft">待补充</Badge>}
                     </span>
                   </NavigationLink>
@@ -216,7 +276,9 @@ export function Layout() {
         {/* 内容区（min-w-0：允许内容收缩，宽内容才能在面板内出现横向滚动；
             高度限定为视口减顶栏，页面可用 h-full 撑满剩余空间） */}
         <main className="h-[calc(100vh-3.5rem)] min-w-0 flex-1 overflow-auto p-6 text-foreground-intense">
-          <Outlet />
+          <PageTransition pageKey={pathname}>
+            <Outlet />
+          </PageTransition>
         </main>
       </div>
     </div>

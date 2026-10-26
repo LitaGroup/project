@@ -164,7 +164,7 @@ export function TaskTemplateEditPage() {
           />
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            定义一类任务的描述、输入、输出与默认处理机器人，新建任务时可一键填充
+            沉淀一类任务的可复用定义：描述、输入、输出与默认处理机器人
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -228,7 +228,7 @@ export function TaskTemplateEditPage() {
           <CardHeader className="flex-none">
             <CardTitle>基础信息</CardTitle>
             <CardDescription>
-              任务包名称用于新建任务时选择，处理机器人作为默认执行者
+              任务包名称用于识别与复用，处理机器人作为默认执行者
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">
@@ -248,7 +248,7 @@ export function TaskTemplateEditPage() {
                   setAgentId(v === 'none' ? '' : (v as string))
                 }
                 items={{
-                  none: '不指定（由调度器分配）',
+                  none: '不指定（由调度机器人分配）',
                   ...Object.fromEntries(
                     workers.map((w) => [
                       String(w.id),
@@ -261,7 +261,7 @@ export function TaskTemplateEditPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">不指定（由调度器分配）</SelectItem>
+                  <SelectItem value="none">不指定（由调度机器人分配）</SelectItem>
                   {workers.map((w) => (
                     <SelectItem key={w.id} value={String(w.id)}>
                       {w.name}

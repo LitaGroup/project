@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useParams } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { useAuth } from './context/AuthContext'
 import { OverviewPage } from './pages/OverviewPage'
@@ -13,6 +13,8 @@ import { TestsPage } from './pages/TestsPage'
 import { ChecksPage } from './pages/ChecksPage'
 import { ExportsPage } from './pages/ExportsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
+import { KnowledgeBrowserPage } from './pages/KnowledgeBrowserPage'
+import { KnowledgeSearchPage } from './pages/KnowledgeSearchPage'
 import { ResourcesPage } from './pages/ResourcesPage'
 import { MilestonesPage } from './pages/MilestonesPage'
 import { CommitsPage } from './pages/CommitsPage'
@@ -20,13 +22,15 @@ import { ReposPage } from './pages/ReposPage'
 import { ScriptsPage } from './pages/ScriptsPage'
 import { SchedulesPage } from './pages/SchedulesPage'
 import { TaskCenterPage } from './pages/TaskCenterPage'
+import { TasksPage } from './pages/TasksPage'
+import { TaskCreatePage } from './pages/TaskCreatePage'
 import { TaskTemplatesPage } from './pages/TaskTemplatesPage'
 import { TaskTemplateEditPage } from './pages/TaskTemplateEditPage'
 import { TaskPackageDetailPage } from './pages/TaskPackageDetailPage'
 import { WorkersLivePage } from './pages/WorkersLivePage'
 import { WorkersPage } from './pages/WorkersPage'
-import { SchedulersPage } from './pages/SchedulersPage'
 import { WorkerEditPage } from './pages/WorkerEditPage'
+import { WorkerDebugPage } from './pages/WorkerDebugPage'
 import { ExecutorsPage } from './pages/ExecutorsPage'
 import { DefectsPage } from './pages/DefectsPage'
 import { DefectDetailPage } from './pages/DefectDetailPage'
@@ -44,6 +48,17 @@ function RequireAuth() {
   if (loading) return null
   if (!user) return <Navigate to="/login" replace />
   return <Outlet />
+}
+
+/** 旧「调度器」路由兼容：调度器已合并进机器人 */
+function SchedulerRedirect() {
+  const { workerId } = useParams<{ workerId: string }>()
+  return (
+    <Navigate
+      to={workerId ? `/tasks/workers/${workerId}` : '/tasks/workers'}
+      replace
+    />
+  )
 }
 
 function App() {
@@ -92,6 +107,10 @@ function App() {
           <Route path="/exports" element={<ExportsPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
+          <Route path="/docs" element={<Navigate to="/docs/detail/" replace />} />
+          <Route path="/docs/search" element={<KnowledgeSearchPage />} />
+          <Route path="/docs/detail" element={<KnowledgeBrowserPage />} />
+          <Route path="/docs/detail/*" element={<KnowledgeBrowserPage />} />
           <Route path="/resources" element={<ResourcesPage />} />
           <Route path="/milestones" element={<MilestonesPage />} />
           <Route path="/commits" element={<CommitsPage />} />
@@ -100,6 +119,8 @@ function App() {
           <Route path="/scripts" element={<ScriptsPage />} />
           <Route path="/schedules" element={<SchedulesPage />} />
           <Route path="/tasks" element={<TaskCenterPage />} />
+          <Route path="/tasks/list" element={<TasksPage />} />
+          <Route path="/tasks/new" element={<TaskCreatePage />} />
           <Route path="/tasks/live" element={<WorkersLivePage />} />
           <Route path="/tasks/templates" element={<TaskTemplatesPage />} />
           <Route
@@ -111,17 +132,12 @@ function App() {
             element={<TaskTemplateEditPage />}
           />
           <Route path="/tasks/workers" element={<WorkersPage />} />
-          <Route path="/tasks/workers/new" element={<WorkerEditPage role="工作者" />} />
-          <Route path="/tasks/workers/:workerId" element={<WorkerEditPage role="工作者" />} />
-          <Route path="/tasks/schedulers" element={<SchedulersPage />} />
-          <Route
-            path="/tasks/schedulers/new"
-            element={<WorkerEditPage role="调度器" />}
-          />
-          <Route
-            path="/tasks/schedulers/:workerId"
-            element={<WorkerEditPage role="调度器" />}
-          />
+          <Route path="/tasks/workers/new" element={<WorkerEditPage />} />
+          <Route path="/tasks/workers/:workerId" element={<WorkerEditPage />} />
+          <Route path="/tasks/debug" element={<WorkerDebugPage />} />
+          {/* 调度器已合并进机器人：旧链接兼容 */}
+          <Route path="/tasks/schedulers" element={<SchedulerRedirect />} />
+          <Route path="/tasks/schedulers/:workerId" element={<SchedulerRedirect />} />
           <Route path="/tasks/executors" element={<ExecutorsPage />} />
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
           <Route path="/apps" element={<AppsPage />} />

@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
-version: 1.12.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库
+version: 1.14.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -28,6 +28,8 @@ tags:
 9. 查询缺陷清单与详情、创建/编辑缺陷、变更状态、追加变更记录、删除缺陷（见第 9 节）
 10. 登记项目代码分支（GitHub 仓库+分支，标注 后端/H5/安卓/IOS/其它），平台自动监听 test/main/stable 等分支的新提交/合并（见第 10 节）
 11. 获取平台设置信息、更新脚本仓库
+12. 搜索平台知识库、浏览知识目录、读取知识文章与项目文档镜像（见第 11 节；也可单独安装 `knowledge-search` 技能）
+13. 创建知识文章/目录，更新正文、标题，移动/重命名，删除文章或目录（见第 11.4 节）
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -384,10 +386,72 @@ curl -X DELETE {BASE}/api/code-branches/{id}
 - 监听范围 = 全平台登记的 (repo, branch) 去重集合；分支建议登记 test/main/stable
 - 项目详情 `.md` 含「代码分支」小节与本项目提交记录地址；删除项目时登记随之删除（已记录的提交保留）
 
+## 11. 知识库（Markdown + 路径）
+
+知识库以路径组织 Markdown，支持全文 + PGVector 混合检索。独立技能 `knowledge-search` 见 `http://{host}/knowledge/SKILL.md`。
+
+### 11.1 搜索知识（RAG 上下文）
+
+```
+GET /api/docs/search.md?q={关键词}[&source=project|feishu|all][&path={目录}][&page=1][&pageSize=8]
+```
+
+- `source` 默认 `project`：`project`=站内知识，`feishu`=飞书 Search v2，`all`=两源同时搜索（各返回当前页最多 `pageSize` 条）
+- `pageSize` 范围 1..100；`page` 从 1 开始；旧 `limit` 是 `pageSize` 别名
+- 飞书搜索使用当前平台用户登录飞书时获得的 `user_access_token`，授权过期需重新登录；飞书关键词最多 50 字
+- 报 `99991679 / search:docs:read` 表示飞书应用缺少「搜索云文档」权限：管理员需添加 `search:docs:read`、发布应用版本，然后用户退出并重新登录平台；刷新旧 token 不会补充新权限
+- 站内结果带标题、知识路径、章节、相关度、命中方式和原文链接；飞书结果带原文链接与 `markdownUrl`
+- `source=all` 时飞书不可用不影响站内结果（飞书小节带 error）
+- 先搜索，再按需读取原文；回答时注明知识路径/飞书链接，不要只凭片段推测
+
+### 11.2 飞书文档转 Markdown
+
+```
+GET /api/feishu/read.md?url={URL 编码后的飞书文档链接}
+```
+
+- 支持 `docx/docs/sheets/base/wiki`；返回带 frontmatter 的完整 Markdown
+- 搜索结果的 `markdownUrl` 即该地址，可直接交给下游 Agent
+
+### 11.3 浏览目录 / 读取文章
+
+```
+GET /api/docs/detail/.md                              # 根目录
+GET /api/docs/detail/guides/.md                       # 目录（结尾斜杠，API 用 /.md）
+GET /api/docs/detail/guides/deploy.md                 # 文章（无结尾斜杠，API 用 .md）
+GET /api/docs/detail/project/{projectId}/document/{documentId}.md  # 项目文档镜像
+```
+
+- 目录返回直接子目录和直接文章；文章返回完整 Markdown
+- 项目文档在知识库中只读，修改仍走 `POST /api/documents/upsert.md` 或平台文档详情
+
+### 11.4 维护知识（AI Markdown 接口）
+
+所有接口为 `POST`，JSON body，返回 `text/markdown`。路径使用不带结尾 `/` 的绝对路径（目录也写 `/guides`）。
+
+```bash
+# 创建文章（kind=directory 时创建目录，content 忽略）
+curl -X POST {BASE}/api/docs/nodes/create.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+  -d '{"kind":"article","parentPath":"/guides","name":"deploy","title":"部署说明","content":"# 部署\n\n正文"}'
+
+# 更新正文/标题，或移动/重命名（path 为当前路径，至少再提供一个字段）
+curl -X POST {BASE}/api/docs/nodes/update.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+  -d '{"path":"/guides/deploy","title":"部署说明 v2","parentPath":"/manual","name":"deploy-v2"}'
+
+# 删除文章；非空目录必须 recursive=true
+curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+  -d '{"path":"/guides/old","recursive":true}'
+```
+
+- 创建时 `parentPath` 默认 `/`，父目录必须存在，路径冲突返回 400
+- 更新至少提供 `title/content/name/parentPath` 之一；目录移动会递归迁移后代并重建后代向量
+- 删除不可恢复；项目同步的 `/project/**` 知识只读，拒绝更新/删除
+- 返回内容含节点 ID、原/当前路径、类型、读取地址和网页地址，可直接用于后续复核
+
 ## 工作约定
 
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

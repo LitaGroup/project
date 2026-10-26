@@ -53,7 +53,7 @@ export class Repo {
   status: RepoStatus;
 
   /** 仓库最后被更新的时间（GitHub updated_at，随同步刷新） */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   lastUpdatedAt: Date | null;
 
   /** 备注 */

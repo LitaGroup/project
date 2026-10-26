@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Like, Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, Repository } from 'typeorm';
 import { RepoPlatform, RepoStatus } from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
 import { GithubRepo, GithubService } from './github.service';
@@ -66,9 +66,9 @@ export class ReposService {
     const q = query.q?.trim();
     if (q) {
       where.push(
-        { ...base, name: Like(`%${q}%`) },
-        { ...base, fullName: Like(`%${q}%`) },
-        { ...base, description: Like(`%${q}%`) },
+        { ...base, name: ILike(`%${q}%`) },
+        { ...base, fullName: ILike(`%${q}%`) },
+        { ...base, description: ILike(`%${q}%`) },
       );
     } else {
       where.push(base);

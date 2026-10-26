@@ -75,8 +75,9 @@ export class AuthController {
       if (typeof code !== 'string' || !code) {
         throw new Error('飞书回调缺少授权码，请重试登录');
       }
-      const info = await this.authService.exchangeCodeForUser(code);
-      const user = await this.authService.upsertFeishuUser(info);
+      const { info, tokens } =
+        await this.authService.exchangeCodeForLogin(code);
+      const user = await this.authService.upsertFeishuUser(info, tokens);
       res.cookie(
         AUTH_COOKIE,
         this.authService.signSessionToken(user),

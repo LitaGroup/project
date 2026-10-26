@@ -127,6 +127,19 @@ describe('AuthService（飞书登录 + 会话）', () => {
       expect(second.role).toBe(UserRole.MEMBER);
     });
 
+    it('登录时保存飞书用户令牌用于后续文档搜索', async () => {
+      const { service } = createService();
+      const expiresAt = new Date(Date.now() + 7200_000);
+      const user = await service.upsertFeishuUser(FEISHU_INFO, {
+        accessToken: 'u-access',
+        refreshToken: 'u-refresh',
+        expiresAt,
+      });
+      expect(user.feishuAccessToken).toBe('u-access');
+      expect(user.feishuRefreshToken).toBe('u-refresh');
+      expect(user.feishuTokenExpiresAt).toEqual(expiresAt);
+    });
+
     it('同 open_id 重复登录只更新不新增', async () => {
       const { service, repo } = createService();
       await service.upsertFeishuUser(FEISHU_INFO);
@@ -281,6 +294,25 @@ describe('AuthService（飞书登录 + 会话）', () => {
   });
 
   describe('exchangeCodeForUser', () => {
+    it('授权码同时返回 access/refresh token 与过期时间', async () => {
+      const { service } = createService();
+      jest.spyOn(service['http'], 'post').mockResolvedValue({
+        data: {
+          access_token: 'u-token',
+          refresh_token: 'r-token',
+          expires_in: 7200,
+        },
+      });
+      jest.spyOn(service['http'], 'get').mockResolvedValue({
+        data: { code: 0, data: { open_id: 'ou_123', name: '张三' } },
+      });
+      const result = await service.exchangeCodeForLogin('auth-code');
+      expect(result.info.openId).toBe('ou_123');
+      expect(result.tokens.accessToken).toBe('u-token');
+      expect(result.tokens.refreshToken).toBe('r-token');
+      expect(result.tokens.expiresAt.getTime()).toBeGreaterThan(Date.now());
+    });
+
     it('换 token 后取用户信息', async () => {
       const { service } = createService();
       const post = jest

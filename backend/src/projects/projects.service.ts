@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as path from 'path';
-import { FindOptionsWhere, Like, Not, Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, Not, Repository } from 'typeorm';
 import {
   MilestoneAchieved,
   ProjectStatus,
@@ -132,7 +132,7 @@ export class ProjectsService {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(200, Math.max(1, query.pageSize ?? 50));
     const where: FindOptionsWhere<Project> = {};
-    if (query.q) where.name = Like(`%${query.q}%`);
+    if (query.q) where.name = ILike(`%${query.q}%`);
     if (query.iteration) where.iterationCycle = query.iteration;
     if (query.status) where.status = query.status;
     if (query.type) where.type = query.type;
@@ -259,7 +259,7 @@ export class ProjectsService {
     }
     const candidates = await this.projects.find({
       select: PROJECT_LIST_SELECT,
-      where: { name: Like(`%${q}%`) },
+      where: { name: ILike(`%${q}%`) },
       order: { createdAt: 'DESC' },
       take: 100,
     });

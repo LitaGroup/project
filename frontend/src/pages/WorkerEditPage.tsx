@@ -32,7 +32,7 @@ import {
 
 type OptimizePhase = 'idle' | 'loading' | 'review'
 
-/** 新建机器人/调度器时的默认角色 PROMPT 模板（与 AI 优化的结构保持一致） */
+/** 新建机器人（含系统调度机器人编辑）时的默认角色 PROMPT 模板（与 AI 优化的结构保持一致） */
 const NEW_PROMPT_TEMPLATE = `## 角色定义
 （待补充：身份、定位、服务的对象与最终目标）
 
@@ -52,14 +52,14 @@ const NEW_PROMPT_TEMPLATE = `## 角色定义
 - 边界与拒收条件：（待补充）`
 
 /**
- * 机器人/调度器新建与编辑（独立页面）。
- * title 与 role 由路由决定：新建时 role 取传入值，编辑时以服务端返回的 role 为准。
+ * 机器人新建与编辑（独立页面，调度机器人与工作者共用）。
+ * 新建一律为自定义工作者；编辑时以服务端返回的 role 为准（系统调度机器人也在此配置）。
  */
-export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
+export function WorkerEditPage() {
   const { workerId } = useParams<{ workerId: string }>()
   const navigate = useNavigate()
 
-  const [role, setRole] = useState<WorkerRole>(roleProp)
+  const [role, setRole] = useState<WorkerRole>('工作者')
   const [executors, setExecutors] = useState<Executor[]>([])
   const [users, setUsers] = useState<PlatformUser[]>([])
   const [worker, setWorker] = useState<Worker | null>(null)
@@ -69,12 +69,8 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
   const [name, setName] = useState('')
   const [intro, setIntro] = useState('')
   const [executorId, setExecutorId] = useState('')
-  const [providerId, setProviderId] = useState(
-    roleProp === '调度器' ? 'deepseek' : '',
-  )
-  const [modelId, setModelId] = useState(
-    roleProp === '调度器' ? 'deepseek-v4-flash' : '',
-  )
+  const [providerId, setProviderId] = useState('')
+  const [modelId, setModelId] = useState('')
   const [prompt, setPrompt] = useState(workerId ? '' : NEW_PROMPT_TEMPLATE)
   const [ownerUserId, setOwnerUserId] = useState('')
   const [materials, setMaterials] = useState('')
@@ -88,14 +84,10 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
   const promptRef = useRef<MarkdownEditorHandle>(null)
   const editorEpochRef = useRef(0)
 
-  const listPath = role === '调度器' ? '/tasks/schedulers' : '/tasks/workers'
+  const listPath = '/tasks/workers'
   const isScheduler = role === '调度器'
   /** 面包屑固定用初始标题；页面大标题跟随名称输入变化 */
-  const initialTitle = worker
-    ? `编辑「${worker.name}」`
-    : isScheduler
-      ? '新建调度器'
-      : '新建机器人'
+  const initialTitle = worker ? `编辑「${worker.name}」` : '新建机器人'
   const typedName = name.trim()
   const pageTitle = worker
     ? typedName
@@ -134,21 +126,10 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
     return () => {
       alive = false
     }
-  }, [workerId, roleProp])
+  }, [workerId])
 
   const executor = executors.find((e) => String(e.id) === executorId)
-  const providers = isScheduler
-    ? [
-        {
-          id: 'deepseek',
-          name: 'DeepSeek',
-          models: [
-            { id: 'deepseek-v4-flash', name: 'deepseek-v4-flash（快）' },
-            { id: 'deepseek-v4-pro', name: 'deepseek-v4-pro（强）' },
-          ],
-        },
-      ]
-    : (executor?.providersCache ?? [])
+  const providers = executor?.providersCache ?? []
   const provider = providers.find((p) => p.id === providerId)
   const models = provider?.models ?? []
 
@@ -159,9 +140,8 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
     const payload = {
       name,
       intro: intro.trim() || null,
-      role,
-      runtime: isScheduler ? ('pi' as const) : ('opencode' as const),
-      executorId: isScheduler ? null : executorId ? Number(executorId) : null,
+      runtime: 'opencode' as const,
+      executorId: executorId ? Number(executorId) : null,
       providerId: providerId || null,
       modelId: modelId || null,
       prompt: promptText.trim() || null,
@@ -181,10 +161,8 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
 
   const canSave =
     !!name.trim() &&
-    !!providerId &&
-    !!modelId &&
-    (isScheduler || !!executorId) &&
-    !saving
+    !saving &&
+    (!enabled || (!!executorId && !!providerId && !!modelId))
 
   /** 替换编辑器内容：换 key 重新挂载（MarkdownEditor 为非受控组件） */
   const replacePrompt = (next: string) => {
@@ -209,8 +187,14 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
     setOptimizeError(null)
     setOptimizePhase('loading')
     try {
-      const optimized = await api.optimizeWorkerPrompt(current)
-      if (!optimized.trim()) throw new Error('PI Agent 返回内容为空')
+      const optimized = await api.optimizeWorkerPrompt({
+        prompt: current,
+        workerId: worker?.id ?? null,
+        executorId: executorId ? Number(executorId) : null,
+        providerId: providerId || null,
+        modelId: modelId || null,
+      })
+      if (!optimized.trim()) throw new Error('执行器返回内容为空')
       // 以返回时刻编辑器里的最新内容作为撤销快照，避免优化期间的手动编辑丢失
       setOptimizeSnapshot(promptRef.current?.getMarkdown() ?? current)
       replacePrompt(optimized)
@@ -243,7 +227,7 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
       <div className="flex flex-col gap-4">
         <PageBreadcrumb
           items={[
-            { label: listPath === '/tasks/schedulers' ? '调度器' : '机器人', to: listPath },
+            { label: '机器人', to: listPath },
             { label: '编辑' },
           ]}
         />
@@ -258,14 +242,14 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
         <div>
           <PageBreadcrumb
             items={[
-              { label: isScheduler ? '调度器' : '机器人', to: listPath },
+              { label: '机器人', to: listPath },
               { label: initialTitle },
             ]}
           />
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
             {isScheduler
-              ? '调度器 = 平台进程内 PI Agent（DeepSeek）：任务识别 → 材料审查 → 拆解/分配建议'
+              ? '系统调度机器人：运行在 opencode 等执行器上，负责任务识别、工作计划生成与执行机器人分配'
               : '机器人的负责人对机器人的产出结果负责'}
           </p>
         </div>
@@ -368,17 +352,22 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
           <CardHeader className="flex-none">
             <CardTitle>基础信息</CardTitle>
             <CardDescription>
-              名称与简介供调度器识别，执行器与模型决定运行位置
+              名称与简介供调度机器人识别，执行器与模型决定运行位置
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">
+            {worker?.system && (
+              <p className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-xs text-foreground-muted">
+                系统机器人（ID {worker.id}）由代码内置，可在此调整配置与启用状态，但网页不能删除。
+              </p>
+            )}
             <div className="flex gap-4">
               <label className="flex flex-1 flex-col gap-1 text-sm">
                 名称
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={isScheduler ? '如：调度器-项目负责人' : '如：前端工程师'}
+                  placeholder={isScheduler ? '如：调度机器人' : '如：前端工程师'}
                 />
               </label>
               <label className="flex w-32 flex-col gap-1 text-sm">
@@ -404,7 +393,7 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
                 rows={3}
                 value={intro}
                 onChange={(e) => setIntro(e.target.value)}
-                placeholder="擅长什么、能接什么任务，供调度器与外部选择"
+                placeholder="擅长什么、能接什么任务，供调度机器人与外部选择"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
@@ -437,8 +426,7 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
               </p>
             )}
             <div className="border-t border-border-strong" />
-            {!isScheduler && (
-              <label className="flex flex-col gap-1 text-sm">
+            <label className="flex flex-col gap-1 text-sm">
                 执行器
                 <Select
                   value={executorId || 'none'}
@@ -475,7 +463,6 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
                   </span>
                 )}
               </label>
-            )}
             <div className="flex gap-4">
               <label className="flex flex-1 flex-col gap-1 text-sm">
                 供应商
@@ -529,7 +516,7 @@ export function WorkerEditPage({ role: roleProp }: { role: WorkerRole }) {
             </div>
             {isScheduler && (
               <label className="flex flex-col gap-1 text-sm">
-                调度材料（负责人提供的背景约定，调度时附加给 PI）
+                调度材料（负责人提供的背景约定，识别时附加给调度机器人）
                 <Textarea
                   rows={5}
                   value={materials}

@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-} from '@appica/ui-react/card'
+import { Card, CardHeader, CardTitle } from '@appica/ui-react/card'
+import { Badge } from '@appica/ui-react/badge'
 import { api, type Worker } from '../lib/api'
 import { WorkerLiveBadge } from '../components/StatusBadge'
 
-/** 工作概览：机器人实时状态卡片墙（5s 轮询；工作中呼吸动画） */
+/** 工作概览：全部机器人（系统 + 自定义）实时状态卡片墙（5s 轮询；工作中呼吸动画） */
 export function WorkersLivePage() {
   const [workers, setWorkers] = useState<Worker[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -33,44 +30,25 @@ export function WorkersLivePage() {
     }
   }, [])
 
-  const agents = workers.filter((w) => w.role === '工作者')
-  const schedulers = workers.filter((w) => w.role === '调度器')
-
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold">工作概览</h1>
         <p className="mt-1 text-sm text-foreground-muted">
-          机器人实时状态（每 5 秒刷新）：空闲中 / 工作中 / 等待中 / 验收中
+          全部机器人（含系统调度机器人）实时状态（每 5 秒刷新）：空闲中 / 工作中 / 等待中 / 验收中
         </p>
       </div>
       {error && <p className="text-sm">加载失败:{error}</p>}
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">机器人（{agents.length}）</h2>
+        <h2 className="mb-3 text-lg font-semibold">机器人（{workers.length}）</h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {agents.map((w) => (
+          {workers.map((w) => (
             <WorkerCard key={w.id} worker={w} />
           ))}
-          {agents.length === 0 && (
+          {workers.length === 0 && (
             <p className="text-sm text-foreground-muted">
               暂无机器人，到「机器人」页创建
-            </p>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">
-          调度器（{schedulers.length}）
-        </h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {schedulers.map((w) => (
-            <WorkerCard key={w.id} worker={w} />
-          ))}
-          {schedulers.length === 0 && (
-            <p className="text-sm text-foreground-muted">
-              暂无调度器，到「调度器」页创建
             </p>
           )}
         </div>
@@ -85,7 +63,17 @@ function WorkerCard({ worker }: { worker: Worker }) {
     <Card className={working ? 'ring-1 ring-success/40' : undefined}>
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
-          <span className="truncate">{worker.name}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate">{worker.name}</span>
+            {worker.system && (
+              <Badge variant="soft" size="sm">
+                系统
+              </Badge>
+            )}
+            <Badge variant="soft" size="sm">
+              {worker.role}
+            </Badge>
+          </span>
           <span className={working ? 'animate-pulse' : undefined}>
             <WorkerLiveBadge status={worker.liveStatus} />
           </span>
@@ -99,8 +87,7 @@ function WorkerCard({ worker }: { worker: Worker }) {
             </p>
           )}
           <p className="text-xs text-foreground-muted">
-            {worker.runtime === 'pi' ? '内置 PI' : 'opencode'} ·{' '}
-            {worker.providerId ?? '-'}/{worker.modelId ?? '-'}
+            {worker.runtime} · {worker.providerId ?? '-'}/{worker.modelId ?? '-'}
             {worker.ownerName ? ` · 负责人 ${worker.ownerName}` : ''}
           </p>
           {worker.activeTask ? (

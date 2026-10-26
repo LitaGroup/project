@@ -36,12 +36,16 @@ export class Document {
   description: string | null;
 
   /** 正文：Markdown（飞书/手工）；apipost 来源存原始 swagger JSON 字符串（单一数据源） */
-  @Column({ type: 'longtext', nullable: true })
+  @Column({ type: 'text', nullable: true })
   content: string | null;
 
   /** 用户备注（为后续 AI 阅读准备），任何来源的文档都可编辑 */
   @Column({ type: 'text', nullable: true })
   remark: string | null;
+
+  /** 知识库文章 ID（PostgreSQL）；配置知识库后普通 Markdown 正文仅存知识库 */
+  @Column({ type: 'char', length: 36, nullable: true })
+  knowledgeId: string | null;
 
   /** 来源为飞书时记录原始链接，便于再次同步 */
   @Column({ type: 'varchar', length: 500, nullable: true })

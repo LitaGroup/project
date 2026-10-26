@@ -4,7 +4,8 @@
 
 > 自建应用需在飞书开放平台开通对应读权限：
 > 云文档 `docx:document:readonly`、表格 `sheets:spreadsheet:readonly`、
-> 多维表格 `bitable:app:readonly`、知识库 `wiki:wiki:readonly`（链接为 wiki 节点时需要）；
+> 多维表格 `bitable:app:readonly`、知识库 `wiki:wiki:readonly`（链接为 wiki 节点时需要）、
+> 搜索云文档 `search:docs:read`（飞书搜索需要用户先登录平台完成授权）；
 > 文档内图片导入需要素材下载权限（`drive:drive:readonly` 或等同的媒体下载 scope），
 > 无权限时图片块降级为 `*[图片暂不导入]*` 占位，其余内容不受影响。
 
@@ -23,6 +24,16 @@ curl 'http://localhost:3000/api/feishu/read?url=https://xxx.feishu.cn/base/ABC12
 # 知识库节点（自动解析为实际文档类型）
 curl 'http://localhost:3000/api/feishu/read?url=https://xxx.feishu.cn/wiki/ABC123'
 ```
+
+## 外部 Agent：飞书文档转 Markdown
+
+```bash
+# 需登录用户或 Agent 访问令牌；返回 text/markdown（带 frontmatter）
+curl -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+  'http://localhost:3000/api/feishu/read.md?url=https%3A%2F%2Fxxx.feishu.cn%2Fdocx%2FABC123'
+```
+
+`GET /api/docs/search.md?source=feishu|all` 的每一条飞书搜索结果都会带 `markdownUrl`，可直接调用。
 
 ## 一键同步飞书文档到项目
 

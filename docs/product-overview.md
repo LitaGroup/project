@@ -20,5 +20,5 @@
 ## 技术实现
 
 - 前端：Vite + React 19 + Appica UI + Tailwind CSS v4
-- 后端：NestJS + TypeORM + MySQL
+- 后端：NestJS + TypeORM + PostgreSQL
 - 飞书集成：读取飞书文档、飞书表格、飞书多维表格（单向导入）

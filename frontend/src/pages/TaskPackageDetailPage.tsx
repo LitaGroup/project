@@ -1,382 +1,333 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-} from '@appica/ui-react/card'
-import { Button } from '@appica/ui-react/button'
+import { useParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
-import {
-  Table,
-  TableBody,
-  TableRow,
-  TableCell,
-} from '@appica/ui-react/table'
+import { Button } from '@appica/ui-react/button'
 import {
   api,
-  type DispatchPlan,
+  type TaskChatMessage,
+  type TaskChatSnapshot,
+  type TaskChatStreamMessage,
   type TaskPackage,
-  type Worker,
+  type TaskPipelineStage,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
-import { MarkdownEditor } from '../components/MarkdownEditor'
-import { Terminal } from '../components/Terminal'
+import { TaskChatPanel } from '../components/task-detail/TaskChatPanel'
+import { TaskSidePanel } from '../components/task-detail/TaskSidePanel'
+import { useAuth } from '../context/AuthContext'
 
-/** 活跃状态（SSE 持续订阅） */
-const ACTIVE_STATUSES = ['已派发', '执行中']
+type ConnectionState = 'connecting' | 'live' | 'reconnecting'
 
-/** 任务详情：实时执行终端 + 流程动作 + 调度方案 + 子任务 + 事件时间线 */
+/**
+ * 任务详情：左侧 assistant-ui 对话（SSE 实时），右侧任务详情 / PIPELINE / 交付物。
+ * PIPELINE 由主任务 + 子任务组成，每个阶段可能是不同的机器人。
+ */
 export function TaskPackageDetailPage() {
   const { id } = useParams<{ id: string }>()
   const taskId = Number(id)
+  const { user } = useAuth()
   const [task, setTask] = useState<TaskPackage | null>(null)
-  const [plan, setPlan] = useState<DispatchPlan | null>(null)
-  const [worker, setWorker] = useState<Worker | null>(null)
-  const [workers, setWorkers] = useState<Worker[]>([])
-  const [lines, setLines] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const [pipeline, setPipeline] = useState<TaskPipelineStage[]>([])
+  const [messages, setMessages] = useState<TaskChatMessage[]>([])
+  const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(
-    () =>
-      api
-        .getTaskPackage(taskId)
-        .then((t) => {
-          setTask(t)
-          setLines(t.liveLines ?? [])
-          return Promise.all([
-            api.getTaskPlan(taskId).catch(() => null),
-            t.agentId ? api.getWorker(t.agentId).catch(() => null) : null,
-          ])
-        })
-        .then(([p, w]) => {
-          setPlan(p)
-          setWorker(w)
-        })
-        .catch((e: Error) => setError(e.message)),
-    [taskId],
-  )
+  const loadSeq = useRef(0)
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current
+    try {
+      const data: TaskChatSnapshot = await api.getTaskChat(taskId)
+      if (seq !== loadSeq.current) return
+      setTask(data.task)
+      setPipeline(data.pipeline)
+      setMessages(data.messages)
+      setError(null)
+    } catch (e) {
+      if (seq === loadSeq.current) setError((e as Error).message)
+    } finally {
+      if (seq === loadSeq.current) setLoading(false)
+    }
+  }, [taskId])
 
-  useEffect(() => {
-    void load()
-    api
-      .listWorkers({ role: '工作者' })
-      .then(setWorkers)
-      .catch(() => undefined)
-  }, [load])
-
-  // 活跃状态订阅 SSE（执行器事件行 + 状态推送）
-  const active = task ? ACTIVE_STATUSES.includes(task.status) : false
   const loadRef = useRef(load)
   useEffect(() => {
     loadRef.current = load
   }, [load])
+
   useEffect(() => {
-    if (!active) return
-    const es = new EventSource(`/api/tasks/${taskId}/stream`)
-    es.onmessage = (e: MessageEvent<string>) => {
-      const data = JSON.parse(e.data) as { line?: string; status?: string }
-      if (data.line) setLines((prev) => [...prev, data.line!])
-      if (data.status && !ACTIVE_STATUSES.includes(data.status)) {
-        es.close()
-        void loadRef.current()
+    // 首次拉取任务对话；setState 均在 fetch 完成后的异步回调里触发，非同步级联
+    // oxlint-disable-next-line react/set-state-in-effect
+    void load()
+  }, [load])
+
+  // 任务聊天 SSE：机器人文本增量 / 工具调用 / PIPELINE 阶段变化 / 快照刷新信号
+  useEffect(() => {
+    let closed = false
+    let refreshTimer: number | undefined
+    const source = new EventSource(`/api/tasks/${taskId}/chat/stream`)
+
+    source.onopen = () => {
+      if (!closed) setConnection('live')
+    }
+    source.onmessage = (event: MessageEvent<string>) => {
+      if (closed) return
+      let data: TaskChatStreamMessage
+      try {
+        data = JSON.parse(event.data) as TaskChatStreamMessage
+      } catch {
+        return
+      }
+      switch (data.type) {
+        case 'ready':
+          setConnection('live')
+          // 连接建立后重新对齐一次快照，补齐 GET 与 SSE 订阅之间的间隙
+          void loadRef.current()
+          break
+        case 'message.upsert':
+          setMessages((current) => upsertMessage(current, data.message))
+          break
+        case 'stage.upsert':
+          setPipeline((current) => upsertStage(current, data.stage))
+          setTask((current) =>
+            current?.id === data.stage.task.id ? data.stage.task : current,
+          )
+          break
+        case 'stage.delete':
+          setPipeline((current) =>
+            current.filter((stage) => !data.ids.includes(stage.task.id)),
+          )
+          break
+        case 'refresh':
+          if (refreshTimer) window.clearTimeout(refreshTimer)
+          refreshTimer = window.setTimeout(() => {
+            refreshTimer = undefined
+            void loadRef.current()
+          }, 120)
+          break
+        default:
+          // ping 仅保活
+          break
       }
     }
-    es.onerror = () => es.close()
-    return () => es.close()
-  }, [active, taskId])
+    source.onerror = () => {
+      if (!closed) setConnection('reconnecting')
+    }
 
-  const act = (fn: (id: number) => Promise<unknown>) => {
-    setBusy(true)
-    setError(null)
-    fn(taskId)
-      .then(() => load())
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setBusy(false))
+    return () => {
+      closed = true
+      source.close()
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+    }
+  }, [taskId])
+
+  const sendFeedback = useCallback(
+    async (content: string) => {
+      const text = content.trim()
+      if (!text) return
+      const optimistic: TaskChatMessage = {
+        id: `local:${Date.now()}`,
+        taskId,
+        role: 'user',
+        sender: {
+          id: `user:${user?.name ?? 'me'}`,
+          name: user?.name ?? '我',
+          kind: 'user',
+          roleLabel: '用户',
+        },
+        content: text,
+        createdAt: new Date().toISOString(),
+        status: 'complete',
+        kind: 'message',
+      }
+      setMessages((current) => [...current, optimistic])
+      setBusy(true)
+      setError(null)
+      try {
+        await api.provideTaskFeedback(taskId, text)
+        await loadRef.current()
+      } catch (e) {
+        setMessages((current) =>
+          current.filter((message) => message.id !== optimistic.id),
+        )
+        setError((e as Error).message)
+        throw e
+      } finally {
+        setBusy(false)
+      }
+    },
+    [taskId, user?.name],
+  )
+
+  const act = useCallback(
+    (fn: (id: number) => Promise<unknown>) => {
+      setBusy(true)
+      setError(null)
+      fn(taskId)
+        .then(() => loadRef.current())
+        .catch((e: Error) => setError(e.message))
+        .finally(() => setBusy(false))
+    },
+    [taskId],
+  )
+
+  if (loading && !task) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-foreground-muted">
+        加载任务对话…
+      </div>
+    )
+  }
+  if (!task) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <p className="text-sm text-error-foreground">
+          加载失败：{error ?? '任务不存在'}
+        </p>
+        <Button size="sm" variant="outline" onClick={() => void load()}>
+          重试
+        </Button>
+      </div>
+    )
   }
 
-  if (error && !task) return <p>加载失败:{error}</p>
-  if (!task) return <p className="text-sm text-foreground-muted">加载中…</p>
-
-  const workerName = new Map(workers.map((w) => [w.id, w.name]))
-
-  return (
-    <div className="flex h-full gap-6">
-      {/* 左侧：实时执行终端 + 结果 */}
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
-        <PageBreadcrumb
-          items={[{ label: '任务', to: '/tasks' }, { label: task.title }]}
-        />
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-semibold">
-              {task.code} {task.title}
-            </h2>
-            <p className="mt-1 flex items-center gap-2 text-sm text-foreground-muted">
-              <TaskStatusBadge status={task.status} />
-              <span>{task.type}</span>
-              {worker && <span>· {worker.name}</span>}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Actions task={task} busy={busy} act={act} />
-          </div>
-        </div>
-
-        {task.missingItems && task.missingItems.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>缺失材料（补齐后点「材料已补齐」）</CardTitle>
-            </CardHeader>
-            <div className="px-6 pb-6">
-              <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
-                {task.missingItems.map((m, i) => (
-                  <li key={i}>
-                    <span className="font-medium">{m.item}</span>
-                    {m.reason ? ` — ${m.reason}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </Card>
-        )}
-
-        {task.result && (
-          <Card>
-            <CardHeader>
-              <CardTitle>执行产出</CardTitle>
-            </CardHeader>
-            <div className="px-6 pb-6">
-              <pre className="whitespace-pre-wrap break-words font-mono text-xs">
-                {task.result}
-              </pre>
-            </div>
-          </Card>
-        )}
-
-        <section className="flex min-h-64 flex-1 flex-col">
-          <h3 className="mb-2 text-sm font-medium">
-            实时执行日志{active ? '（进行中）' : ''}
-          </h3>
-          <Terminal
-            run={{
-              status: active ? 'running' : 'success',
-              output: lines.length > 0 ? lines : ['（暂无输出）'],
+  const currentTask = task.id === taskId ? task : null
+  if (!currentTask) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <p
+          className={`text-sm ${error ? 'text-error-foreground' : 'text-foreground-muted'}`}
+        >
+          {error ? `加载失败：${error}` : '加载任务对话…'}
+        </p>
+        {error && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setLoading(true)
+              void load()
             }}
-            scriptPath={`任务 ${task.code}`}
-          />
-        </section>
+          >
+            重试
+          </Button>
+        )}
       </div>
+    )
+  }
 
-      {/* 右侧：调度方案 + 信息 + 子任务 + 时间线 */}
-      <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-auto pb-6">
-        {plan && (
-          <Card>
-            <CardHeader>
-              <CardTitle>调度方案（待确认）</CardTitle>
-            </CardHeader>
-            <div className="px-6 pb-6">
-              <div className="flex flex-col gap-3 text-sm">
-                {plan.plan.identification.summary && (
-                  <p className="text-foreground-muted">
-                    {plan.plan.identification.summary}
-                  </p>
-                )}
-                <div>
-                  <p className="mb-1 font-medium">拆解与分配</p>
-                  <ul className="flex flex-col gap-1">
-                    {(plan.plan.subtasks ?? []).map((s, i) => (
-                      <li key={i} className="rounded border border-border-strong px-2 py-1">
-                        <p className="font-medium">{s.title}</p>
-                        <p className="text-xs text-foreground-muted">
-                          {s.type}
-                          {s.agentId
-                            ? ` · ${s.agentName ?? workerName.get(s.agentId) ?? `#${s.agentId}`}`
-                            : ' · 未分配'}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => {
-                      setBusy(true)
-                      api
-                        .confirmTaskPlan(plan.id)
-                        .then(() => load())
-                        .catch((e: Error) => setError(e.message))
-                        .finally(() => setBusy(false))
-                    }}
-                  >
-                    确认并派发
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => {
-                      setBusy(true)
-                      api
-                        .rejectTaskPlan(plan.id, '需调整')
-                        .then(() => load())
-                        .catch((e: Error) => setError(e.message))
-                        .finally(() => setBusy(false))
-                    }}
-                  >
-                    驳回重调度
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Card>
-        )}
+  const currentStage = pipeline.find((stage) => stage.task.id === currentTask.id)
+  const robotNames = pipeline
+    .map((stage) => stage.agent?.name)
+    .filter((name): name is string => Boolean(name))
 
-        <Card>
-          <CardHeader>
-            <CardTitle>任务信息</CardTitle>
-          </CardHeader>
-          <div className="px-6 pb-6">
-            <dl className="flex flex-col gap-2 text-sm">
-              <InfoRow label="编号" value={task.code} />
-              <InfoRow label="类型" value={task.type} />
-              <InfoRow label="机器人" value={worker?.name ?? '—'} />
-              <InfoRow label="工位" value={worker?.workdir ?? '—'} mono />
-              <InfoRow label="会话" value={task.opencodeSessionId ?? '—'} mono />
-              <InfoRow
-                label="创建时间"
-                value={new Date(task.createdAt).toLocaleString()}
-              />
-              {task.acceptedBy && (
-                <InfoRow
-                  label="验收"
-                  value={`${task.acceptedBy} ${task.acceptedAt ? new Date(task.acceptedAt).toLocaleString() : ''}`}
-                />
-              )}
-            </dl>
-          </div>
-        </Card>
-
-        {task.description && (
-          <Card>
-            <CardHeader>
-              <CardTitle>任务描述</CardTitle>
-            </CardHeader>
-            <div className="pb-4">
-              <TaskMarkdown key={`description:${task.updatedAt}`} value={task.description} />
-            </div>
-          </Card>
-        )}
-        {task.input && (
-          <Card>
-            <CardHeader>
-              <CardTitle>任务输入</CardTitle>
-            </CardHeader>
-            <div className="pb-4">
-              <TaskMarkdown key={`input:${task.updatedAt}`} value={task.input} />
-            </div>
-          </Card>
-        )}
-        {task.outputSpec && (
-          <Card>
-            <CardHeader>
-              <CardTitle>输出要求</CardTitle>
-            </CardHeader>
-            <div className="pb-4">
-              <TaskMarkdown key={`output:${task.updatedAt}`} value={task.outputSpec} />
-            </div>
-          </Card>
-        )}
-
-        {task.children && task.children.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>子任务（{task.children.length}）</CardTitle>
-            </CardHeader>
-            <div className="px-6 pb-6">
-              <Table>
-                <TableBody>
-                  {task.children.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-mono text-xs">
-                        <Link to={`/tasks/${c.id}`} className="underline">
-                          {c.code}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="max-w-40 truncate" title={c.title}>
-                        <Link to={`/tasks/${c.id}`} className="underline">
-                          {c.title}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="w-20">
-                        <TaskStatusBadge status={c.status} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </Card>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>流转时间线</CardTitle>
-          </CardHeader>
-          <div className="px-6 pb-6">
-            <ul className="flex flex-col gap-3">
-              {(task.events ?? []).map((e) => (
-                <li key={e.id} className="flex flex-col gap-0.5 text-sm">
-                  <span>
-                    <Badge variant="soft" size="sm">
-                      {e.type}
-                    </Badge>{' '}
-                    {e.content}
-                  </span>
-                  <span className="text-xs text-foreground-muted">
-                    {new Date(e.createdAt).toLocaleString()}
-                    {e.operator ? ` · ${e.operator}` : ''}
-                  </span>
-                </li>
-              ))}
-              {(task.events ?? []).length === 0 && (
-                <li className="text-sm text-foreground-muted">暂无记录</li>
-              )}
-            </ul>
-          </div>
-        </Card>
-      </aside>
-    </div>
-  )
-}
-
-function InfoRow({
-  label,
-  value,
-  mono,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-}) {
   return (
-    <div className="flex justify-between gap-3">
-      <dt className="shrink-0 text-foreground-muted">{label}</dt>
-      <dd
-        className={`truncate text-right ${mono ? 'font-mono text-xs' : ''}`}
-        title={value}
-      >
-        {value}
-      </dd>
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <PageBreadcrumb
+        items={[
+          { label: '任务', to: '/tasks/list' },
+          { label: currentTask.title },
+        ]}
+      />
+
+      <header className="flex shrink-0 items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-xl font-semibold text-foreground-intense">
+              {currentTask.code} {currentTask.title}
+            </h1>
+            <TaskStatusBadge
+              status={currentTask.status}
+              subStatus={currentTask.subStatus}
+            />
+            <Badge variant="soft" size="sm">
+              {currentTask.type}
+            </Badge>
+          </div>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
+            {robotNames.length > 0 ? (
+              <span>{[...new Set(robotNames)].join(' · ')}</span>
+            ) : (
+              <span>等待分配机器人</span>
+            )}
+            <span>·</span>
+            <span>
+              PIPELINE {pipeline.length} 个阶段
+              {currentStage?.scheduler
+                ? ` · 调度机器人 ${currentStage.scheduler.name}`
+                : ''}
+            </span>
+            <span>·</span>
+            <span>
+              创建于 {new Date(currentTask.createdAt).toLocaleString()}
+            </span>
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Actions task={currentTask} busy={busy} act={act} />
+        </div>
+      </header>
+
+      {error && (
+        <p
+          role="alert"
+          className="shrink-0 rounded-[var(--radius-md)] bg-error-soft px-3 py-2 text-sm text-error-foreground"
+        >
+          {error}
+        </p>
+      )}
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-auto xl:grid-cols-[minmax(0,1fr)_420px] xl:overflow-hidden">
+        <TaskChatPanel
+          key={taskId}
+          task={currentTask}
+          pipeline={pipeline}
+          messages={messages}
+          connection={connection}
+          busy={busy}
+          onSendFeedback={sendFeedback}
+          onAction={act}
+        />
+        <TaskSidePanel key={taskId} task={currentTask} pipeline={pipeline} />
+      </div>
     </div>
   )
 }
 
-/** 按状态渲染可执行动作 */
+function upsertMessage(
+  current: TaskChatMessage[],
+  message: TaskChatMessage,
+): TaskChatMessage[] {
+  const index = current.findIndex((item) => item.id === message.id)
+  if (index < 0) {
+    return [...current, message].sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    )
+  }
+  const next = current.slice()
+  next[index] = message
+  return next
+}
+
+function upsertStage(
+  current: TaskPipelineStage[],
+  stage: TaskPipelineStage,
+): TaskPipelineStage[] {
+  const index = current.findIndex((item) => item.task.id === stage.task.id)
+  if (index < 0) {
+    return [...current, stage].sort(
+      (a, b) =>
+        a.task.sortOrder - b.task.sortOrder || a.task.id - b.task.id,
+    )
+  }
+  const next = current.slice()
+  next[index] = stage
+  return next
+}
+
+/** 按「主状态-子状态」渲染可执行动作 */
 function Actions({
   task,
   busy,
@@ -401,40 +352,12 @@ function Actions({
     </Button>
   )
 
-  switch (task.status) {
-    case '草稿':
-      return (
-        <>
-          {button('提交调度', (id) => api.submitTask(id))}
-          {button('取消', (id) => api.cancelTask(id), 'destructive')}
-        </>
-      )
-    case '待补材料':
-      return (
-        <>
-          {button('材料已补齐', (id) => api.resolveTaskMissing(id))}
-          {button('取消', (id) => api.cancelTask(id), 'destructive')}
-        </>
-      )
-    case '待调度':
-      return (
-        <>
-          {button('AI 调度', (id) => api.scheduleTask(id), 'primary')}
-          {button('直接派发', (id) => api.dispatchTask(id))}
-          {button('取消', (id) => api.cancelTask(id), 'destructive')}
-        </>
-      )
-    case '待确认':
-      return <span className="text-sm text-foreground-muted">请在右侧确认调度方案</span>
-    case '已派发':
-    case '执行中':
-      return (
-        <>
-          {button('中断', (id) => api.interruptTask(id))}
-          {button('重新派发', (id) => api.dispatchTask(id))}
-          {button('取消', (id) => api.cancelTask(id), 'destructive')}
-        </>
-      )
+  switch (task.subStatus) {
+    case '待识别':
+    case '识别中':
+      return <>{button('取消', (id) => api.cancelTask(id), 'destructive')}</>
+    case '待反馈':
+      return <>{button('取消', (id) => api.cancelTask(id), 'destructive')}</>
     case '待验收':
       return (
         <>
@@ -442,16 +365,14 @@ function Actions({
           {button('取消', (id) => api.cancelTask(id), 'destructive')}
         </>
       )
-    case '内部完成':
-      return <>{button('交付', (id) => api.deliverTask(id), 'primary')}</>
-    case '已交付':
-      return <>{button('归档（维护中）', (id) => api.archiveTask(id), 'primary')}</>
+    case '执行中':
+      return (
+        <>
+          {button('中断', (id) => api.interruptTask(id))}
+          {button('取消', (id) => api.cancelTask(id), 'destructive')}
+        </>
+      )
     default:
       return null
   }
-}
-
-/** 任务描述/输入/输出：按 Markdown 只读渲染 */
-function TaskMarkdown({ value }: { value: string }) {
-  return <MarkdownEditor value={value} readOnly appica />
 }

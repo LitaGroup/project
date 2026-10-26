@@ -6,9 +6,9 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { TaskStatus, TaskType } from '../common/enums';
+import { TaskStatus, TaskSubStatus, TaskType } from '../common/enums';
 
-/** 创建阶段缺失清单条目（调度器材料审查产出，补齐后清除） */
+/** 创建阶段缺失清单条目（调度机器人材料审查产出，补齐后清除） */
 export interface TaskMissingItem {
   item: string;
   reason?: string;
@@ -29,6 +29,8 @@ export interface TaskPlanRef {
 @Index(['rootId'])
 @Index(['parentId'])
 @Index(['status'])
+@Index(['subStatus'])
+@Index(['status', 'subStatus'])
 export class Task {
   @PrimaryGeneratedColumn()
   id: number;
@@ -71,14 +73,35 @@ export class Task {
   @Column({ type: 'simple-json', nullable: true })
   missingItems: TaskMissingItem[] | null;
 
-  @Column({ type: 'enum', enum: TaskStatus, default: TaskStatus.DRAFT })
+  /** 主状态：等待中 / 进行中 / 已结束（varchar 兼容历史状态值，启动时由 LOOP 迁移） */
+  @Column({ type: 'varchar', length: 20, default: TaskStatus.WAITING })
   status: TaskStatus;
+
+  /** 子状态：与主状态严格对应，见 TaskSubStatus */
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: TaskSubStatus.PENDING_IDENTIFY,
+  })
+  subStatus: TaskSubStatus;
+
+  /** 调度机器人识别产出的工作计划（Markdown，派发时随任务下发给机器人） */
+  @Column({ type: 'text', nullable: true })
+  workPlan: string | null;
+
+  /** 待反馈/待验收提醒次数（进入等待态时重置） */
+  @Column({ type: 'int', default: 0 })
+  remindCount: number;
+
+  /** 最近一次提醒发送时间（30 分钟节流；为空表示尚未提醒） */
+  @Column({ type: 'timestamp', nullable: true })
+  lastRemindedAt: Date | null;
 
   /** 分配的机器人（workers.id，可空=未分配） */
   @Column({ type: 'int', nullable: true })
   agentId: number | null;
 
-  /** 使用的调度器（workers.id，可空=人工调度） */
+  /** 使用的调度机器人（workers.id，可空=人工调度） */
   @Column({ type: 'int', nullable: true })
   schedulerId: number | null;
 
@@ -95,22 +118,22 @@ export class Task {
   result: string | null;
 
   /** 责任人验收（→ 内部完成） */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   acceptedAt: Date | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   acceptedBy: string | null;
 
   /** 交付确认时间 */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   deliveredAt: Date | null;
 
   /** 归档（维护中终态）时间 */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   archivedAt: Date | null;
 
   /** 取消时间 */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   canceledAt: Date | null;
 
   /** 创建人（users.id，可空） */

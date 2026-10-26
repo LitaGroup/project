@@ -195,15 +195,21 @@ export enum WorkerKind {
   HUMAN = '员工',
 }
 
-/** 机器人角色：工作者（干活）/ 调度器（任务识别、拆解、分配建议，AI 调度） */
+/** 机器人角色：工作者（干活）/ 调度器（任务识别、拆解、分配建议；当前为系统内置机器人） */
 export enum WorkerRole {
   WORKER = '工作者',
   SCHEDULER = '调度器',
 }
 
-/** 机器人运行时：opencode 执行器上跑 / 平台进程内 PI Agent */
+/**
+ * 机器人运行时：统一走执行器（opencode 等）。
+ * PI 为历史值（原平台进程内 PI Agent），仅兼容存量数据，启动时迁移为 opencode，禁止再创建。
+ */
 export enum WorkerRuntime {
   OPENCODE = 'opencode',
+  CODEX = 'codex',
+  CLAUDE_CODE = 'claude-code',
+  /** @deprecated 平台进程内 PI Agent 已移除（调度并入机器人，统一走执行器） */
   PI = 'pi',
 }
 
@@ -215,7 +221,7 @@ export enum WorkerLiveStatus {
   ACCEPTING = '验收中',
 }
 
-/** 任务类型（任务包；调度器识别结果亦归入此枚举） */
+/** 任务类型（任务包；调度机器人识别结果亦归入此枚举） */
 export enum TaskType {
   REQUIREMENT = '需求分析',
   TECH_DESIGN = '技术设计',
@@ -229,22 +235,29 @@ export enum TaskType {
 }
 
 /**
- * 任务包状态机（阶段：创建→分发→执行→验收→交付→维护，见 docs/FEATURE-02-TASKS-PLAN.md）：
- * 草稿/待补材料/待调度（创建）→ 待确认/已派发（分发）→ 执行中/待验收（执行）
- * → 内部完成（责任人验收）→ 已交付（交付）→ 维护中（终态，不再动）；任意阶段可取消。
+ * 任务主状态（三态：等待中 / 进行中 / 已结束）。
+ * 子状态见 TaskSubStatus；LOOP（每秒）按 主状态 + 子状态 推进任务。
  */
 export enum TaskStatus {
-  DRAFT = '草稿',
-  MISSING_MATERIALS = '待补材料',
-  PENDING_SCHEDULE = '待调度',
-  PENDING_CONFIRM = '待确认',
-  DISPATCHED = '已派发',
-  EXECUTING = '执行中',
+  WAITING = '等待中',
+  RUNNING = '进行中',
+  FINISHED = '已结束',
+}
+
+/**
+ * 任务子状态（与主状态严格对应）：
+ * - 等待中：待识别 / 待反馈 / 待验收
+ * - 进行中：识别中 / 执行中
+ * - 已结束：完成 / 取消
+ */
+export enum TaskSubStatus {
+  PENDING_IDENTIFY = '待识别',
+  PENDING_FEEDBACK = '待反馈',
   PENDING_ACCEPT = '待验收',
-  INTERNAL_DONE = '内部完成',
-  DELIVERED = '已交付',
-  ARCHIVED = '维护中',
-  CANCELED = '已取消',
+  IDENTIFYING = '识别中',
+  EXECUTING = '执行中',
+  COMPLETED = '完成',
+  CANCELED = '取消',
 }
 
 /** 调度方案状态：PI 产出 → 管理员确认/驳回 */

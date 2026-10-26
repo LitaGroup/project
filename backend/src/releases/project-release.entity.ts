@@ -63,7 +63,7 @@ export class ProjectRelease {
   verifier: string | null;
 
   /** 判定时间（改为已通过/未通过时记录，改回待冒烟时清空） */
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   verifiedAt: Date | null;
 
   /** 提测时间 */

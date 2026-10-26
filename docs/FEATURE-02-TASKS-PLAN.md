@@ -1,5 +1,5 @@
 ---
-description: "> AI 助手提示：任务处理中心（FEATURE-02）的设计与实施方案。执行器/机器人/任务包/调度器的领域模型、opencode 集成细节、PI Agent 调度器、状态机与实施顺序。"
+description: "> AI 助手提示：任务处理中心（FEATURE-02）的设计与实施方案。执行器/机器人/任务包/调度机器人的领域模型、opencode 集成细节、状态机与实施顺序。调度能力已并入机器人（系统机器人 ID < 1000），不再使用平台进程内 PI Agent。"
 version: 1.1.0
 type: docs
 ---
@@ -7,7 +7,9 @@ type: docs
 # FEATURE-02 · 任务处理中心 设计与实施方案
 
 > 需求原文占位于 `docs/FETURE-02-TASKS.md`；本文为评审定稿后的实施方案。
-> 结论性原则：任务由 Agent（opencode 执行器上的机器人）完成，由人验收；平台内调度能力基于 PI Agent 进程内实现。
+> 结论性原则：任务由 Agent（opencode 执行器上的机器人）完成，由人验收；调度能力并入机器人——系统调度机器人（ID < 1000，代码内置）统一运行在 opencode 等执行器上，不再使用平台进程内 PI Agent。
+
+> **实施变更（2026-10-26）**：调度器已合并进机器人。`workers` 表中 id < 1000 为系统机器人（只能由代码内置，如系统调度机器人），id >= 1000 为网页创建的自定义机器人；历史自定义机器人启动时迁入 1000+，历史调度器迁入系统 ID 段。任务识别通过系统调度机器人的执行器会话完成（`TaskIdentifyService`），PROMPT 优化同样走执行器（`WorkerAiService`）；`src/pi/` 与 `@mariozechner/pi-ai` 已移除。
 
 ---
 
@@ -18,10 +20,10 @@ type: docs
 | **执行器** | 实际执行任务的工具实例（opencode / codex / claude-code，本期仅 opencode）。属性：ip、port、type、description、token（鉴权） | `executors` 表 + 登记页 |
 | **供应商** | 大模型供应商及其模型清单。**从执行器 API 拉取并本地缓存**（`GET /api/provider` + `GET /api/model`） | `executors.providersCache` JSON |
 | **机器人** | 干活的最小单元。可以是智能体（擅长一件事：需求分析师 / 技术架构师 / 前端·后端·客户端架构师 / 发布工程师 / 前端·UI·后端工程师 等）或员工（本期仅智能体）。每个智能体有**责任人**：定义智能体、验收其任务产出；验收通过即「内部完成」 | `workers` 表 |
-| **调度器** | 项目负责人角色：任务识别（类型/输入/输出）、材料检查、任务拆解（单机器人可完成 or 拆成工作流）、分配建议。**有具体负责人**，对派发负责。AI 调度产出方案后须**管理员确认**才派发 | `workers` 表中 role=调度器（runtime=pi） |
+| **调度机器人** | 项目负责人角色：任务识别（类型/输入/输出）、材料检查、任务拆解（单机器人可完成 or 拆成工作流）、分配建议。**有具体负责人**，对派发负责。属于系统机器人（id < 1000），运行在 opencode 等执行器上 | `workers` 表中 role=调度器（系统内置） |
 | **任务包** | 具体任务内容：明确输入、明确输出、明确任务类型；可挂子任务形成工作流；有阶段状态机 | `tasks` / `task_events` / `dispatch_plans` 表 |
 
-**统一建模说明**：机器人与调度器字段高度重合（PROMPT / 负责人 / 模型选择），统一存 `workers` 表，以 `role`（工作者/调度器）与 `runtime`（opencode/pi）区分；调度器多一个「调度材料」字段。
+**统一建模说明**：机器人与调度机器人字段高度重合（PROMPT / 负责人 / 模型选择），统一存 `workers` 表，以 `role`（工作者/调度器）区分，统一 `runtime=opencode`；调度机器人多一个「调度材料」字段，且属于系统机器人（id < 1000，只能代码内置）。
 
 ---
 
@@ -39,7 +41,7 @@ type: docs
 │   │                     + OpencodeEventHub（每执行器一条 SSE 订阅，断线重连）   │
 │   ├── workers 模块     机器人 + 调度器 CRUD + 实时状态推导                     │
 │   ├── tasks 模块       任务包 + 状态机 + 事件 + 调度方案 + 派发执行 + SSE 转发  │
-│   └── PI Runtime（服务） 进程内 @mariozechner/pi-ai（DeepSeek）——调度器运行时   │
+│   └── 调度机器人（系统机器人 id<1000）——运行在 opencode 等执行器上              │
 └──────────────────────────────┬─────────────────────────────────────────────┘
                                │ http://{ip}:{port}，HTTP Basic 鉴权
                     ┌──────────▼──────────┐
@@ -48,7 +50,7 @@ type: docs
 ```
 
 - **机器人** → 跑在执行器（opencode server）上：平台组装 PROMPT → 建 session（指定 model / location / permissions）→ 发 prompt（附 skills）→ 订阅 `/api/event` SSE 实时拿进展。
-- **调度器 + 平台内部 Agent 能力**（任务识别、材料完整性检查、拆解、分配建议）→ **PI Agent 进程内**（`pi-ai` 模型调用 + 按需 `pi-agent-core` Agent 循环；OpenCode V2 底层同源）。调度类任务无文件系统工具需求，以结构化 JSON 输出为主。
+- **调度机器人 + 平台内部 Agent 能力**（任务识别、材料完整性检查、拆解、分配建议）→ **系统机器人（id<1000）+ opencode 等执行器会话**（`TaskIdentifyService`）。调度类任务无文件系统工具需求，以结构化 JSON 输出为主；不再使用平台进程内 PI Agent。
 
 ---
 
@@ -95,24 +97,19 @@ type: docs
 
 ---
 
-## 五、任务状态机
+## 五、任务状态机（2026-10-26 起改为 LOOP：主状态 + 子状态）
 
-| 阶段 | 状态 | 进入条件 |
+| 主状态 | 子状态 | 进入条件 / LOOP 动作 |
 |---|---|---|
-| 创建 | 草稿 | 手动创建 |
-| 创建 | 待补材料 | 调度/审查发现材料缺失（missingItems 落库） |
-| 创建 | 待调度 | 材料齐备，等待调度（手动或自动触发 PI） |
-| 分发 | 待确认 | 调度方案已产出，等管理员确认 |
-| 分发 | 已派发 | 方案确认/手动分配后派发（子任务物化） |
-| 执行 | 执行中 | opencode session 运行中 |
-| 执行 | 等待中（事件态，非独立状态列） | permission 挂起等批复 |
-| 执行 | 待验收 | 会话完成（idle），产出等责任人验收 |
-| 验收 | 内部完成 | 责任人验收通过 |
-| 交付 | 已交付 | 最终交付确认（可附 result） |
-| 维护 | 维护中（终态） | 归档，不再动 |
-| — | 已取消 | 任意阶段可取消 |
+| 等待中 | 待识别 | 新任务创建；LOOP 下一秒领取并置「进行中-识别中」 |
+| 等待中 | 待反馈 | 调度器识别发现资料缺失/信息不明；LOOP 每 30 分钟提醒负责人，3 次未处理标记失败 |
+| 等待中 | 待验收 | 机器人执行完成；LOOP 每 30 分钟提醒负责人，3 次未处理按成功完成 |
+| 进行中 | 识别中 | 调度器正在识别标题/输入/输出/类型/工作计划/机器人 |
+| 进行中 | 执行中 | 机器人 opencode session 运行中（LOOP 暂不处理，后续加超时） |
+| 已结束 | 完成 | 验收通过或待验收超时自动完成 |
+| 已结束 | 取消 | 人工取消或待反馈超时自动判失败 |
 
-每步流转写 `task_events`；「待确认」「待验收」飞书卡片通知对应负责人（复用 `FeishuService.sendUserCard`）。
+每次流转写 `task_events`；任务详情的待反馈/待验收飞书卡片经 `TaskNotifyService` 发送给机器人/调度器负责人。详细实现见 `docs/FETURE-02-TASKS.md` 末尾「LOOP 实现说明」。
 
 ---
 
@@ -144,7 +141,7 @@ type: docs
     或 拆解方案（单任务直接分配 / 多子任务+建议智能体）→ 存 dispatch_plans →「待确认」+ 通知
   → 管理员确认 → 物化子任务（parentId 挂树）→ 逐个自动派发
 ```
-- 供应商：DeepSeek（`DEEPSEEK_API_KEY` 走后端 `.env`；deepseek-chat / deepseek-reasoner）；设置页仅显示配置状态，不回显 key。
+- 供应商：由执行器的供应商缓存提供（如 DeepSeek）；机器人与调度机器人在表单里选择执行器 → 供应商 → 模型。
 - 调度器管理页提供「试跑」验证连通。
 
 ---
@@ -158,7 +155,7 @@ type: docs
 | 调度器 | 同机器人接口（`?role=scheduler`），另有 `POST /api/schedulers/:id/test`（试跑） |
 | 任务 | `GET/POST /api/tasks`、`GET/PATCH/DELETE /api/tasks/:id`、`GET /api/tasks/:id/events`、`GET /api/tasks/overview`（统计） |
 | 流程动作 | `POST /api/tasks/:id/schedule`（触发 PI 调度）、`POST /api/tasks/:id/plans/:planId/confirm|reject`、`POST /api/tasks/:id/dispatch`（手动派发）、`POST /api/tasks/:id/accept`（验收→内部完成）、`/deliver`、`/archive`、`/cancel`、`POST /api/tasks/:id/interrupt`、`POST /api/tasks/:id/permission/:requestID/reply` |
-| 实时 | `GET /api/tasks/:id/stream`（SSE：执行器事件透传 + 状态变更；复用检查运行 SSE 模式） |
+| 实时 | `GET /api/tasks/:id/chat`（聊天初始快照：任务 + 根任务 PIPELINE + 消息）、`GET /api/tasks/:id/chat/stream`（SSE：`message.upsert` / `stage.upsert` / `refresh`，机器人文本增量与工具调用实时推送）、`GET /api/tasks/:id/stream`（执行器事件行 + 状态变更；任务看板兼容） |
 | 看板 | `GET /api/workers/live`（卡片墙：状态+当前任务，前端轮询） |
 
 权限：全部走现有 AuthGuard（网页登录）。`.md` AI 端点 P2 再议。
@@ -172,7 +169,7 @@ type: docs
 | 页面 | 路由 | 内容 |
 |---|---|---|
 | 任务概览 | `/tasks` | 阶段统计卡 + 任务树/工作流视图（SVG+CSS 动画：执行中节点脉冲、流转边流动虚线，不引新依赖）+ 任务列表（状态/类型筛选、搜索） |
-| 任务详情 | `/tasks/:id` | 输入/输出/缺失清单 + 子任务树 + 调度方案卡片（确认/驳回）+ **执行终端**（复用 Gruvbox 终端，SSE 实时）+ 流转时间线 + 按状态出现的操作按钮 |
+| 任务详情 | `/tasks/:id` | assistant-ui 对话页（SSE 实时，按发送方展示机器人头像/名称）+ 右侧任务概览 / PIPELINE（主任务 + 各机器人子任务）/ 交付物（含中间产出） |
 | 工作概览 | `/tasks/live` | 智能体卡片墙：状态 Badge（空闲中/工作中/等待中/验收中，工作中呼吸动画）+ 当前任务 + 点击展开实时日志 |
 | 机器人管理 | `/tasks/workers` | CRUD：执行器→供应商→模型三级联动、PROMPT 编辑、技能清单、任务定义、负责人、工位路径展示 |
 | 调度器管理 | `/tasks/schedulers` | CRUD：DeepSeek 供应商+模型、角色 PROMPT、调度材料、负责人、启停、试跑 |
@@ -215,7 +212,7 @@ type: docs
 |---|---|
 | 本机执行器 | `http://127.0.0.1:4096`（password `RPuavt...j3c`，见「三」） |
 | 生产执行器 | `10.251.6.12:49374`（password 待提供） |
-| `DEEPSEEK_API_KEY` | 后端 `.env`（PI 调度器） |
+| `DEEPSEEK_API_KEY` | （已废弃）原 PI 调度器使用，现统一走执行器供应商配置 |
 | `WORKER_BASE_DIR` | 后端 `.env`，执行器机器上的工位根目录（默认建议 `<执行器侧约定路径>`，登记执行器页面展示） |
 | 执行器登记 | 页面录入（ip/port/token），不预置种子数据 |
 
@@ -243,7 +240,7 @@ type: docs
 2. 会话成功终态事件是 **`session.execution.succeeded`**；`session.execution.failed` 为失败终态。
 3. 工具事件为 `session.tool.input.started`（data.name）/`session.tool.success`/`session.tool.failed`；文本流为 `session.text.delta`（data.delta）。
 4. 消息列表接口的 assistant 项 `text` 为空，完整文本需 `GET /api/session/{id}/message/{messageID}` 的 `content[].text`；实时产出优先用文本增量累积。
-5. `pi-ai` 为纯 ESM 包，后端 CJS 运行时必须用动态 `import()`（`module: nodenext` 保留）。
+5. ~~`pi-ai` 为纯 ESM 包，后端 CJS 运行时必须用动态 `import()`~~（已移除，调度统一走执行器）。
 6. 事件流漏收（服务重启/断线）通过三处兜底：启动时订阅、派发时 ensureConnected、每 2 分钟对账执行中任务（查会话 outcome）。
 
 ### P2 待办
@@ -254,5 +251,5 @@ type: docs
 
 - 执行器：`http://127.0.0.1:4096`（`opencode serve --port 4096` 启动，password 见启动输出，登记时填入 token）
 - `WORKER_BASE_DIR`：执行器机器上的工位根目录（开发机已用 `/Users/monkee/workplace/hufeng/runtime`）
-- `DEEPSEEK_API_KEY`：后端环境变量（PI 调度器）
+- `DEEPSEEK_API_KEY`：（已废弃）原 PI 调度器使用，不再需要
 - 已配置示例：调度器-项目负责人（PI/deepseek-v4-flash）、前端工程师/后端工程师（opencode/deepseek-flash）

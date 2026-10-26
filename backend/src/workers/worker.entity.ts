@@ -34,8 +34,8 @@ export interface WorkerSkill {
   content: string;
 }
 
-/** 机器人：工作者（智能体/员工）与调度器统一实体。
- * runtime=opencode 跑在执行器上；runtime=pi 为平台进程内 PI Agent（调度器用）。 */
+/** 机器人：工作者与调度机器人统一实体。
+ * 统一运行在执行器上（opencode 等），不再使用平台进程内 PI Agent。 */
 @Entity('workers')
 export class Worker {
   @PrimaryGeneratedColumn()
@@ -44,7 +44,7 @@ export class Worker {
   @Column({ length: 100, unique: true })
   name: string;
 
-  /** 简介：擅长什么、能接什么任务（供调度器与外部选择） */
+  /** 简介：擅长什么、能接什么任务（供调度机器人与外部选择） */
   @Column({ type: 'text', nullable: true })
   intro: string | null;
 
@@ -61,11 +61,11 @@ export class Worker {
   })
   runtime: WorkerRuntime;
 
-  /** 执行器（runtime=opencode 必填） */
+  /** 执行器（所有机器人必填，统一走执行器运行） */
   @Column({ type: 'int', nullable: true })
   executorId: number | null;
 
-  /** 供应商 id（runtime=opencode 取执行器供应商缓存；runtime=pi 取 PI 供应商） */
+  /** 供应商 id（取执行器供应商缓存） */
   @Column({ type: 'varchar', length: 200, nullable: true })
   providerId: string | null;
 
@@ -93,7 +93,7 @@ export class Worker {
   @Column({ type: 'varchar', length: 100, nullable: true })
   ownerName: string | null;
 
-  /** 调度材料（仅调度器：调度时附加给 PI 的背景材料，Markdown） */
+  /** 调度材料（仅调度机器人：识别时附加的背景材料，Markdown） */
   @Column({ type: 'text', nullable: true })
   materials: string | null;
 

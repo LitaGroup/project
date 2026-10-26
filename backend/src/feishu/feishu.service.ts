@@ -41,6 +41,27 @@ export interface FeishuReadResult {
   content: string;
 }
 
+/** 飞书文档搜索结果（搜索 v2 的脱敏子集） */
+export interface FeishuSearchDoc {
+  token: string;
+  title: string;
+  /** 文档 Web 链接（可直接传给 readByUrl 转 Markdown） */
+  url: string | null;
+  docsType: string;
+  entityType: string;
+  summary: string;
+  ownerName: string | null;
+  ownerId: string | null;
+  updateTime: number | null;
+  createTime: number | null;
+}
+
+export interface FeishuSearchPage {
+  docs: FeishuSearchDoc[];
+  total: number;
+  hasMore: boolean;
+}
+
 /** 多维表格记录（含记录级时间戳，用于增量同步过滤） */
 export interface BitableRecord {
   record_id: string;
@@ -128,6 +149,19 @@ function extFromMagic(buf: Buffer, contentType?: string): string {
   return '.png';
 }
 
+/** 去除搜索高亮 HTML 标签，保留纯文本 */
+function stripHighlight(value: unknown): string {
+  return typeof value === 'string'
+    ? value
+        .replace(/<[^>]*>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    : '';
+}
+
+const FEISHU_SEARCH_PERMISSION_HINT =
+  '飞书应用缺少「搜索云文档」权限（search:docs:read）。请管理员在飞书开放平台「权限管理」中添加该权限并发布应用版本，然后退出并重新登录本平台以刷新用户授权';
+
 /**
  * 飞书开放平台客户端。
  * 只读（单向导入：文档/项目/缺陷已解绑，飞书 → 平台，不回写）。
@@ -175,7 +209,7 @@ export class FeishuService implements OnModuleInit {
    */
   parseUrl(url: string): FeishuResourceRef {
     const match = url.match(
-      /(?:feishu\.cn|larksuite\.com)\/(docx|docs|sheets|base|wiki)\/([A-Za-z0-9]+)/,
+      /(?:feishu\.cn|larksuite\.com)\/(docx|docs|sheets|base|wiki)\/([A-Za-z0-9_-]+)/,
     );
     if (!match) {
       throw new BadRequestException(`无法识别的飞书链接: ${url}`);
@@ -214,7 +248,7 @@ export class FeishuService implements OnModuleInit {
       /* 非完整 URL 时忽略 query */
     }
     const wikiMatch = url.match(
-      /(?:feishu\.cn|larksuite\.com)\/wiki\/([A-Za-z0-9]+)/,
+      /(?:feishu\.cn|larksuite\.com)\/wiki\/([A-Za-z0-9_-]+)/,
     );
     const ref = wikiMatch
       ? await this.resolveWiki(wikiMatch[1])
@@ -234,6 +268,136 @@ export class FeishuService implements OnModuleInit {
           query.get('view') ?? undefined,
         );
     }
+  }
+
+  /**
+   * 搜索当前飞书用户可见的云文档（Search v2）。
+   * 该接口仅支持 user_access_token；调用方须先经 AuthService 取得当前用户的授权。
+   * 飞书单页最多 20 条，本方法按 offset/limit 顺序翻页后返回请求页。
+   */
+  async searchDocs(
+    query: string,
+    userAccessToken: string,
+    options: { offset: number; limit: number },
+  ): Promise<FeishuSearchPage> {
+    const end = options.offset + options.limit;
+    const all: FeishuSearchDoc[] = [];
+    let pageToken: string | undefined;
+    let total = 0;
+    let apiHasMore = false;
+    do {
+      const pageSize = Math.min(20, Math.max(1, end - all.length));
+      let data: {
+        total?: number;
+        has_more?: boolean;
+        page_token?: string;
+        res_units?: Array<{
+          title_highlighted?: string;
+          summary_highlighted?: string;
+          entity_type?: string;
+          result_meta?: {
+            doc_types?: string;
+            update_time?: number;
+            url?: string;
+            owner_name?: string;
+            owner_id?: string;
+            create_time?: number;
+            token?: string;
+          };
+        }>;
+      };
+      try {
+        const response = await this.http.post<{
+          code?: number;
+          msg?: string;
+          data?: typeof data;
+        }>(
+          '/search/v2/doc_wiki/search',
+          {
+            query,
+            doc_filter: {
+              doc_types: [
+                'DOC',
+                'DOCX',
+                'SHEET',
+                'BITABLE',
+                'MINDNOTE',
+                'FILE',
+                'SLIDES',
+                'SHORTCUT',
+              ],
+            },
+            wiki_filter: {
+              doc_types: [
+                'DOC',
+                'DOCX',
+                'SHEET',
+                'BITABLE',
+                'MINDNOTE',
+                'FILE',
+                'WIKI',
+                'SLIDES',
+                'SHORTCUT',
+              ],
+            },
+            page_size: pageSize,
+            ...(pageToken ? { page_token: pageToken } : {}),
+          },
+          {
+            headers: { Authorization: `Bearer ${userAccessToken}` },
+          },
+        );
+        if (response.data.code !== 0 || !response.data.data) {
+          if (response.data.code === 99991679) {
+            throw new Error(FEISHU_SEARCH_PERMISSION_HINT);
+          }
+          throw new Error(
+            `飞书文档搜索失败（code=${response.data.code ?? '未知'}）：${response.data.msg ?? '未知错误'}`,
+          );
+        }
+        data = response.data.data;
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response) {
+          const body = error.response.data as
+            { code?: number; msg?: string } | undefined;
+          if (body?.code === 99991679) {
+            throw new Error(FEISHU_SEARCH_PERMISSION_HINT);
+          }
+          throw new Error(
+            `飞书文档搜索失败（HTTP ${error.response.status}，code=${body?.code ?? '未知'}）：${body?.msg ?? error.message}`,
+          );
+        }
+        throw error;
+      }
+      total = data.total ?? total;
+      apiHasMore = Boolean(data.has_more);
+      for (const unit of data.res_units ?? []) {
+        const meta = unit.result_meta ?? {};
+        if (!meta.token) continue;
+        all.push({
+          token: meta.token,
+          title: stripHighlight(unit.title_highlighted) || meta.token,
+          url: meta.url ?? null,
+          docsType: meta.doc_types ?? unit.entity_type ?? 'UNKNOWN',
+          entityType: unit.entity_type ?? 'DOC',
+          summary: stripHighlight(unit.summary_highlighted),
+          ownerName: meta.owner_name ?? null,
+          ownerId: meta.owner_id ?? null,
+          updateTime: meta.update_time ?? null,
+          createTime: meta.create_time ?? null,
+        });
+      }
+      pageToken = apiHasMore ? data.page_token : undefined;
+    } while (pageToken && all.length < end);
+
+    return {
+      docs: all.slice(options.offset, end),
+      total,
+      hasMore:
+        apiHasMore ||
+        all.length > end ||
+        (total > 0 && options.offset + options.limit < total),
+    };
   }
 
   /**
