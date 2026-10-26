@@ -1,6 +1,6 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/任务/提测记录及运行信息）、运行检查/用例/导出/任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库
 version: 1.12.0
 author: Lita R&D Team
 tags:
@@ -18,9 +18,9 @@ tags:
 对接项目管理平台（以 AI 为中心的项目管理与脚本运行平台），供 Agent 完成以下工作：
 
 1. 按项目名称模糊搜索项目
-2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及资源/节点/检查/用例/导出/任务的清单、运行命令、最近运行结果与运行记录
+2. 获取项目详情：文档（含 Markdown 正文地址）、类型、描述，以及资源/节点/检查/用例/导出/定时任务的清单、运行命令、最近运行结果与运行记录
 3. 读取文档 Markdown 正文；写入/更新项目文档（按 fileName upsert）
-4. 运行检查/用例/导出/任务，流式读取脚本输出与结果（导出运行详情含产物文件下载链接）
+4. 运行检查/用例/导出/定时任务，流式读取脚本输出与结果（导出运行详情含产物文件下载链接）
 5. 向 scripts 仓库提交代码后，把新脚本同步导入到指定项目（自动登记为 检查/用例/导出）
 6. 修改项目本地配置：脚本目录、飞书通知群、描述、人员
 7. 登记项目节点（时间点事项），研发验收后标记达成
@@ -100,7 +100,7 @@ GET /api/projects/{id}.md
 - 检查清单：每条含编号、描述、脚本路径、运行命令 `POST /api/checks/{checkId}/run.md`、最近一次运行结果摘要 + 详情链接 `GET /api/checks/runs/{runId}.md`、运行历史地址
 - 用例（测试）清单：结构同检查（base 为 `/api/tests`）
 - 导出清单：结构同检查（base 为 `/api/exports`）；导出运行详情的 Markdown 视图含产物文件下载链接（`/export-files/{exportId}/{runId}/{file}`）
-- 任务清单：标题、cron、绑定的检查编号、开关状态、上次执行时间、下次执行时间、上次执行结果 + 详情链接、执行命令 `POST /api/tasks/{taskId}/run.md`、运行记录地址 `GET /api/tasks/{taskId}/runs`
+- 定时任务清单：标题、cron、绑定的检查编号、开关状态、上次执行时间、下次执行时间、上次执行结果 + 执行命令 `POST /api/schedules/{scheduleId}/run.md`、运行记录地址 `GET /api/schedules/{scheduleId}/runs`
 - 提测记录小节（最近 5 条）：时间 / 提测人 / 状态 / 判定人 / 判定时间 / 测试人员 / 内容摘要；全量清单地址 `GET /api/releases.md?projectId={id}`（见第 8 节）
 - 缺陷清单：每条含 id + 详情链接 `GET /api/defects/{id}.md` + 状态 + 预期 + 端 + 优先级 + 用例脚本；"缺陷"小节另附本项目全部缺陷清单地址 `GET /api/defects.md?projectId={id}`（见第 9 节）
 - 末尾"AI 操作"小节列出全部可用端点
@@ -160,13 +160,13 @@ Content-Type: application/json
 | 配置脚本（Yaml/Json） | `xxxxx-xxxx.yaml`（按项目命名） | 配置 |
 | SQL脚本 | `init.sql` | 技术 |
 
-### 4. 运行检查 / 用例 / 导出 / 任务（流式）
+### 4. 运行检查 / 用例 / 导出 / 定时任务（流式）
 
 ```bash
-curl -N -X POST {BASE}/api/checks/{checkId}/run.md   # 运行一次检查
-curl -N -X POST {BASE}/api/tests/{testId}/run.md     # 运行一次用例
-curl -N -X POST {BASE}/api/exports/{exportId}/run.md # 运行一次导出
-curl -N -X POST {BASE}/api/tasks/{taskId}/run.md     # 手动触发一次任务
+curl -N -X POST {BASE}/api/checks/{checkId}/run.md          # 运行一次检查
+curl -N -X POST {BASE}/api/tests/{testId}/run.md            # 运行一次用例
+curl -N -X POST {BASE}/api/exports/{exportId}/run.md        # 运行一次导出
+curl -N -X POST {BASE}/api/schedules/{scheduleId}/run.md    # 手动触发一次定时任务
 ```
 
 - 必须带 `-N`（禁用缓冲）以逐行读取
@@ -174,7 +174,7 @@ curl -N -X POST {BASE}/api/tasks/{taskId}/run.md     # 手动触发一次任务
 - 拿到运行 ID 后也可单次获取详情：
 
 ```
-GET /api/checks/runs/{runId}.md   # 检查 / 任务的运行详情
+GET /api/checks/runs/{runId}.md   # 检查 / 定时任务的运行详情
 GET /api/tests/runs/{runId}.md    # 用例的运行详情
 GET /api/exports/runs/{runId}.md  # 导出的运行详情（含产物文件下载链接）
 ```
@@ -237,7 +237,7 @@ GET /api/checks[?projectId=]      # 检查列表
 GET /api/tests[?projectId=]       # 用例列表
 GET /api/exports[?projectId=]     # 导出列表
 GET /api/documents[?projectId=]   # 文档列表（不含正文）
-GET /api/tasks[?projectId=]       # 任务列表（附下次执行时间与运行统计）
+GET /api/schedules[?projectId=]    # 定时任务列表（附下次执行时间与运行统计）
 GET /api/defects[?projectId=]     # 缺陷列表（Markdown 清单见 9.1 `/api/defects.md`，详情见 9.2 `/api/defects/{id}.md`）
 GET /api/releases.md?projectId=   # 提测记录清单（Markdown，见 8.2；仅 .md 版）
 GET /api/resources[?projectId=&includeDeleted=]  # 资源列表（不含多语言缓存正文；includeDeleted=true 含软删除）

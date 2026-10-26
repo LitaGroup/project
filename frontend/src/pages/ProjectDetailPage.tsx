@@ -86,7 +86,7 @@ import {
   type ProjectRelease,
   type ProjectResource,
   type ProjectStatus,
-  type ProjectTask,
+  type ProjectSchedule,
   type ProjectType,
   type ReleaseBranch,
   type ReleaseStatus,
@@ -111,14 +111,10 @@ import {
   RunTestButton,
 } from '../components/TestActionButtons'
 import { NewDefectDialog } from '../components/NewDefectDialog'
-import { Editor } from '@bytemd/react'
-import gfm from '@bytemd/plugin-gfm'
-import zhHans from 'bytemd/locales/zh_Hans.json'
-import 'bytemd/dist/index.css'
-import 'github-markdown-css/github-markdown.css'
-
-/** 提测内容 Markdown 编辑器插件（与文档详情页一致） */
-const releaseEditorPlugins = [gfm()]
+import {
+  MarkdownEditor,
+  type MarkdownEditorHandle,
+} from '../components/MarkdownEditor'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -267,7 +263,7 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <TasksSection project={project} />
+          <SchedulesSection project={project} />
         </section>
 
         <section>
@@ -2010,9 +2006,9 @@ function DeleteExportButton({
   )
 }
 
-/** 任务板块：列表经 /api/tasks 独立拉取（含实时计算的下次执行时间），不随项目详情关系加载 */
-function TasksSection({ project }: { project: Project }) {
-  const [tasks, setTasks] = useState<ProjectTask[] | null>(null)
+/** 定时任务板块：列表经 /api/schedules 独立拉取（含实时计算的下次执行时间），不随项目详情关系加载 */
+function SchedulesSection({ project }: { project: Project }) {
+  const [schedules, setSchedules] = useState<ProjectSchedule[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [quickFilter, setQuickFilter] = useState<'all' | 'enabled' | 'disabled'>(
     'all',
@@ -2020,8 +2016,8 @@ function TasksSection({ project }: { project: Project }) {
 
   const reload = useCallback(() => {
     api
-      .listTasks(project.id)
-      .then(setTasks)
+      .listSchedules(project.id)
+      .then(setSchedules)
       .catch((e: Error) => setError(e.message))
   }, [project.id])
 
@@ -2029,19 +2025,19 @@ function TasksSection({ project }: { project: Project }) {
 
   const checks = project.checks ?? []
   const checkOf = (checkId: number) => checks.find((c) => c.id === checkId)
-  const allTasks = tasks ?? []
-  const filteredTasks =
+  const allSchedules = schedules ?? []
+  const filteredSchedules =
     quickFilter === 'all'
-      ? allTasks
-      : allTasks.filter((t) =>
-          quickFilter === 'enabled' ? t.enabled : !t.enabled,
+      ? allSchedules
+      : allSchedules.filter((s) =>
+          quickFilter === 'enabled' ? s.enabled : !s.enabled,
         )
-  const displayedTasks = filteredTasks.slice(0, 10)
+  const displayedSchedules = filteredSchedules.slice(0, 10)
   return (
     <>
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-semibold">任务</h2>
+          <h2 className="text-xl font-semibold">定时任务</h2>
           {/* 快速筛选：未选中=对应语义浅色（启用=success、停用=warning），选中=深色背景浅色字体；再次点击当前项恢复全部 */}
           <FilterPill
             label="启用"
@@ -2062,12 +2058,12 @@ function TasksSection({ project }: { project: Project }) {
         </div>
         <div className="flex items-center gap-2">
           <Link
-            to={`/tasks?projectId=${project.id}`}
+            to={`/schedules?projectId=${project.id}`}
             className={buttonVariants({ variant: 'outline', size: 'sm' })}
           >
             查看全部
           </Link>
-          <TaskFormDialog
+          <ScheduleFormDialog
             projectId={project.id}
             checks={project.checks ?? []}
             onSaved={reload}
@@ -2087,20 +2083,20 @@ function TasksSection({ project }: { project: Project }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {displayedTasks.map((t) => {
-            const check = checkOf(t.checkId)
+          {displayedSchedules.map((s) => {
+            const check = checkOf(s.checkId)
             return (
-              <TableRow key={t.id}>
-                <TableCell className="max-w-md truncate" title={t.title}>
+              <TableRow key={s.id}>
+                <TableCell className="max-w-md truncate" title={s.title}>
                   <Link
-                    to={`/projects/${project.id}/tasks/${t.id}`}
+                    to={`/projects/${project.id}/schedules/${s.id}`}
                     className="underline"
                   >
-                    {t.title}
+                    {s.title}
                   </Link>
                 </TableCell>
-                <TableCell title={`执行周期：${t.cron}`}>
-                  {t.nextRunAt ? new Date(t.nextRunAt).toLocaleString() : '—'}
+                <TableCell title={`执行周期：${s.cron}`}>
+                  {s.nextRunAt ? new Date(s.nextRunAt).toLocaleString() : '—'}
                 </TableCell>
                 <TableCell className="max-w-md truncate">
                   {check ? (
@@ -2112,24 +2108,24 @@ function TasksSection({ project }: { project: Project }) {
                       {check.code}
                     </Link>
                   ) : (
-                    `#${t.checkId}`
+                    `#${s.checkId}`
                   )}
                 </TableCell>
                 <TableCell title="成功/失败/总运行次数（失败含异常）">
-                  {t.runStats ? <RunStats stats={t.runStats} /> : '—'}
+                  {s.runStats ? <RunStats stats={s.runStats} /> : '—'}
                 </TableCell>
                 <TableCell className="text-center">
                   <Switch
                     size="sm"
-                    checked={t.enabled}
+                    checked={s.enabled}
                     onCheckedChange={(checked) =>
                       api
-                        .updateTask(t.id, { enabled: checked })
+                        .updateSchedule(s.id, { enabled: checked })
                         .then(reload)
                         .catch((e: Error) => setError(e.message))
                     }
                     title={
-                      t.enabled
+                      s.enabled
                         ? '已启用，到点正常执行；点击关闭后不再定时触发'
                         : '已停用，不参与调度；点击打开恢复定时执行'
                     }
@@ -2137,17 +2133,17 @@ function TasksSection({ project }: { project: Project }) {
                 </TableCell>
                 <TableCell className="text-center">
                   <div className="flex justify-center gap-2">
-                    <TaskFormDialog
+                    <ScheduleFormDialog
                       projectId={project.id}
                       checks={checks}
-                      task={t}
+                      schedule={s}
                       onSaved={reload}
                     />
-                    <DeleteTaskButton
-                      task={t}
+                    <DeleteScheduleButton
+                      schedule={s}
                       onDeleted={() =>
                         api
-                          .deleteTask(t.id)
+                          .deleteSchedule(s.id)
                           .then(reload)
                           .catch((e: Error) => setError(e.message))
                       }
@@ -2157,21 +2153,21 @@ function TasksSection({ project }: { project: Project }) {
               </TableRow>
             )
           })}
-          {tasks !== null && filteredTasks.length === 0 && (
+          {schedules !== null && filteredSchedules.length === 0 && (
             <TableRow>
               <TableCell colSpan={6}>
-                {allTasks.length === 0
-                  ? '暂无任务'
+                {allSchedules.length === 0
+                  ? '暂无定时任务'
                   : quickFilter === 'all'
-                    ? '暂无任务'
-                    : '无符合筛选条件的任务'}
+                    ? '暂无定时任务'
+                    : '无符合筛选条件的定时任务'}
               </TableCell>
             </TableRow>
           )}
           <CountRow
             colSpan={6}
-            total={filteredTasks.length}
-            displayed={displayedTasks.length}
+            total={filteredSchedules.length}
+            displayed={displayedSchedules.length}
           />
         </TableBody>
       </Table>
@@ -2179,18 +2175,18 @@ function TasksSection({ project }: { project: Project }) {
   )
 }
 
-/** 新建/编辑任务：标题 + crontab 表达式 + 使用的检查脚本（本项目已登记检查）；任务详情页复用 */
-export function TaskFormDialog({
+/** 新建/编辑定时任务：标题 + crontab 表达式 + 使用的检查脚本（本项目已登记检查）；任务详情页复用 */
+export function ScheduleFormDialog({
   projectId,
   checks,
-  task,
+  schedule,
   onSaved,
 }: {
   projectId: number
   /** 可选的检查脚本（本项目已登记检查） */
   checks: ProjectCheck[]
   /** 传入则为编辑，否则为新建 */
-  task?: ProjectTask
+  schedule?: ProjectSchedule
   onSaved: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -2203,18 +2199,18 @@ export function TaskFormDialog({
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
     if (next) {
-      setTitle(task?.title ?? '')
-      setCron(task?.cron ?? '')
-      setCheckId(task ? String(task.checkId) : '')
+      setTitle(schedule?.title ?? '')
+      setCron(schedule?.cron ?? '')
+      setCheckId(schedule ? String(schedule.checkId) : '')
       setError(null)
     }
   }
 
   const submit = () => {
     setError(null)
-    const saving = task
-      ? api.updateTask(task.id, { title, cron, checkId: Number(checkId) })
-      : api.createTask({
+    const saving = schedule
+      ? api.updateSchedule(schedule.id, { title, cron, checkId: Number(checkId) })
+      : api.createSchedule({
           projectId,
           title,
           cron,
@@ -2231,11 +2227,11 @@ export function TaskFormDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button variant="outline" size="sm" />}>
-        {task ? '编辑' : '添加任务'}
+        {schedule ? '编辑' : '添加定时任务'}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{task ? '编辑任务' : '添加任务'}</DialogTitle>
+          <DialogTitle>{schedule ? '编辑定时任务' : '添加定时任务'}</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
@@ -2301,11 +2297,11 @@ export function TaskFormDialog({
   )
 }
 
-export function DeleteTaskButton({
-  task,
+export function DeleteScheduleButton({
+  schedule,
   onDeleted,
 }: {
-  task: ProjectTask
+  schedule: ProjectSchedule
   onDeleted: () => void
 }) {
   return (
@@ -2313,9 +2309,9 @@ export function DeleteTaskButton({
       <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>删除任务</AlertDialogTitle>
+          <AlertDialogTitle>删除定时任务</AlertDialogTitle>
           <AlertDialogDescription>
-            确定删除任务「{task.title}」吗？删除后不再定时触发，已产生的检查运行记录保留。
+            确定删除定时任务「{schedule.title}」吗？删除后不再定时触发，已产生的检查运行记录保留。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -4151,6 +4147,7 @@ function SubmitReleaseDialog({
   const [submittedAt, setSubmittedAt] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const releaseEditorRef = useRef<MarkdownEditorHandle>(null)
 
   /** 拉取某仓库的分支候选（按仓库全名缓存），供分支联想与提交校验 */
   const loadBranchOptions = useCallback((repo: string) => {
@@ -4233,7 +4230,9 @@ function SubmitReleaseDialog({
         }
       }
       await api.submitRelease(project.id, {
-        content: content.trim() || undefined,
+        // 取编辑器当前内容：onChange 有防抖，避免刚输入就提测丢字
+        content:
+          (releaseEditorRef.current?.getMarkdown() ?? content).trim() || undefined,
         urls: urls.map((u) => u.trim()).filter(Boolean),
         branches: branches
           .filter((b) => b.repo.trim() && b.branch.trim())
@@ -4453,12 +4452,13 @@ function SubmitReleaseDialog({
             </label>
             <div className="flex flex-col gap-1 text-sm">
               <span>提测内容（Markdown，可为空）</span>
-              <div className="doc-editor h-72 rounded-md border border-border-strong bg-background">
-                <Editor
-                  mode="tab"
+              <div className="h-72 overflow-auto rounded-md border border-border-strong bg-background">
+                {/* key 用打开时间：每次打开弹窗都从空白重新挂载（Milkdown 编辑器为非受控） */}
+                <MarkdownEditor
+                  key={submittedAt}
+                  ref={releaseEditorRef}
                   value={content}
-                  plugins={releaseEditorPlugins}
-                  locale={zhHans}
+                  appica
                   onChange={setContent}
                 />
               </div>

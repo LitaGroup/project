@@ -44,7 +44,8 @@ const NAV_SECTIONS: NavSection[] = [
     key: 'projects',
     label: '项目',
     to: '/',
-    match: (p) => !p.startsWith('/admin') && !p.startsWith('/code'),
+    match: (p) =>
+      !p.startsWith('/admin') && !p.startsWith('/code') && !p.startsWith('/tasks'),
     items: [
       { to: '/', label: '概览', ready: true },
       { to: '/projects', label: '项目', ready: true },
@@ -57,9 +58,23 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/milestones', label: '节点', ready: true },
       { to: '/commits', label: '提交', ready: true },
       { to: '/scripts', label: '脚本', ready: true },
-      { to: '/tasks', label: '任务', ready: true },
+      { to: '/schedules', label: '定时任务', ready: true },
       { to: '/apps', label: 'APP', ready: true },
       { to: '/settings', label: '设置', ready: true },
+    ],
+  },
+  {
+    key: 'tasks',
+    label: '任务',
+    to: '/tasks',
+    match: (p) => p.startsWith('/tasks'),
+    items: [
+      { to: '/tasks', label: '任务概览', ready: true },
+      { to: '/tasks/live', label: '工作概览', ready: true },
+      { to: '/tasks/templates', label: '任务包', ready: true },
+      { to: '/tasks/workers', label: '机器人', ready: true },
+      { to: '/tasks/schedulers', label: '调度器', ready: true },
+      { to: '/tasks/executors', label: '执行器', ready: true },
     ],
   },
   {

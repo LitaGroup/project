@@ -10,7 +10,7 @@ import {
 import { ProjectStatus, ProjectType } from '../common/enums';
 import { Check } from '../checks/check.entity';
 import { AppVersion } from '../app-versions/app-version.entity';
-import { Task } from '../tasks/task.entity';
+import { Schedule } from '../schedules/schedule.entity';
 import { Test } from '../tests/test.entity';
 import { Export } from '../exports/export.entity';
 import { Document } from '../documents/document.entity';
@@ -82,8 +82,8 @@ export class Project {
   @OneToMany(() => Export, (exportItem) => exportItem.project)
   exports: Export[];
 
-  @OneToMany(() => Task, (task) => task.project)
-  tasks: Task[];
+  @OneToMany(() => Schedule, (schedule) => schedule.project)
+  schedules: Schedule[];
 
   @OneToMany(() => Defect, (defect) => defect.project)
   defects: Defect[];

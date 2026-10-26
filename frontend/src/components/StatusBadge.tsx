@@ -120,3 +120,55 @@ export function CodeBranchCategoryBadge({ category }: { category: string }) {
     </Badge>
   )
 }
+
+/** 任务包状态 → Badge variant（创建=淡/分发=蓝/执行=青/验收=黄/交付=绿/终态=淡） */
+const taskStatusVariant: Record<
+  string,
+  'info' | 'success' | 'warning' | 'error' | 'soft' | 'primary' | 'secondary'
+> = {
+  草稿: 'soft',
+  待补材料: 'warning',
+  待调度: 'info',
+  待确认: 'warning',
+  已派发: 'info',
+  执行中: 'primary',
+  待验收: 'warning',
+  内部完成: 'success',
+  已交付: 'success',
+  维护中: 'secondary',
+  已取消: 'soft',
+}
+
+export function TaskStatusBadge({ status }: { status: string }) {
+  return <Badge variant={taskStatusVariant[status] ?? 'soft'}>{status}</Badge>
+}
+
+/** 机器人实时状态 → Badge variant：空闲淡 / 工作中绿 / 等待黄 / 验收蓝 */
+const workerLiveVariant: Record<
+  string,
+  'soft' | 'success' | 'warning' | 'info'
+> = {
+  空闲中: 'soft',
+  工作中: 'success',
+  等待中: 'warning',
+  验收中: 'info',
+}
+
+export function WorkerLiveBadge({ status }: { status: string }) {
+  const variant = workerLiveVariant[status] ?? 'soft'
+  return (
+    <Badge variant={variant}>
+      <span className="mr-1 inline-block size-1.5 rounded-full bg-current" />
+      {status}
+    </Badge>
+  )
+}
+
+/** 执行器在线状态：在线绿 / 离线红 */
+export function ExecutorOnlineBadge({ online }: { online: boolean }) {
+  return (
+    <Badge variant={online ? 'success' : 'error'}>
+      {online ? '在线' : '离线'}
+    </Badge>
+  )
+}

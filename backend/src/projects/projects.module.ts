@@ -3,7 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppVersionsModule } from '../app-versions/app-versions.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { ChecksModule } from '../checks/checks.module';
-import { TasksModule } from '../tasks/tasks.module';
+import { SchedulesModule } from '../schedules/schedules.module';
 import { TestsModule } from '../tests/tests.module';
 import { ExportsModule } from '../exports/exports.module';
 import { DefectsModule } from '../defects/defects.module';
@@ -23,7 +23,7 @@ import { SyncState } from './sync-state.entity';
     TypeOrmModule.forFeature([Project, SyncState]),
     DocumentsModule,
     ChecksModule,
-    TasksModule,
+    SchedulesModule,
     TestsModule,
     ExportsModule,
     DefectsModule,

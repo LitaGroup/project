@@ -39,8 +39,8 @@ export interface RunMeta {
   appVersion: AppVersion | null;
   /** 触发方式（通知用） */
   source: 'schedule' | 'manual';
-  /** 触发任务 id（仅 task 调度的 check 运行有） */
-  taskId?: number;
+  /** 触发任务 id（仅定时任务调度的 check 运行有） */
+  scheduleId?: number;
 }
 
 /** 远程执行期间累积的上下文（对应本地 executeRun 的局部变量） */

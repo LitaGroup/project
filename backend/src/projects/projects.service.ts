@@ -19,8 +19,8 @@ import { TestsService } from '../tests/tests.service';
 import { Test } from '../tests/test.entity';
 import { ExportsService } from '../exports/exports.service';
 import { Export } from '../exports/export.entity';
-import { TasksService } from '../tasks/tasks.service';
-import { Task } from '../tasks/task.entity';
+import { SchedulesService } from '../schedules/schedules.service';
+import { Schedule } from '../schedules/schedule.entity';
 import {
   DOCUMENT_LIST_SELECT,
   DocumentsService,
@@ -109,7 +109,7 @@ export class ProjectsService {
     private readonly checksService: ChecksService,
     private readonly testsService: TestsService,
     private readonly exportsService: ExportsService,
-    private readonly tasksService: TasksService,
+    private readonly schedulesService: SchedulesService,
     private readonly defectsService: DefectsService,
     private readonly resourcesService: ResourcesService,
     private readonly milestonesService: MilestonesService,
@@ -180,7 +180,7 @@ export class ProjectsService {
       checks,
       tests,
       exportList,
-      tasks,
+      schedules,
       defects,
       resources,
       milestones,
@@ -195,7 +195,7 @@ export class ProjectsService {
       manager.find(Check, { where: { projectId: id } }),
       manager.find(Test, { where: { projectId: id } }),
       manager.find(Export, { where: { projectId: id } }),
-      manager.find(Task, { where: { projectId: id } }),
+      manager.find(Schedule, { where: { projectId: id } }),
       // 缺陷列表不取 description 等大字段（详情经 GET /defects/:id 单独加载）
       manager.find(Defect, {
         where: { projectId: id },
@@ -225,7 +225,7 @@ export class ProjectsService {
     project.checks = checks;
     project.tests = tests;
     project.exports = exportList;
-    project.tasks = tasks;
+    project.schedules = schedules;
     project.defects = defects;
     project.projectResources = resources;
     project.milestones = milestones;
@@ -293,11 +293,11 @@ export class ProjectsService {
     ].join('\n');
   }
 
-  /** Markdown 视图（GET /projects/:id.md）：项目描述 + 文档/检查/测试/导出/任务清单（含运行信息） */
+  /** Markdown 视图（GET /projects/:id.md）：项目描述 + 文档/检查/测试/导出/定时任务清单（含运行信息） */
   async findOneMarkdown(id: number): Promise<string> {
     const project = await this.findOne(id);
     // 并行补齐运行信息：各检查/测试/导出/任务的最近几次运行 + 任务视图（下次执行时间）
-    const [checkRuns, testRuns, exportRuns, taskRuns, taskViews] =
+    const [checkRuns, testRuns, exportRuns, scheduleRuns, scheduleViews] =
       await Promise.all([
         this.checksService.recentRunsByCheckIds(
           project.checks.map((c) => c.id),
@@ -306,8 +306,10 @@ export class ProjectsService {
         this.exportsService.recentRunsByExportIds(
           project.exports.map((e) => e.id),
         ),
-        this.checksService.recentRunsByTaskIds(project.tasks.map((t) => t.id)),
-        this.tasksService.findByProject(project.id),
+        this.checksService.recentRunsByScheduleIds(
+          project.schedules.map((s) => s.id),
+        ),
+        this.schedulesService.findByProject(project.id),
       ]);
     const meta = [`- 类型：${project.type}`, `- 状态：${project.status}`];
     if (project.priority) meta.push(`- 优先级：${project.priority}`);
@@ -376,20 +378,20 @@ export class ProjectsService {
     );
     const checkName = (checkId: number) =>
       project.checks.find((c) => c.id === checkId)?.code ?? `#${checkId}`;
-    const tasks = project.tasks.map((t) => {
-      const view = taskViews.find((v) => v.id === t.id);
+    const schedules = project.schedules.map((s) => {
+      const view = scheduleViews.find((v) => v.id === s.id);
       const lines = [
-        `- **${t.title}**（cron：\`${t.cron}\`，检查：\`${checkName(t.checkId)}\`${t.enabled ? '' : '，已停用'}）`,
-        `  - 上次执行：${t.lastRunAt ? new Date(t.lastRunAt).toISOString() : '未执行过'}；下次执行：${view?.nextRunAt ?? '-'}`,
+        `- **${s.title}**（cron：\`${s.cron}\`，检查：\`${checkName(s.checkId)}\`${s.enabled ? '' : '，已停用'}）`,
+        `  - 上次执行：${s.lastRunAt ? new Date(s.lastRunAt).toISOString() : '未执行过'}；下次执行：${view?.nextRunAt ?? '-'}`,
       ];
-      const lastRun = (taskRuns.get(t.id) ?? [])[0];
+      const lastRun = (scheduleRuns.get(s.id) ?? [])[0];
       if (lastRun) {
         lines.push(
           `  - 上次结果：#${lastRun.id} ${runSummaryLine(lastRun)} — 详情：\`GET /api/checks/runs/${lastRun.id}.md\``,
         );
       }
       lines.push(
-        `  - 执行地址：\`POST /api/tasks/${t.id}/run.md\`；运行记录：\`GET /api/tasks/${t.id}/runs\``,
+        `  - 执行地址：\`POST /api/schedules/${s.id}/run.md\`；运行记录：\`GET /api/schedules/${s.id}/runs\``,
       );
       return lines.join('\n');
     });
@@ -494,9 +496,9 @@ export class ProjectsService {
       '',
       ...(exports.length > 0 ? exports : ['（暂无）']),
       '',
-      `## 任务（${project.tasks.length}）`,
+      `## 定时任务（${project.schedules.length}）`,
       '',
-      ...(tasks.length > 0 ? tasks : ['（暂无）']),
+      ...(schedules.length > 0 ? schedules : ['（暂无）']),
       '',
       `## 提测记录（${project.projectReleases.length}）`,
       '',
@@ -522,7 +524,7 @@ export class ProjectsService {
       'curl -N -X POST /api/checks/{checkId}/run.md',
       'curl -N -X POST /api/tests/{testId}/run.md',
       'curl -N -X POST /api/exports/{exportId}/run.md',
-      'curl -N -X POST /api/tasks/{taskId}/run.md',
+      'curl -N -X POST /api/schedules/{scheduleId}/run.md',
       '```',
       '',
       '运行详情（Markdown 视图）与系统设置：',
@@ -820,7 +822,7 @@ export class ProjectsService {
     await this.resourcesService.removeByProject(project.id);
     await this.milestonesService.removeByProject(project.id);
     // 任务先于检查清理（任务依赖检查脚本；检查删除时也会再兜底清理）
-    await this.tasksService.removeByProject(project.id);
+    await this.schedulesService.removeByProject(project.id);
     await this.checksService.removeByProject(project.id);
     await this.testsService.removeByProject(project.id);
     await this.exportsService.removeByProject(project.id);

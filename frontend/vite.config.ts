@@ -6,13 +6,16 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    // 开发环境固定端口（strictPort：被占用时直接报错而不是换端口）
+    port: 5273,
+    strictPort: true,
     proxy: {
-      // 后端 NestJS，见 backend/src/main.ts（globalPrefix: 'api'）
-      '/api': 'http://localhost:3000',
+      // 后端 NestJS（固定 3100），见 backend/src/main.ts（globalPrefix: 'api'）
+      '/api': 'http://localhost:3100',
       // 上传图片静态目录（DIR_IMAGE_WEBROOT，后端挂在 /images 下）
-      '/images': 'http://localhost:3000',
+      '/images': 'http://localhost:3100',
       // 导出产物静态目录（DIR_EXPORT_WEBROOT，后端挂在 /export-files 下）
-      '/export-files': 'http://localhost:3000',
+      '/export-files': 'http://localhost:3100',
     },
   },
 })

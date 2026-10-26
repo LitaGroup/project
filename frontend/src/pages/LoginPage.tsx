@@ -1,4 +1,4 @@
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   Card,
   CardHeader,
@@ -10,12 +10,16 @@ import { useAuth } from '../context/AuthContext'
 
 /**
  * 登录页：飞书 OAuth 入口（/api/auth/feishu 302 到飞书授权页，回调后端落 Cookie 后跳回首页）。
- * 回调失败经 /login?error=... 落到此页展示。
+ * 回调失败经 /login?error=... 落到此页展示；已登录访问则直接跳首页。
  */
 export function LoginPage() {
   const [params] = useSearchParams()
   const error = params.get('error')
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
+
+  // 会话加载中先不渲染（避免已登录用户短暂看到登录卡片），加载完已登录直接进首页
+  if (loading) return null
+  if (user) return <Navigate to="/" replace />
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background-muted">
@@ -30,19 +34,12 @@ export function LoginPage() {
               登录失败：{error}
             </p>
           )}
-          {user ? (
-            <p className="text-sm">
-              已登录：<span className="text-foreground-intense">{user.name}</span>
-              （{user.role}），可直接访问左侧导航。
-            </p>
-          ) : (
-            <a
-              href="/api/auth/feishu"
-              className={buttonVariants({ variant: 'primary' })}
-            >
-              飞书登录
-            </a>
-          )}
+          <a
+            href="/api/auth/feishu"
+            className={buttonVariants({ variant: 'primary' })}
+          >
+            飞书登录
+          </a>
         </div>
       </Card>
     </div>

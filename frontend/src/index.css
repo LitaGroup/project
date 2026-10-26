@@ -4,64 +4,123 @@
 /* Appica UI 规则：必须扫描组件库类名，否则组件无样式。路径相对本文件，勿改成裸包名。 */
 @source '../node_modules/@appica/ui-react/dist';
 
-/* ByteMD：取消编辑区/预览区的 800px 居中限宽，铺满容器（ByteMD 自带全屏按钮在工具栏右侧）。
-   注意必须提高选择器优先级：bytemd 的 CSS 在组件加载时注入，顺序晚于本文件。 */
-.bytemd .bytemd-editor .CodeMirror .CodeMirror-lines {
-  max-width: none;
-  margin: 0;
-}
-.bytemd .bytemd-preview .markdown-body {
-  max-width: none;
-  margin: 0;
-}
-
-/* 文档详情页：编辑器撑满剩余空间，底部与浏览器底部对齐（覆盖 ByteMD 默认固定高度）。
-   bytemd/react 在 .bytemd 外还包了一层无样式的 div，百分比高度需要逐层都是确定值才能生效。 */
-.doc-editor > div {
-  height: 100%;
-}
-.doc-editor .bytemd {
-  height: 100%;
+/* Milkdown（Crepe）Markdown 编辑器：
+   - 背景透明，跟随容器/页面背景（主题自带白底）
+   - 字号与页面正文一致、内边距收紧（Crepe 默认 60px 120px，页面内容区放不下）
+   - 只读模式隐藏块操作、斜杠菜单、选区工具栏等编辑态交互元素 */
+.md-editor .milkdown {
+  --crepe-base-font-size: 14px;
+  /* 标题/正文沿用应用字体，避免 Crepe 默认衬线标题与页面观感割裂 */
+  --crepe-font-default: inherit;
+  --crepe-font-title: inherit;
+  background: transparent;
 }
 
-/* 文档预览标题锚点：悬停标题时左侧出现 # 链接，点击复制带锚点地址并滚动定位。
-   markdown-body 有 4% 内边距，锚点绝对定位在其中，不占布局 */
-.doc-editor .markdown-body > :is(h1, h2, h3, h4, h5, h6) {
-  position: relative;
-  scroll-margin-top: 8px;
+/* 编辑器铺满容器：Crepe 默认只把可编辑区撑到内容高度，
+   导致点击正文下方的空白区域无法进入编辑，只有 placeholder 处可点 */
+.md-editor > div,
+.md-editor .milkdown {
+  height: 100%;
 }
-.doc-editor .markdown-body .doc-heading-anchor {
-  position: absolute;
-  left: -0.8em;
-  top: 0;
+.md-editor .milkdown .ProseMirror {
+  min-height: 100%;
+}
+.md-editor .milkdown .ProseMirror {
+  padding: 16px 24px;
+}
+.md-editor .milkdown .ProseMirror :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+}
+.md-readonly .milkdown .milkdown-block-handle,
+.md-readonly .milkdown .milkdown-slash-menu,
+.md-readonly .milkdown .milkdown-toolbar,
+.md-readonly .milkdown .milkdown-link-preview,
+.md-readonly .milkdown .milkdown-link-edit,
+.md-readonly .milkdown .milkdown-image-block > .image-edit,
+.md-readonly .milkdown .milkdown-image-block .image-wrapper .operation,
+.md-readonly .milkdown .milkdown-image-block .image-wrapper .image-resize-handle,
+.md-readonly .milkdown .milkdown-table-block .cell-handle {
+  display: none !important;
+}
+
+/* Milkdown 编辑器变体：紧凑内边距（嵌在小面板里时使用） */
+.md-editor-compact .milkdown .ProseMirror {
+  padding: 8px 12px;
+}
+
+/* Milkdown 编辑器变体：Appica 风格（机器人角色定义 / 提测内容）
+   标题与正文同为中性色、链接下划线、行内代码/引用用 muted 底色与圆角；
+   颜色/圆角走 Appica 角色 token，与页面排版保持一致 */
+.md-editor-appica .milkdown .ProseMirror {
+  color: var(--foreground);
+  line-height: 1.65;
+}
+.md-editor-appica .milkdown .ProseMirror :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--foreground-intense);
+  font-family: inherit;
+  font-weight: 600;
+  margin-top: 16px;
+}
+.md-editor-appica .milkdown .ProseMirror h1 {
+  font-size: 1.5rem;
+}
+.md-editor-appica .milkdown .ProseMirror h2 {
+  font-size: 1.25rem;
+}
+.md-editor-appica .milkdown .ProseMirror h3 {
+  font-size: 1.125rem;
+  margin-top: 12px;
+}
+.md-editor-appica .milkdown .ProseMirror h4 {
+  font-size: 1rem;
+  margin-top: 12px;
+}
+.md-editor-appica .milkdown .ProseMirror :is(h5, h6) {
+  font-size: 0.875rem;
+  margin-top: 8px;
+}
+.md-editor-appica .milkdown .ProseMirror h6 {
+  color: var(--foreground-muted);
+}
+.md-editor-appica .milkdown .ProseMirror p {
+  line-height: 1.65;
+}
+.md-editor-appica .milkdown .ProseMirror strong {
+  font-weight: 600;
+}
+.md-editor-appica .milkdown .ProseMirror a {
   color: inherit;
-  text-decoration: none;
-  opacity: 0;
-  pointer-events: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
-.doc-editor .markdown-body > :is(h1, h2, h3, h4, h5, h6):hover .doc-heading-anchor {
-  opacity: 0.4;
-  pointer-events: auto;
+.md-editor-appica .milkdown .ProseMirror code {
+  color: var(--foreground-intense);
+  background: var(--background-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
 }
-.doc-editor .markdown-body .doc-heading-anchor:hover,
-.doc-editor .markdown-body .doc-heading-anchor:focus-visible {
-  opacity: 0.9;
+.md-editor-appica .milkdown .ProseMirror pre {
+  background: var(--background-muted);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
 }
-
-/* 文档预览 YAML frontmatter 表格：正文开头由 AI 写入的 frontmatter（--- 键值 ---）按 CommonMark
-   会被渲染成「分隔线 + 键值挤成的 setext 大标题」，DocumentDetailPage 在预览 DOM 层将其
-   替换为键值表格（applyFrontmatterTable）。表格边框/内边距沿用 github-markdown-css，
-   与正文表格观感一致；此处仅补充紧凑字号与键值列差异化（角色 token，深浅色自适应） */
-.doc-editor .markdown-body table.doc-frontmatter {
-  margin: 4px 0 16px;
-  font-size: 13px;
+.md-editor-appica .milkdown .ProseMirror pre code {
+  background: transparent;
+  padding: 0;
 }
-.doc-frontmatter .doc-frontmatter-key {
-  white-space: nowrap;
-  color: var(--color-foreground-muted);
+.md-editor-appica .milkdown .ProseMirror blockquote {
+  color: var(--foreground-muted);
 }
-.doc-frontmatter .doc-frontmatter-value {
-  word-break: break-word;
+.md-editor-appica .milkdown .ProseMirror blockquote::before {
+  background: var(--border-strong);
+}
+.md-editor-appica .milkdown .ProseMirror hr {
+  background-color: var(--border-strong);
+}
+.md-editor-appica .milkdown .ProseMirror ::selection {
+  background: var(--selection-color);
 }
 
 /* 检查运行详情页终端面板：Gruvbox Dark 主题。

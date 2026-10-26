@@ -78,7 +78,7 @@ export class SettingsService {
     private readonly agentGateway: AgentGateway,
   ) {
     this.environment = config.get<string>('NODE_ENV') ?? 'development';
-    this.port = config.get<number>('PORT') ?? 3000;
+    this.port = config.get<number>('PORT') ?? 3100;
     this.scriptsDir = path.resolve(
       config.get<string>('CHECK_SCRIPTS_DIR') ??
         path.resolve(process.cwd(), '../scripts'),

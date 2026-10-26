@@ -180,8 +180,8 @@ export interface CheckRunItem {
 export interface CheckRun {
   id: number
   checkId: number
-  /** 触发来源任务（定时任务触发时记录；手动运行为 null） */
-  taskId?: number | null
+  /** 触发来源定时任务（定时任务触发时记录；手动运行为 null） */
+  scheduleId?: number | null
   /** queued=已入队待 appium-agent 执行；running=执行中；success=全部通过；fail=有失败项；error=脚本异常 */
   status: 'queued' | 'running' | 'success' | 'fail' | 'error'
   /** 总步数（脚本 [start] 上报） */
@@ -449,7 +449,7 @@ export interface Project {
   checks?: ProjectCheck[]
   tests?: ProjectTest[]
   exports?: ProjectExport[]
-  tasks?: ProjectTask[]
+  tasks?: ProjectSchedule[]
   defects?: Defect[]
   /** 资源列表（不含多语言缓存正文、隐藏软删除；键名避开上方人员 resources） */
   projectResources?: ProjectResource[]
@@ -532,8 +532,8 @@ export interface ProjectResource {
   updatedAt: string
 }
 
-/** 任务：按 crontab 表达式定时运行一个已登记的检查脚本 */
-export interface ProjectTask {
+/** 定时任务（调度）：按 crontab 表达式定时运行一个已登记的检查脚本 */
+export interface ProjectSchedule {
   id: number
   projectId: number
   /** 标题 */
@@ -548,11 +548,11 @@ export interface ProjectTask {
   lastRunAt: string | null
   /** 已运行次数（任务触发累计，含失败） */
   runCount: number
-  /** 下次执行时间（由 cron 表达式实时计算；停用为 null）。经 /tasks 接口返回，项目详情的关系数据不含此字段 */
+  /** 下次执行时间（由 cron 表达式实时计算；停用为 null）。经 /schedules 接口返回，项目详情的关系数据不含此字段 */
   nextRunAt?: string | null
-  /** 运行统计（成功/失败/总数；失败含 error）。经 /tasks 列表接口返回 */
+  /** 运行统计（成功/失败/总数；失败含 error）。经 /schedules 列表接口返回 */
   runStats?: { success: number; fail: number; total: number }
-  /** 未来 5 次执行时间（仅 GET /tasks/:id 返回；停用为 null） */
+  /** 未来 5 次执行时间（仅 GET /schedules/:id 返回；停用为 null） */
   nextRuns?: string[] | null
   updatedAt: string
 }
@@ -669,7 +669,215 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(body?.message ?? `请求失败 (${res.status})`)
   }
   if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
+  // 空响应体（如可空详情返回 null）按 null 处理，避免 JSON 解析异常
+  const text = await res.text()
+  if (!text) return null as T
+  return JSON.parse(text) as T
+}
+
+// ===== 任务处理中心（FEATURE-02）=====
+
+export const EXECUTOR_TYPES = ['opencode', 'codex', 'claude-code'] as const
+export type ExecutorType = (typeof EXECUTOR_TYPES)[number]
+
+export const WORKER_KINDS = ['智能体', '员工'] as const
+export type WorkerKind = (typeof WORKER_KINDS)[number]
+
+export const WORKER_ROLES = ['工作者', '调度器'] as const
+export type WorkerRole = (typeof WORKER_ROLES)[number]
+
+export const WORKER_RUNTIMES = ['opencode', 'pi'] as const
+export type WorkerRuntime = (typeof WORKER_RUNTIMES)[number]
+
+export const WORKER_LIVE_STATUSES = ['空闲中', '工作中', '等待中', '验收中'] as const
+export type WorkerLiveStatus = (typeof WORKER_LIVE_STATUSES)[number]
+
+export const TASK_TYPES = [
+  '需求分析',
+  '技术设计',
+  '前端开发',
+  '后端开发',
+  '客户端开发',
+  'UI设计',
+  '测试',
+  '发布',
+  '其它',
+] as const
+export type TaskType = (typeof TASK_TYPES)[number]
+
+export const TASK_STATUSES = [
+  '草稿',
+  '待补材料',
+  '待调度',
+  '待确认',
+  '已派发',
+  '执行中',
+  '待验收',
+  '内部完成',
+  '已交付',
+  '维护中',
+  '已取消',
+] as const
+export type TaskStatus = (typeof TASK_STATUSES)[number]
+
+/** 执行器：实际执行任务的工具实例（本期 opencode server） */
+export interface ExecutorProviderModel {
+  id: string
+  name: string
+}
+export interface ExecutorProvider {
+  id: string
+  name: string
+  models: ExecutorProviderModel[]
+}
+export interface Executor {
+  id: number
+  name: string
+  ip: string
+  port: number
+  type: ExecutorType
+  description: string | null
+  token: string | null
+  enabled: boolean
+  /** 健康检查推导：在线/离线 */
+  online: boolean
+  version: string | null
+  /** server 默认工作目录 */
+  defaultLocation: string | null
+  providersCache: ExecutorProvider[] | null
+  providersSyncedAt: string | null
+  lastCheckedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkerSkill {
+  name: string
+  content: string
+}
+export interface WorkerTaskDef {
+  type: string
+  inputs: { name: string; desc?: string; required?: boolean }[]
+  outputs: { name: string; desc?: string }[]
+  how?: string
+}
+
+/** 机器人（工作者/调度器统一）：附工位路径与实时状态（服务端实时计算） */
+export interface Worker {
+  id: number
+  name: string
+  intro: string | null
+  kind: WorkerKind
+  role: WorkerRole
+  runtime: WorkerRuntime
+  executorId: number | null
+  providerId: string | null
+  modelId: string | null
+  prompt: string | null
+  skills: WorkerSkill[] | null
+  taskDefs: WorkerTaskDef[] | null
+  ownerUserId: number | null
+  ownerName: string | null
+  materials: string | null
+  enabled: boolean
+  /** 工位路径 {WORKER_BASE_DIR}/worker/{id}（未配置 env 为 null） */
+  workdir: string | null
+  liveStatus: WorkerLiveStatus
+  activeTask: { id: number; code: string; title: string; status: string } | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 任务包缺失材料条目 */
+export interface TaskMissingItem {
+  item: string
+  reason?: string
+}
+
+/** 任务流转事件（append-only） */
+export interface TaskEvent {
+  id: number
+  taskId: number
+  type: string
+  content: string
+  meta: Record<string, unknown> | null
+  operator: string | null
+  createdAt: string
+}
+
+/** 调度方案（PI 调度器产出） */
+export interface PlanSubtask {
+  title: string
+  type: string
+  input?: string
+  outputSpec?: string
+  agentId?: number | null
+  agentName?: string
+}
+export interface DispatchPlan {
+  id: number
+  taskId: number
+  schedulerId: number | null
+  plan: {
+    identification: { type?: string; input?: string; output?: string; summary?: string }
+    missingItems?: TaskMissingItem[]
+    subtasks?: PlanSubtask[]
+  }
+  status: '待确认' | '已确认' | '已驳回'
+  operator: string | null
+  operatedAt: string | null
+  createdAt: string
+}
+
+/** 任务包：明确输入/输出/类型，可挂子任务形成工作流 */
+export interface TaskPackage {
+  id: number
+  code: string
+  title: string
+  type: TaskType
+  parentId: number | null
+  rootId: number
+  sortOrder: number
+  description: string | null
+  input: string | null
+  outputSpec: string | null
+  missingItems: TaskMissingItem[] | null
+  status: TaskStatus
+  agentId: number | null
+  schedulerId: number | null
+  executorId: number | null
+  opencodeSessionId: string | null
+  result: string | null
+  acceptedAt: string | null
+  acceptedBy: string | null
+  deliveredAt: string | null
+  archivedAt: string | null
+  canceledAt: string | null
+  createdAt: string
+  updatedAt: string
+  /** 列表接口附带的子任务（调度拆解产物） */
+  children?: TaskPackage[]
+  /** 详情接口附带的事件时间线与实时输出行 */
+  events?: TaskEvent[]
+  liveLines?: string[]
+}
+
+export interface TaskOverview {
+  total: number
+  roots: number
+  statuses: Record<string, number>
+}
+
+/** 任务包：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
+export interface TaskTemplate {
+  id: number
+  name: string
+  description: string | null
+  input: string | null
+  outputSpec: string | null
+  agentId: number | null
+  createdAt: string
+  updatedAt: string
 }
 
 export const api = {
@@ -956,21 +1164,21 @@ export const api = {
     }),
   deleteAppVersion: (id: number) =>
     request<void>(`/app-versions/${id}`, { method: 'DELETE' }),
-  listTasks: (projectId?: number) =>
-    request<ProjectTask[]>(
-      `/tasks${projectId === undefined ? '' : `?projectId=${projectId}`}`,
+  listSchedules: (projectId?: number) =>
+    request<ProjectSchedule[]>(
+      `/schedules${projectId === undefined ? '' : `?projectId=${projectId}`}`,
     ),
-  createTask: (input: {
+  createSchedule: (input: {
     projectId: number
     title: string
     cron: string
     checkId: number
   }) =>
-    request<ProjectTask>('/tasks', {
+    request<ProjectSchedule>('/schedules', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  updateTask: (
+  updateSchedule: (
     id: number,
     input: Partial<{
       title: string
@@ -979,18 +1187,18 @@ export const api = {
       enabled: boolean
     }>,
   ) =>
-    request<ProjectTask>(`/tasks/${id}`, {
+    request<ProjectSchedule>(`/schedules/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(input),
     }),
-  deleteTask: (id: number) =>
-    request<void>(`/tasks/${id}`, { method: 'DELETE' }),
-  getTask: (id: number) => request<ProjectTask>(`/tasks/${id}`),
+  deleteSchedule: (id: number) =>
+    request<void>(`/schedules/${id}`, { method: 'DELETE' }),
+  getSchedule: (id: number) => request<ProjectSchedule>(`/schedules/${id}`),
   /** 任务触发的运行历史（倒序，上限 50） */
-  listTaskRuns: (id: number) => request<CheckRun[]>(`/tasks/${id}/runs`),
+  listScheduleRuns: (id: number) => request<CheckRun[]>(`/schedules/${id}/runs`),
   /** 立即触发一次任务（手动触发不受 enabled 限制），返回启动的运行记录 */
-  runTask: (id: number) =>
-    request<CheckRun>(`/tasks/${id}/run`, { method: 'POST' }),
+  runSchedule: (id: number) =>
+    request<CheckRun>(`/schedules/${id}/run`, { method: 'POST' }),
   /** 平台设置：脚本目录与访问域名（只读） */
   getSettings: () => request<Settings>('/settings'),
   /** 更新脚本仓库：在脚本根目录执行 git pull，返回输出 */
@@ -1292,4 +1500,236 @@ export const api = {
     }).then((r) => r.token),
   /** 登出：清除会话 Cookie */
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+
+  // ===== 任务处理中心（FEATURE-02）=====
+
+  /** 执行器列表 */
+  listExecutors: () => request<Executor[]>('/executors'),
+  createExecutor: (input: {
+    name: string
+    ip: string
+    port: number
+    type?: ExecutorType
+    description?: string | null
+    token?: string | null
+  }) =>
+    request<Executor>('/executors', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateExecutor: (
+    id: number,
+    input: Partial<{
+      name: string
+      ip: string
+      port: number
+      type: ExecutorType
+      description: string | null
+      token: string | null
+      enabled: boolean
+    }>,
+  ) =>
+    request<Executor>(`/executors/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteExecutor: (id: number) =>
+    request<void>(`/executors/${id}`, { method: 'DELETE' }),
+  /** 立即健康检查 */
+  checkExecutor: (id: number) =>
+    request<Executor>(`/executors/${id}/check`, { method: 'POST' }),
+  /** 同步供应商/模型缓存 */
+  syncExecutorProviders: (id: number) =>
+    request<Executor>(`/executors/${id}/sync-providers`, { method: 'POST' }),
+  /** 供应商缓存（机器人表单三级联动） */
+  getExecutorProviders: (id: number) =>
+    request<ExecutorProvider[]>(`/executors/${id}/providers`),
+
+  /** 机器人列表（kind/role 筛选） */
+  listWorkers: (params?: { kind?: WorkerKind; role?: WorkerRole }) => {
+    const qs = new URLSearchParams()
+    if (params?.kind) qs.set('kind', params.kind)
+    if (params?.role) qs.set('role', params.role)
+    const q = qs.toString()
+    return request<Worker[]>(`/workers${q ? `?${q}` : ''}`)
+  },
+  getWorker: (id: number) => request<Worker>(`/workers/${id}`),
+  createWorker: (input: {
+    name: string
+    intro?: string | null
+    kind?: WorkerKind
+    role?: WorkerRole
+    runtime?: WorkerRuntime
+    executorId?: number | null
+    providerId?: string | null
+    modelId?: string | null
+    prompt?: string | null
+    skills?: WorkerSkill[] | null
+    taskDefs?: WorkerTaskDef[] | null
+    ownerUserId?: number | null
+    materials?: string | null
+    enabled?: boolean
+  }) =>
+    request<Worker>('/workers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateWorker: (
+    id: number,
+    input: Partial<{
+      name: string
+      intro: string | null
+      kind: WorkerKind
+      role: WorkerRole
+      runtime: WorkerRuntime
+      executorId: number | null
+      providerId: string | null
+      modelId: string | null
+      prompt: string | null
+      skills: WorkerSkill[] | null
+      taskDefs: WorkerTaskDef[] | null
+      ownerUserId: number | null
+      materials: string | null
+      enabled: boolean
+    }>,
+  ) =>
+    request<Worker>(`/workers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteWorker: (id: number) =>
+    request<void>(`/workers/${id}`, { method: 'DELETE' }),
+  /** AI 优化角色 PROMPT：结构补全 + 清晰化（PI Agent / DeepSeek） */
+  optimizeWorkerPrompt: (prompt: string) =>
+    request<{ prompt: string }>('/workers/optimize-prompt', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }).then((r) => r.prompt),
+  /** 工作概览卡片数据（实时状态，前端轮询） */
+  listWorkersLive: () => request<Worker[]>('/workers/live'),
+
+  /** 任务包列表 */
+  listTaskTemplates: () => request<TaskTemplate[]>('/task-templates'),
+  getTaskTemplate: (id: number) =>
+    request<TaskTemplate>(`/task-templates/${id}`),
+  createTaskTemplate: (input: {
+    name: string
+    description?: string | null
+    input?: string | null
+    outputSpec?: string | null
+    agentId?: number | null
+  }) =>
+    request<TaskTemplate>('/task-templates', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateTaskTemplate: (
+    id: number,
+    input: Partial<{
+      name: string
+      description: string | null
+      input: string | null
+      outputSpec: string | null
+      agentId: number | null
+    }>,
+  ) =>
+    request<TaskTemplate>(`/task-templates/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteTaskTemplate: (id: number) =>
+    request<void>(`/task-templates/${id}`, { method: 'DELETE' }),
+
+  /** 任务概览统计 */
+  taskOverview: () => request<TaskOverview>('/tasks/overview'),
+  /** 任务列表（默认根任务树；q=编号/标题） */
+  listTaskPackages: (params?: {
+    q?: string
+    status?: TaskStatus
+    type?: TaskType
+    rootOnly?: boolean
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.q) qs.set('q', params.q)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.type) qs.set('type', params.type)
+    if (params?.rootOnly === false) qs.set('rootOnly', 'false')
+    const q = qs.toString()
+    return request<TaskPackage[]>(`/tasks${q ? `?${q}` : ''}`)
+  },
+  getTaskPackage: (id: number) => request<TaskPackage>(`/tasks/${id}`),
+  createTaskPackage: (input: {
+    title: string
+    type?: TaskType
+    description?: string | null
+    input?: string | null
+    outputSpec?: string | null
+    agentId?: number | null
+    schedulerId?: number | null
+    parentId?: number | null
+  }) =>
+    request<TaskPackage>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateTaskPackage: (
+    id: number,
+    input: Partial<{
+      title: string
+      type: TaskType
+      description: string | null
+      input: string | null
+      outputSpec: string | null
+      agentId: number | null
+      result: string | null
+      missingItems: TaskMissingItem[] | null
+    }>,
+  ) =>
+    request<TaskPackage>(`/tasks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteTaskPackage: (id: number) =>
+    request<void>(`/tasks/${id}`, { method: 'DELETE' }),
+  /** 提交调度：草稿/待补材料 → 待调度 */
+  submitTask: (id: number) =>
+    request<TaskPackage>(`/tasks/${id}/submit`, { method: 'POST' }),
+  /** 材料补齐：待补材料 → 待调度 */
+  resolveTaskMissing: (id: number) =>
+    request<TaskPackage>(`/tasks/${id}/resolved`, { method: 'POST' }),
+  /** AI 调度（识别/审查/拆解/分配） */
+  scheduleTask: (id: number) =>
+    request<TaskPackage>(`/tasks/${id}/schedule`, { method: 'POST' }),
+  /** 派发（执行中可重新派发） */
+  dispatchTask: (id: number) =>
+    request<TaskPackage>(`/tasks/${id}/dispatch`, { method: 'POST' }),
+  /** 中断执行 */
+  interruptTask: (id: number) =>
+    request<TaskPackage>(`/tasks/${id}/interrupt`, { method: 'POST' }),
+  /** 验收通过：待验收 → 内部完成 */
+  acceptTask: (id: number) =>
+    request<TaskPackage>(`/tasks/${id}/accept`, { method: 'POST' }),
+  /** 交付：内部完成 → 已交付 */
+  deliverTask: (id: number, result?: string) =>
+    request<TaskPackage>(`/tasks/${id}/deliver`, {
+      method: 'POST',
+      body: JSON.stringify({ result }),
+    }),
+  /** 归档：已交付 → 维护中（终态） */
+  archiveTask: (id: number) =>
+    request<TaskPackage>(`/tasks/${id}/archive`, { method: 'POST' }),
+  /** 取消（任意非终态） */
+  cancelTask: (id: number) =>
+    request<TaskPackage>(`/tasks/${id}/cancel`, { method: 'POST' }),
+  /** 任务当前待确认调度方案 */
+  getTaskPlan: (id: number) => request<DispatchPlan | null>(`/tasks/${id}/plan`),
+  /** 确认调度方案（物化子任务并派发） */
+  confirmTaskPlan: (planId: number) =>
+    request<TaskPackage>(`/tasks/plans/${planId}/confirm`, { method: 'POST' }),
+  /** 驳回调度方案（打回待调度） */
+  rejectTaskPlan: (planId: number, reason?: string) =>
+    request<TaskPackage>(`/tasks/plans/${planId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 }

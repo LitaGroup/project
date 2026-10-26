@@ -180,7 +180,7 @@ export class AuthService {
   /** 欢迎卡片：介绍 + SKILL 安装 + 核心任务流（口径与前端概览页一致） */
   private buildWelcomeCard(): Record<string, unknown> {
     const appUrl = (
-      this.config.get<string>('APP_URL') ?? 'http://localhost:5173'
+      this.config.get<string>('APP_URL') ?? 'http://localhost:5273'
     ).replace(/\/$/, '');
     const skillUrl = `${appUrl}/SKILL.md`;
     const installCmd = `mkdir -p ~/.opencode/skills/project-manage && curl -fsSL ${skillUrl} -o ~/.opencode/skills/project-manage/SKILL.md`;
@@ -410,7 +410,7 @@ export class AuthService {
       );
     }
     const appUrl =
-      this.config.get<string>('APP_URL') ?? 'http://localhost:5173';
+      this.config.get<string>('APP_URL') ?? 'http://localhost:5273';
     return {
       appId,
       appSecret,

@@ -54,7 +54,7 @@ export class ReleasesService {
     private readonly feishu: FeishuService,
     config: ConfigService,
   ) {
-    this.appUrl = config.get<string>('APP_URL') ?? 'http://localhost:5173';
+    this.appUrl = config.get<string>('APP_URL') ?? 'http://localhost:5273';
   }
 
   /**

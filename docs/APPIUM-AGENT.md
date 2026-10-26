@@ -207,7 +207,7 @@ project/
 # backend
 AGENT_TOKEN=...          # agent 连接鉴权 token
 # appium-agent
-PROJECT_WS_URL=ws://project-host:3000/api/ws
+PROJECT_WS_URL=ws://project-host:3100/api/ws
 AGENT_TOKEN=...           # 与 backend 一致
 AGENT_NAME=mac-mini-1
 AGENT_SCRIPTS_DIR=...     # 本地脚本工作目录（含预装 node_modules）

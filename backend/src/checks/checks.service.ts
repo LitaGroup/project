@@ -23,7 +23,7 @@ import {
   RemoteRunService,
   isRemoteDevice,
 } from '../remote-run/remote-run.service';
-import { TasksService } from '../tasks/tasks.service';
+import { SchedulesService } from '../schedules/schedules.service';
 import { CheckRun, CheckRunItem } from './check-run.entity';
 import { Check } from './check.entity';
 
@@ -76,8 +76,8 @@ export class ChecksService implements OnModuleInit {
     private readonly runs: Repository<CheckRun>,
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
-    @Inject(forwardRef(() => TasksService))
-    private readonly tasksService: TasksService,
+    @Inject(forwardRef(() => SchedulesService))
+    private readonly schedulesService: SchedulesService,
     private readonly notifyService: NotifyService,
     private readonly remoteRun: RemoteRunService,
     config: ConfigService,
@@ -216,7 +216,7 @@ export class ChecksService implements OnModuleInit {
     const check = await this.findOne(id);
     // 应用层级联：先清运行记录与依赖该检查的任务，再删登记（无物理外键）
     await this.runs.delete({ checkId: check.id });
-    await this.tasksService.removeByCheck(check.id);
+    await this.schedulesService.removeByCheck(check.id);
     await this.checks.remove(check);
   }
 
@@ -229,7 +229,7 @@ export class ChecksService implements OnModuleInit {
     if (checks.length > 0) {
       await this.runs.delete({ checkId: In(checks.map((c) => c.id)) });
       for (const check of checks) {
-        await this.tasksService.removeByCheck(check.id);
+        await this.schedulesService.removeByCheck(check.id);
       }
     }
     await this.checks.delete({ projectId });
@@ -238,55 +238,55 @@ export class ChecksService implements OnModuleInit {
   /**
    * 启动一次脚本运行：先落 running 记录并立即返回，脚本在后台异步执行，
    * 运行中实时更新 total/current，结束后落完整结果（前端通过 SSE 实时获取进度）。
-   * taskId 标记触发来源（定时任务），手动运行为空；
+   * scheduleId 标记触发来源（定时任务），手动运行为空；
    * source 标记任务触发方式（schedule=到点调度 / manual=手动），仅用于飞书"开始执行"通知。
    */
   async startRun(
     checkId: number,
-    taskId?: number,
+    scheduleId?: number,
     source: 'schedule' | 'manual' = 'manual',
   ): Promise<CheckRun> {
     const check = await this.findOne(checkId);
     if (isRemoteDevice(check.device)) {
-      return this.enqueueRemoteRun(check, taskId, source);
+      return this.enqueueRemoteRun(check, scheduleId, source);
     }
     const absPath = await this.resolveScriptPath(check.scriptPath);
     const run = await this.runs.save(
       this.runs.create({
         checkId,
-        taskId: taskId ?? null,
+        scheduleId: scheduleId ?? null,
         status: 'running',
         startedAt: new Date(),
       }),
     );
     this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
     // 任务触发的运行：执行前推送"开始执行"卡片（含触发方式）
-    if (taskId !== undefined) {
-      void this.notifyService.notifyTaskRunStart(
+    if (scheduleId !== undefined) {
+      void this.notifyService.notifyScheduleRunStart(
         {
           projectId: check.projectId,
-          taskId,
+          scheduleId,
           checkCode: check.code,
           scriptPath: check.scriptPath,
         },
         source,
       );
     }
-    this.executeRun(run.id, absPath, check, taskId ?? null, source);
+    this.executeRun(run.id, absPath, check, scheduleId ?? null, source);
     return run;
   }
 
   /** device=android/ios：创建 queued 记录入队，交给 RemoteRunService 派发 */
   private async enqueueRemoteRun(
     check: Check,
-    taskId: number | undefined,
+    scheduleId: number | undefined,
     source: 'schedule' | 'manual',
   ): Promise<CheckRun> {
     const now = new Date();
     const run = await this.runs.save(
       this.runs.create({
         checkId: check.id,
-        taskId: taskId ?? null,
+        scheduleId: scheduleId ?? null,
         status: 'queued',
         startedAt: now,
         queuedAt: now,
@@ -295,11 +295,11 @@ export class ChecksService implements OnModuleInit {
     );
     this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
     const runTitle = `检查：${check.code}`;
-    if (taskId !== undefined) {
-      void this.notifyService.notifyTaskRunStart(
+    if (scheduleId !== undefined) {
+      void this.notifyService.notifyScheduleRunStart(
         {
           projectId: check.projectId,
-          taskId,
+          scheduleId,
           runTitle,
           checkCode: check.code,
           scriptPath: check.scriptPath,
@@ -316,12 +316,12 @@ export class ChecksService implements OnModuleInit {
       appTarget: null,
       appVersion: null,
       source,
-      taskId,
+      scheduleId,
     });
     return run;
   }
 
-  /** 远程终态/中断：落 patch + 推 SSE 终态 + 飞书结果卡片（仅 task 触发时通知） */
+  /** 远程终态/中断：落 patch + 推 SSE 终态 + 飞书结果卡片（仅定时任务触发时通知） */
   private applyRemoteFinal(
     ctx: RemoteRunContext,
     patch: Record<string, unknown>,
@@ -339,10 +339,10 @@ export class ChecksService implements OnModuleInit {
             LIVE_SNAPSHOT_TTL_MS,
           );
         }
-        if (ctx.meta.taskId !== undefined) {
-          void this.notifyService.notifyTaskRun({
+        if (ctx.meta.scheduleId !== undefined) {
+          void this.notifyService.notifyScheduleRun({
             projectId: ctx.meta.projectId,
-            taskId: ctx.meta.taskId,
+            scheduleId: ctx.meta.scheduleId,
             runTitle: ctx.meta.runTitle,
             checkCode: ctx.meta.checkCode,
             scriptPath: ctx.meta.scriptPath,
@@ -429,16 +429,16 @@ export class ChecksService implements OnModuleInit {
     return this.recentRunsBy('checkId', checkIds, take);
   }
 
-  /** 各任务最近几次运行（项目 .md 的任务板块用）：Map<taskId, CheckRun[]> */
-  async recentRunsByTaskIds(
-    taskIds: number[],
+  /** 各任务最近几次运行（项目 .md 的定时任务板块用）：Map<scheduleId, CheckRun[]> */
+  async recentRunsByScheduleIds(
+    scheduleIds: number[],
     take = DEFAULT_RECENT_RUNS,
   ): Promise<Map<number, CheckRun[]>> {
-    return this.recentRunsBy('taskId', taskIds, take);
+    return this.recentRunsBy('scheduleId', scheduleIds, take);
   }
 
   private async recentRunsBy(
-    key: 'checkId' | 'taskId',
+    key: 'checkId' | 'scheduleId',
     ids: number[],
     take: number,
   ): Promise<Map<number, CheckRun[]>> {
@@ -459,26 +459,26 @@ export class ChecksService implements OnModuleInit {
   }
 
   /** 某次任务触发的运行历史（倒序，上限 50；任务详情页用） */
-  listRunsByTask(taskId: number): Promise<CheckRun[]> {
+  listRunsBySchedule(scheduleId: number): Promise<CheckRun[]> {
     return this.runs.find({
-      where: { taskId },
+      where: { scheduleId },
       order: { id: 'DESC' },
       take: MAX_RUNS,
     });
   }
 
   /** 各任务的运行统计（任务列表"运行"列用）：fail 含 error，total 为全部运行数 */
-  async runStatsByTasks(
-    taskIds: number[],
+  async runStatsBySchedules(
+    scheduleIds: number[],
   ): Promise<Map<number, { success: number; fail: number; total: number }>> {
     const map = new Map<
       number,
       { success: number; fail: number; total: number }
     >();
-    if (taskIds.length === 0) return map;
+    if (scheduleIds.length === 0) return map;
     const rows = await this.runs
       .createQueryBuilder('r')
-      .select('r.taskId', 'taskId')
+      .select('r.scheduleId', 'scheduleId')
       .addSelect(
         `SUM(CASE WHEN r.status = 'success' THEN 1 ELSE 0 END)`,
         'success',
@@ -488,16 +488,16 @@ export class ChecksService implements OnModuleInit {
         'fail',
       )
       .addSelect('COUNT(*)', 'total')
-      .where('r.taskId IN (:...taskIds)', { taskIds })
-      .groupBy('r.taskId')
+      .where('r.scheduleId IN (:...scheduleIds)', { scheduleIds })
+      .groupBy('r.scheduleId')
       .getRawMany<{
-        taskId: number;
+        scheduleId: number;
         success: string;
         fail: string;
         total: string;
       }>();
     for (const row of rows) {
-      map.set(Number(row.taskId), {
+      map.set(Number(row.scheduleId), {
         success: Number(row.success),
         fail: Number(row.fail),
         total: Number(row.total),
@@ -529,13 +529,13 @@ export class ChecksService implements OnModuleInit {
   /**
    * 后台执行脚本：node 直跑 .check.ts（Node 24+ 原生类型擦除），以脚本根目录为 cwd，
    * 逐行解析 stdout 的行协议 `[{type}] {json}`，实时更新步数，进程结束后落最终结果。
-   * taskId 非空（定时/手动任务触发）时，终态向项目飞书群 webhook 推送结果。
+   * scheduleId 非空（定时/手动任务触发）时，终态向项目飞书群 webhook 推送结果。
    */
   private executeRun(
     runId: number,
     absPath: string,
     check: Check,
-    taskId: number | null,
+    scheduleId: number | null,
     source: 'schedule' | 'manual',
   ): void {
     const startedAt = Date.now();
@@ -654,16 +654,16 @@ export class ChecksService implements OnModuleInit {
             setTimeout(() => this.liveRuns.delete(runId), LIVE_SNAPSHOT_TTL_MS);
           }
           // 任务触发的运行：向项目飞书群 webhook 推送结果卡片（含异常/超时）
-          if (taskId !== null) {
+          if (scheduleId !== null) {
             const countBy = (s: 'success' | 'fail' | 'skip') =>
               items.filter((i) => i.status === s).length;
             // 异常结束时 [done] 计数缺失，按已解析的明细条数兜底
             const success = finalPatch.success ?? countBy('success');
             const fail = finalPatch.fail ?? countBy('fail');
             const skip = finalPatch.skip ?? countBy('skip');
-            void this.notifyService.notifyTaskRun({
+            void this.notifyService.notifyScheduleRun({
               projectId: check.projectId,
-              taskId,
+              scheduleId,
               checkCode: check.code,
               scriptPath: check.scriptPath,
               status: status,

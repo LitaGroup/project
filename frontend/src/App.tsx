@@ -8,7 +8,7 @@ import { DocumentDetailPage } from './pages/DocumentDetailPage'
 import { CheckRunPage } from './pages/CheckRunPage'
 import { TestRunPage } from './pages/TestRunPage'
 import { ExportRunPage } from './pages/ExportRunPage'
-import { TaskDetailPage } from './pages/TaskDetailPage'
+import { ScheduleDetailPage } from './pages/ScheduleDetailPage'
 import { TestsPage } from './pages/TestsPage'
 import { ChecksPage } from './pages/ChecksPage'
 import { ExportsPage } from './pages/ExportsPage'
@@ -18,7 +18,16 @@ import { MilestonesPage } from './pages/MilestonesPage'
 import { CommitsPage } from './pages/CommitsPage'
 import { ReposPage } from './pages/ReposPage'
 import { ScriptsPage } from './pages/ScriptsPage'
-import { TasksPage } from './pages/TasksPage'
+import { SchedulesPage } from './pages/SchedulesPage'
+import { TaskCenterPage } from './pages/TaskCenterPage'
+import { TaskTemplatesPage } from './pages/TaskTemplatesPage'
+import { TaskTemplateEditPage } from './pages/TaskTemplateEditPage'
+import { TaskPackageDetailPage } from './pages/TaskPackageDetailPage'
+import { WorkersLivePage } from './pages/WorkersLivePage'
+import { WorkersPage } from './pages/WorkersPage'
+import { SchedulersPage } from './pages/SchedulersPage'
+import { WorkerEditPage } from './pages/WorkerEditPage'
+import { ExecutorsPage } from './pages/ExecutorsPage'
 import { DefectsPage } from './pages/DefectsPage'
 import { DefectDetailPage } from './pages/DefectDetailPage'
 import { ProjectDefectsPage } from './pages/ProjectDefectsPage'
@@ -47,7 +56,6 @@ function App() {
         <Route element={<RequireAuth />}>
           <Route element={<Layout />}>
           <Route path="/" element={<OverviewPage />} />
-          <Route path="/login" element={<LoginPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route
@@ -67,8 +75,8 @@ function App() {
             element={<ExportRunPage />}
           />
           <Route
-            path="/projects/:id/tasks/:taskId"
-            element={<TaskDetailPage />}
+            path="/projects/:id/schedules/:scheduleId"
+            element={<ScheduleDetailPage />}
           />
           <Route
             path="/projects/:id/defects"
@@ -90,7 +98,32 @@ function App() {
           <Route path="/code" element={<Navigate to="/code/repos" replace />} />
           <Route path="/code/repos" element={<ReposPage />} />
           <Route path="/scripts" element={<ScriptsPage />} />
-          <Route path="/tasks" element={<TasksPage />} />
+          <Route path="/schedules" element={<SchedulesPage />} />
+          <Route path="/tasks" element={<TaskCenterPage />} />
+          <Route path="/tasks/live" element={<WorkersLivePage />} />
+          <Route path="/tasks/templates" element={<TaskTemplatesPage />} />
+          <Route
+            path="/tasks/templates/new"
+            element={<TaskTemplateEditPage />}
+          />
+          <Route
+            path="/tasks/templates/:templateId"
+            element={<TaskTemplateEditPage />}
+          />
+          <Route path="/tasks/workers" element={<WorkersPage />} />
+          <Route path="/tasks/workers/new" element={<WorkerEditPage role="工作者" />} />
+          <Route path="/tasks/workers/:workerId" element={<WorkerEditPage role="工作者" />} />
+          <Route path="/tasks/schedulers" element={<SchedulersPage />} />
+          <Route
+            path="/tasks/schedulers/new"
+            element={<WorkerEditPage role="调度器" />}
+          />
+          <Route
+            path="/tasks/schedulers/:workerId"
+            element={<WorkerEditPage role="调度器" />}
+          />
+          <Route path="/tasks/executors" element={<ExecutorsPage />} />
+          <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
           <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/profile" element={<ProfilePage />} />

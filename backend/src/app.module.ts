@@ -8,12 +8,15 @@ import { AppService } from './app.service';
 import { AppVersionsModule } from './app-versions/app-versions.module';
 import { AgentModule } from './agent/agent.module';
 import { AgentAppsModule } from './agent/agent-apps.module';
+import { ExecutorsModule } from './executors/executors.module';
+import { TasksModule } from './tasks/tasks.module';
+import { WorkersModule } from './workers/workers.module';
 import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './auth/auth.guard';
 import { ProjectsModule } from './projects/projects.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ChecksModule } from './checks/checks.module';
-import { TasksModule } from './tasks/tasks.module';
+import { SchedulesModule } from './schedules/schedules.module';
 import { TestsModule } from './tests/tests.module';
 import { ExportsModule } from './exports/exports.module';
 import { DefectsModule } from './defects/defects.module';
@@ -48,7 +51,7 @@ import { ReleasesModule } from './releases/releases.module';
     AuthModule,
     DocumentsModule,
     ChecksModule,
-    TasksModule,
+    SchedulesModule,
     TestsModule,
     ExportsModule,
     DefectsModule,
@@ -57,6 +60,9 @@ import { ReleasesModule } from './releases/releases.module';
     AppVersionsModule,
     AgentModule,
     AgentAppsModule,
+    ExecutorsModule,
+    WorkersModule,
+    TasksModule,
     ScriptsModule,
     FeishuModule,
     GithubModule,

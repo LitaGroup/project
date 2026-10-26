@@ -14,15 +14,15 @@ import {
   api,
   type Project,
   type ProjectCheck,
-  type ProjectTask,
+  type ProjectSchedule,
 } from '../lib/api'
 import { RunStats } from '../components/RunStats'
 import { ProjectFilterSelect } from '../components/ProjectFilterSelect'
 import { useProjectIdParam } from '../components/useProjectIdParam'
 
-/** 任务全局列表：全部项目的定时任务（标题/计划/脚本/项目/运行），支持标题、脚本名模糊搜索 */
-export function TasksPage() {
-  const [tasks, setTasks] = useState<ProjectTask[] | null>(null)
+/** 定时任务全局列表：全部项目的定时任务（标题/计划/脚本/项目/运行），支持标题、脚本名模糊搜索 */
+export function SchedulesPage() {
+  const [schedules, setSchedules] = useState<ProjectSchedule[] | null>(null)
   const [checks, setChecks] = useState<ProjectCheck[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [keyword, setKeyword] = useState('')
@@ -31,8 +31,8 @@ export function TasksPage() {
 
   useEffect(() => {
     api
-      .listTasks()
-      .then(setTasks)
+      .listSchedules()
+      .then(setSchedules)
       .catch((e: Error) => setError(e.message))
     // 脚本列：checkId → 检查登记信息；项目列：projectId → 项目名
     api.listChecks().then(setChecks).catch(() => undefined)
@@ -43,12 +43,13 @@ export function TasksPage() {
   const projectName = new Map(projects.map((p) => [p.id, p.name]))
 
   const q = keyword.trim().toLowerCase()
-  const filtered = (tasks ?? []).filter((t) => {
-    if (projectFilter !== 'all' && String(t.projectId) !== projectFilter) return false
+  const filtered = (schedules ?? []).filter((s) => {
+    if (projectFilter !== 'all' && String(s.projectId) !== projectFilter)
+      return false
     if (!q) return true
-    const check = checkOf.get(t.checkId)
+    const check = checkOf.get(s.checkId)
     return (
-      t.title.toLowerCase().includes(q) ||
+      s.title.toLowerCase().includes(q) ||
       (check?.code.toLowerCase().includes(q) ?? false) ||
       (check?.scriptPath.toLowerCase().includes(q) ?? false)
     )
@@ -57,10 +58,10 @@ export function TasksPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">任务</h1>
+        <h1 className="text-2xl font-semibold">定时任务</h1>
       </div>
 
-      <Toolbar aria-label="任务筛选" className="mb-4">
+      <Toolbar aria-label="定时任务筛选" className="mb-4">
         <ToolbarInput
           className="w-64"
           render={
@@ -94,58 +95,58 @@ export function TasksPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filtered.map((t) => {
-            const check = checkOf.get(t.checkId)
+          {filtered.map((s) => {
+            const check = checkOf.get(s.checkId)
             return (
-              <TableRow key={t.id}>
-                <TableCell className="max-w-md truncate" title={t.title}>
+              <TableRow key={s.id}>
+                <TableCell className="max-w-md truncate" title={s.title}>
                   <Link
-                    to={`/projects/${t.projectId}/tasks/${t.id}`}
+                    to={`/projects/${s.projectId}/schedules/${s.id}`}
                     className="text-foreground-intense underline"
                   >
-                    {t.title}
+                    {s.title}
                   </Link>
                 </TableCell>
-                <TableCell title={`执行周期：${t.cron}`}>
-                  {t.enabled
-                    ? t.nextRunAt
-                      ? new Date(t.nextRunAt).toLocaleString()
+                <TableCell title={`执行周期：${s.cron}`}>
+                  {s.enabled
+                    ? s.nextRunAt
+                      ? new Date(s.nextRunAt).toLocaleString()
                       : '—'
                     : '已停用'}
                 </TableCell>
                 <TableCell className="max-w-md truncate">
                   {check ? (
                     <Link
-                      to={`/projects/${t.projectId}/checks/${check.id}`}
+                      to={`/projects/${s.projectId}/checks/${check.id}`}
                       className="text-foreground-intense underline"
                       title={check.scriptPath}
                     >
                       {check.code}
                     </Link>
                   ) : (
-                    `#${t.checkId}`
+                    `#${s.checkId}`
                   )}
                 </TableCell>
                 <TableCell className="max-w-64 truncate">
                   <Link
-                    to={`/projects/${t.projectId}`}
+                    to={`/projects/${s.projectId}`}
                     className="text-foreground-intense underline"
                   >
-                    {projectName.get(t.projectId) ?? `#${t.projectId}`}
+                    {projectName.get(s.projectId) ?? `#${s.projectId}`}
                   </Link>
                 </TableCell>
                 <TableCell title="成功/失败/总运行次数（失败含异常）">
-                  {t.runStats ? <RunStats stats={t.runStats} /> : '—'}
+                  {s.runStats ? <RunStats stats={s.runStats} /> : '—'}
                 </TableCell>
               </TableRow>
             )
           })}
-          {tasks !== null && filtered.length === 0 && (
+          {schedules !== null && filtered.length === 0 && (
             <TableRow>
               <TableCell colSpan={5}>
-                {tasks.length === 0
-                  ? '暂无任务，到项目详情页新建定时任务'
-                  : '无匹配的任务'}
+                {schedules.length === 0
+                  ? '暂无定时任务，到项目详情页新建'
+                  : '无匹配的定时任务'}
               </TableCell>
             </TableRow>
           )}

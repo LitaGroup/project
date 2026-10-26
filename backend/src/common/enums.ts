@@ -177,3 +177,79 @@ export enum RepoStatus {
   ACTIVE = '有效',
   IGNORED = '忽略',
 }
+
+/**
+ * 任务处理中心（FEATURE-02）领域枚举。
+ */
+
+/** 执行器类型：本期仅 opencode，预留后续扩展 */
+export enum ExecutorType {
+  OPENCODE = 'opencode',
+  CODEX = 'codex',
+  CLAUDE_CODE = 'claude-code',
+}
+
+/** 机器人类型：智能体（本期）/ 员工（人工任务，预留） */
+export enum WorkerKind {
+  AGENT = '智能体',
+  HUMAN = '员工',
+}
+
+/** 机器人角色：工作者（干活）/ 调度器（任务识别、拆解、分配建议，AI 调度） */
+export enum WorkerRole {
+  WORKER = '工作者',
+  SCHEDULER = '调度器',
+}
+
+/** 机器人运行时：opencode 执行器上跑 / 平台进程内 PI Agent */
+export enum WorkerRuntime {
+  OPENCODE = 'opencode',
+  PI = 'pi',
+}
+
+/** 机器人实时状态（不落库，由名下任务实时推导，见 workers.service） */
+export enum WorkerLiveStatus {
+  IDLE = '空闲中',
+  WORKING = '工作中',
+  WAITING = '等待中',
+  ACCEPTING = '验收中',
+}
+
+/** 任务类型（任务包；调度器识别结果亦归入此枚举） */
+export enum TaskType {
+  REQUIREMENT = '需求分析',
+  TECH_DESIGN = '技术设计',
+  FRONTEND = '前端开发',
+  BACKEND = '后端开发',
+  CLIENT = '客户端开发',
+  UI = 'UI设计',
+  TESTING = '测试',
+  RELEASE = '发布',
+  OTHER = '其它',
+}
+
+/**
+ * 任务包状态机（阶段：创建→分发→执行→验收→交付→维护，见 docs/FEATURE-02-TASKS-PLAN.md）：
+ * 草稿/待补材料/待调度（创建）→ 待确认/已派发（分发）→ 执行中/待验收（执行）
+ * → 内部完成（责任人验收）→ 已交付（交付）→ 维护中（终态，不再动）；任意阶段可取消。
+ */
+export enum TaskStatus {
+  DRAFT = '草稿',
+  MISSING_MATERIALS = '待补材料',
+  PENDING_SCHEDULE = '待调度',
+  PENDING_CONFIRM = '待确认',
+  DISPATCHED = '已派发',
+  EXECUTING = '执行中',
+  PENDING_ACCEPT = '待验收',
+  INTERNAL_DONE = '内部完成',
+  DELIVERED = '已交付',
+  ARCHIVED = '维护中',
+  CANCELED = '已取消',
+}
+
+/** 调度方案状态：PI 产出 → 管理员确认/驳回 */
+export enum DispatchPlanStatus {
+  PENDING = '待确认',
+  CONFIRMED = '已确认',
+  REJECTED = '已驳回',
+}

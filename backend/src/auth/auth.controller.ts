@@ -135,7 +135,7 @@ export class AuthController {
   }
 
   private appUrl(): string {
-    return this.config.get<string>('APP_URL') ?? 'http://localhost:5173';
+    return this.config.get<string>('APP_URL') ?? 'http://localhost:5273';
   }
 
   private redirectLoginError(res: Response, message: string) {

@@ -19,14 +19,14 @@ const usageCards: InfoCard[] = [
     ],
   },
   {
-    title: '运行检查 / 用例 / 导出 / 任务（流式）',
+    title: '运行检查 / 用例 / 导出 / 定时任务（流式）',
     description:
       'POST 启动一次运行并以 text/markdown 流式返回：先头部信息，运行中逐行追加脚本原始输出，终态附「结果」小节后结束。客户端断开自动退订。',
     points: [
       'curl -N -X POST {BASE}/api/checks/{checkId}/run.md',
       'curl -N -X POST {BASE}/api/tests/{testId}/run.md',
       'curl -N -X POST {BASE}/api/exports/{exportId}/run.md',
-      'curl -N -X POST {BASE}/api/tasks/{taskId}/run.md（手动触发，不受 enabled 限制）',
+      'curl -N -X POST {BASE}/api/schedules/{scheduleId}/run.md（手动触发定时任务，不受 enabled 限制）',
       '必须带 -N 禁用缓冲逐行读取，无需轮询；长耗时操作直接等流结束',
     ],
   },
@@ -46,7 +46,7 @@ const usageCards: InfoCard[] = [
     description:
       '跨项目列举数据走常规 JSON 接口（projectId 可选，不传返回全部）；设置与脚本仓库更新走 .md 视图。',
     points: [
-      'GET /api/{checks,tests,exports,documents,tasks,defects}[?projectId=]',
+      'GET /api/{checks,tests,exports,documents,schedules,defects}[?projectId=]',
       'GET /api/settings.md（环境 / 脚本目录 / 访问域名 / agent 在线状态）',
       'curl -N -X POST {BASE}/api/settings/scripts/pull.md（脚本仓库 git pull，流式返回）',
       'POST /api/scripts/import.md（提交 scripts 代码后同步：新脚本一次导入为 检查/用例/导出，需指定项目）',

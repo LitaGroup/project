@@ -3,14 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Project } from '../projects/project.entity';
-import { Task } from '../tasks/task.entity';
+import { Schedule } from '../schedules/schedule.entity';
 
-/** 运行通知上下文（开始/结束共用）。仅任务触发的运行会通知，taskId 用于查任务标题 */
-export interface TaskRunContext {
+/** 运行通知上下文（开始/结束共用）。仅定时任务触发的运行会通知，scheduleId 用于查任务标题 */
+export interface ScheduleRunContext {
   projectId: number;
-  /** 任务 id（用于查 task title） */
-  taskId?: number;
-  /** 展示用标题（查不到 task 时的 fallback） */
+  /** 定时任务 id（用于查 schedule title） */
+  scheduleId?: number;
+  /** 展示用标题（查不到任务时的 fallback） */
   runTitle?: string;
   /** 脚本编号（code），用于群里识别脚本 */
   checkCode: string;
@@ -19,7 +19,7 @@ export interface TaskRunContext {
 }
 
 /** 发送 webhook 所需的运行结果快照 */
-export interface TaskRunResult extends TaskRunContext {
+export interface ScheduleRunResult extends ScheduleRunContext {
   status: 'success' | 'fail' | 'error';
   /** 触发方式（卡片第一行展示"手动 / 计划时间"） */
   source: 'schedule' | 'manual';
@@ -51,23 +51,23 @@ export class NotifyService {
   constructor(
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
-    @InjectRepository(Task)
-    private readonly tasks: Repository<Task>,
+    @InjectRepository(Schedule)
+    private readonly schedules: Repository<Schedule>,
     config: ConfigService,
   ) {
     this.fallbackWebhook = config.get<string>('FEISHU_WEBHOOK_URL') || null;
   }
 
   /**
-   * 任务触发的运行开始前，向项目飞书群推送"开始执行"卡片：
+   * 定时任务触发的运行开始前，向项目飞书群推送"开始执行"卡片：
    * [执行]（蓝色）任务名 - 触发方式（手动 / 计划时间）+ 项目 + 脚本。
    * 发送失败只记日志，不影响运行。
    */
-  async notifyTaskRunStart(
-    context: TaskRunContext,
+  async notifyScheduleRunStart(
+    context: ScheduleRunContext,
     source: 'schedule' | 'manual',
   ): Promise<void> {
-    await this.send(context, ({ project, task }) => {
+    await this.send(context, ({ project, schedule }) => {
       const trigger =
         source === 'schedule'
           ? `计划时间：${formatPlannedAt(new Date())}`
@@ -81,7 +81,7 @@ export class NotifyService {
               text: {
                 tag: 'lark_md',
                 content: [
-                  `**<font color='blue'>[执行]</font>** ${task?.title ?? context.runTitle ?? `#${context.taskId ?? '?'}`} - ${trigger}`,
+                  `**<font color='blue'>[执行]</font>** ${schedule?.title ?? context.runTitle ?? `#${context.scheduleId ?? '?'}`} - ${trigger}`,
                   `**项目**：${project?.name ?? `#${context.projectId}`} 项目`,
                   `**脚本**：${context.scriptPath ?? context.checkCode} 脚本`,
                 ].join('\n'),
@@ -94,12 +94,12 @@ export class NotifyService {
   }
 
   /**
-   * 任务触发的运行结束后，向项目飞书群推送结果卡片（成功/失败/异常/超时都推）：
+   * 定时任务触发的运行结束后，向项目飞书群推送结果卡片（成功/失败/异常/超时都推）：
    * [成功]（绿色）/ [失败]（红色）任务名 - 触发方式 + 项目 + 脚本 + 详情计数（失败数 0 绿 / >0 红）+ 描述。
    * 发送失败只记日志，不影响运行结果。
    */
-  async notifyTaskRun(result: TaskRunResult): Promise<void> {
-    await this.send(result, ({ project, task }) => {
+  async notifyScheduleRun(result: ScheduleRunResult): Promise<void> {
+    await this.send(result, ({ project, schedule }) => {
       const ok = result.status === 'success';
       const trigger =
         result.source === 'schedule'
@@ -114,7 +114,7 @@ export class NotifyService {
               text: {
                 tag: 'lark_md',
                 content: [
-                  `**<font color='${ok ? 'green' : 'red'}'>[${ok ? '成功' : '失败'}]</font>** ${task?.title ?? result.runTitle ?? `#${result.taskId ?? '?'}`} - ${trigger}`,
+                  `**<font color='${ok ? 'green' : 'red'}'>[${ok ? '成功' : '失败'}]</font>** ${schedule?.title ?? result.runTitle ?? `#${result.scheduleId ?? '?'}`} - ${trigger}`,
                   `**项目**：${project?.name ?? `#${result.projectId}`} 项目`,
                   `**脚本**：${result.scriptPath ?? result.checkCode} 脚本`,
                   `**详情**：共计**${result.total}**条，成功**${result.success}**条，失败**<font color='${result.fail > 0 ? 'red' : 'green'}'>${result.fail}</font>**条，跳过**${result.skip}**条`,
@@ -133,10 +133,10 @@ export class NotifyService {
    * 未配置回退 FEISHU_WEBHOOK_URL；都为空则跳过。
    */
   private async send(
-    context: TaskRunContext,
+    context: ScheduleRunContext,
     buildPayload: (refs: {
       project: Project | null;
-      task: Pick<Task, 'title'> | null;
+      schedule: Pick<Schedule, 'title'> | null;
     }) => Record<string, unknown>,
   ): Promise<void> {
     try {
@@ -151,18 +151,18 @@ export class NotifyService {
           : FEISHU_HOOK_PREFIX + secret
         : this.fallbackWebhook;
       if (!webhook) return;
-      // taskId 缺失时跳过 task 查询（标题走 runTitle fallback）
-      const task =
-        context.taskId !== undefined
-          ? await this.tasks.findOne({
-              where: { id: context.taskId },
+      // scheduleId 缺失时跳过任务查询（标题走 runTitle fallback）
+      const schedule =
+        context.scheduleId !== undefined
+          ? await this.schedules.findOne({
+              where: { id: context.scheduleId },
               select: { id: true, title: true },
             })
           : null;
       const res = await fetch(webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildPayload({ project, task })),
+        body: JSON.stringify(buildPayload({ project, schedule })),
       });
       // 飞书 webhook 业务失败也可能返回 200（body 带非 0 code / StatusCode），需看响应体
       const body = (await res.json().catch(() => null)) as {
@@ -174,12 +174,12 @@ export class NotifyService {
       const code = body?.code ?? body?.StatusCode ?? (res.ok ? 0 : -1);
       if (!res.ok || code !== 0) {
         this.logger.warn(
-          `飞书 webhook 推送失败（HTTP ${res.status}, code ${code}: ${body?.msg ?? body?.StatusMessage ?? '-'}）: task=${context.taskId ?? '-'}`,
+          `飞书 webhook 推送失败（HTTP ${res.status}, code ${code}: ${body?.msg ?? body?.StatusMessage ?? '-'}）: schedule=${context.scheduleId ?? '-'}`,
         );
       }
     } catch (e) {
       this.logger.warn(
-        `飞书 webhook 推送异常: ${(e as Error).message}（task=${context.taskId ?? '-'}）`,
+        `飞书 webhook 推送异常: ${(e as Error).message}（schedule=${context.scheduleId ?? '-'}）`,
       );
     }
   }

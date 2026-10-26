@@ -18,9 +18,9 @@ import {
   api,
   type CheckRun,
   type ProjectCheck,
-  type ProjectTask,
+  type ProjectSchedule,
 } from '../lib/api'
-import { DeleteTaskButton, TaskFormDialog } from './ProjectDetailPage'
+import { DeleteScheduleButton, ScheduleFormDialog } from './ProjectDetailPage'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { Terminal } from '../components/Terminal'
 
@@ -51,14 +51,17 @@ function formatDuration(run: CheckRun, now: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
 }
 
-/** 任务详情页：任务信息 + 该任务触发的检查脚本运行（布局同检查运行页） */
-export function TaskDetailPage() {
-  const { id, taskId } = useParams<{ id: string; taskId: string }>()
+/** 定时任务详情页：任务信息 + 该任务触发的检查脚本运行（布局同检查运行页） */
+export function ScheduleDetailPage() {
+  const { id, scheduleId } = useParams<{
+    id: string
+    scheduleId: string
+  }>()
   const projectId = Number(id)
-  const taskIdNum = Number(taskId)
+  const scheduleIdNum = Number(scheduleId)
   const navigate = useNavigate()
 
-  const [task, setTask] = useState<ProjectTask | null>(null)
+  const [schedule, setSchedule] = useState<ProjectSchedule | null>(null)
   const [projectName, setProjectName] = useState<string | null>(null)
   const [check, setCheck] = useState<ProjectCheck | null>(null)
   const [checks, setChecks] = useState<ProjectCheck[]>([])
@@ -72,28 +75,28 @@ export function TaskDetailPage() {
 
   const loadHistory = useCallback(
     () =>
-      api.listTaskRuns(taskIdNum).then((list) => {
+      api.listScheduleRuns(scheduleIdNum).then((list) => {
         setRuns(list)
         setSelectedRunId((cur) => cur ?? list[0]?.id ?? null)
       }),
-    [taskIdNum],
+    [scheduleIdNum],
   )
 
-  const loadTask = useCallback(
+  const loadSchedule = useCallback(
     () =>
       api
-        .getTask(taskIdNum)
-        .then((t) => {
-          setTask(t)
-          return api.getCheck(t.checkId)
+        .getSchedule(scheduleIdNum)
+        .then((s) => {
+          setSchedule(s)
+          return api.getCheck(s.checkId)
         })
         .then(setCheck)
         .catch((e: Error) => setError(e.message)),
-    [taskIdNum],
+    [scheduleIdNum],
   )
 
   useEffect(() => {
-    loadTask()
+    loadSchedule()
     // 面包屑的项目层级
     api
       .getProject(projectId)
@@ -105,7 +108,7 @@ export function TaskDetailPage() {
       .then(setChecks)
       .catch(() => setChecks([]))
     loadHistory().catch((e: Error) => setError(e.message))
-  }, [projectId, loadTask, loadHistory])
+  }, [projectId, loadSchedule, loadHistory])
 
   // 通过 SSE 订阅选中的运行记录：实时推送进度，终态推送后服务端自动完成
   const loadHistoryRef = useRef(loadHistory)
@@ -143,7 +146,7 @@ export function TaskDetailPage() {
     setStarting(true)
     setError(null)
     api
-      .runTask(taskIdNum)
+      .runSchedule(scheduleIdNum)
       .then((r) => {
         setSelectedRunId(r.id)
         return loadHistory()
@@ -152,7 +155,7 @@ export function TaskDetailPage() {
       .finally(() => setStarting(false))
   }
 
-  if (error && !task) return <p>加载失败:{error}</p>
+  if (error && !schedule) return <p>加载失败:{error}</p>
 
   // 切换选中记录时不展示上一次的旧数据
   const run = selectedRunId !== null && runData?.id === selectedRunId ? runData : null
@@ -165,27 +168,27 @@ export function TaskDetailPage() {
       <div className="flex min-w-0 flex-1 flex-col gap-6">
         <PageBreadcrumb
           items={[
-            { label: '任务', to: '/tasks' },
+            { label: '定时任务', to: '/schedules' },
             { label: projectName ?? '…', to: `/projects/${projectId}` },
-            { label: task?.title ?? '…' },
+            { label: schedule?.title ?? '…' },
           ]}
         />
         <section className="flex min-h-0 flex-1 flex-col">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <h2 className="text-xl font-semibold">
-                任务：{task?.title ?? '…'}
+                定时任务：{schedule?.title ?? '…'}
               </h2>
-              {task && (
+              {schedule && (
                 <p className="text-sm" title={check?.scriptPath}>
-                  <code>{task.cron}</code>
+                  <code>{schedule.cron}</code>
                   {' · '}
                   下次执行：
-                  {task.nextRunAt
-                    ? new Date(task.nextRunAt).toLocaleString()
+                  {schedule.nextRunAt
+                    ? new Date(schedule.nextRunAt).toLocaleString()
                     : '—'}
                   {' · '}
-                  已运行 {task.runCount} 次
+                  已运行 {schedule.runCount} 次
                   {check && (
                     <>
                       {' · '}
@@ -254,19 +257,19 @@ export function TaskDetailPage() {
           ) : (
             <p className="px-6 pb-6 text-sm">暂无运行记录</p>
           )}
-          {task && (
+          {schedule && (
             <div className="flex gap-2 px-6 pb-6">
-              <TaskFormDialog
+              <ScheduleFormDialog
                 projectId={projectId}
                 checks={checks}
-                task={task}
-                onSaved={loadTask}
+                schedule={schedule}
+                onSaved={loadSchedule}
               />
-              <DeleteTaskButton
-                task={task}
+              <DeleteScheduleButton
+                schedule={schedule}
                 onDeleted={() =>
                   api
-                    .deleteTask(task.id)
+                    .deleteSchedule(schedule.id)
                     .then(() => navigate(`/projects/${projectId}`))
                     .catch((e: Error) => setError(e.message))
                 }
@@ -280,9 +283,9 @@ export function TaskDetailPage() {
             <CardTitle>计划</CardTitle>
           </CardHeader>
           {/* 未来 5 次执行时间（cron 表达式实时计算） */}
-          {task?.nextRuns ? (
+          {schedule?.nextRuns ? (
             <ul className="flex flex-col gap-2 px-6 pb-6 text-sm">
-              {task.nextRuns.map((t) => (
+              {schedule.nextRuns.map((t) => (
                 <li key={t}>{new Date(t).toLocaleString()}</li>
               ))}
             </ul>

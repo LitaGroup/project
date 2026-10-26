@@ -7,8 +7,8 @@
 ```bash
 pnpm install
 cp backend/.env.example backend/.env   # 填 MySQL 与飞书凭据
-pnpm dev:backend    # http://localhost:3000/api
-pnpm dev:frontend   # http://localhost:5173
+pnpm dev:backend    # http://localhost:3100/api
+pnpm dev:frontend   # http://localhost:5273
 ```
 
 ## 部署待办
