@@ -44,7 +44,6 @@ import {
   Settings,
   TimelineEvent,
   Users,
-  Wrench,
 } from '@appica/icons-react'
 import type { IconComponent } from '@appica/icons-react'
 import { LayoutGroup, m } from 'framer-motion'
@@ -107,9 +106,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/tasks/list', label: '任务', icon: ClipboardList, ready: true },
       { to: '/tasks', label: '任务概览', icon: ChartPie, ready: true },
       { to: '/tasks/live', label: '工作概览', icon: Activity, ready: true },
-      { to: '/tasks/templates', label: '任务包', icon: Package, ready: true },
+      { to: '/tasks/templates', label: '任务定义', icon: Package, ready: true },
       { to: '/tasks/workers', label: '机器人', icon: Robot, ready: true },
-      { to: '/tasks/debug', label: '调试', icon: Wrench, ready: true },
       { to: '/tasks/executors', label: '执行器', icon: Cpu, ready: true },
     ],
   },

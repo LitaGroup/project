@@ -16,6 +16,8 @@ export default defineConfig({
       '/images': 'http://localhost:3100',
       // 导出产物静态目录（DIR_EXPORT_WEBROOT，后端挂在 /export-files 下）
       '/export-files': 'http://localhost:3100',
+      // 通用上传文件静态目录（DIR_FILE_WEBROOT，后端挂在 /files 下）
+      '/files': 'http://localhost:3100',
     },
   },
 })

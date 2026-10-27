@@ -117,6 +117,31 @@ export function SettingsPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>公共 Agent 访问令牌</CardTitle>
+              <CardDescription>
+                供多个公共 Agent 共用的 agent 访问令牌，权限与管理员等同，仅用于
+                .md 端点；来源于后端配置 PUBLIC_AGENT_TOKEN，不回显明文
+              </CardDescription>
+            </CardHeader>
+            <div className="flex flex-col gap-3 px-6 pb-6 group-data-inset/card:px-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm">配置状态</span>
+                <Badge variant={settings.publicAgentTokenConfigured ? 'success' : 'soft'}>
+                  {settings.publicAgentTokenConfigured
+                    ? '已配置'
+                    : '未配置 PUBLIC_AGENT_TOKEN'}
+                </Badge>
+              </div>
+              <p className="text-sm text-foreground-muted">
+                请求头携带 X-Agent-Token（或 URL 加 ?token= 参数）调用
+                /api/...*.md；写操作的操作人统一记录为「公共 Agent」。需要更换时由部署环境更新
+                PUBLIC_AGENT_TOKEN 并重启后端。
+              </p>
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Appium Agent</CardTitle>
               <CardDescription>
                 APP 测试执行机的连接信息，实时来自 agent 上报，只读

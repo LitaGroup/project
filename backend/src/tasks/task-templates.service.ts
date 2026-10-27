@@ -19,7 +19,7 @@ export interface CreateTaskTemplateInput {
 
 export type UpdateTaskTemplateInput = Partial<CreateTaskTemplateInput>;
 
-/** 任务包管理（TaskTemplate）：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
+/** 任务定义管理（TaskTemplate）：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
 @Injectable()
 export class TaskTemplatesService {
   constructor(

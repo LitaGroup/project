@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   MessageEvent,
   Param,
   ParseIntPipe,
@@ -18,6 +19,7 @@ import { TaskStatus, TaskSubStatus, TaskType } from '../common/enums';
 import { Task, TaskMissingItem } from './task.entity';
 import {
   CreateTaskInput,
+  RecognizeTaskInput,
   TasksService,
   TaskOverview,
   UpdateTaskInput,
@@ -55,6 +57,29 @@ class MarkMissingDto {
 
 class FeedbackDto {
   content?: string;
+}
+
+class ReplyQuestionDto {
+  /** 按问题顺序的答案（选项 label + 自定义文本） */
+  answers?: string[][];
+  /** 跳过本次提问 */
+  reject?: boolean;
+}
+
+/** AI 任务识别更新入参（task-recognize-update；只保存，不改状态、不派发） */
+class RecognizeTaskDto implements RecognizeTaskInput {
+  /** 任务标题（必填） */
+  title: string;
+  /** 用户的原始需求；不传保留原值，传空值/null 清除 */
+  input?: string | null;
+  /** 需求内容（必填，AI 分析整理后的需求，含需求澄清与补充的详细信息） */
+  content: string;
+  /** 交付方式（必填，即任务输出要求） */
+  outputSpec: string;
+  /** 工作计划（必填，Markdown） */
+  workPlan: string;
+  /** 执行机器人；不传保留原分配，传 null 清除 */
+  agentId?: number | null;
 }
 
 @Controller('tasks')
@@ -98,6 +123,8 @@ export class TasksController {
   /** 任务详情页聊天快照：当前任务 + 所属 PIPELINE + 对话消息 */
   @Get(':id/chat')
   chatSnapshot(@Param('id', ParseIntPipe) id: number) {
+    // 打开对话时补一次提问对账（节流 30s），恢复服务重启/断线期间漏收的提问
+    void this.dispatchService.syncPendingQuestions(id);
     return this.taskChat.snapshot(id);
   }
 
@@ -128,6 +155,34 @@ export class TasksController {
     @Req() req: AuthedRequest,
   ): Promise<Task> {
     return this.tasksService.update(id, dto, req.user?.name ?? null);
+  }
+
+  /**
+   * AI 技能 task-recognize-detail：任务识别上下文（text/markdown）。
+   * 含任务详情、状态、时间与启用中的工作者机器人清单。
+   */
+  @Get(':id/recognize.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  recognizeDetail(@Param('id', ParseIntPipe) id: number): Promise<string> {
+    return this.tasksService.recognizeDetailMarkdown(id);
+  }
+
+  /**
+   * AI 技能 task-recognize-update：保存识别结果（text/markdown）。
+   * 只更新标题/原始需求/需求内容/交付方式/工作计划/机器人分配，不改变状态、不派发。
+   */
+  @Post(':id/recognize.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  recognizeUpdate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RecognizeTaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    return this.tasksService.recognizeUpdateMarkdown(
+      id,
+      dto,
+      req.user?.name ?? null,
+    );
   }
 
   @Delete(':id')
@@ -173,6 +228,22 @@ export class TasksController {
   @Post(':id/interrupt')
   interrupt(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
     return this.dispatchService.interrupt(id, req.user?.name ?? null);
+  }
+
+  /** 回答机器人提问（answers 与问题顺序一致；reject=true 表示跳过） */
+  @Post(':id/questions/:questionId/reply')
+  replyQuestion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('questionId') questionId: string,
+    @Body() dto: ReplyQuestionDto,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.dispatchService.replyQuestion(
+      id,
+      questionId,
+      { answers: dto.answers, reject: dto.reject === true },
+      req.user?.name ?? null,
+    );
   }
 
   /** 验收通过：等待中-待验收 → 已结束-完成 */

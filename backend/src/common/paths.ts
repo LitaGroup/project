@@ -23,3 +23,14 @@ export function exportWebroot(): string {
       path.resolve(process.cwd(), '../export-files'),
   );
 }
+
+/**
+ * 通用文件上传后的本地根目录：环境变量 DIR_FILE_WEBROOT，默认 <项目根>/files。
+ * 目录经 main.ts 静态挂载，通过 http://{host}/files/{file-path} 公开访问。
+ * 注意：需在 ConfigModule 加载 .env 之后调用（bootstrap / Nest 服务内均可）。
+ */
+export function fileWebroot(): string {
+  return path.resolve(
+    process.env.DIR_FILE_WEBROOT ?? path.resolve(process.cwd(), '../files'),
+  );
+}

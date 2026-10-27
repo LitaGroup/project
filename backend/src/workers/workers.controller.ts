@@ -18,6 +18,11 @@ import {
 } from '../common/enums';
 import { Worker } from './worker.entity';
 import { OptimizePromptInput, WorkerAiService } from './worker-ai.service';
+import { WorkerEnvironmentService } from './worker-environment.service';
+import {
+  SkillCatalogItem,
+  WorkerSkillCatalogService,
+} from './worker-skill-catalog.service';
 import {
   CreateWorkerInput,
   UpdateWorkerInput,
@@ -28,6 +33,7 @@ import {
 class CreateWorkerDto implements CreateWorkerInput {
   name: string;
   intro?: string | null;
+  avatarUrl?: string | null;
   kind?: WorkerKind;
   role?: WorkerRole;
   runtime?: WorkerRuntime;
@@ -45,6 +51,7 @@ class CreateWorkerDto implements CreateWorkerInput {
 class UpdateWorkerDto implements UpdateWorkerInput {
   name?: string;
   intro?: string | null;
+  avatarUrl?: string | null;
   kind?: WorkerKind;
   role?: WorkerRole;
   runtime?: WorkerRuntime;
@@ -72,6 +79,7 @@ export interface WorkerLiveCard {
   id: number;
   name: string;
   intro: string | null;
+  avatarUrl: string | null;
   role: WorkerRole;
   runtime: WorkerRuntime;
   executorId: number | null;
@@ -90,9 +98,11 @@ export class WorkersController {
   constructor(
     private readonly workersService: WorkersService,
     private readonly workerAi: WorkerAiService,
+    private readonly workerEnvironment: WorkerEnvironmentService,
+    private readonly skillCatalog: WorkerSkillCatalogService,
   ) {}
 
-  /** AI 优化角色 PROMPT：结构补全 + 清晰化，返回 Markdown 正文（走执行器） */
+  /** AI 优化机器人 AGENTS.md：结构补全 + 清晰化，返回 Markdown 正文（走执行器） */
   @Post('optimize-prompt')
   async optimizePrompt(
     @Body() dto: OptimizePromptDto,
@@ -108,6 +118,7 @@ export class WorkersController {
         id: w.id,
         name: w.name,
         intro: w.intro,
+        avatarUrl: w.avatarUrl,
         role: w.role,
         runtime: w.runtime,
         executorId: w.executorId,
@@ -132,6 +143,20 @@ export class WorkersController {
       kind: kind || undefined,
       role: role || undefined,
     });
+  }
+
+  /** 技能库目录：从 Gitea docs/skills 发现可选 SKILL.md */
+  @Get('skill-catalog')
+  listSkillCatalog(@Query('q') q?: string): Promise<SkillCatalogItem[]> {
+    return this.skillCatalog.search(q);
+  }
+
+  /** 初始化/同步工作环境：写入工位 AGENTS.md 并按清单同步 .opencode/skills */
+  @Post(':id/initialize')
+  initialize(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<{ status: 'success'; workdir: string }> {
+    return this.workerEnvironment.initialize(id);
   }
 
   @Get(':id')

@@ -29,6 +29,7 @@ import { FeishuModule } from './feishu/feishu.module';
 import { GithubModule } from './github/github.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { SettingsModule } from './settings/settings.module';
+import { FilesModule } from './files/files.module';
 import { ImagesModule } from './images/images.module';
 import { ReleasesModule } from './releases/releases.module';
 
@@ -81,6 +82,7 @@ import { ReleasesModule } from './releases/releases.module';
     FeishuModule,
     GithubModule,
     SettingsModule,
+    FilesModule,
     ImagesModule,
     ReleasesModule,
   ],

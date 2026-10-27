@@ -22,6 +22,7 @@ import {
 } from '@appica/ui-react/alert-dialog'
 import { api, type Executor, type Worker } from '../lib/api'
 import { WorkerLiveBadge } from '../components/StatusBadge'
+import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 
 /**
  * 机器人管理：系统机器人（id < 1000，代码内置）+ 自定义机器人（id >= 1000）。
@@ -73,7 +74,7 @@ export function WorkersPage() {
             <TableHead className="w-48">模型</TableHead>
             <TableHead className="w-24">负责人</TableHead>
             <TableHead className="w-24">启用</TableHead>
-            <TableHead className="w-32 text-center">操作</TableHead>
+            <TableHead className="w-48 text-center">操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -81,6 +82,7 @@ export function WorkersPage() {
             <TableRow key={w.id}>
               <TableCell className="max-w-64">
                 <p className="flex items-center gap-2 truncate font-medium" title={w.name}>
+                  <RobotAvatar name={w.name} avatarUrl={w.avatarUrl} size={26} />
                   <span className="truncate">{w.name}</span>
                   <span className="text-xs font-normal text-foreground-muted">#{w.id}</span>
                   {w.system && (
@@ -114,6 +116,12 @@ export function WorkersPage() {
               <TableCell>{w.enabled ? '启用' : '停用'}</TableCell>
               <TableCell className="text-center">
                 <div className="flex justify-center gap-2">
+                  <Link
+                    to={`/tasks/workers/${w.id}/debug`}
+                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                  >
+                    调试
+                  </Link>
                   <Link
                     to={`/tasks/workers/${w.id}`}
                     className={buttonVariants({ variant: 'outline', size: 'sm' })}

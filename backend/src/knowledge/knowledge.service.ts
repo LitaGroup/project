@@ -1,15 +1,12 @@
 import {
   BadRequestException,
   ForbiddenException,
-  HttpException,
   Injectable,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { mdFrontmatter } from '../common/frontmatter';
-import { AuthService } from '../auth/auth.service';
-import { FeishuService } from '../feishu/feishu.service';
 import { KnowledgeEmbeddingService } from './knowledge-embedding.service';
 import {
   encodeKnowledgePath,
@@ -19,7 +16,6 @@ import {
 import { KnowledgeStore } from './knowledge.store';
 import type {
   KnowledgeDirectory,
-  KnowledgeFeishuResult,
   KnowledgeNode,
   KnowledgeSearchResponse,
   KnowledgeSearchSource,
@@ -41,8 +37,6 @@ export class KnowledgeService {
   constructor(
     private readonly store: KnowledgeStore,
     private readonly embedding: KnowledgeEmbeddingService,
-    private readonly auth: AuthService,
-    private readonly feishu: FeishuService,
   ) {}
 
   get isEnabled(): boolean {
@@ -282,11 +276,12 @@ export class KnowledgeService {
     path?: string;
     page?: number;
     pageSize?: number;
-    userId: number;
   }): Promise<KnowledgeSearchResponse> {
     const source = input.source ?? 'project';
-    if (!['project', 'feishu', 'all'].includes(source)) {
-      throw new BadRequestException('source 只能是 project / feishu / all');
+    if (source !== 'project') {
+      throw new BadRequestException(
+        '飞书云文档搜索已下线，source 仅支持 project（站内知识）',
+      );
     }
     const q = input.query?.trim();
     if (!q) throw new BadRequestException('搜索关键词不能为空');
@@ -298,117 +293,53 @@ export class KnowledgeService {
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
       throw new BadRequestException('pageSize 必须是 1..100 的整数');
     }
-    const includesFeishu = source === 'feishu' || source === 'all';
-    if (includesFeishu && q.length > 50) {
-      throw new BadRequestException('飞书搜索关键词不能超过 50 字');
-    }
-    if (!includesFeishu && q.length > 500) {
+    if (q.length > 500) {
       throw new BadRequestException('搜索关键词不能超过 500 字');
     }
+    this.assertEnabled();
     const offset = (page - 1) * pageSize;
-    const response: KnowledgeSearchResponse = {
+    const path = this.normalize(input.path || '/');
+    if (path !== '/') {
+      const node = await this.store.getByPath(path);
+      if (!node || node.kind !== 'directory') {
+        throw new BadRequestException(`搜索目录 ${path} 不存在`);
+      }
+    }
+    let queryVector: number[] | null = null;
+    if (this.embedding.configured) {
+      try {
+        queryVector = await this.embedding.embedOne(q);
+      } catch (error) {
+        this.logger.warn(
+          `查询向量生成失败，降级为全文检索：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    const retrieval = await this.store.search({
+      query: q,
+      path,
+      offset,
+      limit: pageSize,
+      queryVector,
+    });
+    return {
       query: q,
       source,
-      path: '/',
+      path,
       page,
       pageSize,
-      mode: 'fulltext',
-      results: [],
+      mode: retrieval.mode,
+      results: retrieval.results,
+      project: {
+        page,
+        pageSize,
+        hasMore: retrieval.hasMore,
+        mode: retrieval.mode,
+        results: retrieval.results,
+      },
     };
-
-    if (source === 'project' || source === 'all') {
-      if (!this.store.isEnabled) {
-        if (source === 'project') this.assertEnabled();
-        response.project = {
-          page,
-          pageSize,
-          hasMore: false,
-          mode: 'fulltext',
-          results: [],
-          error: this.store.unavailableMessage,
-        };
-      } else {
-        const path = this.normalize(input.path || '/');
-        if (path !== '/') {
-          const node = await this.store.getByPath(path);
-          if (!node || node.kind !== 'directory') {
-            throw new BadRequestException(`搜索目录 ${path} 不存在`);
-          }
-        }
-        let queryVector: number[] | null = null;
-        if (this.embedding.configured) {
-          try {
-            queryVector = await this.embedding.embedOne(q);
-          } catch (error) {
-            this.logger.warn(
-              `查询向量生成失败，降级为全文检索：${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-          }
-        }
-        const retrieval = await this.store.search({
-          query: q,
-          path,
-          offset,
-          limit: pageSize,
-          queryVector,
-        });
-        response.path = path;
-        response.mode = retrieval.mode;
-        response.results = retrieval.results;
-        response.project = {
-          page,
-          pageSize,
-          hasMore: retrieval.hasMore,
-          mode: retrieval.mode,
-          results: retrieval.results,
-        };
-      }
-    }
-
-    if (includesFeishu) {
-      try {
-        const token = await this.auth.getFeishuAccessToken(input.userId);
-        const found = await this.feishu.searchDocs(q, token, {
-          offset,
-          limit: pageSize,
-        });
-        const results: KnowledgeFeishuResult[] = found.docs.map((doc) => ({
-          ...doc,
-          markdownUrl:
-            doc.url &&
-            /(?:feishu\.cn|larksuite\.com)\/(?:docx|docs|sheets|base|wiki)\//.test(
-              doc.url,
-            )
-              ? `/api/feishu/read.md?url=${encodeURIComponent(doc.url)}`
-              : null,
-        }));
-        response.feishu = {
-          page,
-          pageSize,
-          hasMore: found.hasMore,
-          total: found.total,
-          results,
-        };
-      } catch (error) {
-        if (source === 'feishu') {
-          if (error instanceof HttpException) throw error;
-          throw new BadRequestException(
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-        response.feishu = {
-          page,
-          pageSize,
-          hasMore: false,
-          total: 0,
-          results: [],
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    }
-    return response;
   }
 
   async renderDirectoryMarkdown(path: string): Promise<string> {
@@ -561,12 +492,6 @@ export class KnowledgeService {
   }
 
   renderSearchMarkdown(result: KnowledgeSearchResponse): string {
-    const sourceLabel =
-      result.source === 'all'
-        ? '站内 + 飞书'
-        : result.source === 'feishu'
-          ? '飞书'
-          : '站内知识';
     const lines = [
       mdFrontmatter({
         update: new Date(),
@@ -576,101 +501,44 @@ export class KnowledgeService {
         path: result.path,
         page: result.page,
         pageSize: result.pageSize,
-        mode: result.project?.mode ?? 'fulltext',
+        mode: result.mode,
       }),
       '# 知识搜索结果',
       '',
       `- 关键词：${result.query}`,
-      `- 数据源：${sourceLabel}（${result.source}）`,
+      `- 数据源：站内知识（${result.source}）`,
       `- 分页：第 ${result.page} 页，每页最多 ${result.pageSize} 条`,
-      ...(result.project
-        ? [
-            `- 站内范围：${result.path}`,
-            `- 站内检索模式：${result.project.mode === 'hybrid' ? '全文 + 向量混合' : '全文'}`,
-            `- 站内结果数：${result.project.results.length}${result.project.hasMore ? '（还有下一页）' : ''}`,
-            ...(result.project.error
-              ? [`- 站内知识不可用：${result.project.error}`]
-              : []),
-          ]
-        : []),
-      ...(result.feishu
-        ? [
-            `- 飞书结果数：${result.feishu.results.length}${result.feishu.total ? ` / 共 ${result.feishu.total} 条` : ''}${result.feishu.hasMore ? '（还有下一页）' : ''}`,
-            ...(result.feishu.error
-              ? [`- 飞书搜索不可用：${result.feishu.error}`]
-              : []),
-          ]
-        : []),
+      `- 站内范围：${result.path}`,
+      `- 站内检索模式：${result.mode === 'hybrid' ? '全文 + 向量混合' : '全文'}`,
+      `- 站内结果数：${result.results.length}${result.project.hasMore ? '（还有下一页）' : ''}`,
+      '',
+      '## 站内知识',
       '',
     ];
-    if (result.project) {
-      lines.push('## 站内知识', '');
-      if (result.project.error) {
-        lines.push(`站内知识不可用：${result.project.error}`, '');
-      } else if (result.project.results.length === 0) {
-        lines.push('未检索到站内相关知识。', '');
-      } else {
-        result.project.results.forEach((item, index) => {
-          const encoded = encodeKnowledgePath(item.path);
-          lines.push(
-            `### ${index + 1}. ${item.title}`,
-            '',
-            `- 路径：${item.path}`,
-            `- 章节：${item.headingPath || '（正文）'}`,
-            `- 匹配：${item.matchedBy}`,
-            `- 相关度：${item.score}`,
-            `- 原文：GET /api/docs/detail/${encoded}.md`,
-            `- 网页：/docs/detail/${encoded}`,
-            '',
-            item.content,
-            '',
-            '---',
-            '',
-          );
-        });
-      }
-    }
-
-    if (result.feishu) {
-      lines.push('## 飞书云文档', '');
-      if (result.feishu.error) {
-        lines.push(`飞书搜索不可用：${result.feishu.error}`, '');
-      } else if (result.feishu.results.length === 0) {
-        lines.push('未检索到飞书云文档。', '');
-      } else {
-        result.feishu.results.forEach((item, index) => {
-          const updated =
-            item.updateTime !== null
-              ? new Date(item.updateTime * 1000).toISOString()
-              : '未知';
-          lines.push(
-            `### ${index + 1}. ${item.title}`,
-            '',
-            `- 类型：${item.docsType}`,
-            ...(item.url ? [`- 飞书原文：${item.url}`] : []),
-            `- 所有者：${item.ownerName || item.ownerId || '未知'}`,
-            `- 更新时间：${updated}`,
-            ...(item.markdownUrl
-              ? [`- 转 Markdown：GET ${item.markdownUrl}`]
-              : []),
-            ...(item.summary ? ['', item.summary] : []),
-            '',
-            '---',
-            '',
-          );
-        });
-      }
-    }
-
-    if (
-      (result.project?.results.length ?? 0) === 0 &&
-      (result.feishu?.results.length ?? 0) === 0 &&
-      !result.feishu?.error
-    ) {
-      lines.push('未检索到相关知识。', '');
+    if (result.results.length === 0) {
+      lines.push('未检索到站内相关知识。', '');
+    } else {
+      result.results.forEach((item, index) => {
+        const encoded = encodeKnowledgePath(item.path);
+        lines.push(
+          `### ${index + 1}. ${item.title}`,
+          '',
+          `- 路径：${item.path}`,
+          `- 章节：${item.headingPath || '（正文）'}`,
+          `- 匹配：${item.matchedBy}`,
+          `- 相关度：${item.score}`,
+          `- 原文：GET /api/docs/detail/${encoded}.md`,
+          `- 网页：/docs/detail/${encoded}`,
+          '',
+          item.content,
+          '',
+          '---',
+          '',
+        );
+      });
     }
     lines.push(
-      '> 站内结果为知识片段，需要完整上下文时继续读取“原文”；飞书结果可调用“转 Markdown”接口获取全文。回答时请注明来源。',
+      '> 站内结果为知识片段，需要完整上下文时继续读取“原文”；需要读取外部飞书文档时使用 `GET /api/feishu/read.md?url=`。回答时请注明来源。',
       '',
     );
     return lines.join('\n');

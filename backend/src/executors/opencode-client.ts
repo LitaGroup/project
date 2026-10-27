@@ -3,6 +3,10 @@
  * 鉴权：HTTP Basic，用户名固定 `opencode`，密码为登记的 server password（token 列）。
  * 响应包裹：部分端点返回 `{ data: ... }` 信封（如 /api/session、/api/provider），统一在方法内解包。
  */
+import {
+  extractOpencodeTodosFromMessage,
+  type OpencodeTodo,
+} from './opencode-todos';
 
 /** 执行器连接信息（Executor 实体的连接子集） */
 export interface OpencodeEndpoint {
@@ -60,6 +64,64 @@ export interface OpencodePromptInput {
   text: string;
   skills?: unknown[];
   files?: unknown[];
+}
+
+/**
+ * POST /prompt 的响应（data 信封已解包）。
+ * 该接口是异步投递：立即返回本轮创建的用户消息，不等执行结果；
+ * 结果需轮询会话终态（outcome 具有粘性，须配合 isFreshOutcome 采信本轮运行）。
+ */
+export interface OpencodePromptResult {
+  id?: string;
+  sessionID?: string;
+  time?: { created?: number | null };
+}
+
+/**
+ * 会话终态是否来自「本轮」运行（晚于 afterMs 结束）。
+ * prompt 为异步接口，outcome/time.idle 会保留上一轮运行的结果，直接采信会把
+ * 上一轮回复误判为本轮完成（重复旧内容）；time.idle 与消息 time.created 同源
+ * （执行器时钟），晚于本轮用户消息创建时间才可信。
+ * 缺 time.idle 的旧版本或未知基准（afterMs<=0）退回旧行为直接采信。
+ */
+export function isFreshOutcome(
+  info: { outcome?: string | null; time?: { idle?: number | null } },
+  afterMs: number,
+): boolean {
+  if (info.outcome !== 'succeeded' && info.outcome !== 'failed') return false;
+  const idle = info.time?.idle;
+  if (typeof idle !== 'number' || afterMs <= 0) return true;
+  return idle >= afterMs;
+}
+
+/** 提问选项（QuestionV2Option / QuestionOption 同构） */
+export interface OpencodeQuestionOption {
+  label: string;
+  /** 选项说明（可选） */
+  description?: string;
+}
+
+/** 单个问题（QuestionV2Info / QuestionInfo 同构） */
+export interface OpencodeQuestionInfo {
+  /** 完整问题 */
+  question: string;
+  /** 短标签（≤30 字符，前端用作标题） */
+  header: string;
+  /** 可选项；为空时只能自由输入 */
+  options?: OpencodeQuestionOption[];
+  /** 是否可多选 */
+  multiple?: boolean;
+  /** 是否接受自由输入（false 时只能选选项） */
+  custom?: boolean;
+}
+
+/** 待回答的提问请求（2.x 会话级 question） */
+export interface OpencodeQuestionRequest {
+  id: string;
+  sessionID: string;
+  questions: OpencodeQuestionInfo[];
+  /** 关联的工具调用（用于把提问挂到对应 tool part 上） */
+  tool?: { messageID?: string; callID?: string };
 }
 
 /** opencode 请求错误（保留状态码与响应体摘要） */
@@ -174,17 +236,25 @@ export class OpencodeClient {
     return OpencodeClient.unwrap(json);
   }
 
-  /** 发送消息（任务派发的 prompt） */
+  /**
+   * 发送消息（任务派发的 prompt）。异步投递：立即返回本轮创建的用户消息。
+   * 执行结果须轮询会话终态，且 outcome 具有粘性（保留上一轮结果），
+   * 判定时使用 isFreshOutcome 以本轮用户消息时间作为基准。
+   */
   async prompt(
     sessionId: string,
     input: OpencodePromptInput,
     signal?: AbortSignal,
-  ): Promise<unknown> {
-    return this.request(`/api/session/${sessionId}/prompt`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-      signal,
-    });
+  ): Promise<OpencodePromptResult | null> {
+    const json = await this.request<unknown>(
+      `/api/session/${sessionId}/prompt`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+        signal,
+      },
+    );
+    return OpencodeClient.unwrap(json) as OpencodePromptResult | null;
   }
 
   /** 会话消息历史（列表，assistant 项 text 可能为空，需取详情） */
@@ -200,20 +270,39 @@ export class OpencodeClient {
   /**
    * 会话最后一条 assistant 消息的文本。
    * 消息列表项的 text 可能为空，需取单条详情读取 content 分段。
+   * 兼容列表按时间倒序/正序返回：优先按 time.created 排序后取最新一条。
+   * afterCreatedMs：只取该时间之后创建的 assistant 消息（本轮基准），
+   * 避免终态先于消息落库的瞬间取到上一轮回复。
    */
-  async lastAssistantText(sessionId: string): Promise<string | null> {
+  async lastAssistantText(
+    sessionId: string,
+    afterCreatedMs = 0,
+  ): Promise<string | null> {
     interface ListMessage {
       id?: string;
       type?: string;
-      text?: string;
+      role?: string;
+      time?: { created?: number | null };
     }
     type Detail = { content?: Array<{ type?: string; text?: string }> };
     const json = (await this.messages(sessionId)) as
       ListMessage[] | { data?: ListMessage[] };
     const list: ListMessage[] = Array.isArray(json) ? json : (json.data ?? []);
-    for (let i = list.length - 1; i >= 0; i--) {
-      const message = list[i];
-      if (message?.type !== 'assistant' || !message.id) continue;
+    const assistants = list
+      .filter(
+        (message) =>
+          (message?.type === 'assistant' || message?.role === 'assistant') &&
+          (message.time?.created ?? 0) >= afterCreatedMs,
+      )
+      .sort((a, b) => {
+        const left = a.time?.created ?? 0;
+        const right = b.time?.created ?? 0;
+        if (left !== right) return right - left;
+        // 兜底：消息 ID 内含单调时间戳
+        return (b.id ?? '').localeCompare(a.id ?? '');
+      });
+    for (const message of assistants) {
+      if (!message.id) continue;
       const raw = (await this.message(sessionId, message.id)) as
         Detail | { data?: Detail };
       const detail = (raw as { data?: Detail }).data ?? (raw as Detail);
@@ -224,6 +313,23 @@ export class OpencodeClient {
       if (text) return text;
     }
     return null;
+  }
+
+  /** 会话最后一条用户消息的创建时间（毫秒，无用户消息返回 0）；作为本轮运行的新鲜度基准 */
+  async lastUserMessageCreatedAt(sessionId: string): Promise<number> {
+    interface ListMessage {
+      type?: string;
+      role?: string;
+      time?: { created?: number | null };
+    }
+    const json = (await this.messages(sessionId)) as
+      ListMessage[] | { data?: ListMessage[] };
+    const list: ListMessage[] = Array.isArray(json) ? json : (json.data ?? []);
+    const created = list
+      .filter((message) => message?.type === 'user' || message?.role === 'user')
+      .map((message) => message.time?.created ?? 0)
+      .sort((left, right) => right - left);
+    return created[0] ?? 0;
   }
 
   /** 会话信息（outcome=运行结果，time.idle=空闲时间；重启后对账用） */
@@ -238,6 +344,42 @@ export class OpencodeClient {
       time?: { idle?: number | null };
     }>(`/api/session/${sessionId}`);
     return OpencodeClient.unwrap(json);
+  }
+
+  /**
+   * 最近一次 todowrite 工具输入中的 todos（消息详情从新到旧扫描；无则 null）。
+   * 用于调试待办面板的兜底对账：SSE 漏事件时从消息历史补齐。
+   */
+  async latestTodos(sessionId: string): Promise<OpencodeTodo[] | null> {
+    interface ListMessage {
+      id?: string;
+      type?: string;
+      role?: string;
+      time?: { created?: number | null };
+    }
+    const json = (await this.messages(sessionId)) as
+      ListMessage[] | { data?: ListMessage[] };
+    const list: ListMessage[] = Array.isArray(json) ? json : (json.data ?? []);
+    const assistants = list
+      .filter(
+        (message) =>
+          message?.type === 'assistant' || message?.role === 'assistant',
+      )
+      .sort((a, b) => {
+        const left = a.time?.created ?? 0;
+        const right = b.time?.created ?? 0;
+        if (left !== right) return right - left;
+        // 兜底：消息 ID 内含单调时间戳
+        return (b.id ?? '').localeCompare(a.id ?? '');
+      });
+    for (const message of assistants) {
+      if (!message.id) continue;
+      const raw = await this.message(sessionId, message.id);
+      const detail = (raw as { data?: unknown }).data ?? raw;
+      const todos = extractOpencodeTodosFromMessage(detail);
+      if (todos) return todos;
+    }
+    return null;
   }
 
   /** 中断会话执行 */
@@ -259,6 +401,62 @@ export class OpencodeClient {
       `/api/session/${sessionId}/permission/${requestId}/reply`,
       { method: 'POST', body: JSON.stringify({ decision, message }) },
     );
+  }
+
+  /** 待回答的提问（2.x 会话级端点；旧版回退全局 /question 后按会话过滤） */
+  async listQuestions(sessionId: string): Promise<OpencodeQuestionRequest[]> {
+    try {
+      const json = await this.request<
+        OpencodeQuestionRequest[] | { data?: OpencodeQuestionRequest[] } | null
+      >(`/api/session/${sessionId}/question`);
+      const data = OpencodeClient.unwrap(json);
+      if (Array.isArray(data)) return data;
+    } catch (e) {
+      if (!(e instanceof OpencodeClientError) || e.status !== 404) throw e;
+    }
+    const json = await this.request<
+      OpencodeQuestionRequest[] | { data?: OpencodeQuestionRequest[] } | null
+    >('/question');
+    const data = OpencodeClient.unwrap(json);
+    return Array.isArray(data)
+      ? data.filter((item) => item.sessionID === sessionId)
+      : [];
+  }
+
+  /** 回答提问（answers 与问题顺序一致，每项为所选 label 与自定义文本） */
+  async replyQuestion(
+    sessionId: string,
+    requestId: string,
+    answers: string[][],
+  ): Promise<void> {
+    await this.requestQuestionAction(
+      `/api/session/${sessionId}/question/${requestId}/reply`,
+      `/question/${requestId}/reply`,
+      { method: 'POST', body: JSON.stringify({ answers }) },
+    );
+  }
+
+  /** 跳过提问 */
+  async rejectQuestion(sessionId: string, requestId: string): Promise<void> {
+    await this.requestQuestionAction(
+      `/api/session/${sessionId}/question/${requestId}/reject`,
+      `/question/${requestId}/reject`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+  }
+
+  /** 2.x 会话级端点优先，404 时回退旧版全局端点（服务端版本差异） */
+  private async requestQuestionAction(
+    path: string,
+    fallback: string,
+    init: RequestInit,
+  ): Promise<void> {
+    try {
+      await this.request(path, init);
+    } catch (e) {
+      if (!(e instanceof OpencodeClientError) || e.status !== 404) throw e;
+      await this.request(fallback, init);
+    }
   }
 
   /** 执行 shell 命令（建工位目录等；在 server 默认目录下用绝对路径操作） */

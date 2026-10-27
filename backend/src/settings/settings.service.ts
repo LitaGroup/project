@@ -44,6 +44,8 @@ export interface Settings {
     tokenConfigured: boolean;
     org: string;
   };
+  /** 公共 Agent 访问令牌是否已配置（PUBLIC_AGENT_TOKEN，不回显明文） */
+  publicAgentTokenConfigured: boolean;
   /** appium-agent 连接信息（实时：离线时 name/appiumUrl 为 null） */
   agent: {
     online: boolean;
@@ -72,6 +74,7 @@ export class SettingsService {
   private readonly feishuWebhookConfigured: boolean;
   private readonly githubTokenConfigured: boolean;
   private readonly githubOrg: string;
+  private readonly publicAgentTokenConfigured: boolean;
 
   constructor(
     config: ConfigService,
@@ -102,6 +105,9 @@ export class SettingsService {
     this.feishuWebhookConfigured = !!config.get<string>('FEISHU_WEBHOOK_URL');
     this.githubTokenConfigured = !!config.get<string>('GITHUB_TOKEN')?.trim();
     this.githubOrg = config.get<string>('GITHUB_ORG')?.trim() || 'LitaGroup';
+    this.publicAgentTokenConfigured = !!config
+      .get<string>('PUBLIC_AGENT_TOKEN')
+      ?.trim();
   }
 
   /** 平台配置概览：运行环境、脚本/图片目录、访问域名、飞书相关、appium-agent 连接信息（均只读，不含密钥） */
@@ -121,6 +127,7 @@ export class SettingsService {
         tokenConfigured: this.githubTokenConfigured,
         org: this.githubOrg,
       },
+      publicAgentTokenConfigured: this.publicAgentTokenConfigured,
       agent: this.agentGateway.getAgentInfo(),
     };
   }

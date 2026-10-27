@@ -221,7 +221,7 @@ export enum WorkerLiveStatus {
   ACCEPTING = '验收中',
 }
 
-/** 任务类型（任务包；调度机器人识别结果亦归入此枚举） */
+/** 任务类型（调度机器人识别结果亦归入此枚举） */
 export enum TaskType {
   REQUIREMENT = '需求分析',
   TECH_DESIGN = '技术设计',

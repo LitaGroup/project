@@ -59,11 +59,11 @@ const featureCards: InfoCard[] = [
   {
     title: '知识库',
     description:
-      'Markdown 文章 + 路径目录，站内全文与 PGVector 混合检索，并可直接搜索飞书云文档。',
+      'Markdown 文章 + 路径目录，站内全文与 PGVector 混合检索。',
     points: [
       '目录必须带结尾 /，文章不带；项目文档自动同步到 /project/{projectId}/document/{documentId}',
-      '搜索支持 source=project / feishu / all，page/pageSize 分页，每页最大 100 条',
-      '站内结果提供 RAG 片段与原文链接；飞书结果可调用 read.md 转为完整 Markdown',
+      '搜索支持 path 限定目录与 page/pageSize 分页，每页最大 100 条',
+      '搜索结果提供 RAG 片段与原文链接，可继续读取完整 Markdown',
       '独立技能 http://{host}/knowledge/SKILL.md 供 Agent 安装使用',
     ],
   },
@@ -188,7 +188,7 @@ function SkillInstallSection() {
         <CardHeader>
           <CardTitle>knowledge-search 技能</CardTitle>
           <CardDescription>
-            面向 RAG 的知识检索技能：站内全文 + PGVector 混合搜索、飞书 Search v2、目录/文章读取与飞书文档转 Markdown。
+            面向 RAG 的知识检索技能：站内全文 + PGVector 混合搜索、目录/文章读取与飞书文档转 Markdown。
           </CardDescription>
         </CardHeader>
         <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">

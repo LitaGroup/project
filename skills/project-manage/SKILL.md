@@ -1,13 +1,14 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库
-version: 1.14.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、获取任务识别上下文并保存任务识别结果
+version: 1.17.0
 author: Lita R&D Team
 tags:
   - 项目管理
   - 检查
   - 测试
   - 定时任务
+  - 文件上传
   - markdown
 ---
 
@@ -30,6 +31,8 @@ tags:
 11. 获取平台设置信息、更新脚本仓库
 12. 搜索平台知识库、浏览知识目录、读取知识文章与项目文档镜像（见第 11 节；也可单独安装 `knowledge-search` 技能）
 13. 创建知识文章/目录，更新正文、标题，移动/重命名，删除文章或目录（见第 11.4 节）
+14. 任务识别：读取任务识别上下文与有效机器人清单，保存识别出的标题、输入、交付方式、工作计划与执行机器人（见第 12 节）
+15. 上传任意文件（≤50MB）并获取无需登录即可访问的公共 URL（见第 13 节；也可单独安装 `file-upload` 技能）
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -40,7 +43,10 @@ tags:
 
 ## 鉴权
 
-所有 `/api/...*.md` 端点要求鉴权，凭 **agent 访问令牌**（`LITA_PROJECT_TOKEN`）调用。令牌归属个人：登录网页 → 右上角头像 → 个人中心 → "Agent 访问令牌"可查看、复制与重置，重置后旧令牌立即失效。个人中心另提供「一键设置令牌（Shell）」脚本，可把令牌写入本机配置。
+所有 `/api/...*.md` 端点要求鉴权，凭 **agent 访问令牌**（`LITA_PROJECT_TOKEN`）调用。令牌分两类：
+
+- **个人令牌**：归属个人，登录网页 → 右上角头像 → 个人中心 → "Agent 访问令牌"可查看、复制与重置，重置后旧令牌立即失效。个人中心另提供「一键设置令牌（Shell）」脚本，可把令牌写入本机配置。
+- **公共 Agent 令牌**：由平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**。同样经 `X-Agent-Token` 头或 `?token=` 参数传递；通过它发起的写操作，操作人统一记录为「公共 Agent」。该令牌未配置时不可用。
 
 ### 令牌获取顺序（按优先级）
 
@@ -73,7 +79,7 @@ curl "{BASE}/api/projects/search.md?q=pk&token={TOKEN}"
 
 ### 操作人记录
 
-通过 agent 令牌发起的写操作（如缺陷创建/更新/状态变更/追加记录）会自动记录**令牌对应用户**为操作人，展示在缺陷详情的"变更记录"中（来源 `AI` + 操作人姓名）；系统自动流转（如脚本回归通过关闭缺陷）操作人为空。
+通过 agent 令牌发起的写操作（如缺陷创建/更新/状态变更/追加记录）会自动记录**令牌对应用户**为操作人，展示在缺陷详情的"变更记录"中（来源 `AI` + 操作人姓名）；通过公共 Agent 令牌发起的操作，操作人固定为「公共 Agent」；系统自动流转（如脚本回归通过关闭缺陷）操作人为空。
 
 ## 能力清单
 
@@ -393,16 +399,13 @@ curl -X DELETE {BASE}/api/code-branches/{id}
 ### 11.1 搜索知识（RAG 上下文）
 
 ```
-GET /api/docs/search.md?q={关键词}[&source=project|feishu|all][&path={目录}][&page=1][&pageSize=8]
+GET /api/docs/search.md?q={关键词}[&path={目录}][&page=1][&pageSize=8]
 ```
 
-- `source` 默认 `project`：`project`=站内知识，`feishu`=飞书 Search v2，`all`=两源同时搜索（各返回当前页最多 `pageSize` 条）
+- 仅站内知识检索（Markdown + PGVector + 全文）；飞书云文档实时搜索已下线，`source` 仅接受 `project`，其他值返回 400
 - `pageSize` 范围 1..100；`page` 从 1 开始；旧 `limit` 是 `pageSize` 别名
-- 飞书搜索使用当前平台用户登录飞书时获得的 `user_access_token`，授权过期需重新登录；飞书关键词最多 50 字
-- 报 `99991679 / search:docs:read` 表示飞书应用缺少「搜索云文档」权限：管理员需添加 `search:docs:read`、发布应用版本，然后用户退出并重新登录平台；刷新旧 token 不会补充新权限
-- 站内结果带标题、知识路径、章节、相关度、命中方式和原文链接；飞书结果带原文链接与 `markdownUrl`
-- `source=all` 时飞书不可用不影响站内结果（飞书小节带 error）
-- 先搜索，再按需读取原文；回答时注明知识路径/飞书链接，不要只凭片段推测
+- 结果带标题、知识路径、章节、相关度、命中方式和原文链接
+- 先搜索，再按需读取原文；回答时注明知识路径，不要只凭片段推测
 
 ### 11.2 飞书文档转 Markdown
 
@@ -448,10 +451,53 @@ curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json'
 - 删除不可恢复；项目同步的 `/project/**` 知识只读，拒绝更新/删除
 - 返回内容含节点 ID、原/当前路径、类型、读取地址和网页地址，可直接用于后续复核
 
+## 12. 任务识别（Markdown）
+
+任务由 AI 识别后回写详情。当前提供两个技能接口；识别更新**只保存结果，不改变任务状态、不派发执行**。
+
+### 12.1 task-recognize-detail：读取识别上下文
+
+```
+GET /api/tasks/{taskId}/recognize.md
+```
+
+- 返回带 frontmatter 的 Markdown：任务信息（ID/编号/标题/类型/描述/任务输入/需求内容/交付方式/工作计划）、状态、执行机器人、创建与更新时间
+- 附「有效机器人清单」：仅启用中的工作者机器人（ID/名称/描述）；调度机器人与停用机器人不会出现
+- 未分配机器人显示「未分配」；缺失文本显示「（暂无）」
+
+### 12.2 task-recognize-update：保存识别结果
+
+```bash
+curl -X POST {BASE}/api/tasks/{taskId}/recognize.md -H 'Content-Type: application/json' \
+  -d '{"title":"活动页开发","input":"用户原话：做个六一套 activity 页","content":"整理后的需求：…（含需求澄清与补充的详细信息）","outputSpec":"可访问的活动页链接","workPlan":"1. 开发页面\n2. 自测","agentId":1001}'
+```
+
+- `title` / `content`（需求内容，AI 分析整理后的需求，含需求澄清与补充的详细信息）/ `outputSpec`（交付方式）/ `workPlan`（任务计划，Markdown）必填
+- `input` 可选：用户的原始需求；不传保留原值，传空值或 `null` 清除
+- `agentId` 可选：不传保留原分配，传 `null` 清除；传 ID 时须为启用中的工作者机器人，否则 400
+- 成功返回 Markdown（任务 ID、状态、执行机器人与已保存字段）；任务不存在 404，参数不合法 400
+- 该接口只更新识别字段，不改状态、不派发执行、不创建子任务
+
+## 13. 文件上传（Markdown）
+
+将本地任意文件上传到平台，返回可直接分享的公共访问 URL。也可单独安装更精简的 `file-upload` 技能：`http://{host}/file-upload/SKILL.md`。
+
+```bash
+curl -X POST {BASE}/api/files/upload.md \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+  -F "file=@./report.pdf"
+```
+
+- multipart 字段名固定为 `file`；支持任意文件类型，单文件最大 **50 MB**
+- 返回 `text/markdown`，frontmatter 含 `filename` 与 `url`，正文另列文件名、大小、类型和「公开地址」
+- `url` 形如 `{BASE}/files/{YYYYMMDD}/{uuid}{ext}`，**无需登录或 Token** 即可访问，可直接发给用户或写入报告
+- 文件长期保存，当前没有自动过期或删除接口；不要上传密钥、凭据等敏感文件
+- 需要嵌入 Markdown 正文的图片仍走 `POST /api/images`（返回 `/images/...`）；本接口适合报告、压缩包、日志等通用文件分享
+
 ## 工作约定
 
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、任务识别结果更新（tasks/{id}/recognize.md）、文件上传（files/upload.md）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

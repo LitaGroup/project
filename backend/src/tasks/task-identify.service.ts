@@ -6,7 +6,6 @@ import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
 import { runOpencodePrompt } from '../executors/opencode-run';
 import { WorkerView, WorkersService } from '../workers/workers.service';
-import { DEFAULT_SCHEDULER_PROMPT } from '../workers/system-workers';
 import { Task, TaskMissingItem } from './task.entity';
 
 /** 调度机器人识别结果：任务详情 + 工作计划，或需要用户补充/确认的反馈清单 */
@@ -108,13 +107,12 @@ export class TaskIdentifyService {
     return this.parseIdentification(text, roster);
   }
 
-  /** 调度机器人 PROMPT + 输出协议 + 待识别任务与候选机器人 */
+  /** 调度机器人 PROMPT：输出协议 + 待识别任务与候选机器人（角色定义由工位 AGENTS.md 提供） */
   private buildPrompt(
     task: Task,
     scheduler: WorkerView,
     roster: WorkerView[],
   ): string {
-    const rolePrompt = scheduler.prompt?.trim() || DEFAULT_SCHEDULER_PROMPT;
     const userPrompt = [
       '# 待识别任务',
       '',
@@ -146,17 +144,7 @@ export class TaskIdentifyService {
       ),
       `\n# 任务类型枚举（type 只能取）\n\n${Object.values(TaskType).join(' / ')}`,
     ].join('\n');
-    return [
-      rolePrompt,
-      '',
-      '---',
-      '',
-      IDENTIFY_OUTPUT_CONTRACT,
-      '',
-      '---',
-      '',
-      userPrompt,
-    ].join('\n');
+    return [IDENTIFY_OUTPUT_CONTRACT, '', '---', '', userPrompt].join('\n');
   }
 
   /** 从回复文本提取并校验识别 JSON（兼容旧版 identification/missingItems/subtasks 字段） */

@@ -1,7 +1,8 @@
 export type KnowledgeNodeKind = 'directory' | 'article';
 export type KnowledgeNodeSource = 'native' | 'project-document' | 'system';
 export type KnowledgeIndexStatus = 'pending' | 'ready' | 'error';
-export type KnowledgeSearchSource = 'project' | 'feishu' | 'all';
+/** 搜索数据源：仅站内知识（飞书云文档搜索已下线） */
+export type KnowledgeSearchSource = 'project';
 
 export interface KnowledgeNode {
   id: string;
@@ -60,33 +61,6 @@ export interface KnowledgeProjectSearchPage {
   hasMore: boolean;
   mode: 'hybrid' | 'fulltext';
   results: KnowledgeSearchResult[];
-  /** source=all 时站内知识库不可用只标记该源，不影响飞书结果 */
-  error?: string;
-}
-
-export interface KnowledgeFeishuResult {
-  token: string;
-  title: string;
-  url: string | null;
-  docsType: string;
-  entityType: string;
-  summary: string;
-  ownerName: string | null;
-  ownerId: string | null;
-  updateTime: number | null;
-  createTime: number | null;
-  /** 转换为 Markdown 的外部接口地址 */
-  markdownUrl: string | null;
-}
-
-export interface KnowledgeFeishuSearchPage {
-  page: number;
-  pageSize: number;
-  hasMore: boolean;
-  total: number;
-  results: KnowledgeFeishuResult[];
-  /** source=all 时飞书搜索失败只标记该源，不影响站内结果 */
-  error?: string;
 }
 
 export interface KnowledgeSearchResponse {
@@ -97,8 +71,7 @@ export interface KnowledgeSearchResponse {
   pageSize: number;
   /** 兼容旧字段：站内检索模式 */
   mode: 'hybrid' | 'fulltext';
-  /** 兼容旧字段：站内检索结果（source=feishu 时为空） */
+  /** 兼容旧字段：站内检索结果 */
   results: KnowledgeSearchResult[];
-  project?: KnowledgeProjectSearchPage;
-  feishu?: KnowledgeFeishuSearchPage;
+  project: KnowledgeProjectSearchPage;
 }

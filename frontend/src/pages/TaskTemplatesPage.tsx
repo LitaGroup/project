@@ -21,7 +21,7 @@ import {
 } from '@appica/ui-react/alert-dialog'
 import { api, type TaskTemplate, type Worker } from '../lib/api'
 
-/** 任务包列表：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
+/** 任务定义列表：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
 export function TaskTemplatesPage() {
   const [templates, setTemplates] = useState<TaskTemplate[] | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
@@ -48,7 +48,7 @@ export function TaskTemplatesPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">任务包</h1>
+          <h1 className="text-2xl font-semibold">任务定义</h1>
           <p className="mt-1 text-sm text-foreground-muted">
             沉淀一类任务的可复用定义：描述、输入、输出与默认处理机器人
           </p>
@@ -57,7 +57,7 @@ export function TaskTemplatesPage() {
           to="/tasks/templates/new"
           className={buttonVariants({ variant: 'outline', size: 'sm' })}
         >
-          新建任务包
+          新建任务定义
         </Link>
       </div>
       {error && <p className="text-sm">操作失败:{error}</p>}
@@ -113,7 +113,7 @@ export function TaskTemplatesPage() {
           {templates !== null && templates.length === 0 && (
             <TableRow>
               <TableCell colSpan={5}>
-                暂无任务包，点右上角「新建任务包」创建
+                暂无任务定义，点右上角「新建任务定义」创建
               </TableCell>
             </TableRow>
           )}
@@ -123,7 +123,7 @@ export function TaskTemplatesPage() {
   )
 }
 
-/** 删除任务包确认 */
+/** 删除任务定义确认 */
 function DeleteTemplateButton({
   template,
   onDeleted,
@@ -140,7 +140,7 @@ function DeleteTemplateButton({
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>删除任务包</AlertDialogTitle>
+          <AlertDialogTitle>删除任务定义</AlertDialogTitle>
           <AlertDialogDescription>
             确定删除「{template.name}」吗？已创建的任务不受影响。
           </AlertDialogDescription>

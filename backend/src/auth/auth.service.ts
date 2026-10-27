@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios, { AxiosInstance } from 'axios';
 import * as jwt from 'jsonwebtoken';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { Repository } from 'typeorm';
 import { UserRole } from '../common/enums';
 import { FeishuService } from '../feishu/feishu.service';
@@ -16,6 +16,11 @@ import { User } from './user.entity';
 
 /** 登录成功后发送的飞书欢迎消息标题 */
 const WELCOME_TITLE = '你好，欢迎登录 project';
+
+/** 公共 Agent 虚拟用户 ID（不落库；多个公共 Agent 共用一个令牌，操作统一记在该身份下） */
+export const PUBLIC_AGENT_USER_ID = 0;
+/** 公共 Agent 展示名（写入缺陷变更记录、提测判定人等操作人字段） */
+export const PUBLIC_AGENT_NAME = '公共 Agent';
 
 /** 登录会话 Cookie 名（HttpOnly，JWT） */
 export const AUTH_COOKIE = 'pmp_auth';
@@ -33,7 +38,7 @@ export interface FeishuUserInfo {
   email: string | null;
 }
 
-/** 飞书 OAuth 用户令牌（用于代表用户搜索云文档） */
+/** 飞书 OAuth 用户令牌（登录时落库，当前无消费方） */
 export interface FeishuOAuthTokens {
   accessToken: string;
   refreshToken: string | null;
@@ -63,6 +68,8 @@ interface FeishuAppCredential {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly http: AxiosInstance;
+  /** 公共 Agent 访问令牌（PUBLIC_AGENT_TOKEN，管理员权限；未配置时禁用） */
+  private readonly publicAgentToken: string | null;
 
   constructor(
     private readonly config: ConfigService,
@@ -74,6 +81,8 @@ export class AuthService {
       baseURL: 'https://open.feishu.cn/open-apis',
       timeout: 30_000,
     });
+    this.publicAgentToken =
+      config.get<string>('PUBLIC_AGENT_TOKEN')?.trim() || null;
   }
 
   /** 生成 OAuth state（随机 hex，回调时与短效 Cookie 比对防 CSRF） */
@@ -99,7 +108,7 @@ export class AuthService {
 
   /**
    * 登录授权码换取用户信息和 OAuth 令牌。
-   * user_access_token 用于代表用户搜索其可见飞书云文档；refresh_token 用于过期自动续期。
+   * 令牌随登录落库，当前无消费方（原飞书云文档搜索已下线），保留给后续需要用户身份的飞书接口。
    */
   async exchangeCodeForLogin(code: string): Promise<FeishuLoginResult> {
     const { appId, appSecret, redirectUri } = this.getFeishuCredential();
@@ -206,65 +215,6 @@ export class AuthService {
     user.feishuAccessToken = tokens.accessToken;
     user.feishuRefreshToken = tokens.refreshToken;
     user.feishuTokenExpiresAt = tokens.expiresAt;
-  }
-
-  /**
-   * 取用户可用于飞书搜索的 user_access_token。
-   * 令牌未过期直接返回；过期时用 refresh_token 自动续期；都没有则要求重新登录授权。
-   */
-  async getFeishuAccessToken(userId: number): Promise<string> {
-    const user = await this.usersRepo
-      .createQueryBuilder('user')
-      .addSelect(['user.feishuAccessToken', 'user.feishuRefreshToken'])
-      .where('user.id = :id', { id: userId })
-      .getOne();
-    if (!user) throw new UnauthorizedException('用户不存在');
-    const valid =
-      user.feishuAccessToken &&
-      (!user.feishuTokenExpiresAt ||
-        user.feishuTokenExpiresAt.getTime() > Date.now() + 5 * 60 * 1000);
-    if (valid) return user.feishuAccessToken as string;
-    if (!user.feishuRefreshToken) {
-      throw new BadRequestException(
-        '飞书用户授权已过期，请重新通过飞书登录后再搜索飞书文档',
-      );
-    }
-    const { appId, appSecret } = this.getFeishuCredential();
-    try {
-      const { data } = await this.http.post<{
-        access_token?: string;
-        refresh_token?: string;
-        expires_in?: number;
-        error?: string;
-        error_description?: string;
-      }>('/authen/v2/oauth/token', {
-        grant_type: 'refresh_token',
-        client_id: appId,
-        client_secret: appSecret,
-        refresh_token: user.feishuRefreshToken,
-      });
-      if (!data.access_token) {
-        throw new Error(
-          data.error_description ?? data.error ?? '飞书未返回新的访问令牌',
-        );
-      }
-      const expiresIn =
-        typeof data.expires_in === 'number' && data.expires_in > 0
-          ? data.expires_in
-          : 7200;
-      user.feishuAccessToken = data.access_token;
-      user.feishuRefreshToken = data.refresh_token ?? user.feishuRefreshToken;
-      user.feishuTokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
-      await this.usersRepo.save(user);
-      return data.access_token;
-    } catch (e) {
-      this.logger.warn(
-        `飞书 user_access_token 刷新失败（用户 ${userId}）: ${(e as Error).message}`,
-      );
-      throw new BadRequestException(
-        '飞书用户授权已失效，请重新通过飞书登录后再搜索飞书文档',
-      );
-    }
   }
 
   /**
@@ -413,13 +363,24 @@ export class AuthService {
     return user.agentToken;
   }
 
-  /** 按 agent 访问令牌查用户（.md 端点鉴权用，enabled=false 视为无效） */
+  /**
+   * 按 agent 访问令牌查用户（`.md` 端点鉴权用）：
+   * - 公共 Agent 令牌（PUBLIC_AGENT_TOKEN）：返回不落库的虚拟管理员「公共 Agent」，
+   *   多个公共 Agent 共用一个令牌，权限与管理员等同，操作记录统一记在该身份下
+   * - 个人 agent 访问令牌：按 users.agentToken 查（enabled=false 视为无效）
+   */
   async getUserByAgentToken(token: string): Promise<User | null> {
     if (!token) return null;
+    if (this.isPublicAgentToken(token)) return this.buildPublicAgentUser();
     const user = await this.usersRepo.findOne({
       where: { agentToken: token },
     });
     return user && user.enabled ? user : null;
+  }
+
+  /** 是否已配置公共 Agent 访问令牌（设置页仅展示配置状态，不回显明文） */
+  hasPublicAgentToken(): boolean {
+    return !!this.publicAgentToken;
   }
 
   /**
@@ -505,6 +466,38 @@ export class AuthService {
   /** 生成 agent 访问令牌（48 位随机 hex） */
   private generateAgentToken(): string {
     return randomBytes(24).toString('hex');
+  }
+
+  /**
+   * 常量时间比对公共 Agent 令牌：先做 SHA-256 再比较，避免长度差异与提前返回泄露信息。
+   */
+  private isPublicAgentToken(token: string): boolean {
+    if (!this.publicAgentToken) return false;
+    const provided = createHash('sha256').update(token).digest();
+    const expected = createHash('sha256')
+      .update(this.publicAgentToken)
+      .digest();
+    return timingSafeEqual(provided, expected);
+  }
+
+  /** 公共 Agent 的虚拟用户：不落库（id=0），角色管理员，权限与管理员等同 */
+  private buildPublicAgentUser(): User {
+    const user = new User();
+    user.id = PUBLIC_AGENT_USER_ID;
+    user.feishuOpenId = 'public-agent';
+    user.unionId = null;
+    user.name = PUBLIC_AGENT_NAME;
+    user.avatarUrl = null;
+    user.email = null;
+    user.department = null;
+    user.role = UserRole.ADMIN;
+    user.enabled = true;
+    user.lastLoginAt = null;
+    user.agentToken = null;
+    user.feishuAccessToken = null;
+    user.feishuRefreshToken = null;
+    user.feishuTokenExpiresAt = null;
+    return user;
   }
 
   /** 飞书应用凭据（登录直接依赖 app_id/secret；tenant token 的 Lita 来源不适用于 OAuth） */

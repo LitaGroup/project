@@ -11,6 +11,12 @@
   }
 }
 
+/* 机器人默认头像占位：产品约定为「黑图」，刻意使用固定色值（主题例外，同 .terminal-gruvbox），
+   边框圈由组件内的 ring-border-strong 提供。 */
+.worker-avatar-empty {
+  background-color: #000;
+}
+
 /* Milkdown（Crepe）Markdown 编辑器：
    - 背景透明，跟随容器/页面背景（主题自带白底）
    - 字号与页面正文一致、内边距收紧（Crepe 默认 60px 120px，页面内容区放不下）

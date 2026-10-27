@@ -32,7 +32,7 @@ export async function ensureWorkerSequenceFloor(
 /**
  * 系统机器人启动初始化（代码内置，网页不可创建/删除）：
  * 1. 历史 runtime=pi 的机器人迁移为 opencode（原 PI 调度器已移除）；
- * 2. 历史自定义机器人（role=工作者）若落在系统 ID 段，迁到 id >= 1000，并同步任务/任务包引用；
+ * 2. 历史自定义机器人（role=工作者）若落在系统 ID 段，迁到 id >= 1000，并同步任务/任务定义引用；
  * 3. 历史调度器并入系统 ID 段（id < 1000），并同步任务的 schedulerId；
  * 4. 缺失时内置系统调度机器人；
  * 5. 把 workers 表的序列起点抬到 1000，保证网页新建的机器人是自定义机器人。
@@ -75,7 +75,7 @@ export class SystemWorkersService implements OnApplicationBootstrap {
     }
   }
 
-  /** 把历史自定义机器人（role=工作者 且 id<1000）迁到 1000+，并同步任务/任务包引用 */
+  /** 把历史自定义机器人（role=工作者 且 id<1000）迁到 1000+，并同步任务/任务定义引用 */
   private async normalizeCustomWorkerIds(): Promise<void> {
     const workers = await this.workers.find({
       where: { role: WorkerRole.WORKER },

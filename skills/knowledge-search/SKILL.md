@@ -1,7 +1,7 @@
 ---
 name: knowledge-search
 description: 在项目管理平台知识库中搜索、浏览、读取、创建、更新、移动和删除 Markdown 知识，基于 PGVector + 全文混合检索获取带来源引用的 RAG 上下文
-version: 1.1.0
+version: 1.2.0
 author: Lita R&D Team
 tags:
   - 知识库
@@ -49,35 +49,24 @@ curl "{BASE}/api/docs/search.md?q=部署&token=$LITA_PROJECT_TOKEN"
 ## 1. 搜索知识（RAG）
 
 ```http
-GET /api/docs/search.md?q={关键词或问题}[&source=project|feishu|all][&path={目录}][&page=1][&pageSize=8]
+GET /api/docs/search.md?q={关键词或问题}[&path={目录}][&page=1][&pageSize=8]
 ```
 
-- `source`：数据源，默认 `project`
-  - `project`：站内知识（Markdown + PGVector + 全文检索）
-  - `feishu`：直接调用飞书 Search v2，搜索当前登录用户可见的飞书云文档
-  - `all`：同时搜索站内知识和飞书，各返回当前页最多 `pageSize` 条
-- `path`：可选，仅对站内知识生效，限定该目录及其后代。
+- 搜索范围为站内知识（Markdown + PGVector + 全文检索）；飞书云文档实时搜索已下线，`source` 仅接受 `project`，传其他值返回 400。
+- `path`：可选，限定该目录及其后代。
 - `page`：页码，从 1 开始；`pageSize`：每页条数，1..100，默认 8。旧参数 `limit` 仍可作为 `pageSize` 别名。
-- 飞书关键词最多 50 字（飞书 Search v2 限制）。
-- 返回每条站内结果的标题、知识路径、章节、相关度、命中方式（`fulltext`/`vector`/`hybrid`）、知识片段、原文 Markdown 地址。
-- 返回每条飞书结果的标题、类型、原文链接、所有者、更新时间、摘要，以及 `markdownUrl`（飞书全文转 Markdown 接口）。
-- 飞书搜索依赖用户 `user_access_token`：Agent 的 `X-Agent-Token` 对应平台用户，该用户需至少成功登录过平台；授权过期会提示重新登录。
-- `source=all` 时若飞书搜索不可用，站内结果仍正常返回，飞书小节带 `error`。
+- 返回每条结果的标题、知识路径、章节、相关度、命中方式（`fulltext`/`vector`/`hybrid`）、知识片段、原文 Markdown 地址。
 
 示例：
 
 ```bash
 # 站内
 curl -s -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
-  "$BASE/api/docs/search.md?q=登录失败排查&source=project&page=1&pageSize=20"
+  "$BASE/api/docs/search.md?q=登录失败排查&page=1&pageSize=20"
 
-# 站内 + 飞书，各返回前 10 条
+# 限定目录
 curl -s -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
-  "$BASE/api/docs/search.md?q=需求评审&source=all&page=1&pageSize=10"
-
-# 仅飞书
-curl -s -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
-  "$BASE/api/docs/search.md?q=OKR&source=feishu&page=1&pageSize=20"
+  "$BASE/api/docs/search.md?q=需求评审&path=/project&page=1&pageSize=10"
 ```
 
 ### 1.1 飞书文档转 Markdown
@@ -88,7 +77,7 @@ GET /api/feishu/read.md?url={URL 编码后的飞书文档链接}
 
 - 支持 `docx/docs/sheets/base/wiki` 链接；电子表格可用 `?sheet=` 指定工作表，多维表格可用 `?table=&view=`。
 - 返回带 frontmatter 的完整 Markdown，可直接保存或提交给下游。
-- 搜索结果里的 `markdownUrl` 就是该接口地址。
+- 该接口走应用（tenant_access_token）权限，与登录用户无关；适用于已知飞书文档链接时按链接读取。
 
 ```bash
 curl -s -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
@@ -97,9 +86,9 @@ curl -s -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
 
 **推荐流程**：
 
-1. 用自然语言问题或关键术语搜索；需要跨站内和飞书时使用 `source=all`。
+1. 用自然语言问题或关键术语在站内知识中搜索。
 2. 阅读返回片段，判断是否需要完整上下文。
-3. 站内对关键结果继续读取“原文”地址；飞书调用 `markdownUrl` 获取全文。
+3. 对关键结果继续读取“原文”地址；需要读取外部飞书文档时调用 `read.md`（必须已有链接）。
 4. 基于原文回答，并注明知识路径或飞书链接。
 
 不要仅凭片段编造未出现的内容；片段不足时明确说明。
@@ -205,7 +194,8 @@ Content-Type: application/json
 ## 常见问题
 
 - **401**：缺少或无效 `X-Agent-Token`，按上文重新取令牌。
-- **飞书搜索 99991679 / search:docs:read**：飞书应用未开通「搜索云文档」用户权限。管理员需在飞书开放平台「权限管理」添加 `search:docs:read`，创建并发布应用版本，然后用户退出并重新登录本平台以刷新授权；仅刷新旧 token 不会增加新权限。
+- **400 `source` 不支持**：飞书云文档实时搜索已下线，`source` 仅接受 `project`（或不传），不要传 `feishu` / `all`。
+- **飞书文档读取失败**：`read.md` 使用应用权限，需应用对该文档有阅读权限（文档分享给应用或应用在知识空间内）；无权限时提示飞书接口错误。
 - **404 目录不存在**：检查目录是否带结尾 `/`，并且 API 地址以 `/.md` 结尾。
 - **404 文章不存在**：检查文章路径是否没有结尾 `/`，API 地址以 `.md` 结尾。
 - **503 知识库不可用**：平台尚未配置 PostgreSQL/PGVector，或数据库暂不可用；不要反复重试，告知用户检查知识库配置。

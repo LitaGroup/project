@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomBytes } from 'crypto';
 import { Observable } from 'rxjs';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
 import {
@@ -14,6 +15,7 @@ import {
   TaskType,
   WorkerRole,
 } from '../common/enums';
+import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { WorkerView, WorkersService } from '../workers/workers.service';
 import { User } from '../auth/user.entity';
 import { Worker } from '../workers/worker.entity';
@@ -71,12 +73,38 @@ export interface UpdateTaskInput {
   missingItems?: TaskMissingItem[] | null;
 }
 
+/** 任务识别更新入参（AI 技能 task-recognize-update；只保存，不改状态、不派发） */
+export interface RecognizeTaskInput {
+  /** 任务标题（必填） */
+  title: string;
+  /** 用户的原始需求；不传保留原值，传空值/null 清除 */
+  input?: string | null;
+  /** 需求内容（必填，Agent AI 分析整理后的需求，含需求澄清与补充的详细信息） */
+  content: string;
+  /** 交付方式（必填，即任务输出要求 outputSpec） */
+  outputSpec: string;
+  /** 工作计划（必填，Markdown） */
+  workPlan: string;
+  /** 执行机器人；不传保留原分配，传 null 清除，传 ID 时须为启用中的工作者 */
+  agentId?: number | null;
+}
+
 /** 概览统计（按主状态与子状态计数） */
 export interface TaskOverview {
   total: number;
   roots: number;
   statuses: Record<string, number>;
   subStatuses: Record<string, number>;
+}
+
+/** Markdown 正文段：空值用占位符，避免 AI 误读为缺失字段 */
+function markdownText(value: string | null | undefined): string {
+  return value?.trim() || '（暂无）';
+}
+
+/** Markdown 表格单元格转义（换行折叠为空格、竖线转义） */
+function escapeCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
 }
 
 @Injectable()
@@ -339,8 +367,14 @@ export class TasksService {
       (description ? '新任务' : '');
     if (!title) throw new BadRequestException('标题或任务描述不能为空');
     if (input.agentId) await this.assertWorker(input.agentId);
+    // 父任务先校验，避免插入后才因父任务不存在留下孤儿记录
+    const parent = input.parentId ? await this.mustFind(input.parentId) : null;
+    // code 按自增 id 生成、根任务 rootId 指向自身，都必须插入后才知道；
+    // 但两列 NOT NULL 且无默认值，先用唯一临时值占位，拿到 id 后再回填正式值。
     const task = await this.tasks.save(
       this.tasks.create({
+        code: `TMP-${randomBytes(8).toString('hex')}`,
+        rootId: parent ? parent.rootId : 0,
         title,
         type: input.type ?? TaskType.OTHER,
         description,
@@ -354,11 +388,8 @@ export class TasksService {
         subStatus: TaskSubStatus.PENDING_IDENTIFY,
       }),
     );
-    // 编号按 id 生成；根任务 rootId 指向自身
     task.code = `TK-${String(task.id).padStart(4, '0')}`;
-    task.rootId = input.parentId
-      ? (await this.mustFind(input.parentId)).rootId
-      : task.id;
+    task.rootId = parent ? parent.rootId : task.id;
     const operator = await this.operatorName(input.createdById ?? null);
     const saved = await this.tasks.save(task);
     await this.addEvent(
@@ -409,6 +440,176 @@ export class TasksService {
     const saved = await this.tasks.save(task);
     await this.addEvent(id, '操作', '更新任务信息', operator);
     return saved;
+  }
+
+  /** 启用中的工作者机器人（识别上下文的候选清单；排除调度机器人与停用机器人） */
+  private async enabledWorkerRoster(): Promise<WorkerView[]> {
+    return (
+      await this.workersService.findAll({ role: WorkerRole.WORKER })
+    ).filter((w) => w.enabled);
+  }
+
+  /**
+   * AI 技能 task-recognize-detail：返回任务识别上下文（Markdown）。
+   * 包含任务详情、状态、时间与启用中的工作者机器人清单，供外部识别流程读取。
+   */
+  async recognizeDetailMarkdown(id: number): Promise<string> {
+    const task = await this.mustFind(id);
+    const roster = await this.enabledWorkerRoster();
+    const agent = task.agentId
+      ? roster.find((w) => w.id === task.agentId)
+      : undefined;
+    const agentLabel = task.agentId
+      ? `${agent ? agent.name : `#${task.agentId}`}（${task.agentId}）`
+      : '未分配';
+    const lines = [
+      mdFrontmatter({ update: task.updatedAt, title: task.title }),
+      `# ${task.title}`,
+      '',
+      '## 任务信息',
+      '',
+      `- ID：${task.id}`,
+      `- 编号：${task.code}`,
+      `- 类型：${task.type}`,
+      `- 状态：${task.status}-${task.subStatus}`,
+      `- 执行机器人：${agentLabel}`,
+      `- 创建时间：${beijingTime(task.createdAt)}`,
+      `- 更新时间：${beijingTime(task.updatedAt)}`,
+      '',
+      '## 描述',
+      '',
+      markdownText(task.description),
+      '',
+      '## 任务输入（用户原始需求）',
+      '',
+      markdownText(task.input),
+      '',
+      '## 需求内容（AI 分析整理）',
+      '',
+      markdownText(task.content),
+      '',
+      '## 交付方式',
+      '',
+      markdownText(task.outputSpec),
+      '',
+      '## 工作计划',
+      '',
+      markdownText(task.workPlan),
+    ];
+    lines.push('', '## 有效机器人清单', '');
+    if (roster.length === 0) {
+      lines.push('当前没有启用的工作者机器人。');
+    } else {
+      lines.push('| ID | 名称 | 描述 |', '| --- | --- | --- |');
+      for (const w of roster) {
+        lines.push(
+          `| ${w.id} | ${escapeCell(w.name)} | ${escapeCell(w.intro ?? '-')} |`,
+        );
+      }
+    }
+    lines.push(
+      '',
+      '## 识别更新',
+      '',
+      '识别完成后调用 `POST /api/tasks/' +
+        task.id +
+        '/recognize.md` 保存标题、原始需求（input）、需求内容（content，AI 分析整理后的需求，含澄清与补充详情）、交付方式、工作计划与执行机器人；该接口只保存识别结果，不改变任务状态、不派发执行。',
+      '',
+    );
+    return lines.join('\n');
+  }
+
+  /** 识别结果落库：只更新识别字段与机器人分配，不改状态、不派发（调用方负责后续流程） */
+  async recognizeUpdate(
+    id: number,
+    input: RecognizeTaskInput,
+    operator: string | null,
+  ): Promise<Task> {
+    const title = input.title?.trim();
+    if (!title) throw new BadRequestException('任务标题不能为空');
+    if (title.length > 200)
+      throw new BadRequestException('任务标题不能超过 200 字');
+    const content = input.content?.trim();
+    if (!content) throw new BadRequestException('需求内容不能为空');
+    const outputSpec = input.outputSpec?.trim();
+    if (!outputSpec) throw new BadRequestException('交付方式不能为空');
+    const workPlan = input.workPlan?.trim();
+    if (!workPlan) throw new BadRequestException('工作计划不能为空');
+
+    const task = await this.mustFind(id);
+    if (input.agentId !== undefined && input.agentId !== null) {
+      if (!Number.isInteger(input.agentId) || input.agentId < 1) {
+        throw new BadRequestException('机器人 ID 必须为正整数');
+      }
+      await this.assertWorker(input.agentId);
+    }
+    task.title = title;
+    task.content = content;
+    if (input.input !== undefined) {
+      task.input = input.input?.trim() || null;
+    }
+    task.outputSpec = outputSpec;
+    task.workPlan = workPlan;
+    if (input.agentId !== undefined) {
+      task.agentId = input.agentId ?? null;
+    }
+    const saved = await this.tasks.save(task);
+    await this.addEvent(id, '操作', 'AI 更新任务识别信息', operator, {
+      title,
+      input: saved.input,
+      content,
+      outputSpec,
+      workPlan,
+      agentId: saved.agentId,
+    });
+    return saved;
+  }
+
+  /** AI 技能 task-recognize-update：保存识别结果并返回 Markdown 结果 */
+  async recognizeUpdateMarkdown(
+    id: number,
+    input: RecognizeTaskInput,
+    operator: string | null,
+  ): Promise<string> {
+    const saved = await this.recognizeUpdate(id, input, operator);
+    const roster = await this.enabledWorkerRoster();
+    const agent = saved.agentId
+      ? roster.find((w) => w.id === saved.agentId)
+      : undefined;
+    const agentLabel = saved.agentId
+      ? `${agent ? agent.name : `#${saved.agentId}`}（${saved.agentId}）`
+      : '未分配';
+    return [
+      mdFrontmatter({ update: saved.updatedAt, title: saved.title }),
+      '# 任务识别信息已更新',
+      '',
+      `- ID：${saved.id}`,
+      `- 编号：${saved.code}`,
+      `- 状态：${saved.status}-${saved.subStatus}（识别更新不改变任务状态）`,
+      `- 执行机器人：${agentLabel}`,
+      `- 详情地址：GET /api/tasks/${saved.id}/recognize.md`,
+      '',
+      '## 标题',
+      '',
+      saved.title,
+      '',
+      '## 任务输入（用户原始需求）',
+      '',
+      markdownText(saved.input),
+      '',
+      '## 需求内容（AI 分析整理）',
+      '',
+      markdownText(saved.content),
+      '',
+      '## 交付方式',
+      '',
+      saved.outputSpec,
+      '',
+      '## 工作计划',
+      '',
+      saved.workPlan,
+      '',
+    ].join('\n');
   }
 
   /** 删除根任务：级联删子任务、事件、方案（无物理外键，应用层处理） */

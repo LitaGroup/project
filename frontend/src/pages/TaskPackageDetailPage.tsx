@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
+import { Skeleton } from '@appica/ui-react/skeleton'
 import {
   api,
   type TaskChatMessage,
@@ -35,8 +36,11 @@ export function TaskPackageDetailPage() {
   const [error, setError] = useState<string | null>(null)
 
   const loadSeq = useRef(0)
+  /** 首次快照请求是否已返回（用于与 SSE ready 对齐，避免重复加载） */
+  const initialSettledRef = useRef(false)
   const load = useCallback(async () => {
     const seq = ++loadSeq.current
+    setLoading(true)
     try {
       const data: TaskChatSnapshot = await api.getTaskChat(taskId)
       if (seq !== loadSeq.current) return
@@ -47,7 +51,10 @@ export function TaskPackageDetailPage() {
     } catch (e) {
       if (seq === loadSeq.current) setError((e as Error).message)
     } finally {
-      if (seq === loadSeq.current) setLoading(false)
+      if (seq === loadSeq.current) {
+        setLoading(false)
+        initialSettledRef.current = true
+      }
     }
   }, [taskId])
 
@@ -58,6 +65,7 @@ export function TaskPackageDetailPage() {
 
   useEffect(() => {
     // 首次拉取任务对话；setState 均在 fetch 完成后的异步回调里触发，非同步级联
+    initialSettledRef.current = false
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
   }, [load])
@@ -82,8 +90,9 @@ export function TaskPackageDetailPage() {
       switch (data.type) {
         case 'ready':
           setConnection('live')
-          // 连接建立后重新对齐一次快照，补齐 GET 与 SSE 订阅之间的间隙
-          void loadRef.current()
+          // 首次快照请求已先于 SSE 就绪完成 → 补一次对齐，覆盖订阅建立前的间隙；
+          // 请求仍在途则跳过（避免进入页面重复加载），活跃任务的事件会经 refresh 持续补偿
+          if (initialSettledRef.current) void loadRef.current()
           break
         case 'message.upsert':
           setMessages((current) => upsertMessage(current, data.message))
@@ -172,49 +181,65 @@ export function TaskPackageDetailPage() {
     [taskId],
   )
 
-  if (loading && !task) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-foreground-muted">
-        加载任务对话…
-      </div>
-    )
-  }
-  if (!task) {
+  /** 回答/跳过机器人提问：后端转发 opencode question.reply/reject */
+  const replyQuestion = useCallback(
+    async (questionId: string, answers: string[][] | null) => {
+      setBusy(true)
+      setError(null)
+      try {
+        await api.replyTaskQuestion(
+          taskId,
+          questionId,
+          answers ? { answers } : { reject: true },
+        )
+        setMessages((current) =>
+          current.map((message) => {
+            const question = message.question
+            if (!question || question.id !== questionId) return message
+            return {
+              ...message,
+              status: 'complete',
+              question: {
+                ...question,
+                state: answers ? ('answered' as const) : ('rejected' as const),
+                answers: answers ?? undefined,
+              },
+            }
+          }),
+        )
+      } catch (e) {
+        setError((e as Error).message)
+        throw e
+      } finally {
+        setBusy(false)
+      }
+    },
+    [taskId],
+  )
+
+  const currentTask = task?.id === taskId ? task : null
+
+  // 初始加载失败（没有任何数据）：页面内错误 + 重试
+  if (!currentTask && !loading && error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
-        <p className="text-sm text-error-foreground">
-          加载失败：{error ?? '任务不存在'}
-        </p>
-        <Button size="sm" variant="outline" onClick={() => void load()}>
+        <p className="text-sm text-error-foreground">加载失败：{error}</p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setLoading(true)
+            void load()
+          }}
+        >
           重试
         </Button>
       </div>
     )
   }
-
-  const currentTask = task.id === taskId ? task : null
+  // 首屏骨架：立即渲染页面结构（面包屑/标题/左右面板占位），快照返回后就地填充
   if (!currentTask) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <p
-          className={`text-sm ${error ? 'text-error-foreground' : 'text-foreground-muted'}`}
-        >
-          {error ? `加载失败：${error}` : '加载任务对话…'}
-        </p>
-        {error && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setLoading(true)
-              void load()
-            }}
-          >
-            重试
-          </Button>
-        )}
-      </div>
-    )
+    return <TaskDetailSkeleton />
   }
 
   const currentStage = pipeline.find((stage) => stage.task.id === currentTask.id)
@@ -287,6 +312,7 @@ export function TaskPackageDetailPage() {
           connection={connection}
           busy={busy}
           onSendFeedback={sendFeedback}
+          onReplyQuestion={replyQuestion}
           onAction={act}
         />
         <TaskSidePanel key={taskId} task={currentTask} pipeline={pipeline} />
@@ -325,6 +351,93 @@ function upsertStage(
   const next = current.slice()
   next[index] = stage
   return next
+}
+
+/**
+ * 首屏骨架：镜像真实页面布局（面包屑 + 标题区 + 左对话右面板占位），
+ * 快照返回后就地填充，避免整页空白等待与明显布局跳动。
+ */
+function TaskDetailSkeleton() {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <PageBreadcrumb
+        items={[{ label: '任务', to: '/tasks/list' }, { label: '加载中' }]}
+      />
+      <header className="flex shrink-0 items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-7 w-72 max-w-full" />
+            <Skeleton className="h-5 w-14 rounded-full" />
+            <Skeleton className="h-5 w-12 rounded-full" />
+          </div>
+          <Skeleton className="h-4 w-[28rem] max-w-full" />
+        </div>
+        <Skeleton className="h-8 w-16 shrink-0" />
+      </header>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-auto xl:grid-cols-[minmax(0,1fr)_420px] xl:overflow-hidden">
+        <section className="flex min-h-[60vh] min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background xl:min-h-0">
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
+            <Skeleton className="size-2 rounded-full" />
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-5 w-20 rounded-full" />
+          </div>
+          <div className="flex flex-1 flex-col justify-end gap-4 px-4 py-4">
+            <ChatBubbleSkeleton />
+            <ChatBubbleSkeleton align="right" />
+            <ChatBubbleSkeleton />
+          </div>
+        </section>
+
+        <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+          <section className="space-y-3 rounded-[var(--radius-lg)] border border-border bg-background p-4">
+            <Skeleton className="h-5 w-24 rounded-full" />
+            <Skeleton className="h-5 w-3/4" />
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+              {Array.from({ length: 4 }, (_, index) => (
+                <Skeleton key={index} className="h-3 w-full" />
+              ))}
+            </div>
+          </section>
+          <Skeleton className="h-9 w-full rounded-[var(--radius-md)]" />
+          <div className="space-y-3">
+            <PipelineStageSkeleton />
+            <PipelineStageSkeleton />
+          </div>
+        </aside>
+      </div>
+    </div>
+  )
+}
+
+function ChatBubbleSkeleton({ align = 'left' }: { align?: 'left' | 'right' }) {
+  return (
+    <div
+      className={`flex items-start gap-2.5 ${align === 'right' ? 'flex-row-reverse' : ''}`}
+    >
+      <Skeleton className="size-8 shrink-0 rounded-full" />
+      <div className="flex-1 space-y-1.5">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-full max-w-md" />
+        <Skeleton className="h-3 w-2/3 max-w-xs" />
+      </div>
+    </div>
+  )
+}
+
+function PipelineStageSkeleton() {
+  return (
+    <div className="rounded-[var(--radius-lg)] border border-border bg-background p-3">
+      <div className="flex items-start gap-2.5">
+        <Skeleton className="size-[30px] shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Skeleton className="h-3 w-28" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-3 w-32" />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /** 按「主状态-子状态」渲染可执行动作 */

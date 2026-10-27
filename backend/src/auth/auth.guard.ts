@@ -19,10 +19,11 @@ export interface AuthedRequest extends Request {
  * 全局登录 Guard：网页 JSON 接口一律要求登录（HttpOnly Cookie 会话）。
  * 鉴权例外与特殊路径：
  * - 标记 @Public() 的路由：登录流程本身（/api/auth/*）、自带 X-Agent-Token 鉴权的脚本接口（/api/scripts）
- * - `.md` 后缀端点：面向 AI/agent 的 Markdown 视图/流式接口，凭个人 agent 访问令牌
- *   （X-Agent-Token 头或 ?token= 参数，个人中心可查看/重置）或网页会话放行
+ * - `.md` 后缀端点：面向 AI/agent 的 Markdown 视图/流式接口，凭 agent 访问令牌
+ *   （X-Agent-Token 头或 ?token= 参数；个人令牌在个人中心查看/重置，公共 Agent 共用令牌由
+ *   PUBLIC_AGENT_TOKEN 配置）或网页会话放行
  * - WebSocket /api/ws：agent 直连，不走 Nest 路由（自有 token 校验）
- * - /images、/export-files 静态资源：挂载在 main.ts，不经 Guard
+ * - /images、/export-files、/files 静态资源：挂载在 main.ts，不经 Guard
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -53,8 +54,9 @@ export class AuthGuard implements CanActivate {
   }
 
   /**
-   * .md 端点鉴权：优先取 X-Agent-Token 头 / ?token= 参数对应的用户 agent 访问令牌
-   * （个人中心可查看/重置）；未提供令牌时回退网页会话 Cookie（浏览器直接打开 .md 链接）。
+   * .md 端点鉴权：优先取 X-Agent-Token 头 / ?token= 参数对应的 agent 访问令牌
+   * （个人令牌在个人中心查看/重置；公共 Agent 共用令牌由 PUBLIC_AGENT_TOKEN 配置）；
+   * 未提供令牌时回退网页会话 Cookie（浏览器直接打开 .md 链接）。
    * 提供了令牌但无效直接 401，不做静默回退。
    */
   private async authorizeMarkdown(req: Request): Promise<boolean> {
@@ -79,7 +81,7 @@ export class AuthGuard implements CanActivate {
     const user = token ? await this.authService.getUserByToken(token) : null;
     if (!user) {
       throw new UnauthorizedException(
-        '缺少鉴权：请在请求头携带 X-Agent-Token（或 ?token= 参数，个人中心可查看令牌），或使用网页登录会话',
+        '缺少鉴权：请在请求头携带 X-Agent-Token（或 ?token= 参数；个人令牌在个人中心查看，公共 Agent 令牌由管理员下发），或使用网页登录会话',
       );
     }
     (req as AuthedRequest).user = user;

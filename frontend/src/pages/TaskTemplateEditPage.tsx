@@ -34,8 +34,8 @@ const LIST_PATH = '/tasks/templates'
 type FieldKey = 'description' | 'input' | 'outputSpec'
 
 /**
- * 任务包新建与编辑（独立页面）。
- * 任务包定义一类任务的可复用描述/输入/输出与默认处理机器人。
+ * 任务定义新建与编辑（独立页面）。
+ * 任务定义用于沉淀一类任务的可复用描述/输入/输出与默认处理机器人。
  */
 export function TaskTemplateEditPage() {
   const { templateId } = useParams<{ templateId: string }>()
@@ -69,7 +69,7 @@ export function TaskTemplateEditPage() {
     outputSpec: setOutputSpec,
   }
 
-  const initialTitle = template ? `编辑「${template.name}」` : '新建任务包'
+  const initialTitle = template ? `编辑「${template.name}」` : '新建任务定义'
   const typedName = name.trim()
   const pageTitle = template
     ? typedName
@@ -148,7 +148,7 @@ export function TaskTemplateEditPage() {
     return (
       <div className="flex flex-col gap-4">
         <PageBreadcrumb
-          items={[{ label: '任务包', to: LIST_PATH }, { label: '编辑' }]}
+          items={[{ label: '任务定义', to: LIST_PATH }, { label: '编辑' }]}
         />
         <p className="text-sm">加载失败：{loadError}</p>
       </div>
@@ -160,7 +160,7 @@ export function TaskTemplateEditPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <PageBreadcrumb
-            items={[{ label: '任务包', to: LIST_PATH }, { label: initialTitle }]}
+            items={[{ label: '任务定义', to: LIST_PATH }, { label: initialTitle }]}
           />
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
@@ -228,12 +228,12 @@ export function TaskTemplateEditPage() {
           <CardHeader className="flex-none">
             <CardTitle>基础信息</CardTitle>
             <CardDescription>
-              任务包名称用于识别与复用，处理机器人作为默认执行者
+              任务定义名称用于识别与复用，处理机器人作为默认执行者
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">
             <label className="flex flex-col gap-1 text-sm">
-              任务包名称
+              任务定义名称
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}

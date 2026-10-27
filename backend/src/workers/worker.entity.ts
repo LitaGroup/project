@@ -28,10 +28,20 @@ export interface WorkerTaskDef {
   how?: string;
 }
 
-/** 技能清单条目：技能名 + MD 内容（派发时随 prompt 下发/附件） */
+/** 技能清单条目：技能库 SKILL.md 的引用（保存后安装到工位 .opencode/skills） */
 export interface WorkerSkill {
+  /** 展示名（frontmatter name，缺失时取目录名） */
   name: string;
-  content: string;
+  /** 仓库内 SKILL.md 相对路径，如 active/rank/SKILL.md */
+  path: string;
+  /** 原始文件下载地址（raw） */
+  url: string;
+  /** 描述（frontmatter description） */
+  description?: string | null;
+  /** 版本（frontmatter version） */
+  version?: string | null;
+  /** Gitea 页面地址（查看原文） */
+  sourceUrl?: string | null;
 }
 
 /** 机器人：工作者与调度机器人统一实体。
@@ -47,6 +57,10 @@ export class Worker {
   /** 简介：擅长什么、能接什么任务（供调度机器人与外部选择） */
   @Column({ type: 'text', nullable: true })
   intro: string | null;
+
+  /** 头像：POST /api/images 上传后返回的 /images/... 路径（空为默认黑底占位头像） */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  avatarUrl: string | null;
 
   @Column({ type: 'enum', enum: WorkerKind, default: WorkerKind.AGENT })
   kind: WorkerKind;
@@ -73,11 +87,11 @@ export class Worker {
   @Column({ type: 'varchar', length: 200, nullable: true })
   modelId: string | null;
 
-  /** 角色定义 PROMPT */
+  /** 机器人定义 AGENTS.md（Markdown，保存后同步到工位） */
   @Column({ type: 'text', nullable: true })
   prompt: string | null;
 
-  /** 技能清单 */
+  /** 技能清单（技能库 SKILL.md 引用，保存后同步到工位） */
   @Column({ type: 'simple-json', nullable: true })
   skills: WorkerSkill[] | null;
 

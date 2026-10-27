@@ -16,6 +16,7 @@ import { buttonVariants } from '@appica/ui-react/button'
 import {
   AlertCircle,
   Check,
+  MessageCircleQuestion,
   Send,
   Wrench,
   X,
@@ -23,14 +24,22 @@ import {
 import {
   api,
   type TaskChatMessage,
+  type TaskChatQuestion,
   type TaskChatSender,
   type TaskChatTool,
   type TaskPackage,
   type TaskPipelineStage,
 } from '../../lib/api'
+import { questionStatusLabel } from '../../lib/question'
+import { QuestionCard } from '../QuestionCard'
 import { SenderLine, WorkerAvatar } from './WorkerAvatar'
+import { MermaidDiagram } from '../MermaidDiagram'
 
 const MARKDOWN_PLUGINS = [remarkGfm]
+/** language-mermaid 代码块（如 flowchart TD）渲染为流程图 */
+const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
+  mermaid: { SyntaxHighlighter: MermaidDiagram },
+}
 
 const FALLBACK_SENDER: TaskChatSender = {
   id: 'system',
@@ -42,6 +51,7 @@ const FALLBACK_SENDER: TaskChatSender = {
 interface ChatCustom {
   sender?: TaskChatSender
   tools?: TaskChatTool[]
+  question?: TaskChatQuestion
 }
 
 interface TaskChatPanelProps {
@@ -51,6 +61,8 @@ interface TaskChatPanelProps {
   connection: 'connecting' | 'live' | 'reconnecting'
   busy: boolean
   onSendFeedback: (content: string) => Promise<void>
+  /** 回答（answers）或跳过（null）机器人提问 */
+  onReplyQuestion: (questionId: string, answers: string[][] | null) => Promise<void>
   onAction: (fn: (id: number) => Promise<unknown>) => void
 }
 
@@ -65,6 +77,7 @@ export function TaskChatPanel({
   connection,
   busy,
   onSendFeedback,
+  onReplyQuestion,
   onAction,
 }: TaskChatPanelProps) {
   const onNew = useCallback(
@@ -130,15 +143,27 @@ export function TaskChatPanel({
               </div>
             )}
             <ThreadPrimitive.Messages>
-              {({ message }) =>
-                message.role === 'system' ? (
+              {({ message }) => {
+                const question = customOf(message).question
+                if (question) {
+                  return (
+                    <QuestionBubble
+                      message={message}
+                      question={question}
+                      busy={busy}
+                      disabled={task.subStatus !== '执行中'}
+                      onReply={onReplyQuestion}
+                    />
+                  )
+                }
+                return message.role === 'system' ? (
                   <SystemEvent message={message} />
                 ) : message.role === 'user' ? (
                   <UserBubble message={message} />
                 ) : (
                   <AssistantBubble message={message} />
                 )
-              }
+              }}
             </ThreadPrimitive.Messages>
 
             <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background pt-2">
@@ -155,7 +180,7 @@ export function TaskChatPanel({
   )
 }
 
-/** 任务包 → assistant-ui 消息（sender 放在 metadata.custom，供多机器人头像展示） */
+/** 任务 → assistant-ui 消息（sender 放在 metadata.custom，供多机器人头像展示） */
 function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
   const status =
     message.role === 'assistant'
@@ -179,6 +204,7 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
       custom: {
         sender: message.sender,
         tools: message.tools ?? [],
+        question: message.question,
       } satisfies ChatCustom,
     },
   }
@@ -205,6 +231,7 @@ function ChatMarkdownText() {
       smooth={false}
       defer
       remarkPlugins={MARKDOWN_PLUGINS}
+      componentsByLanguage={MARKDOWN_COMPONENTS_BY_LANGUAGE}
     />
   )
 }
@@ -240,7 +267,8 @@ function UserBubble({ message }: { message: MessageState }) {
 function AssistantBubble({ message }: { message: MessageState }) {
   const custom = customOf(message)
   const sender = custom.sender ?? FALLBACK_SENDER
-  const tools = custom.tools ?? []
+  // question 工具由独立问答卡片展示，不在工具链里重复出现
+  const tools = (custom.tools ?? []).filter((tool) => tool.name !== 'question')
   const hasText = message.content.some(
     (part) => part.type === 'text' && part.text?.trim(),
   )
@@ -303,6 +331,47 @@ function SystemEvent({ message }: { message: MessageState }) {
         <time className="shrink-0 pt-0.5 text-[10px] text-foreground-subtle">
           {message.createdAt.toLocaleTimeString()}
         </time>
+      </div>
+    </MessagePrimitive.Root>
+  )
+}
+
+interface QuestionBubbleProps {
+  message: MessageState
+  question: TaskChatQuestion
+  busy: boolean
+  /** 任务已离开执行中（提问不可再答） */
+  disabled: boolean
+  onReply: (questionId: string, answers: string[][] | null) => Promise<void>
+}
+
+/** 机器人提问卡片：多问题 + 选项 + 自由输入，提交后变成回执 */
+function QuestionBubble({
+  message,
+  question,
+  busy,
+  disabled,
+  onReply,
+}: QuestionBubbleProps) {
+  const sender = customOf(message).sender ?? FALLBACK_SENDER
+  return (
+    <MessagePrimitive.Root className="flex gap-3 px-1">
+      <WorkerAvatar sender={sender} size={32} className="mt-0.5" />
+      <div className="min-w-0 flex-1">
+        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+          <SenderLine sender={sender} time={message.createdAt.toISOString()} />
+          <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
+            <MessageCircleQuestion className="size-3.5" />
+            {questionStatusLabel(question)}
+          </span>
+        </div>
+
+        <QuestionCard
+          question={question}
+          disabled={disabled}
+          busy={busy}
+          onReply={onReply}
+        />
       </div>
     </MessagePrimitive.Root>
   )

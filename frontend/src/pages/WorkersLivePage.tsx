@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle } from '@appica/ui-react/card'
 import { Badge } from '@appica/ui-react/badge'
 import { api, type Worker } from '../lib/api'
 import { WorkerLiveBadge } from '../components/StatusBadge'
+import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 
 /** 工作概览：全部机器人（系统 + 自定义）实时状态卡片墙（5s 轮询；工作中呼吸动画） */
 export function WorkersLivePage() {
@@ -64,6 +65,7 @@ function WorkerCard({ worker }: { worker: Worker }) {
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-2">
+            <RobotAvatar name={worker.name} avatarUrl={worker.avatarUrl} size={28} />
             <span className="truncate">{worker.name}</span>
             {worker.system && (
               <Badge variant="soft" size="sm">

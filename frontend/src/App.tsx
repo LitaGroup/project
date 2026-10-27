@@ -134,7 +134,15 @@ function App() {
           <Route path="/tasks/workers" element={<WorkersPage />} />
           <Route path="/tasks/workers/new" element={<WorkerEditPage />} />
           <Route path="/tasks/workers/:workerId" element={<WorkerEditPage />} />
-          <Route path="/tasks/debug" element={<WorkerDebugPage />} />
+          <Route
+            path="/tasks/workers/:workerId/debug"
+            element={<WorkerDebugPage />}
+          />
+          {/* 调试入口已并入机器人列表行内按钮：旧链接兼容 */}
+          <Route
+            path="/tasks/debug"
+            element={<Navigate to="/tasks/workers" replace />}
+          />
           {/* 调度器已合并进机器人：旧链接兼容 */}
           <Route path="/tasks/schedulers" element={<SchedulerRedirect />} />
           <Route path="/tasks/schedulers/:workerId" element={<SchedulerRedirect />} />

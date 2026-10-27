@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
+  OnApplicationBootstrap,
   OnModuleInit,
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
@@ -12,7 +14,12 @@ import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
 import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
-import { OpencodeClient } from '../executors/opencode-client';
+import {
+  OpencodeClient,
+  OpencodeClientError,
+  isFreshOutcome,
+  type OpencodeQuestionRequest,
+} from '../executors/opencode-client';
 import {
   OpencodeEvent,
   OpencodeEventHub,
@@ -27,6 +34,9 @@ import { TaskRealtimeService } from './task-realtime.service';
 
 /** 终态快照预留：实时输出缓冲在进程内保留（P1 不做 TTL 清理，重启后由任务历史承担） */
 
+/** 任务会话绑定保留期：7 天不活跃后解除（执行中任务不清理） */
+const TASK_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
+
 /** 每个任务的实时输出缓冲（行数组 + 变更事件） */
 interface LiveTaskStream {
   lines: string[];
@@ -35,11 +45,14 @@ interface LiveTaskStream {
 
 /**
  * 任务派发执行引擎：机器人（runtime=opencode）在执行器上干活。
- * 链路：mkdir 工位 → 建 opencode 会话（title/model/location）→ 发 prompt（角色+技能+输入输出）
+ * 链路：mkdir 工位 → 复用/建 opencode 会话（一个任务固定一个会话）→ 发任务输入/输出要求
  * → 订阅执行器事件流（按 sessionId 路由）→ 终态（execution.completed）取最终回复 → 「待验收」+ 通知责任人。
+ * 机器人定义与技能由工位 AGENTS.md / .opencode/skills 提供，不在任务 prompt 中重复注入。
  */
 @Injectable()
-export class TaskDispatchService implements OnModuleInit {
+export class TaskDispatchService
+  implements OnModuleInit, OnApplicationBootstrap
+{
   private readonly logger = new Logger(TaskDispatchService.name);
 
   constructor(
@@ -70,6 +83,25 @@ export class TaskDispatchService implements OnModuleInit {
   /** 已提醒过权限请求的任务（避免重复通知） */
   private readonly permissionNotified = new Set<number>();
 
+  /** 已提醒过的提问（taskId:requestId，避免同一提问重复通知） */
+  private readonly questionNotified = new Set<string>();
+
+  /** taskId → 上次提问对账时间（页面快照触发时按任务节流） */
+  private readonly questionSyncedAt = new Map<number, number>();
+
+  /** 派发中的任务（对账时避免释放刚占用的连接） */
+  private readonly dispatching = new Set<number>();
+
+  /** taskId → 已占用事件流连接的执行器 id（retain/release 配对） */
+  private readonly hubRetained = new Map<number, number>();
+
+  /** 启动时先对账一次：恢复执行中任务的事件流订阅并补推进漏收终态 */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.reconcileExecuting().catch((error: Error) => {
+      this.logger.warn(`启动对账失败: ${error.message}`);
+    });
+  }
+
   onModuleInit(): void {
     this.eventHub.onEvent((event) => {
       void this.handleEvent(event).catch((e: Error) => {
@@ -82,7 +114,8 @@ export class TaskDispatchService implements OnModuleInit {
 
   /**
    * 派发：调度机器人识别完成的「进行中-识别中」任务，或执行中的重新派发。
-   * 链路：建工位 → 建会话 → 发 prompt；成功后任务进入「进行中-执行中」。
+   * 链路：建工位 → 复用/建会话（一个任务固定一个会话）→ 发 prompt；
+   * 成功后任务进入「进行中-执行中」。
    */
   async dispatch(taskId: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(taskId);
@@ -120,62 +153,127 @@ export class TaskDispatchService implements OnModuleInit {
       throw new NotFoundException('未配置 WORKER_BASE_DIR，无法确定工位目录');
     }
     const client = new OpencodeClient(executor);
-    // 确保事件流订阅在（覆盖服务重启/执行器刚上线等场景）
-    this.eventHub.ensureConnected(executor);
+    this.dispatching.add(task.id);
+    try {
+      // 1. 工位目录（幂等创建；路径单引号包裹防注入）
+      await client.shell(`mkdir -p '${workdir}'`);
 
-    // 1. 工位目录（幂等创建；路径单引号包裹防注入）
-    await client.shell(`mkdir -p '${workdir}'`);
-
-    // 2. 重新派发时先中断旧会话
-    if (task.opencodeSessionId) {
-      await client
-        .interrupt(task.opencodeSessionId)
-        .catch((e: Error) =>
+      // 2. 固定绑定：一个任务只对应一个 opencode 会话。
+      //    同一执行器上复用既有会话；执行器变更或会话已不存在时才新建。
+      const previousExecutorId = task.executorId;
+      const previousSessionId = task.opencodeSessionId;
+      let sessionId =
+        previousSessionId && previousExecutorId === executor.id
+          ? previousSessionId
+          : null;
+      if (sessionId) {
+        try {
+          await client.session(sessionId);
+        } catch (error) {
+          if (!(error instanceof OpencodeClientError) || error.status !== 404) {
+            throw error;
+          }
           this.logger.warn(
-            `旧会话 ${task.opencodeSessionId} 中断失败: ${e.message}`,
-          ),
-        );
-    }
+            `任务 ${task.code} 的会话 ${sessionId} 已不存在，重新创建`,
+          );
+          sessionId = null;
+        }
+      }
+      const reused = Boolean(sessionId);
+      if (!sessionId) {
+        // 执行器变更：旧会话在新执行器上不可达，尽力在旧执行器上中断，避免继续空跑
+        if (
+          previousSessionId &&
+          previousExecutorId &&
+          previousExecutorId !== executor.id
+        ) {
+          const oldExecutor = await this.executors.findOne({
+            where: { id: previousExecutorId },
+          });
+          if (oldExecutor) {
+            await new OpencodeClient(oldExecutor)
+              .interrupt(previousSessionId)
+              .catch((e: Error) =>
+                this.logger.warn(
+                  `旧执行器会话 ${previousSessionId} 中断失败: ${e.message}`,
+                ),
+              );
+          }
+        }
+        const created = await client.createSession({
+          title: `${task.code} ${task.title}`,
+          model: { id: worker.modelId, providerID: worker.providerId },
+          location: { directory: workdir },
+        });
+        sessionId = created.id;
+        task.executorId = executor.id;
+        task.opencodeSessionId = sessionId;
+        await this.tasks.save(task);
+        // 执行器/会话发生更换时清掉旧路由，避免旧会话事件误投到本任务
+        if (previousExecutorId && previousSessionId) {
+          this.sessionRoutes.delete(
+            `${previousExecutorId}:${previousSessionId}`,
+          );
+        }
+      } else if (wasExecuting) {
+        // 同一会话内重新派发：先中断仍在跑的本轮
+        await client
+          .interrupt(sessionId)
+          .catch((e: Error) =>
+            this.logger.warn(`会话 ${sessionId} 中断失败: ${e.message}`),
+          );
+      }
 
-    // 3. 建会话（title=编号+标题；location=工位）
-    const session = await client.createSession({
-      title: `${task.code} ${task.title}`,
-      model: { id: worker.modelId, providerID: worker.providerId },
-      location: { directory: workdir },
-    });
+      // 3. 占用执行器事件流（有执行中的任务才保持连接；结束/中断后释放）
+      this.retainTask(task.id, executor);
 
-    // 4. 绑定会话（状态仍为 识别中/执行中，prompt 成功后再进入执行中）
-    task.executorId = executor.id;
-    task.opencodeSessionId = session.id;
-    await this.tasks.save(task);
-    await this.addEvent(
-      task.id,
-      '操作',
-      `派发给「${worker.name}」（执行器：${executor.name}，会话：${session.id}）`,
-      operator,
-      { executorId: executor.id, sessionId: session.id },
-    );
-    this.sessionRoutes.set(`${executor.id}:${session.id}`, task.id);
-    this.pushLine(task.id, `▶ 已派发给 ${worker.name}（会话 ${session.id}）`);
+      // 4. 新一轮清空输出缓冲与去重标记（结果只取本轮文本）
+      this.textBuffers.delete(task.id);
+      this.failedReconciled.delete(task.id);
+      this.permissionNotified.delete(task.id);
+      this.questionSyncedAt.delete(task.id);
+      for (const key of this.questionNotified) {
+        if (key.startsWith(`${task.id}:`)) this.questionNotified.delete(key);
+      }
 
-    // 5. 发 prompt（角色定义 + 技能内联 + 工作计划 + 任务输入/输出要求）
-    const text = this.buildPrompt(task, worker);
-    await client.prompt(session.id, { text });
-    this.pushLine(task.id, '▶ 任务指令已下发');
-
-    // 6. 执行中
-    task.status = TaskStatus.RUNNING;
-    task.subStatus = TaskSubStatus.EXECUTING;
-    const saved = await this.tasks.save(task);
-    if (!wasExecuting) {
+      const bindLabel = reused ? '复用会话' : '新建会话';
       await this.addEvent(
         task.id,
-        '状态变更',
-        '状态变更：进行中-识别中 → 进行中-执行中',
-        null,
+        '操作',
+        `派发给「${worker.name}」（执行器：${executor.name}，${bindLabel}：${sessionId}）`,
+        operator,
+        { executorId: executor.id, sessionId, reused },
       );
+      this.sessionRoutes.set(`${executor.id}:${sessionId}`, task.id);
+      this.pushLine(
+        task.id,
+        `▶ 已派发给 ${worker.name}（${bindLabel} ${sessionId}）`,
+      );
+
+      // 5. 发任务指令（角色定义与技能已由工位文件提供；历史上下文由会话自身维持）
+      const text = this.buildPrompt(task);
+      await client.prompt(sessionId, { text });
+      this.pushLine(task.id, '▶ 任务指令已下发');
+
+      // 6. 执行中
+      task.status = TaskStatus.RUNNING;
+      task.subStatus = TaskSubStatus.EXECUTING;
+      const saved = await this.tasks.save(task);
+      if (!wasExecuting) {
+        await this.addEvent(
+          task.id,
+          '状态变更',
+          '状态变更：进行中-识别中 → 进行中-执行中',
+          null,
+        );
+      }
+      return saved;
+    } catch (error) {
+      this.releaseTask(task.id);
+      throw error;
+    } finally {
+      this.dispatching.delete(task.id);
     }
-    return saved;
   }
 
   /** 中断执行（会话 interrupt + 事件；任务保持执行中，可重新派发或取消） */
@@ -206,7 +304,163 @@ export class TaskDispatchService implements OnModuleInit {
     this.pushLine(taskId, '■ 已人工中断');
     await this.addEvent(taskId, '操作', '人工中断执行', operator);
     await this.taskChat.finishTask(taskId);
+    this.releaseTask(taskId);
     return this.mustFind(taskId);
+  }
+
+  /**
+   * 回答/跳过机器人提问：转发到 opencode question 接口，
+   * 本地卡片同步为回执（事件到达时会再次幂等校准）。
+   */
+  async replyQuestion(
+    taskId: number,
+    questionId: string,
+    input: { answers?: unknown; reject?: boolean },
+    operator: string | null,
+  ): Promise<{ ok: true }> {
+    const task = await this.mustFind(taskId);
+    const question = this.taskChat.findQuestion(taskId, questionId);
+    if (!question || question.state !== 'pending') {
+      throw new NotFoundException(`提问 ${questionId} 不存在或已处理`);
+    }
+    if (!task.executorId || !task.opencodeSessionId) {
+      throw new NotFoundException('任务没有可用的执行器会话');
+    }
+    const executor = await this.executors.findOne({
+      where: { id: task.executorId },
+    });
+    if (!executor) throw new NotFoundException('执行器不存在');
+    const client = new OpencodeClient(executor);
+    // 提问可能来自 opencode 子会话（task 工具），优先用提问自带的会话
+    const sessionId = question.sessionId || task.opencodeSessionId;
+
+    if (input.reject) {
+      try {
+        await client.rejectQuestion(sessionId, questionId);
+      } catch (e) {
+        throw this.questionSubmitError(e);
+      }
+      this.taskChat.questionSettled(taskId, questionId, 'rejected');
+      this.questionNotified.delete(`${taskId}:${questionId}`);
+      this.pushLine(taskId, '❓ 已跳过提问');
+      await this.addEvent(taskId, '操作', '跳过机器人提问', operator, {
+        questionId,
+      });
+      return { ok: true };
+    }
+
+    const answers = this.normalizeAnswers(input.answers);
+    if (!answers) {
+      throw new BadRequestException('answers 必须是二维字符串数组');
+    }
+    if (answers.length !== question.questions.length) {
+      throw new BadRequestException(
+        `answers 数量（${answers.length}）与问题数（${question.questions.length}）不一致`,
+      );
+    }
+    if (answers.some((answer) => answer.length === 0)) {
+      throw new BadRequestException('每个问题至少需要选择一个选项或输入回答');
+    }
+    try {
+      await client.replyQuestion(sessionId, questionId, answers);
+    } catch (e) {
+      throw this.questionSubmitError(e);
+    }
+    this.taskChat.questionSettled(taskId, questionId, 'answered', answers);
+    this.questionNotified.delete(`${taskId}:${questionId}`);
+    this.pushLine(
+      taskId,
+      `❓ 已回答提问：${question.questions
+        .map(
+          (item, index) =>
+            `${item.header || item.question} → ${
+              answers[index].join(' / ') || '（空）'
+            }`,
+        )
+        .join('；')}`,
+    );
+    await this.addEvent(taskId, '操作', '回答机器人提问', operator, {
+      questionId,
+      answers,
+    });
+    return { ok: true };
+  }
+
+  private questionSubmitError(error: unknown): Error {
+    if (error instanceof OpencodeClientError) {
+      return new BadRequestException(`提问提交失败：${error.message}`);
+    }
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  private normalizeAnswers(value: unknown): string[][] | null {
+    if (!Array.isArray(value)) return null;
+    const rows: string[][] = [];
+    for (const row of value) {
+      if (!Array.isArray(row)) return null;
+      rows.push(
+        row
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      );
+    }
+    return rows;
+  }
+
+  /**
+   * 提问对账：补齐漏收的 question.asked（服务重启/断线），
+   * 并把 opencode 侧已不存在的本地待答卡片置为「已失效」。
+   * 打开任务对话时触发（按任务节流 30s），也用于 2 分钟执行中对账。
+   */
+  async syncPendingQuestions(taskId: number): Promise<void> {
+    const now = Date.now();
+    if (now - (this.questionSyncedAt.get(taskId) ?? 0) < 30_000) return;
+    this.questionSyncedAt.set(taskId, now);
+    try {
+      const task = await this.tasks.findOne({
+        where: { id: taskId },
+        select: {
+          id: true,
+          status: true,
+          subStatus: true,
+          executorId: true,
+          opencodeSessionId: true,
+        },
+      });
+      if (
+        !task ||
+        task.status !== TaskStatus.RUNNING ||
+        task.subStatus !== TaskSubStatus.EXECUTING ||
+        !task.executorId ||
+        !task.opencodeSessionId
+      ) {
+        return;
+      }
+      const executor = await this.executors.findOne({
+        where: { id: task.executorId },
+      });
+      if (!executor?.online) return;
+      const requests = await new OpencodeClient(executor).listQuestions(
+        task.opencodeSessionId,
+      );
+      const remote = new Set(requests.map((request) => request.id));
+      let created = false;
+      for (const request of requests) {
+        if (await this.taskChat.questionAsked(task.id, request)) created = true;
+      }
+      for (const pending of this.taskChat.pendingQuestions(task.id)) {
+        if (!remote.has(pending.id)) {
+          this.taskChat.questionSettled(task.id, pending.id, 'cancelled');
+        }
+      }
+      // 补建的提问可能早于页面 SSE 订阅推送，发一次刷新信号让前端重取快照
+      if (created) this.taskRealtime.taskChanged(task.id);
+    } catch (e) {
+      this.logger.debug(
+        `任务 #${taskId} 提问对账失败: ${(e as Error).message}`,
+      );
+    }
   }
 
   /** 任务详情附带的实时输出行（历史页/详情兜底） */
@@ -286,6 +540,10 @@ export class TaskDispatchService implements OnModuleInit {
     const str = (key: string): string =>
       typeof data[key] === 'string' ? data[key] : '';
     const messageId = str('assistantMessageID');
+    // question 事件有 v1（question.asked）与 v2（question.v2.asked）两套命名，统一处理
+    const eventType = event.type.startsWith('question.v2.')
+      ? event.type.replace('question.v2.', 'question.')
+      : event.type;
 
     switch (true) {
       case event.type === 'session.execution.started': {
@@ -341,6 +599,18 @@ export class TaskDispatchService implements OnModuleInit {
         this.pushLine(taskId, `✗ step-failed ${error?.message ?? '未知错误'}`);
         break;
       }
+      case eventType === 'question.asked': {
+        await this.handleQuestionAsked(taskId, data);
+        break;
+      }
+      case eventType === 'question.replied': {
+        this.handleQuestionReplied(taskId, data);
+        break;
+      }
+      case eventType === 'question.rejected': {
+        this.handleQuestionRejected(taskId, data);
+        break;
+      }
       case event.type.startsWith('permission'): {
         this.pushLine(taskId, `⚠ 权限请求：${event.type}`);
         await this.notifyPermission(taskId, event.type);
@@ -365,6 +635,8 @@ export class TaskDispatchService implements OnModuleInit {
           `会话执行失败：${error?.type ?? ''} ${error?.message ?? ''}`.trim(),
           null,
         );
+        // 本轮已结束，释放事件流占用（等待重派发/取消）
+        this.releaseTask(taskId);
         break;
       }
       default:
@@ -381,9 +653,101 @@ export class TaskDispatchService implements OnModuleInit {
     return buffers;
   }
 
+  /** question.asked：生成问答卡片 + 提醒责任人 */
+  private async handleQuestionAsked(
+    taskId: number,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    const request = this.questionRequestOf(data);
+    if (!request) {
+      this.pushLine(taskId, '❓ 收到提问事件（无法解析，已忽略）');
+      return;
+    }
+    const first = request.questions[0];
+    this.pushLine(
+      taskId,
+      `❓ 机器人提问：${first?.header || first?.question || request.id}`,
+    );
+    await this.taskChat.questionAsked(taskId, request);
+    await this.notifyQuestion(taskId, request);
+  }
+
+  /** question.replied：把卡片同步为已回答（事件补偿/其他客户端作答） */
+  private handleQuestionReplied(
+    taskId: number,
+    data: Record<string, unknown>,
+  ): void {
+    const requestId = this.strOf(data, 'requestID');
+    if (!requestId) return;
+    const answers = Array.isArray(data.answers)
+      ? (data.answers as unknown[])
+          .filter((row): row is unknown[] => Array.isArray(row))
+          .map((row) =>
+            row.filter((value): value is string => typeof value === 'string'),
+          )
+      : undefined;
+    this.taskChat.questionSettled(taskId, requestId, 'answered', answers);
+  }
+
+  /** question.rejected：把卡片同步为已跳过 */
+  private handleQuestionRejected(
+    taskId: number,
+    data: Record<string, unknown>,
+  ): void {
+    const requestId = this.strOf(data, 'requestID');
+    if (!requestId) return;
+    this.taskChat.questionSettled(taskId, requestId, 'rejected');
+  }
+
+  /** 提问事件 → opencode QuestionRequest（事件 data 直接是 request 结构） */
+  private questionRequestOf(
+    data: Record<string, unknown>,
+  ): OpencodeQuestionRequest | null {
+    const raw = (data.request ?? data) as Partial<OpencodeQuestionRequest> & {
+      questions?: unknown;
+    };
+    if (typeof raw.id !== 'string' || !Array.isArray(raw.questions)) {
+      return null;
+    }
+    return {
+      id: raw.id,
+      sessionID: typeof raw.sessionID === 'string' ? raw.sessionID : '',
+      questions: raw.questions,
+      tool: raw.tool,
+    };
+  }
+
+  /** 提问提醒：同一 request 只通知一次 */
+  private async notifyQuestion(
+    taskId: number,
+    request: OpencodeQuestionRequest,
+  ): Promise<void> {
+    const key = `${taskId}:${request.id}`;
+    if (this.questionNotified.has(key)) return;
+    this.questionNotified.add(key);
+    try {
+      const task = await this.mustFind(taskId);
+      const first = request.questions[0];
+      await this.taskNotify.notifyTaskOwner(
+        task,
+        'notice',
+        `任务等待回答：${task.code} ${task.title}`,
+        `机器人提问：${first?.question ?? '请到任务详情回答'}`,
+      );
+    } catch (e) {
+      this.logger.warn(`任务 #${taskId} 提问通知失败: ${(e as Error).message}`);
+    }
+  }
+
+  private strOf(data: Record<string, unknown>, key: string): string {
+    const value = data[key];
+    return typeof value === 'string' ? value : '';
+  }
+
   /** 会话执行完成：取累积文本（兜底读消息）→ 落 result → 待验收 + 通知责任人 */
   private async finalizeSuccess(taskId: number): Promise<void> {
     const task = await this.mustFind(taskId);
+    this.releaseTask(taskId);
     if (
       task.status !== TaskStatus.RUNNING ||
       task.subStatus !== TaskSubStatus.EXECUTING
@@ -443,22 +807,50 @@ export class TaskDispatchService implements OnModuleInit {
       where: { status: TaskStatus.RUNNING, subStatus: TaskSubStatus.EXECUTING },
       select: { id: true, executorId: true, opencodeSessionId: true },
     });
+    // 已不在执行中的任务（人工改状态/删除等）释放事件流占用
+    const runningIds = new Set(running.map((task) => task.id));
+    for (const taskId of [...this.hubRetained.keys()]) {
+      if (!runningIds.has(taskId) && !this.dispatching.has(taskId)) {
+        this.releaseTask(taskId);
+      }
+    }
     for (const task of running) {
       if (!task.executorId || !task.opencodeSessionId) continue;
       const executor = await this.executors.findOne({
         where: { id: task.executorId },
       });
       if (!executor?.online) continue;
+      // 已记录失败的任务等待人工处理，不再占用事件流
+      if (this.failedReconciled.has(task.id)) {
+        this.releaseTask(task.id);
+        continue;
+      }
+      // 服务重启/断线后恢复订阅（有执行中的任务才保持连接）
+      this.retainTask(task.id, executor);
+      // 补齐漏收的提问（服务重启/断线期间 question.asked 可能丢失）
+      await this.syncPendingQuestions(task.id);
       try {
-        const info = await new OpencodeClient(executor).session(
-          task.opencodeSessionId,
-        );
+        const client = new OpencodeClient(executor);
+        const info = await client.session(task.opencodeSessionId);
+        if (
+          (info.outcome === 'succeeded' || info.outcome === 'failed') &&
+          // outcome/time.idle 具有粘性（保留上一轮结果）：只采信晚于本轮用户消息结束的运行，
+          // 避免重派发后对账把上一轮的结果误判为本轮完成
+          !(await this.isCurrentRunOutcome(
+            client,
+            info,
+            task.opencodeSessionId,
+          ))
+        ) {
+          continue;
+        }
         if (info.outcome === 'succeeded') {
           this.pushLine(task.id, '↻ 对账补偿：会话已完成，补推进状态');
           await this.finalizeSuccess(task.id);
         } else if (info.outcome === 'failed') {
           if (this.failedReconciled.has(task.id)) continue;
           this.failedReconciled.add(task.id);
+          this.releaseTask(task.id);
           this.pushLine(task.id, '↻ 对账补偿：会话执行失败');
           await this.addEvent(
             task.id,
@@ -476,17 +868,48 @@ export class TaskDispatchService implements OnModuleInit {
   /** 对账已记录失败的会话（避免重复事件） */
   private readonly failedReconciled = new Set<number>();
 
-  /** prompt 组装：角色定义 + 技能（内联 MD）+ 任务（编号/标题/类型/输入/输出要求） */
-  private buildPrompt(task: Task, worker: Worker): string {
-    const sections: string[] = [];
-    if (worker.prompt?.trim()) sections.push(worker.prompt.trim());
-    if (worker.skills?.length) {
-      sections.push(
-        `# 技能\n\n${worker.skills
-          .map((s) => `## 技能：${s.name}\n\n${s.content}`)
-          .join('\n\n')}`,
-      );
+  /**
+   * 会话终态是否属于本轮运行：prompt 为异步接口且 outcome/time.idle 具有粘性
+   * （保留上一轮运行结果），只采信结束时间（time.idle，执行器时钟）晚于
+   * 本轮用户消息创建时间的终态；取不到基准时退回旧行为直接采信。
+   */
+  private async isCurrentRunOutcome(
+    client: OpencodeClient,
+    info: { outcome?: string | null; time?: { idle?: number | null } },
+    sessionId: string,
+  ): Promise<boolean> {
+    const afterMs = await client
+      .lastUserMessageCreatedAt(sessionId)
+      .catch(() => 0);
+    return isFreshOutcome(info, afterMs);
+  }
+
+  /**
+   * 任务会话保留期清理（每天 04:15）：7 天不活跃的已结束/等待任务解除会话绑定。
+   * 执行中任务不清理（仍在跑或等待人工处理）；opencode 侧历史会话本身保留。
+   */
+  @Cron('0 15 4 * * *')
+  async cleanupIdleSessions(): Promise<void> {
+    const deadline = new Date(Date.now() - TASK_SESSION_TTL_MS);
+    const result = await this.tasks
+      .createQueryBuilder()
+      .update(Task)
+      .set({ opencodeSessionId: null, executorId: null })
+      .where('"opencodeSessionId" IS NOT NULL')
+      .andWhere('"updatedAt" < :deadline', { deadline })
+      .andWhere('NOT ("status" = :running AND "subStatus" = :executing)', {
+        running: TaskStatus.RUNNING,
+        executing: TaskSubStatus.EXECUTING,
+      })
+      .execute();
+    if (result.affected) {
+      this.logger.log(`已清理 ${result.affected} 个 7 天未活跃任务的会话绑定`);
     }
+  }
+
+  /** prompt 组装：任务编号/标题/类型/输入/需求内容/输出要求；角色与技能由工位文件提供 */
+  private buildPrompt(task: Task): string {
+    const sections: string[] = [];
     sections.push(
       [
         '# 任务',
@@ -498,6 +921,7 @@ export class TaskDispatchService implements OnModuleInit {
           ? `\n# 任务描述\n\n${task.description.trim()}`
           : '',
         task.input?.trim() ? `\n# 任务输入\n\n${task.input.trim()}` : '',
+        task.content?.trim() ? `\n# 需求内容\n\n${task.content.trim()}` : '',
         task.outputSpec?.trim()
           ? `\n# 输出要求\n\n${task.outputSpec.trim()}`
           : '',
@@ -513,6 +937,23 @@ export class TaskDispatchService implements OnModuleInit {
   private sessionIdOf(event: OpencodeEvent): string | null {
     const data = event.data as { sessionID?: string } | null;
     return data?.sessionID ?? null;
+  }
+
+  /** 占用执行器事件流（同一任务只占一次；执行器变化时先释放旧连接） */
+  private retainTask(taskId: number, executor: Executor): void {
+    const retained = this.hubRetained.get(taskId);
+    if (retained === executor.id) return;
+    if (retained !== undefined) this.releaseTask(taskId);
+    this.hubRetained.set(taskId, executor.id);
+    this.eventHub.retain(executor);
+  }
+
+  /** 释放执行器事件流占用（幂等；归零后由事件中心延迟断开） */
+  private releaseTask(taskId: number): void {
+    const executorId = this.hubRetained.get(taskId);
+    if (executorId === undefined) return;
+    this.hubRetained.delete(taskId);
+    this.eventHub.release(executorId);
   }
 
   /** sessionId → 任务（缓存未命中回库查并回填） */

@@ -15,6 +15,9 @@ import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import type {
   TaskChatMessage,
+  TaskChatQuestion,
+  TaskChatQuestionInfo,
+  TaskChatQuestionState,
   TaskChatSender,
   TaskChatSnapshot,
   TaskChatStreamMessage,
@@ -109,9 +112,7 @@ export class TaskChatService implements OnModuleDestroy {
     if (!pipelineTasks.some((item) => item.id === rootId)) {
       pipelineTasks.unshift(rootTask);
     }
-    const pipeline = await Promise.all(
-      pipelineTasks.map((item) => this.stageOf(item)),
-    );
+    const pipeline = await this.stagesOf(pipelineTasks);
     const stageByTask = new Map(pipeline.map((item) => [item.task.id, item]));
     const ids = pipelineTasks.map((item) => item.id);
     const taskEvents =
@@ -326,6 +327,95 @@ export class TaskChatService implements OnModuleDestroy {
     this.broadcastMessage(message);
   }
 
+  /**
+   * 机器人发起提问：生成一张待回答卡片（同一 request 幂等，事件重放/对账不重复插入）。
+   * 提问独立成消息，不打断当前助手气泡的文本流。
+   */
+  async questionAsked(
+    taskId: number,
+    request: {
+      id: string;
+      sessionID: string;
+      questions: TaskChatQuestionInfo[];
+      tool?: { callID?: string };
+    },
+  ): Promise<boolean> {
+    const id = this.questionMessageId(taskId, request.id);
+    const existing = this.live.get(taskId)?.get(id);
+    if (existing) return false;
+    const rootTaskId = await this.rootIdOf(taskId);
+    const sender = await this.senderForTask(taskId);
+    const message: InternalChatMessage = {
+      id,
+      taskId,
+      rootTaskId,
+      role: 'assistant',
+      sender,
+      content: '',
+      createdAt: new Date().toISOString(),
+      status: 'running',
+      kind: 'question',
+      question: {
+        id: request.id,
+        sessionId: request.sessionID,
+        questions: (request.questions ?? []).map((question) => ({
+          ...question,
+          options: question.options?.map((option) => ({ ...option })),
+        })),
+        state: 'pending',
+        askedAt: new Date().toISOString(),
+        toolCallId: request.tool?.callID,
+      },
+    };
+    this.store(message);
+    this.broadcastMessage(message);
+    return true;
+  }
+
+  /** 提问已被回答/跳过/失效：就地更新卡片为回执 */
+  questionSettled(
+    taskId: number,
+    requestId: string,
+    state: Exclude<TaskChatQuestionState, 'pending'>,
+    answers?: string[][],
+  ): void {
+    const message = this.live
+      .get(taskId)
+      ?.get(this.questionMessageId(taskId, requestId));
+    if (!message?.question || message.question.state !== 'pending') return;
+    message.question = {
+      ...message.question,
+      state,
+      answers: answers?.map((answer) => [...answer]),
+    };
+    message.status = 'complete';
+    this.broadcastMessage(message);
+  }
+
+  /** 指定任务的待回答提问（对账/答复校验用） */
+  pendingQuestions(taskId: number): TaskChatQuestion[] {
+    const messages = this.live.get(taskId);
+    if (!messages) return [];
+    return [...messages.values()]
+      .map((message) => message.question)
+      .filter(
+        (question): question is TaskChatQuestion =>
+          question?.state === 'pending',
+      );
+  }
+
+  /** 单个提问（含已结算状态；答复前校验用） */
+  findQuestion(taskId: number, requestId: string): TaskChatQuestion | null {
+    return (
+      this.live.get(taskId)?.get(this.questionMessageId(taskId, requestId))
+        ?.question ?? null
+    );
+  }
+
+  private questionMessageId(taskId: number, requestId: string): string {
+    return `chat:${taskId}:question:${requestId}`;
+  }
+
   /** 记录一条机器人错误/提示消息 */
   async note(taskId: number, content: string): Promise<void> {
     if (!content.trim()) return;
@@ -348,6 +438,16 @@ export class TaskChatService implements OnModuleDestroy {
 
   /** 会话执行失败：把当前正在输出的助手消息标记为 error，停止「正在执行」状态 */
   async failTask(taskId: number, content: string): Promise<void> {
+    // 失败的会话不再接受回答，未答提问直接失效
+    const messages = this.live.get(taskId);
+    if (messages) {
+      for (const message of messages.values()) {
+        if (message.question?.state !== 'pending') continue;
+        message.question = { ...message.question, state: 'cancelled' };
+        message.status = 'complete';
+        this.flushNow(message);
+      }
+    }
     const message = this.activeMessage(taskId);
     if (!message) {
       await this.note(taskId, content);
@@ -359,14 +459,21 @@ export class TaskChatService implements OnModuleDestroy {
     this.active.delete(taskId);
   }
 
-  /** 会话结束：收尾当前消息并通知前端刷新快照（拿最终产出） */
+  /** 会话结束：收尾当前消息（含未回答的提问）并通知前端刷新快照（拿最终产出） */
   async finishTask(taskId: number): Promise<void> {
     const messages = this.live.get(taskId);
     if (messages) {
       for (const message of messages.values()) {
-        if (message.status !== 'running') continue;
-        message.status = 'complete';
-        this.flushNow(message);
+        let changed = false;
+        if (message.question?.state === 'pending') {
+          message.question = { ...message.question, state: 'cancelled' };
+          changed = true;
+        }
+        if (message.status === 'running') {
+          message.status = 'complete';
+          changed = true;
+        }
+        if (changed) this.flushNow(message);
       }
     }
     this.active.delete(taskId);
@@ -467,6 +574,36 @@ export class TaskChatService implements OnModuleDestroy {
     return { task, agent, scheduler };
   }
 
+  /** 快照批量取阶段发送方：一次查出全部 agent/scheduler，避免每阶段两次 N+1 查询 */
+  private async stagesOf(tasks: Task[]): Promise<TaskPipelineStage[]> {
+    const ids = [
+      ...new Set(
+        tasks
+          .flatMap((item) => [item.agentId, item.schedulerId])
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    ];
+    const rows = ids.length
+      ? await this.workers.find({ where: { id: In(ids) } })
+      : [];
+    const byId = new Map(rows.map((worker) => [worker.id, worker]));
+    return tasks.map((task) => ({
+      task,
+      agent: task.agentId ? this.senderOfMap(byId, task.agentId) : null,
+      scheduler: task.schedulerId
+        ? this.senderOfMap(byId, task.schedulerId)
+        : null,
+    }));
+  }
+
+  private senderOfMap(
+    byId: Map<number, Worker>,
+    workerId: number,
+  ): TaskChatSender | null {
+    const worker = byId.get(workerId);
+    return worker ? this.workerToSender(worker) : null;
+  }
+
   private async workerSender(workerId: number): Promise<TaskChatSender | null> {
     const worker = await this.workers.findOne({ where: { id: workerId } });
     if (!worker) return null;
@@ -481,6 +618,7 @@ export class TaskChatService implements OnModuleDestroy {
       kind: scheduler ? 'scheduler' : 'worker',
       workerId: worker.id,
       roleLabel: scheduler ? '调度器' : '机器人',
+      avatarUrl: worker.avatarUrl,
     };
   }
 
@@ -635,6 +773,16 @@ export class TaskChatService implements OnModuleDestroy {
       kind: message.kind,
       tools: message.tools
         ? message.tools.map((tool) => ({ ...tool }))
+        : undefined,
+      question: message.question
+        ? {
+            ...message.question,
+            questions: message.question.questions.map((question) => ({
+              ...question,
+              options: question.options?.map((option) => ({ ...option })),
+            })),
+            answers: message.question.answers?.map((answer) => [...answer]),
+          }
         : undefined,
       meta: message.meta,
     };

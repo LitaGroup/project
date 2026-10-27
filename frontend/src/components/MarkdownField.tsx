@@ -6,7 +6,7 @@ import {
 
 /**
  * 表单里的 Markdown 字段：标签 + 固定高度可滚动的所见即所得编辑区。
- * 编辑器为非受控组件，外部内容变化（如选择任务包回填）请变更 `editorKey` 重新挂载。
+ * 编辑器为非受控组件，外部内容变化（如选择任务定义回填）请变更 `editorKey` 重新挂载。
  */
 export function MarkdownField({
   label,

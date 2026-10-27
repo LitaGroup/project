@@ -141,7 +141,8 @@ export const KNOWLEDGE_NODE_KINDS = ['directory', 'article'] as const
 export type KnowledgeNodeKind = (typeof KNOWLEDGE_NODE_KINDS)[number]
 export type KnowledgeNodeSource = 'native' | 'project-document' | 'system'
 export type KnowledgeIndexStatus = 'pending' | 'ready' | 'error'
-export type KnowledgeSearchSource = 'project' | 'feishu' | 'all'
+/** 搜索数据源：仅站内知识（飞书云文档搜索已下线） */
+export type KnowledgeSearchSource = 'project'
 
 export interface KnowledgeNode {
   id: string
@@ -191,30 +192,6 @@ export interface KnowledgeProjectSearchPage {
   hasMore: boolean
   mode: 'hybrid' | 'fulltext'
   results: KnowledgeSearchResult[]
-  error?: string
-}
-
-export interface KnowledgeFeishuResult {
-  token: string
-  title: string
-  url: string | null
-  docsType: string
-  entityType: string
-  summary: string
-  ownerName: string | null
-  ownerId: string | null
-  updateTime: number | null
-  createTime: number | null
-  markdownUrl: string | null
-}
-
-export interface KnowledgeFeishuSearchPage {
-  page: number
-  pageSize: number
-  hasMore: boolean
-  total: number
-  results: KnowledgeFeishuResult[]
-  error?: string
 }
 
 export interface KnowledgeSearchResponse {
@@ -225,8 +202,7 @@ export interface KnowledgeSearchResponse {
   pageSize: number
   mode: 'hybrid' | 'fulltext'
   results: KnowledgeSearchResult[]
-  project?: KnowledgeProjectSearchPage
-  feishu?: KnowledgeFeishuSearchPage
+  project: KnowledgeProjectSearchPage
 }
 
 /** 知识路径逐段编码，保留层级 */
@@ -719,6 +695,8 @@ export interface Settings {
     tokenConfigured: boolean
     org: string
   }
+  /** 公共 Agent 访问令牌是否已配置（PUBLIC_AGENT_TOKEN，不回显明文） */
+  publicAgentTokenConfigured: boolean
   /** appium-agent 连接信息（实时：离线时 name/appiumUrl 为 null） */
   agent: {
     online: boolean
@@ -869,9 +847,24 @@ export interface Executor {
   updatedAt: string
 }
 
+/** 技能库目录条目 */
+export interface WorkerSkillCatalogItem {
+  name: string
+  description: string | null
+  version: string | null
+  path: string
+  url: string
+  sourceUrl: string
+}
+
+/** 机器人技能引用（保存后安装到工位 .opencode/skills） */
 export interface WorkerSkill {
   name: string
-  content: string
+  path: string
+  url: string
+  description?: string | null
+  version?: string | null
+  sourceUrl?: string | null
 }
 export interface WorkerTaskDef {
   type: string
@@ -885,6 +878,8 @@ export interface Worker {
   id: number
   name: string
   intro: string | null
+  /** 头像：/images/... 路径（空为默认黑底占位头像） */
+  avatarUrl: string | null
   kind: WorkerKind
   role: WorkerRole
   runtime: WorkerRuntime
@@ -913,25 +908,54 @@ export interface WorkerDebugOption {
   id: number
   name: string
   intro: string | null
+  avatarUrl: string | null
   executorName: string
   providerId: string
   modelId: string
+}
+
+/** 机器人提问（调试对话中的问答卡片，结构与任务对话的 TaskChatQuestion 一致） */
+export interface WorkerDebugQuestion {
+  id: string
+  /** 提问所在 opencode 会话（可能是子会话） */
+  sessionId: string
+  questions: TaskChatQuestionInfo[]
+  state: TaskChatQuestionState
+  /** 按问题顺序的答案（选项 label + 自定义文本），仅 answered 有值 */
+  answers?: string[][]
+  askedAt: string
+  toolCallId?: string
 }
 
 export interface WorkerDebugMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  /** 流式累积的思考内容（session.reasoning.* 事件；可能为空） */
+  reasoning?: string
   status: 'running' | 'complete' | 'error'
   createdAt: string
+  /** message=普通对话气泡；question=机器人提问卡片（缺省按 message 处理） */
+  kind?: 'message' | 'question'
+  /** kind=question 时的问答卡片数据 */
+  question?: WorkerDebugQuestion
 }
 
-/** 调试对话快照；同一用户 + 机器人复用 sessionId 实现多轮上下文 */
+/** opencode 待办（todowrite 工具产出，随调试快照返回） */
+export interface WorkerDebugTodo {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  priority?: string
+}
+
+/** 调试对话快照；同一用户 + 机器人固定绑定一个 sessionId，7 天不活跃才重置 */
 export interface WorkerDebugSnapshot {
   worker: WorkerDebugOption
   sessionId: string | null
   status: 'idle' | 'running'
   messages: WorkerDebugMessage[]
+  /** 最近一次 todowrite 的待办清单（右侧待办面板数据源） */
+  todos: WorkerDebugTodo[]
   error: string | null
   updatedAt: string
 }
@@ -977,7 +1001,7 @@ export interface DispatchPlan {
   createdAt: string
 }
 
-/** 任务包：明确输入/输出/类型，可挂子任务形成工作流 */
+/** 任务：明确输入/输出/类型，可挂子任务形成工作流 */
 export interface TaskPackage {
   id: number
   code: string
@@ -988,6 +1012,8 @@ export interface TaskPackage {
   sortOrder: number
   description: string | null
   input: string | null
+  /** 需求内容（AI 分析整理后的需求，含需求澄清与补充详情） */
+  content: string | null
   outputSpec: string | null
   missingItems: TaskMissingItem[] | null
   /** 主状态：等待中 / 进行中 / 已结束 */
@@ -1034,6 +1060,8 @@ export interface TaskChatSender {
   kind: 'user' | 'worker' | 'scheduler' | 'system'
   workerId?: number
   roleLabel?: string
+  /** 机器人头像：/images/... 路径（空为默认黑底占位） */
+  avatarUrl?: string | null
 }
 
 /** 机器人执行过程中的工具调用（详情页对话内联展示） */
@@ -1044,19 +1072,55 @@ export interface TaskChatTool {
   detail?: string
 }
 
+/** 提问选项（opencode question） */
+export interface TaskChatQuestionOption {
+  label: string
+  description?: string
+}
+
+/** 单个问题（opencode question） */
+export interface TaskChatQuestionInfo {
+  question: string
+  header: string
+  options?: TaskChatQuestionOption[]
+  multiple?: boolean
+  /** 是否接受自由输入（false 时只能从选项中选择） */
+  custom?: boolean
+}
+
+/** 提问状态：待回答 / 已回答 / 已跳过 / 已失效 */
+export type TaskChatQuestionState =
+  | 'pending'
+  | 'answered'
+  | 'rejected'
+  | 'cancelled'
+
+/** 机器人提问（对话中的问答卡片） */
+export interface TaskChatQuestion {
+  id: string
+  sessionId: string
+  questions: TaskChatQuestionInfo[]
+  state: TaskChatQuestionState
+  /** 按问题顺序的答案（选项 label + 自定义文本） */
+  answers?: string[][]
+  askedAt: string
+  toolCallId?: string
+}
+
 /** 任务详情页聊天消息（来自 GET /api/tasks/:id/chat + SSE 增量） */
 export interface TaskChatMessage {
   id: string
   taskId: number
   role: 'user' | 'assistant' | 'system'
   sender: TaskChatSender
-  /** Markdown 正文；工具调用消息可能为空 */
+  /** Markdown 正文；工具调用/提问消息可能为空 */
   content: string
   createdAt: string
   status: 'running' | 'complete' | 'error'
-  /** message=普通对话气泡；event=居中流转事件 */
-  kind: 'message' | 'event'
+  /** message=普通对话气泡；event=居中流转事件；question=机器人提问卡片 */
+  kind: 'message' | 'event' | 'question'
   tools?: TaskChatTool[]
+  question?: TaskChatQuestion
   meta?: Record<string, unknown>
 }
 
@@ -1093,7 +1157,7 @@ export interface TaskOverview {
   subStatuses: Record<string, number>
 }
 
-/** 任务包：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
+/** 任务定义：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
 export interface TaskTemplate {
   id: number
   name: string
@@ -1782,6 +1846,7 @@ export const api = {
   createWorker: (input: {
     name: string
     intro?: string | null
+    avatarUrl?: string | null
     kind?: WorkerKind
     role?: WorkerRole
     runtime?: WorkerRuntime
@@ -1804,6 +1869,7 @@ export const api = {
     input: Partial<{
       name: string
       intro: string | null
+      avatarUrl: string | null
       kind: WorkerKind
       role: WorkerRole
       runtime: WorkerRuntime
@@ -1824,7 +1890,7 @@ export const api = {
     }),
   deleteWorker: (id: number) =>
     request<void>(`/workers/${id}`, { method: 'DELETE' }),
-  /** AI 优化角色 PROMPT：结构补全 + 清晰化（统一走 opencode 等执行器） */
+  /** AI 优化机器人 AGENTS.md：结构补全 + 清晰化（统一走 opencode 等执行器） */
   optimizeWorkerPrompt: (input: {
     prompt: string
     workerId?: number | null
@@ -1836,12 +1902,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     }).then((r) => r.prompt),
+  /** 技能库目录：从 Gitea docs/skills 发现可选 SKILL.md */
+  listWorkerSkillCatalog: (q?: string) => {
+    const qs = new URLSearchParams()
+    if (q?.trim()) qs.set('q', q.trim())
+    return request<WorkerSkillCatalogItem[]>(
+      `/workers/skill-catalog${qs.toString() ? `?${qs.toString()}` : ''}`,
+    )
+  },
+  /** 初始化/同步工作环境：写入工位 AGENTS.md 并按清单同步 .opencode/skills */
+  initializeWorker: (id: number) =>
+    request<{ status: 'success'; workdir: string }>(
+      `/workers/${id}/initialize`,
+      { method: 'POST' },
+    ),
   /** 工作概览卡片数据（实时状态，前端轮询） */
   listWorkersLive: () => request<Worker[]>('/workers/live'),
-  /** 可调试 Agent：启用、执行器在线且模型配置完整 */
-  listWorkerDebugWorkers: () =>
-    request<WorkerDebugOption[]>('/workers/debug/workers'),
-  /** 当前用户与机器人的调试会话快照 */
+  /** 当前用户与机器人的调试会话快照（含最近一次 todowrite 待办） */
   getWorkerDebugSnapshot: (workerId: number) =>
     request<WorkerDebugSnapshot>(`/workers/${workerId}/debug`),
   /** 发送一轮消息；立即返回 running，轮询快照取得最终回复 */
@@ -1855,13 +1932,26 @@ export const api = {
     request<WorkerDebugSnapshot>(`/workers/${workerId}/debug/interrupt`, {
       method: 'POST',
     }),
+  /** 回答（answers）或跳过（null）调试对话中的机器人提问 */
+  replyWorkerDebugQuestion: (
+    workerId: number,
+    questionId: string,
+    answers: string[][] | null,
+  ) =>
+    request<WorkerDebugSnapshot>(
+      `/workers/${workerId}/debug/questions/${encodeURIComponent(questionId)}/reply`,
+      {
+        method: 'POST',
+        body: JSON.stringify(answers ? { answers } : { reject: true }),
+      },
+    ),
   /** 清空对话并解绑旧会话；下一条消息创建新会话 */
   resetWorkerDebug: (workerId: number) =>
     request<WorkerDebugSnapshot>(`/workers/${workerId}/debug/reset`, {
       method: 'POST',
     }),
 
-  /** 任务包列表 */
+  /** 任务定义列表 */
   listTaskTemplates: () => request<TaskTemplate[]>('/task-templates'),
   getTaskTemplate: (id: number) =>
     request<TaskTemplate>(`/task-templates/${id}`),
@@ -1959,6 +2049,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ content }),
     }),
+  /** 回答/跳过机器人提问（answers 与问题顺序一致） */
+  replyTaskQuestion: (
+    id: number,
+    questionId: string,
+    body: { answers?: string[][]; reject?: boolean },
+  ) =>
+    request<{ ok: boolean }>(
+      `/tasks/${id}/questions/${encodeURIComponent(questionId)}/reply`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
   /** 人工标记待反馈（补充需要用户提供/确认的事项） */
   markTaskMissing: (id: number, items: TaskMissingItem[]) =>
     request<TaskPackage>(`/tasks/${id}/missing`, {
@@ -2010,13 +2110,11 @@ export const api = {
     }),
   searchKnowledge: (params: {
     q: string
-    source?: KnowledgeSearchSource
     path?: string
     page?: number
     pageSize?: number
   }) => {
     const qs = new URLSearchParams({ q: params.q })
-    qs.set('source', params.source ?? 'project')
     if (params.path && params.path !== '/') qs.set('path', params.path)
     if (params.page) qs.set('page', String(params.page))
     if (params.pageSize) qs.set('pageSize', String(params.pageSize))

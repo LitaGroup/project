@@ -330,7 +330,8 @@ function TaskDetail({ task }: { task: TaskPackage }) {
         </section>
       )}
       <MarkdownSection title="任务描述" value={task.description} />
-      <MarkdownSection title="任务输入" value={task.input} />
+      <MarkdownSection title="任务输入（用户原始需求）" value={task.input} />
+      <MarkdownSection title="需求内容（AI 分析整理）" value={task.content} />
       <MarkdownSection title="输出要求" value={task.outputSpec} />
       <MarkdownSection title="工作计划" value={task.workPlan} />
     </>

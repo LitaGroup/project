@@ -13,11 +13,14 @@ export interface OpencodeEvent {
 
 /** 断线重连间隔 */
 const RECONNECT_MS = 5_000;
+/** 活动释放后延迟断开的宽限（等待收尾事件） */
+const IDLE_DISCONNECT_MS = 30_000;
 
 /**
- * opencode 事件中心：为每台「启用且在线」的执行器维持一条 GET /api/event SSE 订阅
- * （断线 5s 重连），解析后经 EventEmitter 转发（'event' 事件）。
- * 任务模块按 opencodeSessionId → 任务 的映射订阅消费。
+ * opencode 事件中心：按需为执行器维持一条 GET /api/event SSE 订阅。
+ * 有活动（任务执行 / 调试回复）时 retain 建立并占用连接，结束后 release；
+ * 引用归零后延迟断开（等待/空闲状态允许断开），下次有活动再重连。
+ * 任务派发/调试发送只依赖 opencode 会话 id，断开期间不影响后续续聊。
  */
 @Injectable()
 export class OpencodeEventHub implements OnModuleDestroy {
@@ -26,20 +29,36 @@ export class OpencodeEventHub implements OnModuleDestroy {
   private readonly latest = new Map<number, Executor>();
   /** executorId → 在途连接（abort 控制器） */
   private readonly streams = new Map<number, AbortController>();
+  /** executorId → 活跃引用数（任务执行 / 调试回复） */
+  private readonly activity = new Map<number, number>();
+  /** executorId → 引用归零后的延迟断开定时器 */
+  private readonly idleTimers = new Map<number, NodeJS.Timeout>();
   private readonly bus = new EventEmitter();
 
-  /** 把订阅状态同步到当前执行器清单：启用+在线建立连接，其余断开 */
+  /**
+   * 把订阅状态同步到当前执行器清单：停用/删除的执行器断开，重新上线的
+   * 执行器若仍有活动引用则恢复连接。无活动的在线执行器不建立连接——按需 retain。
+   */
   sync(executors: Executor[]): void {
     for (const executor of executors) {
       this.latest.set(executor.id, executor);
       const wanted = executor.enabled && executor.online;
-      const active = this.streams.has(executor.id);
-      if (wanted && !active) this.connect(executor);
-      if (!wanted && active) this.disconnect(executor.id);
+      const connected = this.streams.has(executor.id);
+      if (!wanted && connected) {
+        // 保留活动引用：执行器恢复在线后由下一次 sync 重连
+        this.clearIdleTimer(executor.id);
+        this.disconnect(executor.id);
+        continue;
+      }
+      if (wanted && !connected && (this.activity.get(executor.id) ?? 0) > 0) {
+        this.connect(executor);
+      }
     }
     // 已删除的执行器：断开并清快照
     for (const id of this.latest.keys()) {
       if (!executors.some((e) => e.id === id)) {
+        this.activity.delete(id);
+        this.clearIdleTimer(id);
         this.disconnect(id);
         this.latest.delete(id);
       }
@@ -51,12 +70,34 @@ export class OpencodeEventHub implements OnModuleDestroy {
     return this.streams.has(executorId);
   }
 
-  /** 确保某执行器已建立事件流订阅（派发前调用，覆盖重启/离线恢复场景） */
+  /** 建立连接（不占用活动引用；供需要常驻的场景显式调用） */
   ensureConnected(executor: Executor): void {
     this.latest.set(executor.id, executor);
     if (executor.enabled && executor.online && !this.streams.has(executor.id)) {
       this.connect(executor);
     }
+  }
+
+  /**
+   * 占用一次活动引用并确保事件流在线。
+   * 任务派发 / 调试发送时调用，结束时必须配对 release。
+   */
+  retain(executor: Executor): void {
+    this.latest.set(executor.id, executor);
+    this.clearIdleTimer(executor.id);
+    this.activity.set(executor.id, (this.activity.get(executor.id) ?? 0) + 1);
+    if (executor.enabled && executor.online) this.ensureConnected(executor);
+  }
+
+  /** 释放一次活动引用；归零后延迟断开（无活动/等待状态允许断开） */
+  release(executorId: number): void {
+    const count = (this.activity.get(executorId) ?? 0) - 1;
+    if (count > 0) {
+      this.activity.set(executorId, count);
+      return;
+    }
+    this.activity.delete(executorId);
+    this.scheduleDisconnect(executorId);
   }
 
   /** 订阅事件，返回退订函数 */
@@ -123,12 +164,19 @@ export class OpencodeEventHub implements OnModuleDestroy {
         return;
       }
       this.streams.delete(executor.id);
+      const active = (this.activity.get(executor.id) ?? 0) > 0;
       this.logger.warn(
-        `执行器 #${executor.id}（${executor.name}）事件流断开（${(e as Error).message}），${RECONNECT_MS / 1000}s 后重连`,
+        `执行器 #${executor.id}（${executor.name}）事件流断开（${(e as Error).message}），${
+          active
+            ? `${RECONNECT_MS / 1000}s 后重连`
+            : '当前无活动，等待下次 retain'
+        }`,
       );
+      if (!active) return;
       setTimeout(() => {
         const latest = this.latest.get(executor.id);
         if (
+          (this.activity.get(executor.id) ?? 0) > 0 &&
           latest &&
           latest.enabled &&
           latest.online &&
@@ -140,6 +188,26 @@ export class OpencodeEventHub implements OnModuleDestroy {
     }
   }
 
+  private scheduleDisconnect(executorId: number): void {
+    if (this.idleTimers.has(executorId)) return;
+    const timer = setTimeout(() => {
+      this.idleTimers.delete(executorId);
+      if ((this.activity.get(executorId) ?? 0) > 0) return;
+      if (!this.streams.has(executorId)) return;
+      this.disconnect(executorId);
+      this.logger.log(`执行器 #${executorId} 无活动，已断开事件流`);
+    }, IDLE_DISCONNECT_MS);
+    timer.unref();
+    this.idleTimers.set(executorId, timer);
+  }
+
+  private clearIdleTimer(executorId: number): void {
+    const timer = this.idleTimers.get(executorId);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.idleTimers.delete(executorId);
+  }
+
   /** 主动断开某执行器的事件流 */
   private disconnect(executorId: number): void {
     const abort = this.streams.get(executorId);
@@ -149,6 +217,8 @@ export class OpencodeEventHub implements OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    for (const timer of this.idleTimers.values()) clearTimeout(timer);
+    this.idleTimers.clear();
     for (const id of [...this.streams.keys()]) this.disconnect(id);
     this.bus.removeAllListeners();
   }

@@ -21,7 +21,7 @@ export interface TaskPlanRef {
 }
 
 /**
- * 任务包：具体需要执行的任务内容（明确输入/输出/类型），可挂子任务形成工作流。
+ * 任务：具体需要执行的任务内容（明确输入/输出/类型），可挂子任务形成工作流。
  * 无物理外键（测试库无 REFERENCES 权限）：agent/scheduler/executor 仅记 id；
  * 删除根任务时应用层级联删子任务、事件与方案。
  */
@@ -61,9 +61,13 @@ export class Task {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  /** 任务输入（提供什么材料/上下文，Markdown） */
+  /** 任务输入（用户的原始需求，Markdown） */
   @Column({ type: 'text', nullable: true })
   input: string | null;
+
+  /** 需求内容（Agent AI 分析整理后的需求，含需求澄清与补充的详细信息，Markdown） */
+  @Column({ type: 'text', nullable: true })
+  content: string | null;
 
   /** 明确输出（要交付什么，Markdown） */
   @Column({ type: 'text', nullable: true })

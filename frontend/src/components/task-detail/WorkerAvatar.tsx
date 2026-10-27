@@ -1,28 +1,44 @@
 import {
   Avatar,
   AvatarFallback,
+  AvatarImage,
 } from '@appica/ui-react/avatar'
-import { Route, Robot, User } from '@appica/icons-react'
+import { Robot, User } from '@appica/icons-react'
 import type { TaskChatSender } from '../../lib/api'
 
-/** 不同机器人使用不同头像底色；按 workerId 稳定取色，避免每次渲染跳色 */
-const WORKER_TONES = [
-  'bg-info-soft text-foreground-intense',
-  'bg-success-soft text-foreground-intense',
-  'bg-warning-soft text-foreground-intense',
-  'bg-error-soft text-foreground-intense',
-  'bg-primary-soft text-foreground-intense',
-  'bg-background-strong text-foreground-intense',
-] as const
+/** 用户/系统消息的底色（机器人头像走 RobotAvatar，不使用配色轮换） */
+const SENDER_TONES: Record<'user' | 'system', string> = {
+  user: 'bg-primary text-primary-foreground',
+  system: 'bg-background-muted text-foreground-emphasis',
+}
 
 function toneOf(sender: TaskChatSender): string {
-  if (sender.kind === 'user') return 'bg-primary text-primary-foreground'
-  if (sender.kind === 'scheduler')
-    return 'bg-info-soft text-foreground-intense'
-  if (sender.kind === 'system')
-    return 'bg-background-muted text-foreground-emphasis'
-  const index = Math.abs(sender.workerId ?? sender.id.length) % WORKER_TONES.length
-  return WORKER_TONES[index]
+  return SENDER_TONES[sender.kind as 'user' | 'system'] ?? 'bg-background-muted text-foreground-emphasis'
+}
+
+interface RobotAvatarProps {
+  name: string
+  avatarUrl?: string | null
+  size?: number
+  className?: string
+}
+
+/**
+ * 机器人头像（机器人/调度机器人通用）：
+ * 设置了头像显示图片；未设置或加载失败显示纯黑占位（黑图）+ 一圈边框。
+ */
+export function RobotAvatar({
+  name,
+  avatarUrl,
+  size = 32,
+  className = '',
+}: RobotAvatarProps) {
+  return (
+    <Avatar size={size} className={`shrink-0 ${className}`}>
+      {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
+      <AvatarFallback className="worker-avatar-empty ring-1 ring-border-strong" />
+    </Avatar>
+  )
 }
 
 interface WorkerAvatarProps {
@@ -31,16 +47,25 @@ interface WorkerAvatarProps {
   className?: string
 }
 
-/** 对话/PIPELINE 共用的发送方头像：机器人首字 + 稳定底色，调度器/系统带图标 */
+/** 对话/PIPELINE 共用的发送方头像：机器人走 RobotAvatar，用户/系统保留图标样式 */
 export function WorkerAvatar({
   sender,
   size = 32,
   className = '',
 }: WorkerAvatarProps) {
+  if (sender.kind === 'worker' || sender.kind === 'scheduler') {
+    return (
+      <RobotAvatar
+        name={sender.name}
+        avatarUrl={sender.avatarUrl}
+        size={size}
+        className={className}
+      />
+    )
+  }
+
   const icon =
-    sender.kind === 'scheduler' ? (
-      <Route className="size-[55%]" />
-    ) : sender.kind === 'system' ? (
+    sender.kind === 'system' ? (
       <Robot className="size-[55%]" />
     ) : sender.kind === 'user' ? (
       <User className="size-[55%]" />
@@ -48,15 +73,9 @@ export function WorkerAvatar({
 
   return (
     <Avatar size={size} className={`shrink-0 ${className}`}>
-      {icon ? (
-        <AvatarFallback className={`${toneOf(sender)} font-medium`}>
-          {icon}
-        </AvatarFallback>
-      ) : (
-        <AvatarFallback className={`${toneOf(sender)} font-medium`}>
-          {sender.name.trim().slice(0, 1) || '?'}
-        </AvatarFallback>
-      )}
+      <AvatarFallback className={`${toneOf(sender)} font-medium`}>
+        {icon ?? (sender.name.trim().slice(0, 1) || '?')}
+      </AvatarFallback>
     </Avatar>
   )
 }

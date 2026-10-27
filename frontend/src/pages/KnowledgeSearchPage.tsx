@@ -21,22 +21,10 @@ import {
   api,
   knowledgeMdPath,
   knowledgeWebPath,
-  type KnowledgeFeishuResult,
   type KnowledgeSearchResponse,
   type KnowledgeSearchResult,
-  type KnowledgeSearchSource,
 } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
-
-const SOURCE_OPTIONS: Record<KnowledgeSearchSource, string> = {
-  project: '站内知识',
-  feishu: '飞书云文档',
-  all: '站内 + 飞书',
-}
-
-function parseSource(value: string | null): KnowledgeSearchSource {
-  return value === 'feishu' || value === 'all' ? value : 'project'
-}
 
 function positiveInt(value: string | null, fallback: number): number {
   const parsed = Number(value)
@@ -48,12 +36,7 @@ export function KnowledgeSearchPage() {
   const initialQuery = searchParams.get('q') ?? ''
   const [query, setQuery] = useState(initialQuery)
   const [path, setPath] = useState(searchParams.get('path') ?? '')
-  const [source, setSource] = useState<KnowledgeSearchSource>(
-    parseSource(searchParams.get('source')),
-  )
-  const [page, setPage] = useState(
-    positiveInt(searchParams.get('page'), 1),
-  )
+  const [page, setPage] = useState(positiveInt(searchParams.get('page'), 1))
   const [pageSize, setPageSize] = useState(
     Math.min(positiveInt(searchParams.get('pageSize'), 8), 100),
   )
@@ -65,7 +48,6 @@ export function KnowledgeSearchPage() {
     (
       q: string,
       scope: string,
-      nextSource: KnowledgeSearchSource,
       nextPage: number,
       nextPageSize: number,
     ) => {
@@ -79,7 +61,6 @@ export function KnowledgeSearchPage() {
       setError(null)
       const params = new URLSearchParams({
         q: keyword,
-        source: nextSource,
         page: String(nextPage),
         pageSize: String(nextPageSize),
       })
@@ -88,7 +69,6 @@ export function KnowledgeSearchPage() {
       api
         .searchKnowledge({
           q: keyword,
-          source: nextSource,
           path: scope.trim() || undefined,
           page: nextPage,
           pageSize: nextPageSize,
@@ -112,7 +92,6 @@ export function KnowledgeSearchPage() {
       search(
         initialQuery,
         searchParams.get('path') ?? '',
-        parseSource(searchParams.get('source')),
         positiveInt(searchParams.get('page'), 1),
         Math.min(positiveInt(searchParams.get('pageSize'), 8), 100),
       )
@@ -121,11 +100,8 @@ export function KnowledgeSearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const hasMore = Boolean(
-    response?.project?.hasMore || response?.feishu?.hasMore,
-  )
-  const projectResults = response?.project?.results ?? []
-  const feishuResults = response?.feishu?.results ?? []
+  const hasMore = response?.project.hasMore ?? false
+  const results = response?.results ?? []
 
   return (
     <div>
@@ -138,7 +114,7 @@ export function KnowledgeSearchPage() {
       <div className="mt-3 mb-4">
         <h1 className="text-2xl font-semibold">知识搜索</h1>
         <p className="mt-1 text-sm text-foreground-muted">
-          支持站内知识混合检索，以及直接搜索当前飞书账号可见的云文档。
+          站内知识全文与 PGVector 向量混合检索，支持限定目录。
         </p>
       </div>
 
@@ -153,7 +129,7 @@ export function KnowledgeSearchPage() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  search(query, path, source, 1, pageSize)
+                  search(query, path, 1, pageSize)
                 }
               }}
               onClear={() => setQuery('')}
@@ -163,33 +139,11 @@ export function KnowledgeSearchPage() {
         />
         <ToolbarGroup>
           <Select
-            value={source}
-            onValueChange={(value) => {
-              const next = parseSource(value as string)
-              setSource(next)
-              if (query.trim()) search(query, path, next, 1, pageSize)
-            }}
-            items={SOURCE_OPTIONS}
-          >
-            <SelectTrigger className="w-36" aria-label="数据源">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(SOURCE_OPTIONS) as KnowledgeSearchSource[]).map(
-                (item) => (
-                  <SelectItem key={item} value={item}>
-                    {SOURCE_OPTIONS[item]}
-                  </SelectItem>
-                ),
-              )}
-            </SelectContent>
-          </Select>
-          <Select
             value={String(pageSize)}
             onValueChange={(value) => {
               const next = Number(value)
               setPageSize(next)
-              if (query.trim()) search(query, path, source, 1, next)
+              if (query.trim()) search(query, path, 1, next)
             }}
             items={{
               '8': '每页 8 条',
@@ -212,13 +166,13 @@ export function KnowledgeSearchPage() {
             className="w-52"
             render={
               <Input
-                placeholder="站内目录，如 /guides"
+                placeholder="限定目录，如 /guides"
                 clearable
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    search(query, path, source, 1, pageSize)
+                    search(query, path, 1, pageSize)
                   }
                 }}
                 onClear={() => setPath('')}
@@ -227,12 +181,15 @@ export function KnowledgeSearchPage() {
             }
           />
           <ToolbarButton
-            onClick={() => search(query, path, source, 1, pageSize)}
+            render={
+              <Button variant="ghost">
+                <FileSearch size={16} />
+                {loading ? '搜索中…' : '搜索'}
+              </Button>
+            }
+            onClick={() => search(query, path, 1, pageSize)}
             disabled={loading || !query.trim()}
-          >
-            <FileSearch size={16} />
-            {loading ? '搜索中…' : '搜索'}
-          </ToolbarButton>
+          />
         </ToolbarGroup>
       </Toolbar>
 
@@ -248,102 +205,46 @@ export function KnowledgeSearchPage() {
       {response && (
         <>
           <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-foreground-muted">
-            <span>
-              数据源：{SOURCE_OPTIONS[response.source]} · 第 {response.page} 页
-            </span>
-            {response.project && (
-              <>
-                <Badge
-                  variant={
-                    response.project.mode === 'hybrid' ? 'soft' : 'secondary'
-                  }
-                >
-                  {response.project.mode === 'hybrid'
-                    ? '站内全文 + 向量'
-                    : '站内全文'}
-                </Badge>
-                <span>站内 {projectResults.length} 条</span>
-              </>
-            )}
-            {response.feishu && (
-              <span>
-                飞书 {feishuResults.length} 条
-                {response.feishu.total > 0
-                  ? ` / 共 ${response.feishu.total} 条`
-                  : ''}
-              </span>
-            )}
+            <span>第 {response.page} 页</span>
+            <Badge variant={response.mode === 'hybrid' ? 'soft' : 'secondary'}>
+              {response.mode === 'hybrid' ? '全文 + 向量' : '全文'}
+            </Badge>
+            <span>站内 {results.length} 条</span>
           </div>
 
-          {response.project && (
-            <section className="mb-6">
-              <h2 className="mb-3 text-lg font-semibold">站内知识</h2>
-              {response.project.error ? (
-                <p className="rounded-md border border-border-strong bg-background p-5 text-sm">
-                  站内知识不可用：{response.project.error}
-                </p>
-              ) : response.project.results.length === 0 ? (
-                <p className="rounded-md border border-border-strong bg-background p-5 text-sm text-foreground-muted">
-                  未检索到站内相关知识。可尝试更短的关键词、去掉目录限制，或确认知识已同步。
-                </p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {response.project.results.map((result) => (
-                    <ProjectResultCard
-                      key={`${result.nodeId}:${result.headingPath}:${result.score}`}
-                      result={result}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-
-          {response.feishu && (
-            <section className="mb-6">
-              <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
-                飞书云文档
-                <Badge variant="secondary">搜索 v2</Badge>
-              </h2>
-              {response.feishu.error ? (
-                <p className="rounded-md border border-border-strong bg-background p-5 text-sm">
-                  飞书搜索不可用：{response.feishu.error}
-                </p>
-              ) : response.feishu.results.length === 0 ? (
-                <p className="rounded-md border border-border-strong bg-background p-5 text-sm text-foreground-muted">
-                  未检索到当前飞书账号可见的云文档。
-                </p>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {response.feishu.results.map((result) => (
-                    <FeishuResultCard key={result.token} result={result} />
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
+          <section className="mb-6">
+            <h2 className="mb-3 text-lg font-semibold">站内知识</h2>
+            {results.length === 0 ? (
+              <p className="rounded-md border border-border-strong bg-background p-5 text-sm text-foreground-muted">
+                未检索到站内相关知识。可尝试更短的关键词、去掉目录限制，或确认知识已同步。
+              </p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {results.map((result) => (
+                  <ProjectResultCard
+                    key={`${result.nodeId}:${result.headingPath}:${result.score}`}
+                    result={result}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               disabled={loading || page <= 1}
-              onClick={() =>
-                search(query, path, source, Math.max(1, page - 1), pageSize)
-              }
+              onClick={() => search(query, path, Math.max(1, page - 1), pageSize)}
             >
               上一页
             </Button>
-            <span className="text-sm text-foreground-muted">
-              第 {page} 页
-            </span>
+            <span className="text-sm text-foreground-muted">第 {page} 页</span>
             <Button
               variant="outline"
               size="sm"
               disabled={loading || !hasMore}
-              onClick={() =>
-                search(query, path, source, page + 1, pageSize)
-              }
+              onClick={() => search(query, path, page + 1, pageSize)}
             >
               下一页
             </Button>
@@ -356,9 +257,14 @@ export function KnowledgeSearchPage() {
           <p className="font-medium text-foreground-intense">使用提示</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>站内知识按全文与 PGVector 混合排序，可限定目录。</li>
-            <li>飞书搜索直接调用飞书 Search v2，只返回当前登录账号有权限的文档。</li>
-            <li>飞书账号授权过期时请重新登录平台，再重试飞书搜索。</li>
-            <li>Agent 可使用 <span className="font-mono">/api/docs/search.md</span> 获取 Markdown 结果。</li>
+            <li>
+              项目文档会自动同步到 <span className="font-mono">/project/**</span>，
+              可在搜索结果中直接阅读镜像原文。
+            </li>
+            <li>
+              Agent 可使用 <span className="font-mono">/api/docs/search.md</span>{' '}
+              获取 Markdown 结果。
+            </li>
           </ul>
         </div>
       )}
@@ -409,65 +315,6 @@ function ProjectResultCard({ result }: { result: KnowledgeSearchResult }) {
         >
           原文 Markdown
         </a>
-      </div>
-    </article>
-  )
-}
-
-function FeishuResultCard({ result }: { result: KnowledgeFeishuResult }) {
-  return (
-    <article className="rounded-md border border-border-strong bg-background p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          {result.url ? (
-            <a
-              href={result.url}
-              target="_blank"
-              rel="noreferrer"
-              className="truncate font-semibold text-foreground-intense underline"
-            >
-              {result.title}
-            </a>
-          ) : (
-            <span className="truncate font-semibold">{result.title}</span>
-          )}
-          <Badge variant="soft">{result.docsType}</Badge>
-        </div>
-        <span className="text-xs text-foreground-muted">
-          {result.updateTime
-            ? `更新于 ${new Date(result.updateTime * 1000).toLocaleString()}`
-            : ''}
-        </span>
-      </div>
-      <p className="mt-1 text-xs text-foreground-muted">
-        所有者：{result.ownerName || result.ownerId || '未知'}
-      </p>
-      {result.summary && (
-        <p className="mt-3 whitespace-pre-wrap break-words text-sm text-foreground-muted">
-          {result.summary}
-        </p>
-      )}
-      <div className="mt-3 flex gap-3 text-xs">
-        {result.url && (
-          <a
-            href={result.url}
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
-            打开飞书原文
-          </a>
-        )}
-        {result.markdownUrl && (
-          <a
-            href={result.markdownUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
-            转 Markdown
-          </a>
-        )}
       </div>
     </article>
   )

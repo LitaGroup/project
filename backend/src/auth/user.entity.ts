@@ -59,11 +59,11 @@ export class User {
   @Column({ type: 'varchar', length: 64, nullable: true })
   agentToken: string | null;
 
-  /** 飞书 user_access_token：仅用于代表用户搜索其可见云文档，禁止出参（select:false） */
+  /** 飞书 user_access_token：登录时落库，当前无消费方（原云文档搜索已下线），禁止出参（select:false） */
   @Column({ type: 'text', nullable: true, select: false })
   feishuAccessToken: string | null;
 
-  /** 飞书 OAuth refresh_token：访问令牌过期后自动续期（同样禁止出参） */
+  /** 飞书 OAuth refresh_token：预留给后续需要用户身份的接口（同样禁止出参） */
   @Column({ type: 'text', nullable: true, select: false })
   feishuRefreshToken: string | null;
 

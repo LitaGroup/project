@@ -7,7 +7,7 @@ import {
 } from 'typeorm';
 
 /**
- * 任务包（TaskTemplate）：一类任务的复用定义（描述/输入/输出 + 默认处理机器人）。
+ * 任务定义（TaskTemplate）：一类任务的复用定义（描述/输入/输出 + 默认处理机器人）。
  * 新建任务时可按模板填充字段，减少重复录入。
  */
 @Entity('task_templates')

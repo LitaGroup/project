@@ -4,7 +4,7 @@ import * as express from 'express';
 import * as fs from 'fs';
 import { AgentGateway } from './agent/agent.gateway';
 import { AppModule } from './app.module';
-import { imageWebroot, exportWebroot } from './common/paths';
+import { imageWebroot, exportWebroot, fileWebroot } from './common/paths';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -20,6 +20,24 @@ async function bootstrap() {
   const exportsRoot = exportWebroot();
   fs.mkdirSync(exportsRoot, { recursive: true });
   app.use('/export-files', express.static(exportsRoot, { index: false }));
+
+  // 通用文件静态资源：http://{host}/files/{file-path} → DIR_FILE_WEBROOT（公开访问）
+  const filesRoot = fileWebroot();
+  fs.mkdirSync(filesRoot, { recursive: true });
+  app.use(
+    '/files',
+    express.static(filesRoot, {
+      index: false,
+      setHeaders: (res) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        // 上传内容与平台同域：禁止上传的 HTML/SVG 等主动内容执行脚本或访问平台 Cookie
+        res.setHeader(
+          'Content-Security-Policy',
+          "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+        );
+      },
+    }),
+  );
 
   await app.listen(process.env.PORT ?? 3100);
 

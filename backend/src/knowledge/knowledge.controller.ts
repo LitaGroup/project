@@ -152,7 +152,6 @@ export class KnowledgeController {
       path,
       page: optionalNumber(page),
       pageSize: optionalNumber(pageSize) ?? optionalNumber(limit),
-      userId: user.id,
     });
     return this.knowledge.renderSearchMarkdown(result);
   }
@@ -175,7 +174,6 @@ export class KnowledgeController {
       path,
       page: optionalNumber(page),
       pageSize: optionalNumber(pageSize) ?? optionalNumber(limit),
-      userId: user.id,
     });
   }
 

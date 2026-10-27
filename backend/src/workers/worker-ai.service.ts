@@ -19,7 +19,7 @@ export interface OptimizePromptInput {
   modelId?: string | null;
 }
 
-/** 角色 PROMPT 优化器：把机器人/调度机器人的角色定义整理为结构完整、无歧义的 Markdown */
+/** AGENTS.md 优化器：把机器人/调度机器人的角色定义整理为结构完整、无歧义的 Markdown */
 const PROMPT_OPTIMIZE_SYSTEM = `你是资深 AI Agent 角色设计专家，负责优化机器人/调度机器人角色的 PROMPT（Markdown）。
 
 优化要求：
@@ -42,7 +42,7 @@ const PROMPT_OPTIMIZE_SYSTEM = `你是资深 AI Agent 角色设计专家，负�
 
 /**
  * 机器人 AI 能力（统一走 opencode 等执行器，不再使用平台进程内 PI Agent）。
- * 目前提供角色 PROMPT 优化。
+ * 目前提供机器人 AGENTS.md 优化。
  */
 @Injectable()
 export class WorkerAiService {
@@ -62,10 +62,10 @@ export class WorkerAiService {
     const { executor, providerId, modelId, location } =
       await this.resolveEndpoint(input);
     const text = await runOpencodePrompt(new OpencodeClient(executor), {
-      title: '优化角色 PROMPT',
+      title: '优化机器人 AGENTS.md',
       model: { id: modelId, providerID: providerId },
       location,
-      prompt: `${PROMPT_OPTIMIZE_SYSTEM}\n\n---\n\n请优化以下角色 PROMPT：\n\n${content}`,
+      prompt: `${PROMPT_OPTIMIZE_SYSTEM}\n\n---\n\n请优化以下机器人 AGENTS.md：\n\n${content}`,
       timeoutMs: 5 * 60_000,
     });
     return this.stripFence(text);

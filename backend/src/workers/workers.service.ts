@@ -19,12 +19,15 @@ import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Executor } from '../executors/executor.entity';
 import { Worker, WorkerSkill, WorkerTaskDef } from './worker.entity';
+import { WorkerDebugSession } from './worker-debug-session.entity';
 import { SYSTEM_WORKER_ID_LIMIT, isSystemWorkerId } from './system-workers';
 import { ensureWorkerSequenceFloor } from './system-workers.service';
+import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
 
 export interface CreateWorkerInput {
   name: string;
   intro?: string | null;
+  avatarUrl?: string | null;
   kind?: WorkerKind;
   role?: WorkerRole;
   runtime?: WorkerRuntime;
@@ -40,6 +43,18 @@ export interface CreateWorkerInput {
 }
 
 export type UpdateWorkerInput = Partial<CreateWorkerInput>;
+
+/** 头像归一：仅接受 POST /api/images 上传后返回的 /images/... 路径，空值清除 */
+function normalizeAvatarUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() || null;
+  if (!trimmed) return null;
+  if (!trimmed.startsWith('/images/') || trimmed.includes('..')) {
+    throw new BadRequestException(
+      '头像必须是图片上传接口返回的 /images/... 路径',
+    );
+  }
+  return trimmed;
+}
 
 /** 机器人视图：实体 + 工位路径 + 实时状态 + 当前任务（均不落库实时推导） */
 export interface WorkerView extends Worker {
@@ -79,6 +94,9 @@ export class WorkersService {
     private readonly executors: Repository<Executor>,
     @InjectRepository(TaskTemplate)
     private readonly taskTemplates: Repository<TaskTemplate>,
+    @InjectRepository(WorkerDebugSession)
+    private readonly debugSessions: Repository<WorkerDebugSession>,
+    private readonly skillCatalog: WorkerSkillCatalogService,
     config: ConfigService,
   ) {
     this.workerBaseDir = config.get<string>('WORKER_BASE_DIR')?.trim() || null;
@@ -212,9 +230,11 @@ export class WorkersService {
     const exists = await this.workers.findOne({ where: { name } });
     if (exists) throw new BadRequestException(`名称「${name}」已存在`);
     await this.ensureCustomWorkerIdFloor();
+    const skills = this.skillCatalog.normalizeSkills(input.skills) ?? null;
     const worker = this.workers.create({
       name,
       intro: input.intro?.trim() || null,
+      avatarUrl: normalizeAvatarUrl(input.avatarUrl),
       kind: input.kind ?? WorkerKind.AGENT,
       role: WorkerRole.WORKER,
       runtime: WorkerRuntime.OPENCODE,
@@ -222,7 +242,7 @@ export class WorkersService {
       providerId: input.providerId?.trim() || null,
       modelId: input.modelId?.trim() || null,
       prompt: input.prompt?.trim() || null,
-      skills: input.skills?.length ? input.skills : null,
+      skills,
       taskDefs: input.taskDefs?.length ? input.taskDefs : null,
       materials: input.materials?.trim() || null,
       enabled: input.enabled ?? true,
@@ -257,6 +277,9 @@ export class WorkersService {
       worker.name = name;
     }
     if (input.intro !== undefined) worker.intro = input.intro?.trim() || null;
+    if (input.avatarUrl !== undefined) {
+      worker.avatarUrl = normalizeAvatarUrl(input.avatarUrl);
+    }
     if (input.kind !== undefined) worker.kind = input.kind;
     if (input.role !== undefined && input.role !== worker.role) {
       throw new BadRequestException('机器人角色由系统维护，不能修改');
@@ -280,7 +303,7 @@ export class WorkersService {
     if (input.prompt !== undefined)
       worker.prompt = input.prompt?.trim() || null;
     if (input.skills !== undefined) {
-      worker.skills = input.skills?.length ? input.skills : null;
+      worker.skills = this.skillCatalog.normalizeSkills(input.skills) ?? null;
     }
     if (input.taskDefs !== undefined) {
       worker.taskDefs = input.taskDefs?.length ? input.taskDefs : null;
@@ -313,8 +336,10 @@ export class WorkersService {
         `该机器人还有 ${active} 个未完结任务，先处理任务再删除`,
       );
     }
-    // 任务包中的默认处理机器人随机器人删除解绑（无物理外键）
+    // 任务定义中的默认处理机器人随机器人删除解绑（无物理外键）
     await this.taskTemplates.update({ agentId: id }, { agentId: null });
+    // 调试会话绑定随机器人删除清理（opencode 会话本身保留在执行器上）
+    await this.debugSessions.delete({ workerId: id });
     await this.workers.remove(worker);
   }
 
