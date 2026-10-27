@@ -225,6 +225,7 @@ export class SystemWorkersService implements OnApplicationBootstrap {
             modelId: null,
             prompt: def.prompt,
             skills: null,
+            standards: null,
             taskDefs: null,
             ownerUserId: null,
             ownerName: null,

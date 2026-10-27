@@ -47,10 +47,10 @@ export class CodeEvent {
   url: string | null;
 
   /** 提交时间（GitHub commit.author.date） */
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamptz' })
   committedAt: Date;
 
   /** 平台发现该提交的时间 */
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

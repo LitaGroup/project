@@ -51,7 +51,7 @@ export class User {
   enabled: boolean;
 
   /** 最近登录时间 */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   lastLoginAt: Date | null;
 
   /** agent 访问令牌：agent 调 .md 端点时经 X-Agent-Token 头或 ?token= 提供（个人中心可重置，空=尚未发放） */
@@ -68,12 +68,12 @@ export class User {
   feishuRefreshToken: string | null;
 
   /** 飞书 user_access_token 过期时间（本地时钟） */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   feishuTokenExpiresAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

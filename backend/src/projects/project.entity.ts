@@ -109,9 +109,9 @@ export class Project {
 
   /** 列表按创建时间倒序展示，建索引避免全表 filesort */
   @Index('IDX_projects_createdAt')
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

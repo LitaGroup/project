@@ -47,16 +47,16 @@ export class Schedule {
   enabled: boolean;
 
   /** 最近一次触发时间 */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   lastRunAt: Date | null;
 
   /** 已运行次数（任务触发累计，含失败） */
   @Column({ default: 0 })
   runCount: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

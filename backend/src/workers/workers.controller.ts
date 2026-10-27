@@ -19,6 +19,10 @@ import {
   WorkerSkillCatalogService,
 } from './worker-skill-catalog.service';
 import {
+  StandardCatalogItem,
+  WorkerStandardCatalogService,
+} from './worker-standard-catalog.service';
+import {
   CreateWorkerInput,
   UpdateWorkerInput,
   WorkerView,
@@ -36,6 +40,7 @@ class CreateWorkerDto implements CreateWorkerInput {
   modelId?: string | null;
   prompt?: string | null;
   skills?: Worker['skills'];
+  standards?: Worker['standards'];
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
   enabled?: boolean;
@@ -52,6 +57,7 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   modelId?: string | null;
   prompt?: string | null;
   skills?: Worker['skills'];
+  standards?: Worker['standards'];
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
   enabled?: boolean;
@@ -91,6 +97,7 @@ export class WorkersController {
     private readonly workerAi: WorkerAiService,
     private readonly workerEnvironment: WorkerEnvironmentService,
     private readonly skillCatalog: WorkerSkillCatalogService,
+    private readonly standardCatalog: WorkerStandardCatalogService,
   ) {}
 
   /** AI 优化机器人 AGENTS.md：结构补全 + 清晰化，返回 Markdown 正文（走执行器） */
@@ -136,7 +143,13 @@ export class WorkersController {
     return this.skillCatalog.search(q);
   }
 
-  /** 初始化/同步工作环境：写入工位 AGENTS.md 并按清单同步 .opencode/skills */
+  /** 规范库目录：从 Gitea docs/standard 发现可选目录 README.md（不含根目录） */
+  @Get('standard-catalog')
+  listStandardCatalog(@Query('q') q?: string): Promise<StandardCatalogItem[]> {
+    return this.standardCatalog.search(q);
+  }
+
+  /** 初始化/同步工作环境：写入工位 AGENTS.md、按清单同步 .opencode/skills 与规范目录 */
   @Post(':id/initialize')
   initialize(
     @Param('id', ParseIntPipe) id: number,

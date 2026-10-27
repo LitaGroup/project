@@ -853,10 +853,34 @@ export interface WorkerSkillCatalogItem {
   sourceUrl: string
 }
 
+/** 规范库目录条目（README 所在目录，初始化时整目录同步） */
+export interface WorkerStandardCatalogItem {
+  name: string
+  description: string | null
+  version: string | null
+  /** 仓库内 README.md 相对路径，如 fe/h5/README.md */
+  path: string
+  /** README 所在目录，如 fe/h5 */
+  directory: string
+  url: string
+  sourceUrl: string
+}
+
 /** 机器人技能引用（保存后安装到工位 .opencode/skills） */
 export interface WorkerSkill {
   name: string
   path: string
+  url: string
+  description?: string | null
+  version?: string | null
+  sourceUrl?: string | null
+}
+
+/** 机器人规范引用（保存后初始化时同步其目录到工位 .opencode/docs） */
+export interface WorkerStandard {
+  name: string
+  path: string
+  directory: string
   url: string
   description?: string | null
   version?: string | null
@@ -885,6 +909,7 @@ export interface Worker {
   modelId: string | null
   prompt: string | null
   skills: WorkerSkill[] | null
+  standards: WorkerStandard[] | null
   taskDefs: WorkerTaskDef[] | null
   ownerUserId: number | null
   ownerName: string | null
@@ -1867,6 +1892,7 @@ export const api = {
     modelId?: string | null
     prompt?: string | null
     skills?: WorkerSkill[] | null
+    standards?: WorkerStandard[] | null
     taskDefs?: WorkerTaskDef[] | null
     ownerUserId?: number | null
     enabled?: boolean
@@ -1888,6 +1914,7 @@ export const api = {
       modelId: string | null
       prompt: string | null
       skills: WorkerSkill[] | null
+      standards: WorkerStandard[] | null
       taskDefs: WorkerTaskDef[] | null
       ownerUserId: number | null
       enabled: boolean
@@ -1919,7 +1946,15 @@ export const api = {
       `/workers/skill-catalog${qs.toString() ? `?${qs.toString()}` : ''}`,
     )
   },
-  /** 初始化/同步工作环境：写入工位 AGENTS.md 并按清单同步 .opencode/skills */
+  /** 规范库目录：从 Gitea docs/standard 发现可选目录 README.md（不含根目录） */
+  listWorkerStandardCatalog: (q?: string) => {
+    const qs = new URLSearchParams()
+    if (q?.trim()) qs.set('q', q.trim())
+    return request<WorkerStandardCatalogItem[]>(
+      `/workers/standard-catalog${qs.toString() ? `?${qs.toString()}` : ''}`,
+    )
+  },
+  /** 初始化/同步工作环境：写入工位 AGENTS.md，并按清单同步 .opencode/skills 与规范目录 */
   initializeWorker: (id: number) =>
     request<{ status: 'success'; workdir: string }>(
       `/workers/${id}/initialize`,

@@ -34,6 +34,6 @@ export class TaskEvent {
   @Column({ type: 'varchar', length: 100, nullable: true })
   operator: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

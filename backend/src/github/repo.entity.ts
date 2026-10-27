@@ -53,16 +53,16 @@ export class Repo {
   status: RepoStatus;
 
   /** 仓库最后被更新的时间（GitHub updated_at，随同步刷新） */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   lastUpdatedAt: Date | null;
 
   /** 备注 */
   @Column({ type: 'text', nullable: true })
   remark: string | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

@@ -81,10 +81,10 @@ export class ExportRun {
   @Column({ type: 'json', nullable: true })
   files: ExportRunFile[] | null;
 
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamptz' })
   startedAt: Date;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   finishedAt: Date | null;
 
   // 测试库账号无 REFERENCES 权限，暂不建物理外键（同 Export，见 AGENTS.md）

@@ -17,11 +17,17 @@ import { User } from '../auth/user.entity';
 import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Executor } from '../executors/executor.entity';
-import { Worker, WorkerSkill, WorkerTaskDef } from './worker.entity';
+import {
+  Worker,
+  WorkerSkill,
+  WorkerStandard,
+  WorkerTaskDef,
+} from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
 import { SYSTEM_WORKER_ID_LIMIT, isSystemWorkerId } from './system-workers';
 import { ensureWorkerSequenceFloor } from './system-workers.service';
 import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
+import { WorkerStandardCatalogService } from './worker-standard-catalog.service';
 
 export interface CreateWorkerInput {
   name: string;
@@ -34,6 +40,7 @@ export interface CreateWorkerInput {
   modelId?: string | null;
   prompt?: string | null;
   skills?: WorkerSkill[] | null;
+  standards?: WorkerStandard[] | null;
   taskDefs?: WorkerTaskDef[] | null;
   ownerUserId?: number | null;
   enabled?: boolean;
@@ -94,6 +101,7 @@ export class WorkersService {
     @InjectRepository(WorkerDebugSession)
     private readonly debugSessions: Repository<WorkerDebugSession>,
     private readonly skillCatalog: WorkerSkillCatalogService,
+    private readonly standardCatalog: WorkerStandardCatalogService,
     config: ConfigService,
   ) {
     this.workerBaseDir = config.get<string>('WORKER_BASE_DIR')?.trim() || null;
@@ -223,6 +231,8 @@ export class WorkersService {
     if (exists) throw new BadRequestException(`名称「${name}」已存在`);
     await this.ensureCustomWorkerIdFloor();
     const skills = this.skillCatalog.normalizeSkills(input.skills) ?? null;
+    const standards =
+      this.standardCatalog.normalizeStandards(input.standards) ?? null;
     const worker = this.workers.create({
       name,
       intro: input.intro?.trim() || null,
@@ -234,6 +244,7 @@ export class WorkersService {
       modelId: input.modelId?.trim() || null,
       prompt: input.prompt?.trim() || null,
       skills,
+      standards,
       taskDefs: input.taskDefs?.length ? input.taskDefs : null,
       enabled: input.enabled ?? true,
     });
@@ -293,6 +304,10 @@ export class WorkersService {
       worker.prompt = input.prompt?.trim() || null;
     if (input.skills !== undefined) {
       worker.skills = this.skillCatalog.normalizeSkills(input.skills) ?? null;
+    }
+    if (input.standards !== undefined) {
+      worker.standards =
+        this.standardCatalog.normalizeStandards(input.standards) ?? null;
     }
     if (input.taskDefs !== undefined) {
       worker.taskDefs = input.taskDefs?.length ? input.taskDefs : null;

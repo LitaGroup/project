@@ -108,11 +108,11 @@ export class Task {
   remindCount: number;
 
   /** 首次提醒发送时间（7 天超时基准；进入等待态时重置） */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   firstRemindedAt: Date | null;
 
   /** 最近一次提醒发送时间（30 分钟节流；为空表示尚未提醒） */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   lastRemindedAt: Date | null;
 
   /** 分配的机器人（workers.id，可空=未分配） */
@@ -136,22 +136,22 @@ export class Task {
   result: string | null;
 
   /** 责任人验收（→ 内部完成） */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   acceptedAt: Date | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   acceptedBy: string | null;
 
   /** 交付确认时间 */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   deliveredAt: Date | null;
 
   /** 归档（维护中终态）时间 */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   archivedAt: Date | null;
 
   /** 取消时间 */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   canceledAt: Date | null;
 
   /** 创建人（users.id，可空） */
@@ -162,9 +162,9 @@ export class Task {
   @Column({ type: 'simple-json', nullable: true })
   planRef: TaskPlanRef | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

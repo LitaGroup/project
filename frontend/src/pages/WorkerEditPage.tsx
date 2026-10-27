@@ -36,6 +36,8 @@ import {
   type WorkerRole,
   type WorkerSkill,
   type WorkerSkillCatalogItem,
+  type WorkerStandard,
+  type WorkerStandardCatalogItem,
 } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
@@ -89,6 +91,8 @@ export function WorkerEditPage() {
   const [prompt, setPrompt] = useState(workerId ? '' : NEW_PROMPT_TEMPLATE)
   const [skills, setSkills] = useState<WorkerSkill[]>([])
   const [skillPickerOpen, setSkillPickerOpen] = useState(false)
+  const [standards, setStandards] = useState<WorkerStandard[]>([])
+  const [standardPickerOpen, setStandardPickerOpen] = useState(false)
   const [ownerUserId, setOwnerUserId] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -140,6 +144,14 @@ export function WorkerEditPage() {
             (skill): skill is WorkerSkill => typeof skill.url === 'string',
           ),
         )
+        setStandards(
+          (w.standards ?? []).filter(
+            (standard): standard is WorkerStandard =>
+              typeof standard.url === 'string' &&
+              typeof standard.path === 'string' &&
+              typeof standard.directory === 'string',
+          ),
+        )
         setOwnerUserId(w.ownerUserId ? String(w.ownerUserId) : '')
         setEnabled(w.enabled)
       })
@@ -178,6 +190,7 @@ export function WorkerEditPage() {
       modelId: modelId || null,
       prompt: promptText.trim() || null,
       skills,
+      standards,
       ownerUserId: ownerUserId ? Number(ownerUserId) : null,
       enabled,
     }
@@ -189,7 +202,7 @@ export function WorkerEditPage() {
         ? await api.updateWorker(worker.id, payload)
         : await api.createWorker(payload)
       setWorker(saved)
-      // 2. 再调用执行器，把 AGENTS.md 与技能同步到工位
+      // 2. 再调用执行器，把 AGENTS.md、技能与规范同步到工位
       setSaving(false)
       stage = 'init'
       setInitializing(true)
@@ -479,6 +492,13 @@ export function WorkerEditPage() {
               onChange={setSkills}
               pickerOpen={skillPickerOpen}
               onPickerOpenChange={setSkillPickerOpen}
+              disabled={busy}
+            />
+            <WorkerStandardSection
+              standards={standards}
+              onChange={setStandards}
+              pickerOpen={standardPickerOpen}
+              onPickerOpenChange={setStandardPickerOpen}
               disabled={busy}
             />
             <div className="border-t border-border-strong" />
@@ -794,6 +814,236 @@ function WorkerSkillPickerDialog({
             </div>
             <p className="text-xs text-foreground-muted">
               已选择 {selected.length} 个技能；清单以保存时的选择为准
+            </p>
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button size="sm" onClick={() => onOpenChange(false)}>
+            完成
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 规范选择/清单展示：保存时仅保存规范库 README 引用，初始化任务负责整目录同步到工位 docs */
+function WorkerStandardSection({
+  standards,
+  onChange,
+  pickerOpen,
+  onPickerOpenChange,
+  disabled,
+}: {
+  standards: WorkerStandard[]
+  onChange: (standards: WorkerStandard[]) => void
+  pickerOpen: boolean
+  onPickerOpenChange: (open: boolean) => void
+  disabled: boolean
+}) {
+  const remove = (path: string) =>
+    onChange(standards.filter((standard) => standard.path !== path))
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm">规范</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => onPickerOpenChange(true)}
+        >
+          添加规范
+        </Button>
+      </div>
+      {standards.length === 0 ? (
+        <p className="text-xs text-foreground-muted">
+          未选择规范；保存初始化后会按选中目录同步到工位 docs
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {standards.map((standard) => (
+            <div
+              key={standard.path}
+              className="flex items-start gap-2 rounded-[var(--radius-md)] bg-background-muted px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm">{standard.name}</span>
+                  {standard.version && (
+                    <Badge variant="soft" size="sm">
+                      v{standard.version}
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-0.5 truncate font-mono text-xs text-foreground-muted">
+                  {standard.directory}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                onClick={() => remove(standard.path)}
+              >
+                移除
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <WorkerStandardPickerDialog
+        open={pickerOpen}
+        onOpenChange={onPickerOpenChange}
+        selected={standards}
+        onToggle={(item, checked) => {
+          if (checked) {
+            if (!standards.some((standard) => standard.path === item.path)) {
+              onChange([...standards, item])
+            }
+            return
+          }
+          onChange(standards.filter((standard) => standard.path !== item.path))
+        }}
+      />
+    </div>
+  )
+}
+
+/** 规范库多选弹窗：读取后端缓存的 Gitea docs/standard 目录 README 清单 */
+function WorkerStandardPickerDialog({
+  open,
+  onOpenChange,
+  selected,
+  onToggle,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  selected: WorkerStandard[]
+  onToggle: (item: WorkerStandardCatalogItem, checked: boolean) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [items, setItems] = useState<WorkerStandardCatalogItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const selectedPaths = useMemo(
+    () => new Set(selected.map((standard) => standard.path)),
+    [selected],
+  )
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    // 输入防抖后走服务端搜索，避免每敲一个字符都请求 Gitea 缓存清单
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      setError(null)
+      api
+        .listWorkerStandardCatalog(query)
+        .then((result) => {
+          if (alive) setItems(result)
+        })
+        .catch((e: Error) => {
+          if (alive) setError(e.message)
+        })
+        .finally(() => {
+          if (alive) setLoading(false)
+        })
+    }, 200)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [open, query])
+
+  const groups = useMemo(() => {
+    const map = new Map<string, WorkerStandardCatalogItem[]>()
+    for (const item of items) {
+      const group = item.directory.split('/')[0] || '其它'
+      if (!map.has(group)) map.set(group, [])
+      map.get(group)!.push(item)
+    }
+    return [...map.entries()]
+  }, [items])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>添加规范</DialogTitle>
+          <DialogDescription>
+            从规范库选择目录 README.md；保存初始化后会同步该目录下的全部文档到机器人工作目录
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-3">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜索规范名称、描述或路径"
+            />
+            {error && <p className="text-sm text-error-foreground">{error}</p>}
+            <div className="max-h-96 min-h-32 overflow-auto rounded-[var(--radius-md)] border border-border-strong">
+              {loading && items.length === 0 ? (
+                <div className="flex h-32 items-center justify-center text-sm text-foreground-muted">
+                  <Loader variant="dots" currentColor className="mr-2" />
+                  加载中…
+                </div>
+              ) : items.length === 0 ? (
+                <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-foreground-muted">
+                  {error ? '规范库不可用' : '没有匹配的规范'}
+                </div>
+              ) : (
+                groups.map(([group, groupItems]) => (
+                  <div key={group}>
+                    <div className="sticky top-0 z-10 border-b border-border-strong bg-background px-3 py-2 text-xs font-medium text-foreground-muted">
+                      {group}
+                    </div>
+                    {groupItems.map((item) => {
+                      const checked = selectedPaths.has(item.path)
+                      return (
+                        <label
+                          key={item.path}
+                          className="flex cursor-pointer items-start gap-3 border-b border-border-strong px-3 py-3 last:border-b-0 hover:bg-background-muted"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(checked) =>
+                              onToggle(item, checked === true)
+                            }
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="truncate text-sm font-medium">
+                                {item.name}
+                              </span>
+                              {item.version && (
+                                <Badge variant="soft" size="sm">
+                                  v{item.version}
+                                </Badge>
+                              )}
+                            </span>
+                            {item.description && (
+                              <span className="mt-1 block line-clamp-2 text-xs text-foreground-muted">
+                                {item.description}
+                              </span>
+                            )}
+                            <span className="mt-1 block truncate font-mono text-xs text-foreground-muted">
+                              {item.directory}
+                            </span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
+            <p className="text-xs text-foreground-muted">
+              已选择 {selected.length} 个规范；初始化以保存时的选择为准
             </p>
           </div>
         </DialogBody>

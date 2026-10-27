@@ -57,6 +57,8 @@ import { ReleasesModule } from './releases/releases.module';
           config.get<string>('DB_SSL') === 'true'
             ? { rejectUnauthorized: false }
             : undefined,
+        // 每个连接固定会话时区：库端 DEFAULT now()/CURRENT_TIMESTAMP 写北京墙钟，与 JS new Date() 写入对齐
+        extra: { options: '-c timezone=Asia/Shanghai' },
         autoLoadEntities: true,
         // 仅开发期使用，生产前必须切换为 migrations
         synchronize: config.get<string>('NODE_ENV') !== 'production',

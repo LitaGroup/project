@@ -23,6 +23,8 @@ export default new DataSource({
   database: process.env.DB_NAME || 'project',
   ssl:
     process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+  // 与 AppModule 的 TypeORM 配置保持一致：连接级固定会话时区
+  extra: { options: '-c timezone=Asia/Shanghai' },
   entities: [join(__dirname, '**', '*.entity.{ts,js}')],
   migrations: [join(__dirname, 'migrations', '*{.ts,.js}')],
   synchronize: false,

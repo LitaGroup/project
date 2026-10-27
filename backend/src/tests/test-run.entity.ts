@@ -68,14 +68,14 @@ export class TestRun {
   @Column({ type: 'json', nullable: true })
   output: string[] | null;
 
-  @Column({ type: 'timestamp' })
+  @Column({ type: 'timestamptz' })
   startedAt: Date;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   finishedAt: Date | null;
 
   /** 入队时间（APP 测试远程执行时 FIFO 排序用），非 APP 测试为空 */
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   queuedAt: Date | null;
 
   /** 关联的 APP 版本（app_versions.id），非 APP 测试为空 */

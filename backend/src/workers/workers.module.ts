@@ -11,6 +11,7 @@ import { SystemWorkersService } from './system-workers.service';
 import { WorkerAiService } from './worker-ai.service';
 import { WorkerEnvironmentService } from './worker-environment.service';
 import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
+import { WorkerStandardCatalogService } from './worker-standard-catalog.service';
 import { WorkerDebugController } from './worker-debug.controller';
 import { WorkerDebugService } from './worker-debug.service';
 import { WorkersController } from './workers.controller';
@@ -36,6 +37,7 @@ import { WorkersService } from './workers.service';
     WorkerAiService,
     WorkerEnvironmentService,
     WorkerSkillCatalogService,
+    WorkerStandardCatalogService,
     WorkerDebugService,
   ],
   exports: [WorkersService],

@@ -44,9 +44,9 @@ export class AppVersion {
   @JoinColumn({ name: 'projectId' })
   project: Project;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

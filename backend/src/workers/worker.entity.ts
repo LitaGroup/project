@@ -44,6 +44,24 @@ export interface WorkerSkill {
   sourceUrl?: string | null;
 }
 
+/** 规范清单条目：规范库 README.md 的引用（选中即同步其目录到工位 .opencode/docs） */
+export interface WorkerStandard {
+  /** 展示名（README frontmatter name/title，缺失时取目录名） */
+  name: string;
+  /** 仓库内 README.md 相对路径，如 fe/h5/README.md */
+  path: string;
+  /** README 所在目录（同步到 .opencode/docs 的源目录），如 fe/h5 */
+  directory: string;
+  /** 原始文件下载地址（raw） */
+  url: string;
+  /** 描述（frontmatter description） */
+  description?: string | null;
+  /** 版本（frontmatter version） */
+  version?: string | null;
+  /** Gitea 页面地址（查看原文） */
+  sourceUrl?: string | null;
+}
+
 /** 机器人：工作者与调度机器人统一实体。
  * 统一运行在执行器上（opencode 等），不再使用平台进程内 PI Agent。 */
 @Entity('workers')
@@ -96,6 +114,10 @@ export class Worker {
   @Column({ type: 'simple-json', nullable: true })
   skills: WorkerSkill[] | null;
 
+  /** 规范清单（规范库 README.md 引用，初始化时按目录同步到工位 .opencode/docs） */
+  @Column({ type: 'simple-json', nullable: true })
+  standards: WorkerStandard[] | null;
+
   /** 任务定义（接什么活） */
   @Column({ type: 'simple-json', nullable: true })
   taskDefs: WorkerTaskDef[] | null;
@@ -111,9 +133,9 @@ export class Worker {
   @Column({ default: true })
   enabled: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

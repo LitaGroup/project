@@ -65,9 +65,9 @@ export class DispatchPlan {
   @Column({ type: 'varchar', length: 100, nullable: true })
   operator: string | null;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   operatedAt: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }
