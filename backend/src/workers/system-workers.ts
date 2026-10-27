@@ -1,4 +1,4 @@
-import { WorkerKind, WorkerRole, WorkerRuntime } from '../common/enums';
+import { WorkerRole, WorkerRuntime } from '../common/enums';
 
 /**
  * 系统机器人 ID 上界（不含）。
@@ -13,7 +13,7 @@ export function isSystemWorkerId(id: number): boolean {
 
 /**
  * 系统调度机器人默认角色 PROMPT。
- * 平台内可继续编辑该机器人的 PROMPT / 调度材料，但机器人本身只能由代码内置。
+ * 平台内可继续编辑该机器人的 PROMPT，但机器人本身只能由代码内置。
  */
 export const DEFAULT_SCHEDULER_PROMPT = `你是「调度机器人」，项目管理平台中负责任务识别的项目负责人。
 你的职责：阅读用户提交的任务文字，识别任务的详情信息，并给出可执行的工作计划。
@@ -39,7 +39,6 @@ export interface SystemWorkerDefinition {
   id: number;
   name: string;
   intro: string;
-  kind: WorkerKind;
   role: WorkerRole;
   runtime: WorkerRuntime;
   prompt: string;
@@ -52,7 +51,6 @@ export const SYSTEM_WORKERS: SystemWorkerDefinition[] = [
     name: '调度机器人',
     intro:
       '系统机器人：历史任务识别与调度能力保留；新任务由平台直接识别分配后交给处理机器人',
-    kind: WorkerKind.AGENT,
     role: WorkerRole.SCHEDULER,
     runtime: WorkerRuntime.OPENCODE,
     prompt: DEFAULT_SCHEDULER_PROMPT,

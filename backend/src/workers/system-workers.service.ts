@@ -218,7 +218,6 @@ export class SystemWorkersService implements OnApplicationBootstrap {
             systemKey: def.key,
             name,
             intro: def.intro,
-            kind: def.kind,
             role: def.role,
             runtime: def.runtime,
             executorId: null,
@@ -229,7 +228,6 @@ export class SystemWorkersService implements OnApplicationBootstrap {
             taskDefs: null,
             ownerUserId: null,
             ownerName: null,
-            materials: null,
             enabled: false,
           });
           const generatedId = result.identifiers[0]?.id as number | undefined;

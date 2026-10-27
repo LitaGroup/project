@@ -103,7 +103,7 @@ export class TaskIdentifyService {
       title: `识别 ${task.code} ${task.title}`.slice(0, 100),
       model: { id: scheduler.modelId, providerID: scheduler.providerId },
       location: workdir ? { directory: workdir } : undefined,
-      prompt: this.buildPrompt(task, scheduler, roster, types),
+      prompt: this.buildPrompt(task, roster, types),
       timeoutMs,
     });
     this.logger.debug(
@@ -115,7 +115,6 @@ export class TaskIdentifyService {
   /** 调度机器人 PROMPT：输出协议 + 待识别任务与候选机器人（角色定义由工位 AGENTS.md 提供） */
   private buildPrompt(
     task: Task,
-    scheduler: WorkerView,
     roster: WorkerView[],
     types: TaskType[],
   ): string {
@@ -131,9 +130,6 @@ export class TaskIdentifyService {
       task.input?.trim() ? `\n## 已有输入\n\n${task.input.trim()}` : '',
       task.outputSpec?.trim()
         ? `\n## 已有期望输出\n\n${task.outputSpec.trim()}`
-        : '',
-      scheduler.materials?.trim()
-        ? `\n# 调度材料（负责人提供）\n\n${scheduler.materials.trim()}`
         : '',
       '\n# 可选机器人清单',
       '',

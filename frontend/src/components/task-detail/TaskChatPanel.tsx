@@ -176,9 +176,7 @@ export function TaskChatPanel({
                     />
                   )
                 }
-                return message.role === 'system' ? (
-                  <SystemEvent message={message} />
-                ) : message.role === 'user' ? (
+                return message.role === 'user' ? (
                   <UserBubble message={message} />
                 ) : (
                   <AssistantBubble message={message} />
@@ -212,10 +210,7 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
           ? ({ type: 'incomplete', reason: 'error' } as const)
           : ({ type: 'complete', reason: 'stop' } as const)
       : undefined
-  const content =
-    message.role === 'system' && !message.content.trim()
-      ? ' '
-      : message.content
+  const content = message.content
   const parts: Array<ReasoningMessagePart | TextMessagePart> = []
   if (message.reasoning?.trim()) {
     parts.push({
@@ -320,27 +315,6 @@ function AssistantBubble({ message }: { message: MessageState }) {
             </div>
           )
         )}
-      </div>
-    </MessagePrimitive.Root>
-  )
-}
-
-function SystemEvent({ message }: { message: MessageState }) {
-  const sender = customOf(message).sender ?? FALLBACK_SENDER
-  return (
-    <MessagePrimitive.Root className="flex justify-center px-2">
-      <div className="flex max-w-[92%] items-start gap-2 rounded-[var(--radius-md)] border border-border bg-background-subtle px-3 py-1.5 text-xs leading-relaxed text-foreground-muted">
-        {sender.kind !== 'system' && (
-          <span className="shrink-0 font-medium text-foreground-emphasis">
-            {sender.name}
-          </span>
-        )}
-        <span className="min-w-0 whitespace-pre-wrap break-words">
-          <MessagePrimitive.Parts components={CHAT_PLAIN_PARTS} />
-        </span>
-        <time className="shrink-0 pt-0.5 text-[10px] text-foreground-subtle">
-          {message.createdAt.toLocaleTimeString()}
-        </time>
       </div>
     </MessagePrimitive.Root>
   )

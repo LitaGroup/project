@@ -775,9 +775,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const EXECUTOR_TYPES = ['opencode', 'codex', 'claude-code'] as const
 export type ExecutorType = (typeof EXECUTOR_TYPES)[number]
 
-export const WORKER_KINDS = ['智能体', '员工'] as const
-export type WorkerKind = (typeof WORKER_KINDS)[number]
-
 export const WORKER_ROLES = ['工作者', '调度器'] as const
 export type WorkerRole = (typeof WORKER_ROLES)[number]
 
@@ -881,7 +878,6 @@ export interface Worker {
   systemKey: string | null
   /** 头像：/images/... 路径（空为默认黑底占位头像） */
   avatarUrl: string | null
-  kind: WorkerKind
   role: WorkerRole
   runtime: WorkerRuntime
   executorId: number | null
@@ -892,7 +888,6 @@ export interface Worker {
   taskDefs: WorkerTaskDef[] | null
   ownerUserId: number | null
   ownerName: string | null
-  materials: string | null
   enabled: boolean
   /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
@@ -1118,7 +1113,7 @@ export interface TaskChatQuestion {
 export interface TaskChatMessage {
   id: string
   taskId: number
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant'
   sender: TaskChatSender
   /** Markdown 正文；工具调用/提问消息可能为空 */
   content: string
@@ -1126,8 +1121,8 @@ export interface TaskChatMessage {
   reasoning?: string
   createdAt: string
   status: 'running' | 'complete' | 'error'
-  /** message=普通对话气泡；event=居中流转事件；question=机器人提问卡片 */
-  kind: 'message' | 'event' | 'question'
+  /** message=普通对话气泡；question=机器人提问卡片（时间线事件不进对话流，走快照 events） */
+  kind: 'message' | 'question'
   tools?: TaskChatTool[]
   question?: TaskChatQuestion
   meta?: Record<string, unknown>
@@ -1853,10 +1848,9 @@ export const api = {
   getExecutorProviders: (id: number) =>
     request<ExecutorProvider[]>(`/executors/${id}/providers`),
 
-  /** 机器人列表（kind/role 筛选） */
-  listWorkers: (params?: { kind?: WorkerKind; role?: WorkerRole }) => {
+  /** 机器人列表（role 筛选） */
+  listWorkers: (params?: { role?: WorkerRole }) => {
     const qs = new URLSearchParams()
-    if (params?.kind) qs.set('kind', params.kind)
     if (params?.role) qs.set('role', params.role)
     const q = qs.toString()
     return request<Worker[]>(`/workers${q ? `?${q}` : ''}`)
@@ -1866,7 +1860,6 @@ export const api = {
     name: string
     intro?: string | null
     avatarUrl?: string | null
-    kind?: WorkerKind
     role?: WorkerRole
     runtime?: WorkerRuntime
     executorId?: number | null
@@ -1876,7 +1869,6 @@ export const api = {
     skills?: WorkerSkill[] | null
     taskDefs?: WorkerTaskDef[] | null
     ownerUserId?: number | null
-    materials?: string | null
     enabled?: boolean
   }) =>
     request<Worker>('/workers', {
@@ -1889,7 +1881,6 @@ export const api = {
       name: string
       intro: string | null
       avatarUrl: string | null
-      kind: WorkerKind
       role: WorkerRole
       runtime: WorkerRuntime
       executorId: number | null
@@ -1899,7 +1890,6 @@ export const api = {
       skills: WorkerSkill[] | null
       taskDefs: WorkerTaskDef[] | null
       ownerUserId: number | null
-      materials: string | null
       enabled: boolean
     }>,
   ) =>

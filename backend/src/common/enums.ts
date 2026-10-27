@@ -189,12 +189,6 @@ export enum ExecutorType {
   CLAUDE_CODE = 'claude-code',
 }
 
-/** 机器人类型：智能体（本期）/ 员工（人工任务，预留） */
-export enum WorkerKind {
-  AGENT = '智能体',
-  HUMAN = '员工',
-}
-
 /** 机器人角色：工作者（干活）/ 调度器（任务识别、拆解、分配建议；当前为系统内置机器人） */
 export enum WorkerRole {
   WORKER = '工作者',

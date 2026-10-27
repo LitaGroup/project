@@ -13,7 +13,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter } from 'events';
 import { In, LessThan, Repository } from 'typeorm';
 import { Observable } from 'rxjs';
-import { WorkerKind, WorkerRuntime } from '../common/enums';
+import { WorkerRuntime } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import {
   OpencodeEvent,
@@ -329,10 +329,10 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** 仅返回可立即调试的 Agent：启用、模型配置完整、执行器启用且在线、工位可用 */
+  /** 仅返回可立即调试的机器人：启用、模型配置完整、执行器启用且在线、工位可用 */
   async listWorkers(): Promise<WorkerDebugOption[]> {
     const workers = await this.workers.find({
-      where: { kind: WorkerKind.AGENT, enabled: true },
+      where: { enabled: true },
       order: { id: 'ASC' },
     });
     const executorIds = [
@@ -910,8 +910,8 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
 
   private async resolveContext(workerId: number): Promise<DebugContext> {
     const worker = await this.workers.findOne({ where: { id: workerId } });
-    if (!worker || worker.kind !== WorkerKind.AGENT) {
-      throw new NotFoundException('Agent 机器人不存在');
+    if (!worker) {
+      throw new NotFoundException('机器人不存在');
     }
     if (!worker.enabled) throw new BadRequestException('机器人已停用');
     if (worker.runtime !== WorkerRuntime.OPENCODE) {

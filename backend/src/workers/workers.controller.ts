@@ -10,12 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import {
-  WorkerKind,
-  WorkerLiveStatus,
-  WorkerRole,
-  WorkerRuntime,
-} from '../common/enums';
+import { WorkerLiveStatus, WorkerRole, WorkerRuntime } from '../common/enums';
 import { Worker } from './worker.entity';
 import { OptimizePromptInput, WorkerAiService } from './worker-ai.service';
 import { WorkerEnvironmentService } from './worker-environment.service';
@@ -34,7 +29,6 @@ class CreateWorkerDto implements CreateWorkerInput {
   name: string;
   intro?: string | null;
   avatarUrl?: string | null;
-  kind?: WorkerKind;
   role?: WorkerRole;
   runtime?: WorkerRuntime;
   executorId?: number | null;
@@ -44,7 +38,6 @@ class CreateWorkerDto implements CreateWorkerInput {
   skills?: Worker['skills'];
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
-  materials?: string | null;
   enabled?: boolean;
 }
 
@@ -52,7 +45,6 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   name?: string;
   intro?: string | null;
   avatarUrl?: string | null;
-  kind?: WorkerKind;
   role?: WorkerRole;
   runtime?: WorkerRuntime;
   executorId?: number | null;
@@ -62,7 +54,6 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   skills?: Worker['skills'];
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
-  materials?: string | null;
   enabled?: boolean;
 }
 
@@ -133,16 +124,10 @@ export class WorkersController {
     );
   }
 
-  /** 机器人列表（kind/role 筛选，附实时状态与工位路径） */
+  /** 机器人列表（role 筛选，附实时状态与工位路径） */
   @Get()
-  findAll(
-    @Query('kind') kind?: WorkerKind,
-    @Query('role') role?: WorkerRole,
-  ): Promise<WorkerView[]> {
-    return this.workersService.findAll({
-      kind: kind || undefined,
-      role: role || undefined,
-    });
+  findAll(@Query('role') role?: WorkerRole): Promise<WorkerView[]> {
+    return this.workersService.findAll({ role: role || undefined });
   }
 
   /** 技能库目录：从 Gitea docs/skills 发现可选 SKILL.md */

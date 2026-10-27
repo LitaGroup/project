@@ -9,7 +9,6 @@ import { In, Repository } from 'typeorm';
 import {
   TaskStatus,
   TaskSubStatus,
-  WorkerKind,
   WorkerLiveStatus,
   WorkerRole,
   WorkerRuntime,
@@ -28,7 +27,6 @@ export interface CreateWorkerInput {
   name: string;
   intro?: string | null;
   avatarUrl?: string | null;
-  kind?: WorkerKind;
   role?: WorkerRole;
   runtime?: WorkerRuntime;
   executorId?: number | null;
@@ -38,7 +36,6 @@ export interface CreateWorkerInput {
   skills?: WorkerSkill[] | null;
   taskDefs?: WorkerTaskDef[] | null;
   ownerUserId?: number | null;
-  materials?: string | null;
   enabled?: boolean;
 }
 
@@ -108,14 +105,10 @@ export class WorkersService {
     return `${this.workerBaseDir.replace(/\/+$/, '')}/worker/${id}`;
   }
 
-  /** 列表（kind/role 筛选），附实时状态与工位路径 */
-  async findAll(filter?: {
-    kind?: WorkerKind;
-    role?: WorkerRole;
-  }): Promise<WorkerView[]> {
+  /** 列表（role 筛选），附实时状态与工位路径 */
+  async findAll(filter?: { role?: WorkerRole }): Promise<WorkerView[]> {
     const workers = await this.workers.find({
       where: {
-        ...(filter?.kind ? { kind: filter.kind } : {}),
         ...(filter?.role ? { role: filter.role } : {}),
       },
       order: { id: 'ASC' },
@@ -202,8 +195,7 @@ export class WorkersService {
     return {
       ...worker,
       system: Boolean(worker.systemKey) || isSystemWorkerId(worker.id),
-      workdir:
-        worker.kind === WorkerKind.AGENT ? this.workdirOf(worker.id) : null,
+      workdir: this.workdirOf(worker.id),
       liveStatus: entry?.status ?? WorkerLiveStatus.IDLE,
       activeTask: entry?.task
         ? {
@@ -235,7 +227,6 @@ export class WorkersService {
       name,
       intro: input.intro?.trim() || null,
       avatarUrl: normalizeAvatarUrl(input.avatarUrl),
-      kind: input.kind ?? WorkerKind.AGENT,
       role: WorkerRole.WORKER,
       runtime: WorkerRuntime.OPENCODE,
       executorId: input.executorId ?? null,
@@ -244,7 +235,6 @@ export class WorkersService {
       prompt: input.prompt?.trim() || null,
       skills,
       taskDefs: input.taskDefs?.length ? input.taskDefs : null,
-      materials: input.materials?.trim() || null,
       enabled: input.enabled ?? true,
     });
     await this.assertConfig(worker);
@@ -280,7 +270,6 @@ export class WorkersService {
     if (input.avatarUrl !== undefined) {
       worker.avatarUrl = normalizeAvatarUrl(input.avatarUrl);
     }
-    if (input.kind !== undefined) worker.kind = input.kind;
     if (input.role !== undefined && input.role !== worker.role) {
       throw new BadRequestException('机器人角色由系统维护，不能修改');
     }
@@ -307,9 +296,6 @@ export class WorkersService {
     }
     if (input.taskDefs !== undefined) {
       worker.taskDefs = input.taskDefs?.length ? input.taskDefs : null;
-    }
-    if (input.materials !== undefined) {
-      worker.materials = input.materials?.trim() || null;
     }
     if (input.enabled !== undefined) worker.enabled = input.enabled;
     await this.assertConfig(worker);

@@ -90,7 +90,6 @@ export function WorkerEditPage() {
   const [skills, setSkills] = useState<WorkerSkill[]>([])
   const [skillPickerOpen, setSkillPickerOpen] = useState(false)
   const [ownerUserId, setOwnerUserId] = useState('')
-  const [materials, setMaterials] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
   /** 配置已落库但工作环境初始化失败时的提示（重试保存不会再重复创建） */
@@ -142,7 +141,6 @@ export function WorkerEditPage() {
           ),
         )
         setOwnerUserId(w.ownerUserId ? String(w.ownerUserId) : '')
-        setMaterials(w.materials ?? '')
         setEnabled(w.enabled)
       })
       .catch((e: Error) => setLoadError(e.message))
@@ -181,7 +179,6 @@ export function WorkerEditPage() {
       prompt: promptText.trim() || null,
       skills,
       ownerUserId: ownerUserId ? Number(ownerUserId) : null,
-      materials: isScheduler ? materials.trim() || null : null,
       enabled,
     }
     let stage: 'save' | 'init' = 'save'
@@ -573,16 +570,6 @@ export function WorkerEditPage() {
                 </Select>
               </label>
             </div>
-            {isScheduler && (
-              <label className="flex flex-col gap-1 text-sm">
-                调度材料（负责人提供的背景约定，识别时附加给调度机器人）
-                <Textarea
-                  rows={5}
-                  value={materials}
-                  onChange={(e) => setMaterials(e.target.value)}
-                />
-              </label>
-            )}
           </div>
         </Card>
       </div>

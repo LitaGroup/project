@@ -61,7 +61,7 @@ export interface TaskChatQuestion {
 export interface TaskChatMessage {
   id: string;
   taskId: number;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant';
   sender: TaskChatSender;
   /** Markdown 正文；工具调用/提问消息可能为空 */
   content: string;
@@ -69,8 +69,8 @@ export interface TaskChatMessage {
   reasoning?: string;
   createdAt: string;
   status: 'running' | 'complete' | 'error';
-  /** message=普通对话气泡；event=居中流转事件；question=机器人提问卡片 */
-  kind: 'message' | 'event' | 'question';
+  /** message=普通对话气泡；question=机器人提问卡片（状态变更等时间线事件不进入对话流，走快照 events） */
+  kind: 'message' | 'question';
   tools?: TaskChatTool[];
   question?: TaskChatQuestion;
   meta?: Record<string, unknown>;

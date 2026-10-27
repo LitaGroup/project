@@ -5,7 +5,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { WorkerKind, WorkerRole, WorkerRuntime } from '../common/enums';
+import { WorkerRole, WorkerRuntime } from '../common/enums';
 
 /** 智能体的任务定义：接什么类型的任务、要什么输入、产出什么、怎么完成 */
 export interface WorkerTaskDefInput {
@@ -66,9 +66,6 @@ export class Worker {
   @Column({ type: 'varchar', length: 500, nullable: true })
   avatarUrl: string | null;
 
-  @Column({ type: 'enum', enum: WorkerKind, default: WorkerKind.AGENT })
-  kind: WorkerKind;
-
   @Column({ type: 'enum', enum: WorkerRole, default: WorkerRole.WORKER })
   role: WorkerRole;
 
@@ -110,10 +107,6 @@ export class Worker {
   /** 责任人姓名快照（展示用，选人时同步写入） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   ownerName: string | null;
-
-  /** 调度材料（仅调度机器人：识别时附加的背景材料，Markdown） */
-  @Column({ type: 'text', nullable: true })
-  materials: string | null;
 
   @Column({ default: true })
   enabled: boolean;

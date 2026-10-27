@@ -740,19 +740,8 @@ export class TaskChatService implements OnModuleDestroy {
       };
     }
 
-    // 其余都是时间线事件；操作事件保留操作人，便于前端展示「谁做了什么」
-    return {
-      ...base,
-      role: 'system',
-      sender: event.operator
-        ? this.userSender(event.operator)
-        : event.type === '系统' && typeof meta.schedulerId === 'number'
-          ? (stage.scheduler ?? this.systemSender())
-          : this.systemSender(),
-      content: event.content,
-      kind: 'event',
-      meta,
-    };
+    // 其余为时间线事件（状态变更/派发/分配/提醒等），只进右侧「任务事件」面板，不进入对话流
+    return null;
   }
 
   private async stageOf(task: Task): Promise<TaskPipelineStage> {
