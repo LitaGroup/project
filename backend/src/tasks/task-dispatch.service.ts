@@ -12,7 +12,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
-import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
+import {
+  TaskStatus,
+  TaskSubStatus,
+  WorkerRole,
+  WorkerRuntime,
+} from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import {
   OpencodeClient,
@@ -28,6 +33,7 @@ import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
+import { TaskTemplate } from './task-template.entity';
 import { TaskChatService } from './task-chat.service';
 import { TaskNotifyService } from './task-notify.service';
 import { TaskRealtimeService } from './task-realtime.service';
@@ -64,6 +70,8 @@ export class TaskDispatchService
     private readonly executors: Repository<Executor>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
+    @InjectRepository(TaskTemplate)
+    private readonly taskTemplates: Repository<TaskTemplate>,
     private readonly workersService: WorkersService,
     private readonly eventHub: OpencodeEventHub,
     private readonly taskNotify: TaskNotifyService,
@@ -113,22 +121,33 @@ export class TaskDispatchService
   }
 
   /**
-   * 派发：调度机器人识别完成的「进行中-识别中」任务，或执行中的重新派发。
+   * 派发：平台识别分配完成的「进行中-识别中」任务，或执行中的重新派发。
    * 链路：建工位 → 复用/建会话（一个任务固定一个会话）→ 发 prompt；
    * 成功后任务进入「进行中-执行中」。
    */
-  async dispatch(taskId: number, operator: string | null): Promise<Task> {
+  async dispatch(
+    taskId: number,
+    operator: string | null,
+    userMessage?: string,
+  ): Promise<Task> {
     const task = await this.mustFind(taskId);
+    const continuing = Boolean(userMessage?.trim());
+    const canContinue =
+      continuing &&
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_ACCEPT;
     if (
-      task.status !== TaskStatus.RUNNING ||
-      ![TaskSubStatus.IDENTIFYING, TaskSubStatus.EXECUTING].includes(
-        task.subStatus,
-      )
+      !canContinue &&
+      (task.status !== TaskStatus.RUNNING ||
+        ![TaskSubStatus.IDENTIFYING, TaskSubStatus.EXECUTING].includes(
+          task.subStatus,
+        ))
     ) {
       throw new NotFoundException(
         `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可派发`,
       );
     }
+    const fromLabel = `${task.status}-${task.subStatus}`;
     const wasExecuting = task.subStatus === TaskSubStatus.EXECUTING;
     if (!task.agentId)
       throw new NotFoundException(`任务 ${task.code} 未分配机器人`);
@@ -240,18 +259,27 @@ export class TaskDispatchService
       await this.addEvent(
         task.id,
         '操作',
-        `派发给「${worker.name}」（执行器：${executor.name}，${bindLabel}：${sessionId}）`,
+        continuing
+          ? `继续对话（机器人：${worker.name}，${bindLabel}：${sessionId}）`
+          : `派发给「${worker.name}」（执行器：${executor.name}，${bindLabel}：${sessionId}）`,
         operator,
-        { executorId: executor.id, sessionId, reused },
+        { executorId: executor.id, sessionId, reused, continued: continuing },
       );
       this.sessionRoutes.set(`${executor.id}:${sessionId}`, task.id);
       this.pushLine(
         task.id,
-        `▶ 已派发给 ${worker.name}（${bindLabel} ${sessionId}）`,
+        continuing
+          ? `▶ 已继续对话（${bindLabel} ${sessionId}）`
+          : `▶ 已派发给 ${worker.name}（${bindLabel} ${sessionId}）`,
       );
 
       // 5. 发任务指令（角色定义与技能已由工位文件提供；历史上下文由会话自身维持）
-      const text = this.buildPrompt(task);
+      const prompt = await this.buildPrompt(task);
+      const text = continuing
+        ? reused
+          ? userMessage!.trim()
+          : `${prompt}\n\n# 用户消息\n\n${userMessage!.trim()}`
+        : prompt;
       await client.prompt(sessionId, { text });
       this.pushLine(task.id, '▶ 任务指令已下发');
 
@@ -263,7 +291,9 @@ export class TaskDispatchService
         await this.addEvent(
           task.id,
           '状态变更',
-          '状态变更：进行中-识别中 → 进行中-执行中',
+          continuing
+            ? `状态变更：${fromLabel} → 进行中-执行中（继续对话）`
+            : '状态变更：进行中-识别中 → 进行中-执行中',
           null,
         );
       }
@@ -276,8 +306,118 @@ export class TaskDispatchService
     }
   }
 
+  /**
+   * 在已有任务会话中继续多轮对话。待验收任务会重新进入执行中，
+   * 会话缺失/更换执行器时由 dispatch 新建会话并携带任务上下文。
+   */
+  async continueConversation(
+    taskId: number,
+    content: string,
+    operator: string | null,
+  ): Promise<Task> {
+    const task = await this.mustFind(taskId);
+    if (task.status === TaskStatus.FINISHED) {
+      throw new BadRequestException(`任务 ${task.code} 已结束，不能继续对话`);
+    }
+    if (
+      task.status === TaskStatus.WAITING ||
+      (task.status === TaskStatus.RUNNING &&
+        task.subStatus === TaskSubStatus.IDENTIFYING)
+    ) {
+      throw new BadRequestException('当前任务应先补充需求并重新识别');
+    }
+    if (this.taskChat.isRunning(taskId)) {
+      throw new BadRequestException('机器人正在回复，请稍后再发送');
+    }
+    if (!task.agentId) {
+      throw new BadRequestException('任务尚未分配机器人，请先分配');
+    }
+    const text = content.trim();
+    if (!text) throw new BadRequestException('消息内容不能为空');
+    await this.taskChat.archiveResult(taskId);
+    await this.addEvent(taskId, '反馈', text, operator, {
+      intervention: true,
+      chat: true,
+    });
+    return this.dispatch(taskId, operator, text);
+  }
+
+  /**
+   * 人工分配机器人：识别/待反馈阶段仅更新分配；执行中先中断旧会话，
+   * 待验收则直接换机器人重新执行，旧会话事件不会再命中新绑定。
+   */
+  async assign(
+    taskId: number,
+    agentId: number,
+    operator: string | null,
+  ): Promise<Task> {
+    if (!Number.isInteger(agentId) || agentId < 1) {
+      throw new BadRequestException('机器人 ID 必须为正整数');
+    }
+    const task = await this.mustFind(taskId);
+    if (task.status === TaskStatus.FINISHED) {
+      throw new BadRequestException(`任务 ${task.code} 已结束，不能分配`);
+    }
+    const worker = await this.workers.findOne({ where: { id: agentId } });
+    if (!worker) throw new BadRequestException('机器人不存在');
+    if (!worker.enabled) throw new BadRequestException('机器人已停用');
+    if (worker.role === WorkerRole.SCHEDULER) {
+      throw new BadRequestException('调度机器人不承接任务，请分配给工作者');
+    }
+    if (task.agentId === agentId) return task;
+
+    const oldAgent = task.agentId
+      ? await this.workers.findOne({ where: { id: task.agentId } })
+      : null;
+    const shouldRerun =
+      (task.status === TaskStatus.RUNNING &&
+        task.subStatus === TaskSubStatus.EXECUTING) ||
+      (task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_ACCEPT);
+    const previousExecutorId = task.executorId;
+    const previousSessionId = task.opencodeSessionId;
+    if (shouldRerun) await this.taskChat.archiveResult(taskId);
+
+    if (
+      task.status === TaskStatus.RUNNING &&
+      task.subStatus === TaskSubStatus.EXECUTING
+    ) {
+      await this.interrupt(taskId, operator, false);
+    }
+    if (shouldRerun) {
+      if (previousExecutorId && previousSessionId) {
+        this.sessionRoutes.delete(`${previousExecutorId}:${previousSessionId}`);
+      }
+      this.releaseTask(taskId);
+      task.executorId = null;
+      task.opencodeSessionId = null;
+      task.status = TaskStatus.RUNNING;
+      task.subStatus = TaskSubStatus.EXECUTING;
+    }
+    task.agentId = agentId;
+    const saved = await this.tasks.save(task);
+    await this.addEvent(
+      taskId,
+      '分配',
+      `分配：${oldAgent?.name ?? '未分配'} → ${worker.name}${shouldRerun ? '（重新执行）' : ''}`,
+      operator,
+      {
+        intervention: true,
+        fromAgentId: oldAgent?.id ?? null,
+        toAgentId: worker.id,
+        rerun: shouldRerun,
+      },
+    );
+    if (shouldRerun) return this.dispatch(taskId, operator);
+    return saved;
+  }
+
   /** 中断执行（会话 interrupt + 事件；任务保持执行中，可重新派发或取消） */
-  async interrupt(taskId: number, operator: string | null): Promise<Task> {
+  async interrupt(
+    taskId: number,
+    operator: string | null,
+    intervention = true,
+  ): Promise<Task> {
     const task = await this.mustFind(taskId);
     if (
       task.status !== TaskStatus.RUNNING ||
@@ -302,7 +442,9 @@ export class TaskDispatchService
       }
     }
     this.pushLine(taskId, '■ 已人工中断');
-    await this.addEvent(taskId, '操作', '人工中断执行', operator);
+    await this.addEvent(taskId, '操作', '人工中断执行', operator, {
+      intervention,
+    });
     await this.taskChat.finishTask(taskId);
     this.releaseTask(taskId);
     return this.mustFind(taskId);
@@ -345,6 +487,7 @@ export class TaskDispatchService
       this.pushLine(taskId, '❓ 已跳过提问');
       await this.addEvent(taskId, '操作', '跳过机器人提问', operator, {
         questionId,
+        intervention: true,
       });
       return { ok: true };
     }
@@ -382,6 +525,7 @@ export class TaskDispatchService
     await this.addEvent(taskId, '操作', '回答机器人提问', operator, {
       questionId,
       answers,
+      intervention: true,
     });
     return { ok: true };
   }
@@ -447,7 +591,11 @@ export class TaskDispatchService
       const remote = new Set(requests.map((request) => request.id));
       let created = false;
       for (const request of requests) {
-        if (await this.taskChat.questionAsked(task.id, request)) created = true;
+        const isNew = await this.taskChat.questionAsked(task.id, request);
+        if (isNew) {
+          created = true;
+          await this.recordQuestionAskedEvent(task.id, request);
+        }
       }
       for (const pending of this.taskChat.pendingQuestions(task.id)) {
         if (!remote.has(pending.id)) {
@@ -574,6 +722,18 @@ export class TaskDispatchService
         this.taskChat.toolFinished(taskId, false);
         break;
       }
+      case event.type === 'session.reasoning.started': {
+        await this.taskChat.beginReasoning(taskId);
+        break;
+      }
+      case event.type === 'session.reasoning.delta': {
+        await this.taskChat.appendReasoning(taskId, str('delta'));
+        break;
+      }
+      case event.type === 'session.reasoning.ended': {
+        this.taskChat.endReasoning(taskId);
+        break;
+      }
       case event.type === 'session.text.started': {
         this.bufferOf(taskId).set(messageId, '');
         await this.taskChat.beginText(taskId);
@@ -668,8 +828,22 @@ export class TaskDispatchService
       taskId,
       `❓ 机器人提问：${first?.header || first?.question || request.id}`,
     );
-    await this.taskChat.questionAsked(taskId, request);
+    const created = await this.taskChat.questionAsked(taskId, request);
+    if (created) await this.recordQuestionAskedEvent(taskId, request);
     await this.notifyQuestion(taskId, request);
+  }
+
+  /** 机器人提问写入任务事件时间线（同一 questionId 仅记录一次） */
+  private async recordQuestionAskedEvent(
+    taskId: number,
+    request: OpencodeQuestionRequest,
+  ): Promise<void> {
+    const first = request.questions[0];
+    const summary = first?.header || first?.question || `提问 ${request.id}`;
+    await this.addEvent(taskId, '提问', `机器人提问：${summary}`, null, {
+      questionId: request.id,
+      summary,
+    });
   }
 
   /** question.replied：把卡片同步为已回答（事件补偿/其他客户端作答） */
@@ -777,9 +951,11 @@ export class TaskDispatchService
     task.status = TaskStatus.WAITING;
     task.subStatus = TaskSubStatus.PENDING_ACCEPT;
     task.result = resultText ?? task.result;
-    // 立即提醒一次：先记提醒次数（LOOP 30 分钟内不重复打扰，也避免通知期间被重复扫描）
+    // 立即提醒一次：记录首次/最近提醒时间与次数（30 分钟内不重复打扰，7 天后超时自动验收）
+    const remindedAt = new Date();
     task.remindCount = 1;
-    task.lastRemindedAt = new Date();
+    task.firstRemindedAt = remindedAt;
+    task.lastRemindedAt = remindedAt;
     await this.tasks.save(task);
     this.pushLine(taskId, '✔ 执行完成，待验收');
     await this.addEvent(
@@ -907,8 +1083,11 @@ export class TaskDispatchService
     }
   }
 
-  /** prompt 组装：任务编号/标题/类型/输入/需求内容/输出要求；角色与技能由工位文件提供 */
-  private buildPrompt(task: Task): string {
+  /** prompt 组装：任务编号/标题/类型/任务定义/输入/需求内容/输出要求；角色与技能由工位文件提供 */
+  private async buildPrompt(task: Task): Promise<string> {
+    const template = task.templateId
+      ? await this.taskTemplates.findOne({ where: { id: task.templateId } })
+      : null;
     const sections: string[] = [];
     sections.push(
       [
@@ -917,6 +1096,13 @@ export class TaskDispatchService
         `- 编号：${task.code}`,
         `- 标题：${task.title}`,
         `- 类型：${task.type}`,
+        template
+          ? `\n# 任务定义\n\n${template.name}${
+              template.description?.trim()
+                ? `\n\n${template.description.trim()}`
+                : ''
+            }`
+          : '',
         task.description?.trim()
           ? `\n# 任务描述\n\n${task.description.trim()}`
           : '',

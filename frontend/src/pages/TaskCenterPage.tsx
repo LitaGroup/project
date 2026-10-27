@@ -23,12 +23,12 @@ import {
 } from '@appica/ui-react/select'
 import {
   api,
-  TASK_TYPES,
   TASK_SUB_STATUSES,
   type TaskPackage,
   type TaskOverview,
   type TaskSubStatus,
   type TaskType,
+  type TaskTypeDef,
   type Worker,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
@@ -49,6 +49,7 @@ export function TaskCenterPage() {
   const [overview, setOverview] = useState<TaskOverview | null>(null)
   const [tasks, setTasks] = useState<TaskPackage[] | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
+  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([])
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [typeFilter, setTypeFilter] = useState<string>('all')
@@ -82,6 +83,10 @@ export function TaskCenterPage() {
       .listWorkers({ role: '工作者' })
       .then(setWorkers)
       .catch(() => undefined)
+    api
+      .listTaskTypes()
+      .then(setTaskTypes)
+      .catch(() => undefined)
   }, [])
 
   const workerName = new Map(workers.map((w) => [w.id, w.name]))
@@ -92,7 +97,7 @@ export function TaskCenterPage() {
         <div>
           <h1 className="text-2xl font-semibold">任务概览</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            任务由机器人执行、责任人验收；系统调度机器人负责识别任务并分配机器人与工作计划
+            任务由平台按任务定义/类型直接识别分配，机器人负责处理，责任人验收
           </p>
         </div>
         <Link
@@ -170,7 +175,7 @@ export function TaskCenterPage() {
           onValueChange={(v) => setTypeFilter(v as string)}
           items={{
             all: '全部类型',
-            ...Object.fromEntries(TASK_TYPES.map((t) => [t, t])),
+            ...Object.fromEntries(taskTypes.map((t) => [t.name, t.name])),
           }}
         >
           <SelectTrigger className="w-36">
@@ -178,9 +183,9 @@ export function TaskCenterPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部类型</SelectItem>
-            {TASK_TYPES.map((t) => (
-              <SelectItem key={t} value={t}>
-                {t}
+            {taskTypes.map((t) => (
+              <SelectItem key={t.id} value={t.name}>
+                {t.name}
               </SelectItem>
             ))}
           </SelectContent>

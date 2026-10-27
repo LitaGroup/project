@@ -298,7 +298,7 @@ export function WorkerEditPage() {
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
             {isScheduler
-              ? '系统调度机器人：运行在 opencode 等执行器上，负责任务识别、工作计划生成与执行机器人分配'
+              ? '系统调度机器人：历史识别与调度能力保留，新任务由平台直接识别分配'
               : '机器人的负责人对机器人的产出结果负责'}
           </p>
         </div>
@@ -403,7 +403,7 @@ export function WorkerEditPage() {
           <CardHeader className="flex-none">
             <CardTitle>基础信息</CardTitle>
             <CardDescription>
-              名称与简介供调度机器人识别，执行器与模型决定运行位置
+              名称、简介与任务定义用于平台识别分配，执行器与模型决定运行位置
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">

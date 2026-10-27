@@ -14,8 +14,6 @@ import type {
   ReasoningMessagePart,
   TextMessagePart,
 } from '@assistant-ui/react'
-import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
-import remarkGfm from 'remark-gfm'
 import { Button } from '@appica/ui-react/button'
 import {
   AlertDialog,
@@ -28,8 +26,6 @@ import {
   AlertDialogClose,
 } from '@appica/ui-react/alert-dialog'
 import {
-  Brain,
-  ChevronDown,
   CircleCheck,
   Loader,
   MessageCircleQuestion,
@@ -48,19 +44,10 @@ import {
 import { QuestionCard } from '../components/QuestionCard'
 import { questionStatusLabel } from '../lib/question'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
-import { MermaidDiagram } from '../components/MermaidDiagram'
-
-const MARKDOWN_PLUGINS = [remarkGfm]
-/** language-mermaid 代码块（如 flowchart TD）渲染为流程图 */
-const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
-  mermaid: { SyntaxHighlighter: MermaidDiagram },
-}
-const MARKDOWN_PARTS = {
-  Text: DebugMarkdownText,
-  Reasoning: DebugReasoning,
-  Empty: () => null,
-}
-const PLAIN_PARTS = { Text: PlainText, Empty: () => null }
+import {
+  CHAT_MARKDOWN_PARTS,
+  CHAT_PLAIN_PARTS,
+} from '../components/agent-chat/ChatParts'
 
 /**
  * 机器人调试：/tasks/workers/:workerId/debug，从机器人列表进入。
@@ -436,44 +423,6 @@ function todoTextStyle(status: WorkerDebugTodo['status']): string {
 }
 
 /** 思考（reasoning）分片：流式时默认展开，结束后折叠，可点击回看 */
-function DebugReasoning({
-  text,
-  status,
-}: {
-  text: string
-  status?: { type?: string }
-}) {
-  const streaming = status?.type === 'running'
-  // null=用户未手动操作，跟随流式状态；手动展开/折叠后以用户操作为准
-  const [userToggled, setUserToggled] = useState<boolean | null>(null)
-  const open = userToggled ?? streaming
-  if (!text.trim()) return null
-  return (
-    <div className="mb-3 overflow-hidden rounded-[var(--radius-md)] border border-border bg-background-muted">
-      <button
-        type="button"
-        onClick={() => setUserToggled(!open)}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-foreground-muted transition-colors hover:text-foreground-intense"
-      >
-        {streaming ? (
-          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-        ) : (
-          <Brain className="size-3.5 shrink-0" />
-        )}
-        <span className="font-medium">{streaming ? '思考中…' : '思考过程'}</span>
-        <ChevronDown
-          className={`ml-auto size-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
-      {open && (
-        <div className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words border-t border-border px-3 py-2 text-xs leading-relaxed text-foreground-muted">
-          {text}
-        </div>
-      )}
-    </div>
-  )
-}
-
 interface ChatCustom {
   question?: WorkerDebugQuestion
 }
@@ -521,8 +470,8 @@ function toThreadMessage(message: WorkerDebugMessage): ThreadMessageLike {
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="flex justify-end px-1">
-      <div className="max-w-[85%] rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
-        <MessagePrimitive.Parts components={PLAIN_PARTS} />
+      <div className="min-w-0 max-w-[85%] rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
+        <MessagePrimitive.Parts components={CHAT_PLAIN_PARTS} />
       </div>
     </MessagePrimitive.Root>
   )
@@ -544,7 +493,7 @@ function AssistantMessage({
         className="mt-1"
       />
       <div className="min-w-0 max-w-[88%] pt-1 text-sm leading-relaxed">
-        <MessagePrimitive.Parts components={MARKDOWN_PARTS} />
+        <MessagePrimitive.Parts components={CHAT_MARKDOWN_PARTS} />
         {running && (
           <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
         )}
@@ -587,20 +536,4 @@ function DebugQuestionBubble({
       </div>
     </MessagePrimitive.Root>
   )
-}
-
-function DebugMarkdownText() {
-  return (
-    <MarkdownTextPrimitive
-      className="task-chat-markdown"
-      smooth={false}
-      defer
-      remarkPlugins={MARKDOWN_PLUGINS}
-      componentsByLanguage={MARKDOWN_COMPONENTS_BY_LANGUAGE}
-    />
-  )
-}
-
-function PlainText({ text }: { text?: string }) {
-  return <span className="whitespace-pre-wrap break-words">{text}</span>
 }

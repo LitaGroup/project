@@ -3,31 +3,39 @@ import { TaskStatus, TaskSubStatus } from '../common/enums';
 /** 待反馈/待验收提醒间隔：30 分钟 */
 export const TASK_REMIND_INTERVAL_MS = 30 * 60 * 1000;
 
-/** 最多提醒 3 次，仍未处理则自动收尾（待反馈→失败取消 / 待验收→完成） */
-export const TASK_MAX_REMINDERS = 3;
+/** 从首次提醒起最多等待 7 天，仍未处理则自动收尾（待反馈→失败取消 / 待验收→完成） */
+export const TASK_REMIND_TIMEOUT_DAYS = 7;
+export const TASK_REMIND_TIMEOUT_MS =
+  TASK_REMIND_TIMEOUT_DAYS * 24 * 60 * 60 * 1000;
 
 export type ReminderAction = 'send' | 'wait' | 'terminate';
 
 /**
  * 计算下一次提醒动作：
- * - 未提醒过 → send
- * - 距上次提醒不足 30 分钟 → wait
- * - 已提醒 3 次且又过一个间隔 → terminate（不再发送第 4 次）
+ * - 从未提醒过 → send
+ * - 距首次提醒已满 7 天 → terminate（后续提醒不延长截止时间）
+ * - 距最近一次提醒不足 30 分钟 → wait
  * - 其余 → send
+ *
+ * 历史数据可能只有 lastRemindedAt，此时以它作为首次提醒时间兜底。
  */
 export function nextReminderAction(
-  remindCount: number | null | undefined,
+  firstRemindedAt: Date | string | null | undefined,
   lastRemindedAt: Date | string | null | undefined,
   now: number = Date.now(),
 ): ReminderAction {
-  const count = remindCount ?? 0;
-  const last = lastRemindedAt ? new Date(lastRemindedAt).getTime() : null;
-  if (count >= TASK_MAX_REMINDERS) {
-    if (last === null || Number.isNaN(last)) return 'terminate';
-    return now - last >= TASK_REMIND_INTERVAL_MS ? 'terminate' : 'wait';
-  }
-  if (last === null || Number.isNaN(last)) return 'send';
-  return now - last >= TASK_REMIND_INTERVAL_MS ? 'send' : 'wait';
+  const last = parseTime(lastRemindedAt);
+  const first = parseTime(firstRemindedAt) ?? last;
+  if (first === null) return 'send';
+  if (now - first >= TASK_REMIND_TIMEOUT_MS) return 'terminate';
+  if (last !== null && now - last < TASK_REMIND_INTERVAL_MS) return 'wait';
+  return 'send';
+}
+
+function parseTime(value: Date | string | null | undefined): number | null {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? null : time;
 }
 
 export interface MappedTaskStatus {

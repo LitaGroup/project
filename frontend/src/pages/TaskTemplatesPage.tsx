@@ -20,8 +20,12 @@ import {
   AlertDialogClose,
 } from '@appica/ui-react/alert-dialog'
 import { api, type TaskTemplate, type Worker } from '../lib/api'
+import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 
-/** 任务定义列表：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
+/** 系统未知任务定义固定 ID（与后端约定一致，平台保留、不可删除） */
+const UNKNOWN_TASK_TEMPLATE_ID = 6
+
+/** 任务定义列表：任务类型 + 可复用描述 + 多个默认处理机器人 */
 export function TaskTemplatesPage() {
   const [templates, setTemplates] = useState<TaskTemplate[] | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
@@ -42,7 +46,7 @@ export function TaskTemplatesPage() {
       .catch(() => undefined)
   }, [reload])
 
-  const workerName = new Map(workers.map((w) => [w.id, w.name]))
+  const workerMap = new Map(workers.map((worker) => [worker.id, worker]))
 
   return (
     <div className="flex flex-col gap-4">
@@ -50,7 +54,7 @@ export function TaskTemplatesPage() {
         <div>
           <h1 className="text-2xl font-semibold">任务定义</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            沉淀一类任务的可复用定义：描述、输入、输出与默认处理机器人
+            沉淀一类任务的可复用定义：任务类型、统一描述、所需输入、交付方式与多个默认处理机器人
           </p>
         </div>
         <Link
@@ -66,8 +70,9 @@ export function TaskTemplatesPage() {
         <TableHeader>
           <TableRow>
             <TableHead className="w-48">名称</TableHead>
-            <TableHead className="w-36">处理机器人</TableHead>
-            <TableHead>任务描述</TableHead>
+            <TableHead className="w-32">任务类型</TableHead>
+            <TableHead className="w-64">处理机器人</TableHead>
+            <TableHead>任务定义描述</TableHead>
             <TableHead className="w-40">更新时间</TableHead>
             <TableHead className="w-32 text-center">操作</TableHead>
           </TableRow>
@@ -78,11 +83,32 @@ export function TaskTemplatesPage() {
               <TableCell className="max-w-48 truncate font-medium">
                 {template.name}
               </TableCell>
-              <TableCell>
-                {template.agentId
-                  ? (workerName.get(template.agentId) ??
-                    `#${template.agentId}`)
-                  : '—'}
+              <TableCell>{template.type || '其它'}</TableCell>
+              <TableCell className="max-w-64">
+                {(template.agentIds ?? []).length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    {template.agentIds.map((agentId) => {
+                      const worker = workerMap.get(agentId)
+                      const name = worker?.name ?? `#${agentId}`
+                      return (
+                        <span
+                          key={agentId}
+                          className="flex min-w-0 max-w-full items-center gap-1.5"
+                          title={name}
+                        >
+                          <RobotAvatar
+                            name={name}
+                            avatarUrl={worker?.avatarUrl}
+                            size={22}
+                          />
+                          <span className="truncate text-xs">{name}</span>
+                        </span>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  '—'
+                )}
               </TableCell>
               <TableCell
                 className="max-w-md truncate text-xs text-foreground-muted"
@@ -101,18 +127,20 @@ export function TaskTemplatesPage() {
                   >
                     编辑
                   </Link>
-                  <DeleteTemplateButton
-                    template={template}
-                    onDeleted={reload}
-                    onError={setError}
-                  />
+                  {template.id !== UNKNOWN_TASK_TEMPLATE_ID && (
+                    <DeleteTemplateButton
+                      template={template}
+                      onDeleted={reload}
+                      onError={setError}
+                    />
+                  )}
                 </div>
               </TableCell>
             </TableRow>
           ))}
           {templates !== null && templates.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5}>
+              <TableCell colSpan={6}>
                 暂无任务定义，点右上角「新建任务定义」创建
               </TableCell>
             </TableRow>

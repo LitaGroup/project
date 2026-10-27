@@ -58,7 +58,7 @@ function normalizeAvatarUrl(value: string | null | undefined): string | null {
 
 /** 机器人视图：实体 + 工位路径 + 实时状态 + 当前任务（均不落库实时推导） */
 export interface WorkerView extends Worker {
-  /** 系统机器人（id < 1000，由代码内置，网页不可新增/删除） */
+  /** 系统机器人（systemKey 或系统 ID 段，由代码内置，网页不可新增/删除） */
   system: boolean;
   /** 工位路径 {WORKER_BASE_DIR}/worker/{id}；未配置 WORKER_BASE_DIR 为 null */
   workdir: string | null;
@@ -201,7 +201,7 @@ export class WorkersService {
     const entry = live.get(worker.id);
     return {
       ...worker,
-      system: isSystemWorkerId(worker.id),
+      system: Boolean(worker.systemKey) || isSystemWorkerId(worker.id),
       workdir:
         worker.kind === WorkerKind.AGENT ? this.workdirOf(worker.id) : null,
       liveStatus: entry?.status ?? WorkerLiveStatus.IDLE,
@@ -323,7 +323,7 @@ export class WorkersService {
   /** 删除机器人（系统机器人不可删除；已分配未完结任务时会拒绝） */
   async remove(id: number): Promise<void> {
     const worker = await this.findOne(id);
-    if (isSystemWorkerId(worker.id)) {
+    if (worker.systemKey || isSystemWorkerId(worker.id)) {
       throw new BadRequestException(
         '系统机器人由代码内置，不能在网页删除（可停用）',
       );
@@ -337,7 +337,12 @@ export class WorkersService {
       );
     }
     // 任务定义中的默认处理机器人随机器人删除解绑（无物理外键）
-    await this.taskTemplates.update({ agentId: id }, { agentId: null });
+    const templates = await this.taskTemplates.find();
+    for (const template of templates) {
+      if (!(template.agentIds ?? []).includes(id)) continue;
+      template.agentIds = template.agentIds.filter((agentId) => agentId !== id);
+      await this.taskTemplates.save(template);
+    }
     // 调试会话绑定随机器人删除清理（opencode 会话本身保留在执行器上）
     await this.debugSessions.delete({ workerId: id });
     await this.workers.remove(worker);

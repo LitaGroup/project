@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TaskType, WorkerRuntime } from '../common/enums';
+import { WorkerRuntime } from '../common/enums';
+import { TaskTypesService } from '../task-types/task-types.service';
+import { TASK_TYPE_DEFAULT, TaskType } from '../task-types/task-type.entity';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
 import { runOpencodePrompt } from '../executors/opencode-run';
@@ -11,7 +13,8 @@ import { Task, TaskMissingItem } from './task.entity';
 /** 调度机器人识别结果：任务详情 + 工作计划，或需要用户补充/确认的反馈清单 */
 export interface TaskIdentification {
   title?: string;
-  type: TaskType;
+  /** 任务类型（task_types.name，未识别时回退默认「其它」） */
+  type: string;
   input?: string;
   outputSpec?: string;
   /** 工作计划（Markdown） */
@@ -29,7 +32,7 @@ const IDENTIFY_OUTPUT_CONTRACT = `# 输出协议（必须遵守）
 只输出一个 JSON 对象，不要输出任何其它文字。结构：
 {
   "title": "<任务标题>",
-  "type": "<任务类型，取自给定枚举>",
+  "type": "<任务类型，取自给定任务类型清单>",
   "input": "<输入梳理>",
   "output": "<预期输出>",
   "workPlan": "<Markdown 工作计划>",
@@ -52,6 +55,7 @@ export class TaskIdentifyService {
     @InjectRepository(Executor)
     private readonly executors: Repository<Executor>,
     private readonly workersService: WorkersService,
+    private readonly taskTypes: TaskTypesService,
   ) {}
 
   async identify(
@@ -94,17 +98,18 @@ export class TaskIdentifyService {
       executor.defaultLocation ??
       null;
     const client = new OpencodeClient(executor);
+    const types = await this.taskTypes.findAll();
     const text = await runOpencodePrompt(client, {
       title: `识别 ${task.code} ${task.title}`.slice(0, 100),
       model: { id: scheduler.modelId, providerID: scheduler.providerId },
       location: workdir ? { directory: workdir } : undefined,
-      prompt: this.buildPrompt(task, scheduler, roster),
+      prompt: this.buildPrompt(task, scheduler, roster, types),
       timeoutMs,
     });
     this.logger.debug(
       `调度机器人原始输出（任务 ${task.code}）：${text.slice(0, 800)}`,
     );
-    return this.parseIdentification(text, roster);
+    return this.parseIdentification(text, roster, types);
   }
 
   /** 调度机器人 PROMPT：输出协议 + 待识别任务与候选机器人（角色定义由工位 AGENTS.md 提供） */
@@ -112,6 +117,7 @@ export class TaskIdentifyService {
     task: Task,
     scheduler: WorkerView,
     roster: WorkerView[],
+    types: TaskType[],
   ): string {
     const userPrompt = [
       '# 待识别任务',
@@ -142,7 +148,11 @@ export class TaskIdentifyService {
         null,
         2,
       ),
-      `\n# 任务类型枚举（type 只能取）\n\n${Object.values(TaskType).join(' / ')}`,
+      `\n# 任务类型（type 必须取以下名称之一）\n\n${
+        types
+          .map((t) => `- ${t.name}${t.description ? `：${t.description}` : ''}`)
+          .join('\n') || `- ${TASK_TYPE_DEFAULT}`
+      }`,
     ].join('\n');
     return [IDENTIFY_OUTPUT_CONTRACT, '', '---', '', userPrompt].join('\n');
   }
@@ -151,6 +161,7 @@ export class TaskIdentifyService {
   private parseIdentification(
     text: string,
     roster: WorkerView[],
+    types: TaskType[],
   ): TaskIdentification {
     const json = this.extractJson(text);
     if (!json) {
@@ -189,6 +200,7 @@ export class TaskIdentifyService {
     const agent = roster.find((w) => w.id === firstAgentId);
     const type = this.normalizeType(
       raw.type ?? identification.type ?? subtasks[0]?.type,
+      types,
     );
     const workPlan =
       this.normalizeWorkPlan(raw.workPlan ?? raw.plan) ??
@@ -273,13 +285,11 @@ export class TaskIdentifyService {
     }
   }
 
-  /** 任务类型归一化到枚举（不认识的一律「其它」） */
-  private normalizeType(value: unknown): TaskType {
+  /** 任务类型归一化到字典值（不在当前类型列表中的一律回退默认「其它」） */
+  private normalizeType(value: unknown, types: TaskType[]): string {
     const v = str(value);
-    if (!v) return TaskType.OTHER;
-    return (Object.values(TaskType) as string[]).includes(v)
-      ? (v as TaskType)
-      : TaskType.OTHER;
+    if (!v) return TASK_TYPE_DEFAULT;
+    return types.some((t) => t.name === v) ? v : TASK_TYPE_DEFAULT;
   }
 }
 

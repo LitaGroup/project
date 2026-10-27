@@ -1,3 +1,4 @@
+import type { TaskEvent } from './task-event.entity';
 import type { Task } from './task.entity';
 
 /** 聊天消息发送方：用户 / 机器人 / 调度机器人 / 系统 */
@@ -64,6 +65,8 @@ export interface TaskChatMessage {
   sender: TaskChatSender;
   /** Markdown 正文；工具调用/提问消息可能为空 */
   content: string;
+  /** 思考过程（opencode session.reasoning.* 流式累积） */
+  reasoning?: string;
   createdAt: string;
   status: 'running' | 'complete' | 'error';
   /** message=普通对话气泡；event=居中流转事件；question=机器人提问卡片 */
@@ -88,6 +91,14 @@ export interface TaskChatSnapshot {
   rootTask: Task;
   pipeline: TaskPipelineStage[];
   messages: TaskChatMessage[];
+  /** 当前任务的需求人姓名（任务创建人） */
+  requesterName: string | null;
+  /** 当前执行机器人的负责人姓名 */
+  agentOwnerName: string | null;
+  /** 当前任务人工介入次数（事件 meta.intervention） */
+  interventionCount: number;
+  /** 当前任务事件时间线（倒序，供右侧任务事件面板） */
+  events: TaskEvent[];
 }
 
 /** 任务聊天 SSE 推送 */

@@ -11,7 +11,7 @@ import { TaskMissingItem } from './task.entity';
 /** 方案建议的子任务（管理员确认后物化为 Task） */
 export interface PlanSubtask {
   title: string;
-  /** 任务类型（TaskType 值） */
+  /** 任务类型（task_types.name） */
   type: string;
   input?: string;
   outputSpec?: string;

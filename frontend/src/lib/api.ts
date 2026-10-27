@@ -787,18 +787,17 @@ export type WorkerRuntime = (typeof WORKER_RUNTIMES)[number]
 export const WORKER_LIVE_STATUSES = ['空闲中', '工作中', '等待中', '验收中'] as const
 export type WorkerLiveStatus = (typeof WORKER_LIVE_STATUSES)[number]
 
-export const TASK_TYPES = [
-  '需求分析',
-  '技术设计',
-  '前端开发',
-  '后端开发',
-  '客户端开发',
-  'UI设计',
-  '测试',
-  '发布',
-  '其它',
-] as const
-export type TaskType = (typeof TASK_TYPES)[number]
+/** 任务类型名称（动态字典，来源 /api/task-types） */
+export type TaskType = string
+
+/** 任务类型定义（task_types 表，平台内维护） */
+export interface TaskTypeDef {
+  id: number
+  name: string
+  description: string
+  createdAt: string
+  updatedAt: string
+}
 
 /** 任务主状态：等待中 / 进行中 / 已结束 */
 export const TASK_STATUSES = ['等待中', '进行中', '已结束'] as const
@@ -878,6 +877,8 @@ export interface Worker {
   id: number
   name: string
   intro: string | null
+  /** 系统机器人稳定标识（自定义机器人为 null） */
+  systemKey: string | null
   /** 头像：/images/... 路径（空为默认黑底占位头像） */
   avatarUrl: string | null
   kind: WorkerKind
@@ -893,7 +894,7 @@ export interface Worker {
   ownerName: string | null
   materials: string | null
   enabled: boolean
-  /** 系统机器人（id < 1000，由代码内置，网页不可新增/删除） */
+  /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
   /** 工位路径 {WORKER_BASE_DIR}/worker/{id}（未配置 env 为 null） */
   workdir: string | null
@@ -1007,6 +1008,10 @@ export interface TaskPackage {
   code: string
   title: string
   type: TaskType
+  /** 任务定义（task_templates.id，可空） */
+  templateId: number | null
+  /** 任务定义名称快照 */
+  templateName: string | null
   parentId: number | null
   rootId: number
   sortOrder: number
@@ -1020,10 +1025,12 @@ export interface TaskPackage {
   status: TaskStatus
   /** 子状态：待识别 / 待反馈 / 待验收 / 识别中 / 执行中 / 完成 / 取消 */
   subStatus: TaskSubStatus
-  /** 调度机器人识别产出的工作计划（Markdown） */
+  /** 工作计划（历史识别或外部 AI 更新，Markdown） */
   workPlan: string | null
-  /** 待反馈/待验收提醒次数（3 次未处理自动收尾） */
+  /** 待反馈/待验收提醒次数 */
   remindCount: number
+  /** 首次提醒时间（首次提醒满 7 天未处理自动收尾） */
+  firstRemindedAt: string | null
   /** 最近一次提醒时间 */
   lastRemindedAt: string | null
   agentId: number | null
@@ -1115,6 +1122,8 @@ export interface TaskChatMessage {
   sender: TaskChatSender
   /** Markdown 正文；工具调用/提问消息可能为空 */
   content: string
+  /** 机器人思考过程（session.reasoning.*） */
+  reasoning?: string
   createdAt: string
   status: 'running' | 'complete' | 'error'
   /** message=普通对话气泡；event=居中流转事件；question=机器人提问卡片 */
@@ -1137,6 +1146,14 @@ export interface TaskChatSnapshot {
   rootTask: TaskPackage
   pipeline: TaskPipelineStage[]
   messages: TaskChatMessage[]
+  /** 当前任务需求人姓名 */
+  requesterName: string | null
+  /** 当前执行机器人负责人姓名 */
+  agentOwnerName: string | null
+  /** 人工介入次数 */
+  interventionCount: number
+  /** 当前任务事件时间线（倒序） */
+  events: TaskEvent[]
 }
 
 /** 任务聊天 SSE 推送 */
@@ -1157,14 +1174,16 @@ export interface TaskOverview {
   subStatuses: Record<string, number>
 }
 
-/** 任务定义：一类任务的可复用定义（描述/输入/输出 + 默认处理机器人） */
+/** 任务定义：一类任务的可复用定义（任务类型 + 描述 + 默认处理机器人） */
 export interface TaskTemplate {
   id: number
   name: string
+  /** 任务类型名称（task_types.name） */
+  type: string
+  /** Markdown 描述：包含任务范围、所需输入与交付方式 */
   description: string | null
-  input: string | null
-  outputSpec: string | null
-  agentId: number | null
+  /** 默认处理机器人 workers.id 列表 */
+  agentIds: number[]
   createdAt: string
   updatedAt: string
 }
@@ -1957,10 +1976,9 @@ export const api = {
     request<TaskTemplate>(`/task-templates/${id}`),
   createTaskTemplate: (input: {
     name: string
+    type?: string | null
     description?: string | null
-    input?: string | null
-    outputSpec?: string | null
-    agentId?: number | null
+    agentIds?: number[] | null
   }) =>
     request<TaskTemplate>('/task-templates', {
       method: 'POST',
@@ -1970,10 +1988,9 @@ export const api = {
     id: number,
     input: Partial<{
       name: string
+      type: string | null
       description: string | null
-      input: string | null
-      outputSpec: string | null
-      agentId: number | null
+      agentIds: number[] | null
     }>,
   ) =>
     request<TaskTemplate>(`/task-templates/${id}`, {
@@ -1982,6 +1999,24 @@ export const api = {
     }),
   deleteTaskTemplate: (id: number) =>
     request<void>(`/task-templates/${id}`, { method: 'DELETE' }),
+
+  /** 任务类型字典（识别与筛选用，平台内维护） */
+  listTaskTypes: () => request<TaskTypeDef[]>('/task-types'),
+  createTaskType: (input: { name: string; description?: string | null }) =>
+    request<TaskTypeDef>('/task-types', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateTaskType: (
+    id: number,
+    input: { name?: string; description?: string | null },
+  ) =>
+    request<TaskTypeDef>(`/task-types/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteTaskType: (id: number) =>
+    request<void>(`/task-types/${id}`, { method: 'DELETE' }),
 
   /** 任务概览统计 */
   taskOverview: () => request<TaskOverview>('/tasks/overview'),
@@ -2006,7 +2041,7 @@ export const api = {
   /** 任务详情页聊天快照：当前任务 + 所属 PIPELINE + 对话消息 */
   getTaskChat: (id: number) => request<TaskChatSnapshot>(`/tasks/${id}/chat`),
   createTaskPackage: (input: {
-    /** 可空：按任务描述首行生成临时标题，调度机器人识别后覆盖 */
+    /** 可空：按任务描述首行生成标题 */
     title?: string
     type?: TaskType
     description?: string | null
@@ -2015,6 +2050,7 @@ export const api = {
     agentId?: number | null
     schedulerId?: number | null
     parentId?: number | null
+    templateId?: number | null
   }) =>
     request<TaskPackage>('/tasks', {
       method: 'POST',
@@ -2048,6 +2084,18 @@ export const api = {
     request<TaskPackage>(`/tasks/${id}/feedback`, {
       method: 'POST',
       body: JSON.stringify({ content }),
+    }),
+  /** 任务对话发送消息：识别阶段补充需求，执行阶段直接续聊 */
+  sendTaskMessage: (id: number, content: string) =>
+    request<TaskPackage>(`/tasks/${id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  /** 人工分配机器人（执行中会中断旧机器人并重新执行） */
+  assignTask: (id: number, agentId: number) =>
+    request<TaskPackage>(`/tasks/${id}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ agentId }),
     }),
   /** 回答/跳过机器人提问（answers 与问题顺序一致） */
   replyTaskQuestion: (

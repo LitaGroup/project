@@ -25,6 +25,7 @@ import { TaskCenterPage } from './pages/TaskCenterPage'
 import { TasksPage } from './pages/TasksPage'
 import { TaskCreatePage } from './pages/TaskCreatePage'
 import { TaskTemplatesPage } from './pages/TaskTemplatesPage'
+import { TaskTypesPage } from './pages/TaskTypesPage'
 import { TaskTemplateEditPage } from './pages/TaskTemplateEditPage'
 import { TaskPackageDetailPage } from './pages/TaskPackageDetailPage'
 import { WorkersLivePage } from './pages/WorkersLivePage'
@@ -122,6 +123,7 @@ function App() {
           <Route path="/tasks/list" element={<TasksPage />} />
           <Route path="/tasks/new" element={<TaskCreatePage />} />
           <Route path="/tasks/live" element={<WorkersLivePage />} />
+          <Route path="/tasks/types" element={<TaskTypesPage />} />
           <Route path="/tasks/templates" element={<TaskTemplatesPage />} />
           <Route
             path="/tasks/templates/new"

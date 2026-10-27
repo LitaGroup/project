@@ -6,7 +6,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { TaskStatus, TaskSubStatus, TaskType } from '../common/enums';
+import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 
 /** 创建阶段缺失清单条目（调度机器人材料审查产出，补齐后清除） */
 export interface TaskMissingItem {
@@ -42,8 +43,17 @@ export class Task {
   @Column({ length: 200 })
   title: string;
 
-  @Column({ type: 'enum', enum: TaskType, default: TaskType.OTHER })
-  type: TaskType;
+  /** 任务类型（task_types.name，动态字典；无物理外键，改名由 TaskTypesService 同步） */
+  @Column({ type: 'varchar', length: 64, default: TASK_TYPE_DEFAULT })
+  type: string;
+
+  /** 任务定义（task_templates.id，可空；无物理外键，历史任务保留快照） */
+  @Column({ type: 'int', nullable: true })
+  templateId: number | null;
+
+  /** 任务定义名称快照（定义改名/删除后仍能展示历史名称） */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  templateName: string | null;
 
   /** 父任务 id（顶层为 null） */
   @Column({ type: 'int', nullable: true })
@@ -89,13 +99,17 @@ export class Task {
   })
   subStatus: TaskSubStatus;
 
-  /** 调度机器人识别产出的工作计划（Markdown，派发时随任务下发给机器人） */
+  /** 工作计划（Markdown，历史识别或外部 AI 更新，派发时随任务下发给机器人） */
   @Column({ type: 'text', nullable: true })
   workPlan: string | null;
 
   /** 待反馈/待验收提醒次数（进入等待态时重置） */
   @Column({ type: 'int', default: 0 })
   remindCount: number;
+
+  /** 首次提醒发送时间（7 天超时基准；进入等待态时重置） */
+  @Column({ type: 'timestamp', nullable: true })
+  firstRemindedAt: Date | null;
 
   /** 最近一次提醒发送时间（30 分钟节流；为空表示尚未提醒） */
   @Column({ type: 'timestamp', nullable: true })

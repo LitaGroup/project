@@ -20,7 +20,7 @@ export interface WorkerTaskDefOutput {
 }
 
 export interface WorkerTaskDef {
-  /** 任务类型（TaskType 值或自定义） */
+  /** 任务类型（task_types.name 或历史自定义值） */
   type: string;
   inputs: WorkerTaskDefInput[];
   outputs: WorkerTaskDefOutput[];
@@ -53,6 +53,10 @@ export class Worker {
 
   @Column({ length: 100, unique: true })
   name: string;
+
+  /** 系统机器人稳定标识（如 scheduler / unknown-task）；自定义机器人为空 */
+  @Column({ type: 'varchar', length: 50, nullable: true, unique: true })
+  systemKey: string | null;
 
   /** 简介：擅长什么、能接什么任务（供调度机器人与外部选择） */
   @Column({ type: 'text', nullable: true })

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Card,
@@ -16,12 +16,22 @@ import {
   SelectItem,
 } from '@appica/ui-react/select'
 import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from '@appica/ui-react/tabs'
-import { api, type TaskTemplate, type Worker } from '../lib/api'
+  Combobox,
+  ComboboxChips,
+  ComboboxChip,
+  ComboboxValue,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxList,
+  ComboboxItem,
+  createComboboxItems,
+} from '@appica/ui-react/combobox'
+import {
+  api,
+  type TaskTemplate,
+  type TaskTypeDef,
+  type Worker,
+} from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import {
   MarkdownEditor,
@@ -30,44 +40,80 @@ import {
 
 const LIST_PATH = '/tasks/templates'
 
-/** 任务定义的三个 Markdown 字段（Markdown 编辑器同一时间只挂载当前字段） */
-type FieldKey = 'description' | 'input' | 'outputSpec'
+/** 默认兜底任务类型（与后端 TASK_TYPE_DEFAULT 一致） */
+const DEFAULT_TASK_TYPE = '其它'
+
+interface AgentOption {
+  id: string
+  name: string
+  enabled: boolean
+}
+
+/** 新建任务定义时预置的统一描述结构 */
+const DESCRIPTION_TEMPLATE = `## 任务定义描述
+
+> 这类任务的定义，定义什么任务属于这种任务
+
+## 定义任务输入
+
+> 要完成任务需要提供的信息
+
+## 定义任务交付
+
+> 任务最终以什么方式交付`
 
 /**
  * 任务定义新建与编辑（独立页面）。
- * 任务定义用于沉淀一类任务的可复用描述/输入/输出与默认处理机器人。
+ * 任务定义用于沉淀一类任务的可复用类型、描述与多个默认处理机器人。
  */
 export function TaskTemplateEditPage() {
   const { templateId } = useParams<{ templateId: string }>()
   const navigate = useNavigate()
 
   const [workers, setWorkers] = useState<Worker[]>([])
+  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([])
   const [template, setTemplate] = useState<TaskTemplate | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [input, setInput] = useState('')
-  const [outputSpec, setOutputSpec] = useState('')
-  const [agentId, setAgentId] = useState('')
-  const [activeField, setActiveField] = useState<FieldKey>('description')
+  const [taskType, setTaskType] = useState(DEFAULT_TASK_TYPE)
+  const [description, setDescription] = useState(DESCRIPTION_TEMPLATE)
+  const [agentIds, setAgentIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const descriptionRef = useRef<MarkdownEditorHandle>(null)
-  const inputRef = useRef<MarkdownEditorHandle>(null)
-  const outputSpecRef = useRef<MarkdownEditorHandle>(null)
 
-  const fieldRefs = {
-    description: descriptionRef,
-    input: inputRef,
-    outputSpec: outputSpecRef,
-  }
-  const fieldValues = { description, input, outputSpec }
-  const fieldSetters = {
-    description: setDescription,
-    input: setInput,
-    outputSpec: setOutputSpec,
-  }
+  const agentOptions = useMemo<AgentOption[]>(
+    () =>
+      workers.map((worker) => ({
+        id: String(worker.id),
+        name: worker.name,
+        enabled: worker.enabled,
+      })),
+    [workers],
+  )
+  const agentItems = useMemo(
+    () =>
+      createComboboxItems(agentOptions, {
+        getValue: (worker) => worker.id,
+        getLabel: (worker) => worker.name,
+      }),
+    [agentOptions],
+  )
+  const workerNames = useMemo(
+    () => new Map(agentOptions.map((worker) => [worker.id, worker.name])),
+    [agentOptions],
+  )
+  const typeNames = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...taskTypes.map((type) => type.name),
+          taskType || DEFAULT_TASK_TYPE,
+        ]),
+      ),
+    [taskTypes, taskType],
+  )
 
   const initialTitle = template ? `编辑「${template.name}」` : '新建任务定义'
   const typedName = name.trim()
@@ -83,6 +129,7 @@ export function TaskTemplateEditPage() {
 
   useEffect(() => {
     api.listWorkers({ role: '工作者' }).then(setWorkers).catch(() => undefined)
+    api.listTaskTypes().then(setTaskTypes).catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -95,10 +142,9 @@ export function TaskTemplateEditPage() {
         setLoadError(null)
         setTemplate(t)
         setName(t.name)
+        setTaskType(t.type || DEFAULT_TASK_TYPE)
         setDescription(t.description ?? '')
-        setInput(t.input ?? '')
-        setOutputSpec(t.outputSpec ?? '')
-        setAgentId(t.agentId ? String(t.agentId) : '')
+        setAgentIds((t.agentIds ?? []).map(String))
       })
       .catch((e: Error) => {
         if (alive) setLoadError(e.message)
@@ -108,26 +154,16 @@ export function TaskTemplateEditPage() {
     }
   }, [templateId])
 
-  /** 切换字段前先把当前编辑器内容落回状态：未挂载的字段靠 state 保存 */
-  const handleFieldChange = (value: string | number | null) => {
-    const latest = fieldRefs[activeField].current?.getMarkdown()
-    if (latest !== undefined) fieldSetters[activeField](latest)
-    setActiveField(value as FieldKey)
-  }
-
   const submit = () => {
     setError(null)
     // 取编辑器当前内容：onChange 有防抖，避免刚输入就保存丢字
     const descriptionText =
       descriptionRef.current?.getMarkdown() ?? description
-    const inputText = inputRef.current?.getMarkdown() ?? input
-    const outputSpecText = outputSpecRef.current?.getMarkdown() ?? outputSpec
     const payload = {
       name,
+      type: taskType,
       description: descriptionText.trim() || null,
-      input: inputText.trim() || null,
-      outputSpec: outputSpecText.trim() || null,
-      agentId: agentId ? Number(agentId) : null,
+      agentIds: agentIds.map(Number),
     }
     setSaving(true)
     const saving$ = template
@@ -139,7 +175,7 @@ export function TaskTemplateEditPage() {
       .finally(() => setSaving(false))
   }
 
-  const canSave = !!name.trim() && !saving
+  const canSave = !!name.trim() && !!taskType.trim() && !saving
 
   if (loading) {
     return <p className="text-sm text-foreground-muted">加载中…</p>
@@ -164,7 +200,7 @@ export function TaskTemplateEditPage() {
           />
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            沉淀一类任务的可复用定义：描述、输入、输出与默认处理机器人
+            沉淀一类任务的可复用定义：任务类型、统一描述、所需输入、交付方式与多个默认处理机器人
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -186,49 +222,30 @@ export function TaskTemplateEditPage() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <Card className="min-h-64 min-w-0 flex-1">
           <CardHeader className="flex-none">
-            <CardTitle>任务定义</CardTitle>
+            <CardTitle>任务定义描述</CardTitle>
             <CardDescription>
-              任务描述、输入、输出均为 Markdown，派发任务时随任务一起下发给机器人
+              使用 Markdown 统一说明任务范围、完成任务所需输入和最终交付方式
             </CardDescription>
           </CardHeader>
-          <Tabs
-            value={activeField}
-            onValueChange={handleFieldChange}
-            variant="line"
-            size="sm"
-            className="mx-4 mb-2 flex min-h-0 flex-1 flex-col"
-          >
-            <TabsList>
-              <TabsTrigger value="description">任务描述</TabsTrigger>
-              <TabsTrigger value="input">任务输入</TabsTrigger>
-              <TabsTrigger value="outputSpec">任务输出</TabsTrigger>
-            </TabsList>
-            {(['description', 'input', 'outputSpec'] as const).map((field) => (
-              <TabsContent
-                key={field}
-                value={field}
-                className="min-h-0 flex-1"
-              >
-                <div className="h-full overflow-auto bg-background-muted">
-                  <MarkdownEditor
-                    key={`${template?.id ?? 'new'}:${field}`}
-                    ref={fieldRefs[field]}
-                    value={fieldValues[field]}
-                    compact
-                    appica
-                    onChange={fieldSetters[field]}
-                  />
-                </div>
-              </TabsContent>
-            ))}
-          </Tabs>
+          <div className="relative mx-2 mb-2 min-h-0 flex-1">
+            <div className="absolute inset-0 overflow-auto bg-background-muted">
+              <MarkdownEditor
+                key={`${template?.id ?? 'new'}:description`}
+                ref={descriptionRef}
+                value={description}
+                compact
+                appica
+                onChange={setDescription}
+              />
+            </div>
+          </div>
         </Card>
 
         <Card className="w-full shrink-0 lg:min-h-0 lg:w-[26rem]">
           <CardHeader className="flex-none">
             <CardTitle>基础信息</CardTitle>
             <CardDescription>
-              任务定义名称用于识别与复用，处理机器人作为默认执行者
+              任务类型用于分类与筛选，处理机器人可多选并作为默认执行者
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">
@@ -241,35 +258,66 @@ export function TaskTemplateEditPage() {
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              处理机器人
+              任务类型
               <Select
-                value={agentId || 'none'}
-                onValueChange={(v) =>
-                  setAgentId(v === 'none' ? '' : (v as string))
+                value={taskType}
+                onValueChange={(value) =>
+                  setTaskType((value as string) || DEFAULT_TASK_TYPE)
                 }
-                items={{
-                  none: '不指定（由调度机器人分配）',
-                  ...Object.fromEntries(
-                    workers.map((w) => [
-                      String(w.id),
-                      `${w.name}${w.enabled ? '' : '（停用）'}`,
-                    ]),
-                  ),
-                }}
+                items={Object.fromEntries(
+                  typeNames.map((name) => [name, name]),
+                )}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">不指定（由调度机器人分配）</SelectItem>
-                  {workers.map((w) => (
-                    <SelectItem key={w.id} value={String(w.id)}>
-                      {w.name}
-                      {w.enabled ? '' : '（停用）'}
+                  {typeNames.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              处理机器人
+              <Combobox
+                multiple
+                size="sm"
+                items={agentItems}
+                value={agentIds}
+                onValueChange={(value) => setAgentIds(value as string[])}
+              >
+                <ComboboxChips
+                  className="w-full"
+                  placeholder="添加处理机器人"
+                >
+                  <ComboboxValue>
+                    {(selected: string[]) =>
+                      selected.map((agentId) => (
+                        <ComboboxChip key={agentId} aria-label={agentId}>
+                          {workerNames.get(agentId) ?? `#${agentId}`}
+                        </ComboboxChip>
+                      ))
+                    }
+                  </ComboboxValue>
+                </ComboboxChips>
+                <ComboboxContent>
+                  <ComboboxEmpty>没有匹配的机器人</ComboboxEmpty>
+                  <ComboboxList>
+                    {(worker: AgentOption) => (
+                      <ComboboxItem key={worker.id} value={worker.id}>
+                        {worker.name}
+                        {worker.enabled ? '' : '（停用）'}
+                      </ComboboxItem>
+                    )}
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
+              <span className="text-xs text-foreground-muted">
+                可添加多个；不选择时平台按任务类型继续匹配，仍无法匹配则归入未知任务
+              </span>
             </label>
           </div>
         </Card>

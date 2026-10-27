@@ -9,18 +9,17 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import { Observable } from 'rxjs';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
-import {
-  TaskStatus,
-  TaskSubStatus,
-  TaskType,
-  WorkerRole,
-} from '../common/enums';
+import { TaskStatus, TaskSubStatus, WorkerRole } from '../common/enums';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
+import { TaskTypesService } from '../task-types/task-types.service';
+import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 import { WorkerView, WorkersService } from '../workers/workers.service';
 import { User } from '../auth/user.entity';
 import { Worker } from '../workers/worker.entity';
 import { Task, TaskMissingItem } from './task.entity';
 import { TaskEvent } from './task-event.entity';
+import { TaskMessage } from './task-message.entity';
+import { TaskTemplate } from './task-template.entity';
 import { TaskDispatchService } from './task-dispatch.service';
 import {
   TaskRealtimeEvent,
@@ -28,9 +27,10 @@ import {
 } from './task-realtime.service';
 
 export interface CreateTaskInput {
-  /** 标题（可空：按任务描述首行推导，调度机器人识别后会覆盖） */
+  /** 标题（可空：按任务描述首行推导） */
   title?: string;
-  type?: TaskType;
+  /** 任务类型（task_types.name；须为已配置类型，缺省为「其它」） */
+  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -38,6 +38,8 @@ export interface CreateTaskInput {
   schedulerId?: number | null;
   parentId?: number | null;
   createdById?: number | null;
+  /** 任务定义（task_templates.id，可空） */
+  templateId?: number | null;
   /** 兼容旧客户端字段：新流程创建后始终进入「等待中-待识别」 */
   submitForScheduling?: boolean;
 }
@@ -63,7 +65,8 @@ function deriveTaskTitle(description: string): string {
 
 export interface UpdateTaskInput {
   title?: string;
-  type?: TaskType;
+  /** 任务类型（task_types.name；须为已配置类型，不可为空） */
+  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -116,11 +119,16 @@ export class TasksService {
     private readonly tasks: Repository<Task>,
     @InjectRepository(TaskEvent)
     private readonly events: Repository<TaskEvent>,
+    @InjectRepository(TaskMessage)
+    private readonly taskMessages: Repository<TaskMessage>,
+    @InjectRepository(TaskTemplate)
+    private readonly taskTemplates: Repository<TaskTemplate>,
     @InjectRepository(User)
     private readonly users: Repository<User>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
     private readonly workersService: WorkersService,
+    private readonly taskTypes: TaskTypesService,
     private readonly dispatchService: TaskDispatchService,
     private readonly taskRealtime: TaskRealtimeService,
   ) {}
@@ -133,7 +141,7 @@ export class TasksService {
     q?: string;
     status?: TaskStatus;
     subStatus?: TaskSubStatus;
-    type?: TaskType;
+    type?: string;
     rootOnly?: boolean;
   }): Promise<Array<Task & { children?: Task[] }>> {
     const qb = this.tasks.createQueryBuilder('t');
@@ -360,13 +368,24 @@ export class TasksService {
 
   async create(input: CreateTaskInput): Promise<Task> {
     const description = input.description?.trim() || null;
-    // 未填标题时取描述首行作为临时标题；调度机器人识别成功后会覆盖
+    // 未填标题时取描述首行作为临时标题；直接识别分配不会改写标题
     const title =
       input.title?.trim() ||
       (description ? deriveTaskTitle(description) : '') ||
       (description ? '新任务' : '');
     if (!title) throw new BadRequestException('标题或任务描述不能为空');
     if (input.agentId) await this.assertWorker(input.agentId);
+    const template = input.templateId
+      ? await this.taskTemplates.findOne({ where: { id: input.templateId } })
+      : null;
+    if (input.templateId && !template) {
+      throw new BadRequestException('任务定义不存在');
+    }
+    const typeName = input.type
+      ? await this.taskTypes.assertExists(input.type)
+      : template
+        ? await this.taskTypes.assertExists(template.type)
+        : null;
     // 父任务先校验，避免插入后才因父任务不存在留下孤儿记录
     const parent = input.parentId ? await this.mustFind(input.parentId) : null;
     // code 按自增 id 生成、根任务 rootId 指向自身，都必须插入后才知道；
@@ -376,7 +395,9 @@ export class TasksService {
         code: `TMP-${randomBytes(8).toString('hex')}`,
         rootId: parent ? parent.rootId : 0,
         title,
-        type: input.type ?? TaskType.OTHER,
+        type: typeName ?? TASK_TYPE_DEFAULT,
+        templateId: template?.id ?? null,
+        templateName: template?.name ?? null,
         description,
         input: input.input?.trim() || null,
         outputSpec: input.outputSpec?.trim() || null,
@@ -400,6 +421,9 @@ export class TasksService {
       {
         title: saved.title,
         description: saved.description,
+        ...(saved.templateId
+          ? { templateId: saved.templateId, templateName: saved.templateName }
+          : {}),
       },
     );
     return saved;
@@ -416,7 +440,11 @@ export class TasksService {
       if (!title) throw new BadRequestException('标题不能为空');
       task.title = title;
     }
-    if (input.type !== undefined) task.type = input.type;
+    if (input.type !== undefined) {
+      const typeName = await this.taskTypes.assertExists(input.type);
+      if (!typeName) throw new BadRequestException('任务类型不能为空');
+      task.type = typeName;
+    }
     if (input.description !== undefined) {
       task.description = input.description?.trim() || null;
     }
@@ -438,7 +466,9 @@ export class TasksService {
         : null;
     }
     const saved = await this.tasks.save(task);
-    await this.addEvent(id, '操作', '更新任务信息', operator);
+    await this.addEvent(id, '操作', '更新任务信息', operator, {
+      intervention: true,
+    });
     return saved;
   }
 
@@ -622,9 +652,11 @@ export class TasksService {
     const ids = children.map((c) => c.id);
     if (ids.length > 0) {
       await this.events.delete({ taskId: In(ids) });
+      await this.taskMessages.delete({ taskId: In(ids) });
       await this.tasks.delete({ id: In(ids) });
     }
     await this.events.delete({ taskId: id });
+    await this.taskMessages.delete({ taskId: id });
     await this.tasks.delete({ id });
     this.logger.log(
       `任务 ${task.code} 已删除（operator=${operator ?? 'system'}，级联 ${ids.length} 子任务）`,
@@ -648,6 +680,7 @@ export class TasksService {
     task.subStatus = TaskSubStatus.PENDING_IDENTIFY;
     task.missingItems = null;
     task.remindCount = 0;
+    task.firstRemindedAt = null;
     task.lastRemindedAt = null;
     const saved = await this.tasks.save(task);
     await this.addEvent(
@@ -655,6 +688,7 @@ export class TasksService {
       '操作',
       '状态变更：等待中-待反馈 → 等待中-待识别（重新识别）',
       operator,
+      { intervention: true },
     );
     return saved;
   }
@@ -686,6 +720,7 @@ export class TasksService {
     task.subStatus = TaskSubStatus.PENDING_IDENTIFY;
     task.missingItems = null;
     task.remindCount = 0;
+    task.firstRemindedAt = null;
     task.lastRemindedAt = null;
     const saved = await this.tasks.save(task);
     if (text) {
@@ -696,6 +731,82 @@ export class TasksService {
       '操作',
       text ? '提交反馈并重新识别' : '重新提交识别',
       operator,
+      { intervention: true },
+    );
+    return saved;
+  }
+
+  /** 任务对话统一入口：无执行会话时补充并重新识别，有会话时直接续聊 */
+  async sendMessage(
+    id: number,
+    content: string,
+    operator: string | null,
+  ): Promise<Task> {
+    const task = await this.mustFind(id);
+    if (task.status === TaskStatus.FINISHED) {
+      throw new BadRequestException(
+        `任务 ${task.code} 已结束，不能继续发送消息`,
+      );
+    }
+    const text = content.trim();
+    if (!text) throw new BadRequestException('消息内容不能为空');
+    const usesIdentify =
+      (task.status === TaskStatus.WAITING &&
+        [
+          TaskSubStatus.PENDING_IDENTIFY,
+          TaskSubStatus.PENDING_FEEDBACK,
+        ].includes(task.subStatus)) ||
+      (task.status === TaskStatus.RUNNING &&
+        task.subStatus === TaskSubStatus.IDENTIFYING);
+    if (usesIdentify) return this.supplement(id, text, operator);
+    return this.dispatchService.continueConversation(id, text, operator);
+  }
+
+  /**
+   * 任务尚未进入执行会话时发送补充消息：追加到任务描述并重新识别。
+   * 识别中发送会把任务退回待识别，旧识别结果因状态已变化而自动失效。
+   */
+  async supplement(
+    id: number,
+    content: string,
+    operator: string | null,
+  ): Promise<Task> {
+    const task = await this.mustFind(id);
+    const allowed =
+      (task.status === TaskStatus.WAITING &&
+        [
+          TaskSubStatus.PENDING_IDENTIFY,
+          TaskSubStatus.PENDING_FEEDBACK,
+        ].includes(task.subStatus)) ||
+      (task.status === TaskStatus.RUNNING &&
+        task.subStatus === TaskSubStatus.IDENTIFYING);
+    if (!allowed) {
+      throw new BadRequestException(
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可补充需求`,
+      );
+    }
+    const text = content.trim();
+    if (!text) throw new BadRequestException('消息内容不能为空');
+    const from = `${task.status}-${task.subStatus}`;
+    task.description = [task.description?.trim(), text]
+      .filter(Boolean)
+      .join('\n\n');
+    task.status = TaskStatus.WAITING;
+    task.subStatus = TaskSubStatus.PENDING_IDENTIFY;
+    task.missingItems = null;
+    task.remindCount = 0;
+    task.firstRemindedAt = null;
+    task.lastRemindedAt = null;
+    const saved = await this.tasks.save(task);
+    await this.addEvent(id, '反馈', text, operator, {
+      intervention: true,
+      chat: true,
+    });
+    await this.addEvent(
+      id,
+      '状态变更',
+      `状态变更：${from} → 等待中-待识别（补充需求后重新识别）`,
+      operator,
     );
     return saved;
   }
@@ -705,6 +816,7 @@ export class TasksService {
     id: number,
     items: TaskMissingItem[],
     schedulerId: number | null,
+    operator: string | null = null,
   ): Promise<Task> {
     const task = await this.mustFind(id);
     if (task.status !== TaskStatus.WAITING) {
@@ -715,6 +827,7 @@ export class TasksService {
     task.subStatus = TaskSubStatus.PENDING_FEEDBACK;
     task.missingItems = items;
     task.remindCount = 0;
+    task.firstRemindedAt = null;
     task.lastRemindedAt = null;
     if (schedulerId) task.schedulerId = schedulerId;
     const saved = await this.tasks.save(task);
@@ -722,8 +835,8 @@ export class TasksService {
       id,
       '状态变更',
       `状态变更：等待中-待识别 → 等待中-待反馈（需反馈 ${items.length} 项：${items.map((i) => i.item).join('、')}）`,
-      null,
-      { schedulerId },
+      operator,
+      { schedulerId, ...(operator ? { intervention: true } : {}) },
     );
     return saved;
   }
@@ -751,6 +864,7 @@ export class TasksService {
       '状态变更',
       '状态变更：等待中-待验收 → 已结束-完成',
       operator,
+      { intervention: true },
     );
     return saved;
   }
@@ -767,7 +881,10 @@ export class TasksService {
       task.status === TaskStatus.RUNNING &&
       task.subStatus === TaskSubStatus.EXECUTING
     ) {
-      await this.dispatchService.interrupt(id, operator).catch(() => undefined);
+      // 中断是取消流程的内部步骤，本次操作只记录一条人工介入
+      await this.dispatchService
+        .interrupt(id, operator, false)
+        .catch(() => undefined);
     }
     const from = `${task.status}-${task.subStatus}`;
     task.status = TaskStatus.FINISHED;
@@ -779,6 +896,7 @@ export class TasksService {
       '状态变更',
       `状态变更：${from} → 已结束-取消`,
       operator,
+      { intervention: true },
     );
     return saved;
   }

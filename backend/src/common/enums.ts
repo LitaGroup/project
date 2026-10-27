@@ -221,19 +221,6 @@ export enum WorkerLiveStatus {
   ACCEPTING = '验收中',
 }
 
-/** 任务类型（调度机器人识别结果亦归入此枚举） */
-export enum TaskType {
-  REQUIREMENT = '需求分析',
-  TECH_DESIGN = '技术设计',
-  FRONTEND = '前端开发',
-  BACKEND = '后端开发',
-  CLIENT = '客户端开发',
-  UI = 'UI设计',
-  TESTING = '测试',
-  RELEASE = '发布',
-  OTHER = '其它',
-}
-
 /**
  * 任务主状态（三态：等待中 / 进行中 / 已结束）。
  * 子状态见 TaskSubStatus；LOOP（每秒）按 主状态 + 子状态 推进任务。

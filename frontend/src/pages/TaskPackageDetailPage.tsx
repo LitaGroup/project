@@ -16,6 +16,7 @@ import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { TaskChatPanel } from '../components/task-detail/TaskChatPanel'
 import { TaskSidePanel } from '../components/task-detail/TaskSidePanel'
 import { useAuth } from '../context/AuthContext'
+import { formatDuration, taskDurationMs } from '../lib/duration'
 
 type ConnectionState = 'connecting' | 'live' | 'reconnecting'
 
@@ -30,6 +31,11 @@ export function TaskPackageDetailPage() {
   const [task, setTask] = useState<TaskPackage | null>(null)
   const [pipeline, setPipeline] = useState<TaskPipelineStage[]>([])
   const [messages, setMessages] = useState<TaskChatMessage[]>([])
+  const [requesterName, setRequesterName] = useState<string | null>(null)
+  const [agentOwnerName, setAgentOwnerName] = useState<string | null>(null)
+  const [interventionCount, setInterventionCount] = useState(0)
+  const [events, setEvents] = useState<TaskChatSnapshot['events']>([])
+  const [now, setNow] = useState(() => Date.now())
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -47,6 +53,10 @@ export function TaskPackageDetailPage() {
       setTask(data.task)
       setPipeline(data.pipeline)
       setMessages(data.messages)
+      setRequesterName(data.requesterName)
+      setAgentOwnerName(data.agentOwnerName)
+      setInterventionCount(data.interventionCount)
+      setEvents(data.events)
       setError(null)
     } catch (e) {
       if (seq === loadSeq.current) setError((e as Error).message)
@@ -69,6 +79,12 @@ export function TaskPackageDetailPage() {
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
   }, [load])
+
+  // 持续时间展示：未结束任务定时刷新
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   // 任务聊天 SSE：机器人文本增量 / 工具调用 / PIPELINE 阶段变化 / 快照刷新信号
   useEffect(() => {
@@ -131,7 +147,7 @@ export function TaskPackageDetailPage() {
     }
   }, [taskId])
 
-  const sendFeedback = useCallback(
+  const sendMessage = useCallback(
     async (content: string) => {
       const text = content.trim()
       if (!text) return
@@ -154,7 +170,7 @@ export function TaskPackageDetailPage() {
       setBusy(true)
       setError(null)
       try {
-        await api.provideTaskFeedback(taskId, text)
+        await api.sendTaskMessage(taskId, text)
         await loadRef.current()
       } catch (e) {
         setMessages((current) =>
@@ -242,10 +258,7 @@ export function TaskPackageDetailPage() {
     return <TaskDetailSkeleton />
   }
 
-  const currentStage = pipeline.find((stage) => stage.task.id === currentTask.id)
-  const robotNames = pipeline
-    .map((stage) => stage.agent?.name)
-    .filter((name): name is string => Boolean(name))
+  const durationMs = taskDurationMs(currentTask, now)
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -256,7 +269,7 @@ export function TaskPackageDetailPage() {
         ]}
       />
 
-      <header className="flex shrink-0 items-start justify-between gap-4">
+      <header className="shrink-0">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="truncate text-xl font-semibold text-foreground-intense">
@@ -265,32 +278,27 @@ export function TaskPackageDetailPage() {
             <TaskStatusBadge
               status={currentTask.status}
               subStatus={currentTask.subStatus}
+              showMain
             />
             <Badge variant="soft" size="sm">
-              {currentTask.type}
+              类型 · {currentTask.type}
+            </Badge>
+            <Badge variant="secondary" size="sm">
+              定义 · {currentTask.templateName ?? '未设置'}
             </Badge>
           </div>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
-            {robotNames.length > 0 ? (
-              <span>{[...new Set(robotNames)].join(' · ')}</span>
-            ) : (
-              <span>等待分配机器人</span>
-            )}
-            <span>·</span>
-            <span>
-              PIPELINE {pipeline.length} 个阶段
-              {currentStage?.scheduler
-                ? ` · 调度机器人 ${currentStage.scheduler.name}`
-                : ''}
-            </span>
-            <span>·</span>
             <span>
               创建于 {new Date(currentTask.createdAt).toLocaleString()}
             </span>
+            <span>·</span>
+            <span>
+              {currentTask.status === '已结束' ? '持续时间' : '已运行'}{' '}
+              {formatDuration(durationMs)}
+            </span>
+            <span>·</span>
+            <span>人工介入 {interventionCount} 次</span>
           </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Actions task={currentTask} busy={busy} act={act} />
         </div>
       </header>
 
@@ -311,11 +319,23 @@ export function TaskPackageDetailPage() {
           messages={messages}
           connection={connection}
           busy={busy}
-          onSendFeedback={sendFeedback}
+          onSendMessage={sendMessage}
           onReplyQuestion={replyQuestion}
           onAction={act}
         />
-        <TaskSidePanel key={taskId} task={currentTask} pipeline={pipeline} />
+        <TaskSidePanel
+          key={taskId}
+          task={currentTask}
+          agentName={
+            pipeline.find((stage) => stage.task.id === currentTask.id)?.agent
+              ?.name
+          }
+          requesterName={requesterName}
+          agentOwnerName={agentOwnerName}
+          interventionCount={interventionCount}
+          durationMs={durationMs}
+          events={events}
+        />
       </div>
     </div>
   )
@@ -363,16 +383,14 @@ function TaskDetailSkeleton() {
       <PageBreadcrumb
         items={[{ label: '任务', to: '/tasks/list' }, { label: '加载中' }]}
       />
-      <header className="flex shrink-0 items-start justify-between gap-4">
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-7 w-72 max-w-full" />
-            <Skeleton className="h-5 w-14 rounded-full" />
-            <Skeleton className="h-5 w-12 rounded-full" />
-          </div>
-          <Skeleton className="h-4 w-[28rem] max-w-full" />
+      <header className="shrink-0 space-y-2">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-7 w-72 max-w-full" />
+          <Skeleton className="h-5 w-24 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-20 rounded-full" />
         </div>
-        <Skeleton className="h-8 w-16 shrink-0" />
+        <Skeleton className="h-4 w-[28rem] max-w-full" />
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-auto xl:grid-cols-[minmax(0,1fr)_420px] xl:overflow-hidden">
@@ -392,18 +410,18 @@ function TaskDetailSkeleton() {
         <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
           <section className="space-y-3 rounded-[var(--radius-lg)] border border-border bg-background p-4">
             <Skeleton className="h-5 w-24 rounded-full" />
-            <Skeleton className="h-5 w-3/4" />
             <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-              {Array.from({ length: 4 }, (_, index) => (
+              {Array.from({ length: 8 }, (_, index) => (
                 <Skeleton key={index} className="h-3 w-full" />
               ))}
             </div>
           </section>
-          <Skeleton className="h-9 w-full rounded-[var(--radius-md)]" />
-          <div className="space-y-3">
-            <PipelineStageSkeleton />
-            <PipelineStageSkeleton />
-          </div>
+          <section className="space-y-3 rounded-[var(--radius-lg)] border border-border bg-background p-4">
+            <Skeleton className="h-5 w-24 rounded-full" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-5/6" />
+            <Skeleton className="h-3 w-4/6" />
+          </section>
         </aside>
       </div>
     </div>
@@ -423,69 +441,4 @@ function ChatBubbleSkeleton({ align = 'left' }: { align?: 'left' | 'right' }) {
       </div>
     </div>
   )
-}
-
-function PipelineStageSkeleton() {
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-border bg-background p-3">
-      <div className="flex items-start gap-2.5">
-        <Skeleton className="size-[30px] shrink-0 rounded-full" />
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <Skeleton className="h-3 w-28" />
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-3 w-32" />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** 按「主状态-子状态」渲染可执行动作 */
-function Actions({
-  task,
-  busy,
-  act,
-}: {
-  task: TaskPackage
-  busy: boolean
-  act: (fn: (id: number) => Promise<unknown>) => void
-}) {
-  const button = (
-    label: string,
-    fn: (id: number) => Promise<unknown>,
-    variant: 'primary' | 'outline' | 'destructive' = 'outline',
-  ) => (
-    <Button
-      size="sm"
-      variant={variant}
-      disabled={busy}
-      onClick={() => act(fn)}
-    >
-      {label}
-    </Button>
-  )
-
-  switch (task.subStatus) {
-    case '待识别':
-    case '识别中':
-      return <>{button('取消', (id) => api.cancelTask(id), 'destructive')}</>
-    case '待反馈':
-      return <>{button('取消', (id) => api.cancelTask(id), 'destructive')}</>
-    case '待验收':
-      return (
-        <>
-          {button('验收通过', (id) => api.acceptTask(id), 'primary')}
-          {button('取消', (id) => api.cancelTask(id), 'destructive')}
-        </>
-      )
-    case '执行中':
-      return (
-        <>
-          {button('中断', (id) => api.interruptTask(id))}
-          {button('取消', (id) => api.cancelTask(id), 'destructive')}
-        </>
-      )
-    default:
-      return null
-  }
 }

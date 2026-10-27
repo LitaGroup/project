@@ -1,10 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import {
-  TaskStatus,
-  TaskSubStatus,
-  TaskType,
-  WorkerRole,
-} from '../common/enums';
+import { TaskStatus, TaskSubStatus, WorkerRole } from '../common/enums';
 import { Task } from './task.entity';
 import { TasksService } from './tasks.service';
 
@@ -14,7 +9,7 @@ describe('TasksService 任务识别技能', () => {
       id: 1,
       code: 'TK-0001',
       title: '待识别任务',
-      type: TaskType.OTHER,
+      type: '其它',
       status: TaskStatus.WAITING,
       subStatus: TaskSubStatus.IDENTIFYING,
       description: '帮我做一个活动页',
@@ -52,8 +47,11 @@ describe('TasksService 任务识别技能', () => {
       tasksRepo as never,
       { find: jest.fn().mockResolvedValue([]) } as never,
       {} as never,
+      { findOne: jest.fn() } as never,
+      {} as never,
       workersRepo as never,
       workersService as never,
+      { assertExists: jest.fn() } as never,
       dispatchService as never,
       { taskChanged: jest.fn() } as never,
     );

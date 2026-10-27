@@ -81,11 +81,11 @@ export class SystemWorkersService implements OnApplicationBootstrap {
       where: { role: WorkerRole.WORKER },
       order: { id: 'ASC' },
     });
-    // 代码内置的系统工作者保留其系统 ID，不参与迁移
+    // 已有稳定 systemKey 的系统工作者不参与自定义机器人迁移
     const reserved = new Set(
-      SYSTEM_WORKERS.filter((def) => def.role === WorkerRole.WORKER).map(
-        (def) => def.id,
-      ),
+      workers
+        .filter((worker) => Boolean(worker.systemKey))
+        .map((worker) => worker.id),
     );
     const overflow = workers.filter(
       (w) => isSystemWorkerId(w.id) && !reserved.has(w.id),
@@ -103,11 +103,14 @@ export class SystemWorkersService implements OnApplicationBootstrap {
       }
       await this.workers.manager.transaction(async (manager) => {
         await manager.update(Task, { agentId: worker.id }, { agentId: nextId });
-        await manager.update(
-          TaskTemplate,
-          { agentId: worker.id },
-          { agentId: nextId },
-        );
+        const templates = await manager.find(TaskTemplate);
+        for (const template of templates) {
+          if (!(template.agentIds ?? []).includes(worker.id)) continue;
+          template.agentIds = template.agentIds.map((agentId) =>
+            agentId === worker.id ? nextId : agentId,
+          );
+          await manager.save(template);
+        }
         await manager.query('UPDATE workers SET id = $1 WHERE id = $2', [
           nextId,
           worker.id,
@@ -167,9 +170,16 @@ export class SystemWorkersService implements OnApplicationBootstrap {
     }
   }
 
-  /** 代码内置系统机器人：已存在则只校正角色/运行时，不覆盖用户配置 */
+  /** 代码内置系统机器人：按稳定 systemKey 识别，不覆盖用户配置 */
   private async ensureSystemWorkers(): Promise<void> {
     for (const def of SYSTEM_WORKERS) {
+      const byKey = await this.workers.findOne({
+        where: { systemKey: def.key },
+      });
+      if (byKey) {
+        await this.correctSystemWorker(byKey, def);
+        continue;
+      }
       const byId = await this.workers.findOne({ where: { id: def.id } });
       if (byId && byId.role === def.role) {
         await this.correctSystemWorker(byId, def);
@@ -202,26 +212,39 @@ export class SystemWorkersService implements OnApplicationBootstrap {
         continue;
       }
       const name = this.uniqueName(def.name, usedNames);
-      await this.workers.insert({
-        id,
-        name,
-        intro: def.intro,
-        kind: def.kind,
-        role: def.role,
-        runtime: def.runtime,
-        executorId: null,
-        providerId: null,
-        modelId: null,
-        prompt: def.prompt,
-        skills: null,
-        taskDefs: null,
-        ownerUserId: null,
-        ownerName: null,
-        materials: null,
-        enabled: false,
-      });
+      const insertedId = await this.workers.manager.transaction(
+        async (manager) => {
+          const result = await manager.insert(Worker, {
+            systemKey: def.key,
+            name,
+            intro: def.intro,
+            kind: def.kind,
+            role: def.role,
+            runtime: def.runtime,
+            executorId: null,
+            providerId: null,
+            modelId: null,
+            prompt: def.prompt,
+            skills: null,
+            taskDefs: null,
+            ownerUserId: null,
+            ownerName: null,
+            materials: null,
+            enabled: false,
+          });
+          const generatedId = result.identifiers[0]?.id as number | undefined;
+          if (generatedId && generatedId !== id) {
+            // 自增主键列会忽略显式 id：插入后立即迁入系统 ID 段，保持稳定寻址
+            await manager.query('UPDATE workers SET id = $1 WHERE id = $2', [
+              id,
+              generatedId,
+            ]);
+          }
+          return id;
+        },
+      );
       this.logger.log(
-        `已内置系统机器人「${name}」#${id}（默认停用，请在机器人页配置执行器/模型后启用）`,
+        `已内置系统机器人「${name}」#${insertedId}（默认停用，请在机器人页配置执行器/模型后启用）`,
       );
     }
   }
@@ -231,9 +254,10 @@ export class SystemWorkersService implements OnApplicationBootstrap {
     def: SystemWorkerDefinition,
   ): Promise<void> {
     const patch: Partial<Worker> = {};
+    if (worker.systemKey !== def.key) patch.systemKey = def.key;
     if (worker.role !== def.role) patch.role = def.role;
     if (worker.runtime !== def.runtime) patch.runtime = def.runtime;
-    // 系统调度机器人未自定义 PROMPT 时，把内置默认值落库，便于在页面上查看/编辑
+    // 系统机器人未自定义 PROMPT 时，把内置默认值落库，便于在页面上查看/编辑
     if (!worker.prompt?.trim()) patch.prompt = def.prompt;
     if (Object.keys(patch).length === 0) return;
     await this.workers.update({ id: worker.id }, patch);

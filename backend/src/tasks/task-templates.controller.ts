@@ -18,18 +18,16 @@ import {
 
 class CreateTaskTemplateDto implements CreateTaskTemplateInput {
   name: string;
+  type?: string | null;
   description?: string | null;
-  input?: string | null;
-  outputSpec?: string | null;
-  agentId?: number | null;
+  agentIds?: number[] | null;
 }
 
 class UpdateTaskTemplateDto implements UpdateTaskTemplateInput {
   name?: string;
+  type?: string | null;
   description?: string | null;
-  input?: string | null;
-  outputSpec?: string | null;
-  agentId?: number | null;
+  agentIds?: number[] | null;
 }
 
 @Controller('task-templates')

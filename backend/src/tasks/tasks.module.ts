@@ -4,14 +4,16 @@ import { User } from '../auth/user.entity';
 import { ExecutorsModule } from '../executors/executors.module';
 import { Executor } from '../executors/executor.entity';
 import { FeishuModule } from '../feishu/feishu.module';
+import { TaskTypesModule } from '../task-types/task-types.module';
 import { WorkersModule } from '../workers/workers.module';
 import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
+import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
+import { TaskAssignmentService } from './task-assignment.service';
 import { TaskChatService } from './task-chat.service';
 import { TaskDispatchService } from './task-dispatch.service';
-import { TaskIdentifyService } from './task-identify.service';
 import { TaskLoopService } from './task-loop.service';
 import { TaskNotifyService } from './task-notify.service';
 import { TaskRealtimeService } from './task-realtime.service';
@@ -25,6 +27,7 @@ import { TasksService } from './tasks.service';
     TypeOrmModule.forFeature([
       Task,
       TaskEvent,
+      TaskMessage,
       TaskTemplate,
       Worker,
       User,
@@ -33,13 +36,14 @@ import { TasksService } from './tasks.service';
     WorkersModule,
     ExecutorsModule,
     FeishuModule,
+    TaskTypesModule,
   ],
   controllers: [TasksController, TaskTemplatesController],
   providers: [
     TasksService,
+    TaskAssignmentService,
     TaskChatService,
     TaskDispatchService,
-    TaskIdentifyService,
     TaskLoopService,
     TaskNotifyService,
     TaskRealtimeService,

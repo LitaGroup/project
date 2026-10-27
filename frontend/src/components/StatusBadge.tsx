@@ -139,16 +139,19 @@ const taskSubStatusVariant: Record<
 export function TaskStatusBadge({
   status,
   subStatus,
+  showMain = false,
 }: {
   status?: string
   subStatus: string
+  /** 同时展示主状态与子状态（任务详情标题使用） */
+  showMain?: boolean
 }) {
   return (
     <Badge
       variant={taskSubStatusVariant[subStatus] ?? 'soft'}
       title={status ? `${status}-${subStatus}` : subStatus}
     >
-      {subStatus}
+      {showMain && status ? `${status} · ${subStatus}` : subStatus}
     </Badge>
   )
 }

@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import type { AuthedRequest } from '../auth/auth.guard';
-import { TaskStatus, TaskSubStatus, TaskType } from '../common/enums';
+import { TaskStatus, TaskSubStatus } from '../common/enums';
 import { Task, TaskMissingItem } from './task.entity';
 import {
   CreateTaskInput,
@@ -29,19 +29,20 @@ import { TaskDispatchService } from './task-dispatch.service';
 
 class CreateTaskDto implements CreateTaskInput {
   title?: string;
-  type?: TaskType;
+  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
   agentId?: number | null;
   schedulerId?: number | null;
   parentId?: number | null;
+  templateId?: number | null;
   submitForScheduling?: boolean;
 }
 
 class UpdateTaskDto implements UpdateTaskInput {
   title?: string;
-  type?: TaskType;
+  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -57,6 +58,14 @@ class MarkMissingDto {
 
 class FeedbackDto {
   content?: string;
+}
+
+class MessageDto {
+  content?: string;
+}
+
+class AssignTaskDto {
+  agentId: number;
 }
 
 class ReplyQuestionDto {
@@ -102,7 +111,7 @@ export class TasksController {
     @Query('q') q?: string,
     @Query('status') status?: TaskStatus,
     @Query('subStatus') subStatus?: TaskSubStatus,
-    @Query('type') type?: TaskType,
+    @Query('type') type?: string,
     @Query('rootOnly') rootOnly?: string,
   ) {
     return this.tasksService.findAll({
@@ -215,13 +224,46 @@ export class TasksController {
     );
   }
 
+  /**
+   * 任务对话发送消息：识别阶段作为需求补充重新识别；
+   * 已有执行会话时直接续聊，待验收任务会重新进入执行中。
+   */
+  @Post(':id/messages')
+  sendMessage(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: MessageDto,
+    @Req() req: AuthedRequest,
+  ): Promise<Task> {
+    return this.tasksService.sendMessage(
+      id,
+      dto.content ?? '',
+      req.user?.name ?? null,
+    );
+  }
+
+  /** 人工分配给其他机器人（执行中会中断旧机器人并重新派发） */
+  @Post(':id/assign')
+  assign(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignTaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<Task> {
+    return this.dispatchService.assign(id, dto.agentId, req.user?.name ?? null);
+  }
+
   /** 人工标记待反馈（补充需要用户提供/确认的事项） */
   @Post(':id/missing')
   markMissing(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: MarkMissingDto,
+    @Req() req: AuthedRequest,
   ): Promise<Task> {
-    return this.tasksService.markMissing(id, dto.items ?? [], null);
+    return this.tasksService.markMissing(
+      id,
+      dto.items ?? [],
+      null,
+      req.user?.name ?? null,
+    );
   }
 
   /** 中断执行中的机器人会话（任务保持进行中-执行中，可重新派发或取消） */

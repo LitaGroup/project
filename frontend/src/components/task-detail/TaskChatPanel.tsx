@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -7,12 +7,27 @@ import {
   useExternalStoreRuntime,
   type AppendMessage,
   type MessageState,
+  type ReasoningMessagePart,
+  type TextMessagePart,
   type ThreadMessageLike,
 } from '@assistant-ui/react'
-import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
-import remarkGfm from 'remark-gfm'
 import { Badge } from '@appica/ui-react/badge'
-import { buttonVariants } from '@appica/ui-react/button'
+import { Button, buttonVariants } from '@appica/ui-react/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@appica/ui-react/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@appica/ui-react/select'
 import {
   AlertCircle,
   Check,
@@ -29,17 +44,15 @@ import {
   type TaskChatTool,
   type TaskPackage,
   type TaskPipelineStage,
+  type Worker,
 } from '../../lib/api'
 import { questionStatusLabel } from '../../lib/question'
 import { QuestionCard } from '../QuestionCard'
 import { SenderLine, WorkerAvatar } from './WorkerAvatar'
-import { MermaidDiagram } from '../MermaidDiagram'
-
-const MARKDOWN_PLUGINS = [remarkGfm]
-/** language-mermaid 代码块（如 flowchart TD）渲染为流程图 */
-const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
-  mermaid: { SyntaxHighlighter: MermaidDiagram },
-}
+import {
+  CHAT_MARKDOWN_PARTS,
+  CHAT_PLAIN_PARTS,
+} from '../agent-chat/ChatParts'
 
 const FALLBACK_SENDER: TaskChatSender = {
   id: 'system',
@@ -60,7 +73,7 @@ interface TaskChatPanelProps {
   messages: TaskChatMessage[]
   connection: 'connecting' | 'live' | 'reconnecting'
   busy: boolean
-  onSendFeedback: (content: string) => Promise<void>
+  onSendMessage: (content: string) => Promise<void>
   /** 回答（answers）或跳过（null）机器人提问 */
   onReplyQuestion: (questionId: string, answers: string[][] | null) => Promise<void>
   onAction: (fn: (id: number) => Promise<unknown>) => void
@@ -76,7 +89,7 @@ export function TaskChatPanel({
   messages,
   connection,
   busy,
-  onSendFeedback,
+  onSendMessage,
   onReplyQuestion,
   onAction,
 }: TaskChatPanelProps) {
@@ -88,16 +101,20 @@ export function TaskChatPanel({
         .join('\n')
         .trim()
       if (!text) return
-      await onSendFeedback(text)
+      await onSendMessage(text)
     },
-    [onSendFeedback],
+    [onSendMessage],
   )
 
+  const finished = task.status === '已结束'
+  const robotRunning = messages.some(
+    (message) => message.role === 'assistant' && message.status === 'running',
+  )
   const runtime = useExternalStoreRuntime<TaskChatMessage>({
     messages,
     convertMessage: toThreadMessage,
     onNew,
-    isSendDisabled: task.subStatus !== '待反馈' || busy,
+    isSendDisabled: finished || busy || robotRunning,
   })
 
   const robotCount = useMemo(
@@ -109,6 +126,9 @@ export function TaskChatPanel({
       ).size,
     [pipeline],
   )
+  const currentAgentName = pipeline.find(
+    (stage) => stage.task.id === task.id,
+  )?.agent?.name
 
   return (
     <section className="flex min-h-[60vh] min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background xl:min-h-0">
@@ -169,7 +189,9 @@ export function TaskChatPanel({
             <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background pt-2">
               <ChatFooter
                 task={task}
+                agentName={currentAgentName}
                 busy={busy}
+                robotRunning={robotRunning}
                 onAction={onAction}
               />
             </ThreadPrimitive.ViewportFooter>
@@ -194,10 +216,21 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
     message.role === 'system' && !message.content.trim()
       ? ' '
       : message.content
+  const parts: Array<ReasoningMessagePart | TextMessagePart> = []
+  if (message.reasoning?.trim()) {
+    parts.push({
+      type: 'reasoning',
+      text: message.reasoning,
+      ...(message.status === 'running'
+        ? { status: { type: 'running' as const } }
+        : {}),
+    })
+  }
+  if (content) parts.push({ type: 'text', text: content })
   return {
     id: message.id,
     role: message.role,
-    content: content ? [{ type: 'text', text: content }] : [],
+    content: parts,
     createdAt: new Date(message.createdAt),
     status,
     metadata: {
@@ -212,32 +245,6 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
 
 function customOf(message: MessageState): ChatCustom {
   return (message.metadata.custom ?? {}) as ChatCustom
-}
-
-const MARKDOWN_PARTS = {
-  Text: ChatMarkdownText,
-  Empty: () => null,
-}
-
-const PLAIN_PARTS = {
-  Text: PlainText,
-  Empty: () => null,
-}
-
-function ChatMarkdownText() {
-  return (
-    <MarkdownTextPrimitive
-      className="task-chat-markdown"
-      smooth={false}
-      defer
-      remarkPlugins={MARKDOWN_PLUGINS}
-      componentsByLanguage={MARKDOWN_COMPONENTS_BY_LANGUAGE}
-    />
-  )
-}
-
-function PlainText({ text }: { text?: string }) {
-  return <span className="whitespace-pre-wrap break-words">{text}</span>
 }
 
 function UserBubble({ message }: { message: MessageState }) {
@@ -255,8 +262,8 @@ function UserBubble({ message }: { message: MessageState }) {
           time={message.createdAt.toISOString()}
           align="right"
         />
-        <div className="rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
-          <MessagePrimitive.Parts components={PLAIN_PARTS} />
+        <div className="min-w-0 max-w-full rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
+          <MessagePrimitive.Parts components={CHAT_PLAIN_PARTS} />
         </div>
       </div>
       <WorkerAvatar sender={sender} size={30} className="mt-5" />
@@ -271,6 +278,9 @@ function AssistantBubble({ message }: { message: MessageState }) {
   const tools = (custom.tools ?? []).filter((tool) => tool.name !== 'question')
   const hasText = message.content.some(
     (part) => part.type === 'text' && part.text?.trim(),
+  )
+  const hasReasoning = message.content.some(
+    (part) => part.type === 'reasoning' && part.text?.trim(),
   )
   const running = message.status?.type === 'running'
 
@@ -293,10 +303,10 @@ function AssistantBubble({ message }: { message: MessageState }) {
 
         {tools.length > 0 && <ToolList tools={tools} />}
 
-        {hasText ? (
+        {hasText || hasReasoning ? (
           <div className="rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-4 py-3 text-sm leading-relaxed shadow-sm">
-            <MessagePrimitive.Parts components={MARKDOWN_PARTS} />
-            {running && <StreamingCaret />}
+            <MessagePrimitive.Parts components={CHAT_MARKDOWN_PARTS} />
+            {running && hasText && <StreamingCaret />}
           </div>
         ) : (
           running && (
@@ -326,7 +336,7 @@ function SystemEvent({ message }: { message: MessageState }) {
           </span>
         )}
         <span className="min-w-0 whitespace-pre-wrap break-words">
-          <MessagePrimitive.Parts components={PLAIN_PARTS} />
+          <MessagePrimitive.Parts components={CHAT_PLAIN_PARTS} />
         </span>
         <time className="shrink-0 pt-0.5 text-[10px] text-foreground-subtle">
           {message.createdAt.toLocaleTimeString()}
@@ -434,118 +444,255 @@ function ConnectionDot({
   )
 }
 
-/** 底部输入区：仅「待反馈」允许发送；其余状态按任务状态提供动作 */
+/** 底部输入区：未结束任务均可发送消息，操作按钮统一位于输入框下方 */
 function ChatFooter({
   task,
+  agentName,
   busy,
+  robotRunning,
   onAction,
 }: {
   task: TaskPackage
+  agentName?: string
   busy: boolean
+  robotRunning: boolean
   onAction: (fn: (id: number) => Promise<unknown>) => void
 }) {
-  if (task.subStatus === '待反馈') {
-    return (
-      <div className="rounded-[var(--radius-lg)] border border-border bg-background p-3 shadow-sm">
-        {task.missingItems && task.missingItems.length > 0 && (
-          <div className="mb-2 rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-xs text-warning-foreground">
-            <p className="mb-1 flex items-center gap-1.5 font-medium">
-              <AlertCircle className="size-3.5" />
-              待反馈事项（{task.missingItems.length}）
-            </p>
-            <ul className="flex max-h-24 list-disc flex-col gap-0.5 overflow-y-auto pl-4">
-              {task.missingItems.map((item, index) => (
-                <li key={index}>
-                  {item.item}
-                  {item.reason ? ` — ${item.reason}` : ''}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
-          <ComposerPrimitive.Input
-            rows={1}
-            placeholder="补充资料或确认信息，发送后将重新识别任务…"
-            className="max-h-32 min-h-8 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-foreground-subtle"
-          />
-          <ComposerPrimitive.Send
-            className={buttonVariants({ variant: 'primary', size: 'icon-sm' })}
-            aria-label="发送反馈"
-          >
-            <Send className="size-4" />
-          </ComposerPrimitive.Send>
-        </ComposerPrimitive.Root>
-        <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-foreground-muted">
-          <span>Enter 发送，Shift+Enter 换行；反馈会追加到任务描述</span>
-          <button
-            type="button"
-            className="shrink-0 underline underline-offset-2 disabled:opacity-50"
-            disabled={busy}
-            onClick={() => onAction((id) => api.submitTask(id))}
-          >
-            仅重新识别
-          </button>
-        </div>
-        <p className="mt-1 text-[11px] text-foreground-subtle">
-          已提醒 {task.remindCount ?? 0}/3 次
-          {task.lastRemindedAt
-            ? `，最近 ${new Date(task.lastRemindedAt).toLocaleString()}`
-            : ''}
-          ；3 次未处理将自动标记失败
-        </p>
-      </div>
-    )
-  }
-
+  const finished = task.status === '已结束'
+  const needsSupplement =
+    task.subStatus === '待反馈' ||
+    task.subStatus === '待识别' ||
+    task.subStatus === '识别中'
+  const placeholder = finished
+    ? '任务已结束，不能继续对话'
+    : robotRunning
+      ? '机器人正在回复…'
+      : task.subStatus === '待反馈'
+      ? '补充资料或确认信息，发送后将重新识别任务…'
+      : needsSupplement
+        ? '补充任务需求，发送后将重新识别…'
+        : task.subStatus === '待验收'
+          ? '继续与机器人对话，发送后将重新进入执行…'
+          : '继续与机器人对话，Enter 发送，Shift+Enter 换行…'
   const hint =
     task.subStatus === '执行中'
       ? '机器人正在执行，实时输出会同步到对话中'
       : task.subStatus === '识别中'
-        ? '调度机器人正在识别任务…'
+        ? '调度机器人正在识别任务，补充消息会重新排队识别'
         : task.subStatus === '待识别'
-          ? '任务已进入队列，等待调度机器人识别…'
+          ? '任务已进入队列，等待调度机器人识别'
           : task.subStatus === '待验收'
-            ? '机器人已完成执行，请验收交付物'
+            ? '机器人已完成执行，可继续对话或完成验收'
             : task.subStatus === '完成'
               ? '任务已完成并验收'
-              : '任务已取消'
+              : task.subStatus === '取消'
+                ? '任务已取消'
+                : '等待用户补充任务信息'
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-border bg-background-muted px-3 py-2 text-xs text-foreground-muted">
-      <span className="min-w-0 truncate">{hint}</span>
-      <div className="flex shrink-0 items-center gap-2">
-        {task.subStatus === '执行中' && (
-          <button
-            type="button"
-            className="underline underline-offset-2 disabled:opacity-50"
-            disabled={busy}
-            onClick={() => onAction((id) => api.interruptTask(id))}
-          >
-            中断
-          </button>
-        )}
-        {task.subStatus === '待验收' && (
-          <button
-            type="button"
-            className="font-medium text-success-foreground underline underline-offset-2 disabled:opacity-50"
-            disabled={busy}
-            onClick={() => onAction((id) => api.acceptTask(id))}
-          >
-            验收通过
-          </button>
-        )}
-        {task.subStatus !== '完成' && task.subStatus !== '取消' && (
-          <button
-            type="button"
-            className="text-error-foreground underline underline-offset-2 disabled:opacity-50"
-            disabled={busy}
+    <div className="rounded-[var(--radius-lg)] border border-border bg-background p-3 shadow-sm">
+      {task.missingItems && task.missingItems.length > 0 && (
+        <div className="mb-2 rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-xs text-warning-foreground">
+          <p className="mb-1 flex items-center gap-1.5 font-medium">
+            <AlertCircle className="size-3.5" />
+            待反馈事项（{task.missingItems.length}）
+          </p>
+          <ul className="flex max-h-24 list-disc flex-col gap-0.5 overflow-y-auto pl-4">
+            {task.missingItems.map((item, index) => (
+              <li key={index}>
+                {item.item}
+                {item.reason ? ` — ${item.reason}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
+        <ComposerPrimitive.Input
+          rows={2}
+          disabled={finished || robotRunning}
+          placeholder={placeholder}
+          className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <ComposerPrimitive.Send
+          className={buttonVariants({ variant: 'primary', size: 'icon-sm' })}
+          aria-label="发送消息"
+          disabled={finished || robotRunning}
+        >
+          <Send className="size-4" />
+        </ComposerPrimitive.Send>
+      </ComposerPrimitive.Root>
+
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-foreground-muted">
+          {hint}
+        </span>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {task.subStatus === '执行中' && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => onAction((id) => api.interruptTask(id))}
+            >
+              中断
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || finished}
             onClick={() => onAction((id) => api.cancelTask(id))}
           >
-            取消任务
-          </button>
-        )}
+            取消
+          </Button>
+          <AssignTaskDialog
+            task={task}
+            agentName={agentName}
+            busy={busy}
+            onAssign={(agentId) =>
+              onAction((id) => api.assignTask(id, agentId))
+            }
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={busy || task.subStatus !== '待验收'}
+            onClick={() => onAction((id) => api.acceptTask(id))}
+          >
+            完成
+          </Button>
+        </div>
       </div>
     </div>
+  )
+}
+
+/** 分配机器人弹窗：仅列出启用中的工作者 */
+function AssignTaskDialog({
+  task,
+  agentName,
+  busy,
+  onAssign,
+}: {
+  task: TaskPackage
+  agentName?: string
+  busy: boolean
+  onAssign: (agentId: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [workers, setWorkers] = useState<Worker[]>([])
+  const [agentId, setAgentId] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) return
+    setLoading(true)
+    setError(null)
+    setAgentId('')
+  }
+
+  useEffect(() => {
+    if (!open) return
+    api
+      .listWorkers({ role: '工作者' })
+      .then((list) =>
+        setWorkers(
+          list.filter(
+            (worker) => worker.enabled && worker.id !== task.agentId,
+          ),
+        ),
+      )
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [open, task.agentId])
+
+  const items = Object.fromEntries(
+    workers.map((worker) => [String(worker.id), worker.name]),
+  )
+  const submit = () => {
+    const next = Number(agentId)
+    if (!Number.isInteger(next) || next < 1) {
+      setError('请选择机器人')
+      return
+    }
+    if (next === task.agentId) {
+      setError('请选择其他机器人')
+      return
+    }
+    setOpen(false)
+    onAssign(next)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger
+        render={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || task.status === '已结束'}
+          />
+        }
+      >
+        分配
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>分配任务</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-3 px-6 pb-2 text-sm">
+          <p className="text-foreground-muted">
+            当前机器人：{agentName ?? (task.agentId ? `#${task.agentId}` : '未分配')}
+          </p>
+          <label className="flex flex-col gap-1">
+            <span>分配给</span>
+            <Select
+              value={agentId || null}
+              onValueChange={(value) =>
+                setAgentId((value as string | null) ?? '')
+              }
+              items={items}
+            >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={loading ? '加载机器人…' : '选择机器人'}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {workers.map((worker) => (
+                  <SelectItem key={worker.id} value={String(worker.id)}>
+                    {worker.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          {workers.length === 0 && !loading && (
+            <p className="text-xs text-foreground-muted">暂无启用中的工作者</p>
+          )}
+          <p className="text-xs text-foreground-muted">
+            执行中的任务会先中断旧机器人再重新派发；待验收任务会重新执行。
+          </p>
+          {error && <p className="text-xs text-error-foreground">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button size="sm" variant="outline" onClick={() => setOpen(false)}>
+            取消
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={busy || loading || !agentId}
+            onClick={submit}
+          >
+            确认分配
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
