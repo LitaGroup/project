@@ -3,13 +3,13 @@ import { Link } from 'react-router-dom'
 import { Button, buttonVariants } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import {
   AlertDialog,
   AlertDialogTrigger,
@@ -122,9 +122,9 @@ export function ProjectsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="responsive-page-header mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">项目</h1>
-        <div className="flex items-center gap-2">
+        <div className="responsive-page-actions flex items-center gap-2">
           <SyncFeishuButton onSynced={reload} />
           <CreateProjectDialog onCreated={reload} />
         </div>
@@ -335,7 +335,7 @@ export function ProjectsPage() {
       </Table>
 
       {total > 0 && (
-        <div className="mt-4 flex items-center justify-between">
+        <div className="responsive-pagination mt-4 flex items-center justify-between">
           <span className="text-sm text-foreground-muted">
             共 {total} 条，第 {currentPage} / {pageCount} 页
           </span>

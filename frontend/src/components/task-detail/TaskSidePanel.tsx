@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
@@ -24,6 +24,8 @@ import type {
 import { TaskStatusBadge } from '../StatusBadge'
 import { MarkdownEditor } from '../MarkdownEditor'
 import { SenderLine, WorkerAvatar } from './WorkerAvatar'
+import { ActionSwapIcon } from '../motion-ui'
+import './task-pipeline.css'
 
 interface TaskSidePanelProps {
   task: TaskPackage
@@ -46,7 +48,7 @@ export function TaskSidePanel({ task, pipeline }: TaskSidePanelProps) {
     pipeline.find((stage) => stage.task.id === task.id) ?? null
 
   return (
-    <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+    <aside className="task-side-panel flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
       <TaskSummary task={task} stage={selectedStage} pipeline={pipeline} />
 
       <Tabs
@@ -111,7 +113,7 @@ function TaskSummary({
 }) {
   const rootStage = pipeline.find((item) => item.task.id === item.task.rootId)
   return (
-    <section className="rounded-[var(--radius-lg)] border border-border bg-background p-4">
+    <section className="task-summary rounded-[var(--radius-lg)] border border-border bg-background p-4">
       <div className="flex flex-wrap items-center gap-2">
         <TaskStatusBadge status={task.status} subStatus={task.subStatus} />
         <Badge variant="soft" size="sm">
@@ -223,15 +225,21 @@ function PipelineStageCard({
           : 'bg-border-strong'
   const sender = stage.agent ?? stage.scheduler
   return (
-    <div className="relative pl-6">
+    <div
+      className="pipeline-stage relative pl-6"
+      data-running={running}
+      data-selected={selected}
+      style={{ '--pipeline-delay': `${-((task.id * 0.61803398875) % 1) * 3.6}s` } as CSSProperties}
+    >
       <span
-        className={`absolute left-[7px] top-3 z-10 size-2.5 rounded-full ring-4 ring-background ${dotClass}`}
+        aria-hidden="true"
+        className={`pipeline-node absolute left-[7px] top-3 z-10 size-2.5 rounded-full ring-4 ring-background ${dotClass}`}
       />
       {!last && (
-        <span className="absolute left-[11px] top-5 h-[calc(100%-8px)] w-px bg-border" />
+        <span aria-hidden="true" className="pipeline-connector absolute left-[11px] top-5 h-[calc(100%-8px)] w-px bg-border" />
       )}
       <div
-        className={`rounded-[var(--radius-lg)] border p-3 ${
+        className={`pipeline-stage-surface rounded-[var(--radius-lg)] border p-3 ${
           selected
             ? 'border-info-emphasis bg-info-soft/30'
             : 'border-border bg-background'
@@ -403,7 +411,9 @@ function DeliverableCard({ stage }: { stage: TaskPipelineStage }) {
           aria-label="复制交付物"
           onClick={copy}
         >
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          <ActionSwapIcon swapKey={copied ? 'copied' : 'copy'} className="size-4">
+            {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+          </ActionSwapIcon>
         </Button>
       </header>
       <MarkdownEditor

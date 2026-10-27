@@ -104,7 +104,7 @@ export function KnowledgeSearchPage() {
   const results = response?.results ?? []
 
   return (
-    <div>
+    <div className="responsive-knowledge-search">
       <PageBreadcrumb
         items={[
           { label: '知识', to: '/docs/detail/' },
@@ -120,7 +120,7 @@ export function KnowledgeSearchPage() {
 
       <Toolbar aria-label="知识搜索" className="mb-4">
         <ToolbarInput
-          className="w-80"
+          className="knowledge-search-query w-80"
           render={
             <Input
               placeholder="输入关键词或问题…"
@@ -163,7 +163,7 @@ export function KnowledgeSearchPage() {
             </SelectContent>
           </Select>
           <ToolbarInput
-            className="w-52"
+            className="knowledge-search-path w-52"
             render={
               <Input
                 placeholder="限定目录，如 /guides"

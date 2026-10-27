@@ -34,6 +34,9 @@ import { questionStatusLabel } from '../../lib/question'
 import { QuestionCard } from '../QuestionCard'
 import { SenderLine, WorkerAvatar } from './WorkerAvatar'
 import { MermaidDiagram } from '../MermaidDiagram'
+import { AgentActivity } from '../ai-ui/AgentActivity'
+import { AiEnergy } from '../ai-ui/AiEnergy'
+import '../ai-ui/ai-conversation.css'
 
 const MARKDOWN_PLUGINS = [remarkGfm]
 /** language-mermaid 代码块（如 flowchart TD）渲染为流程图 */
@@ -111,8 +114,8 @@ export function TaskChatPanel({
   )
 
   return (
-    <section className="flex min-h-[60vh] min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background xl:min-h-0">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+    <section className="ai-conversation ai-task-conversation flex min-h-[60vh] min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background xl:min-h-0">
+      <header className="ai-conversation-header flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <ConnectionDot state={connection} />
           <span className="truncate text-sm font-medium text-foreground-intense">
@@ -133,9 +136,9 @@ export function TaskChatPanel({
 
       <AssistantRuntimeProvider runtime={runtime}>
         <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-          <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
+          <ThreadPrimitive.Viewport className="ai-conversation-viewport flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
             {messages.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
+              <div className="ai-conversation-empty flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
                 <span className="rounded-full bg-background-muted p-3">
                   <Wrench className="size-5" />
                 </span>
@@ -166,7 +169,7 @@ export function TaskChatPanel({
               }}
             </ThreadPrimitive.Messages>
 
-            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background pt-2">
+            <ThreadPrimitive.ViewportFooter className="ai-conversation-footer sticky bottom-0 mt-auto bg-background pt-2">
               <ChatFooter
                 task={task}
                 busy={busy}
@@ -248,18 +251,18 @@ function UserBubble({ message }: { message: MessageState }) {
     roleLabel: '用户',
   }
   return (
-    <MessagePrimitive.Root className="flex justify-end gap-3 px-1">
-      <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1.5">
+    <MessagePrimitive.Root className="ai-message ai-user-message flex justify-end gap-3 px-1">
+      <div className="ai-message-main flex min-w-0 max-w-[85%] flex-col items-end gap-1.5">
         <SenderLine
           sender={sender}
           time={message.createdAt.toISOString()}
           align="right"
         />
-        <div className="rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
+        <div className="ai-user-surface rounded-[var(--radius-lg)] px-4 py-2.5 text-sm leading-relaxed">
           <MessagePrimitive.Parts components={PLAIN_PARTS} />
         </div>
       </div>
-      <WorkerAvatar sender={sender} size={30} className="mt-5" />
+      <WorkerAvatar sender={sender} size={30} className="ai-message-avatar mt-5" />
     </MessagePrimitive.Root>
   )
 }
@@ -275,18 +278,21 @@ function AssistantBubble({ message }: { message: MessageState }) {
   const running = message.status?.type === 'running'
 
   return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <WorkerAvatar sender={sender} size={32} className="mt-0.5" />
-      <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+    <MessagePrimitive.Root data-running={running} className="ai-message ai-assistant-message flex gap-3 px-1">
+      <span className="ai-avatar-frame">
+        <AiEnergy active={running} size={64} />
+        <WorkerAvatar sender={sender} size={32} className="ai-message-avatar" />
+      </span>
+      <div className="ai-message-main min-w-0 flex-1">
+        <div className="ai-message-heading mb-1.5 flex flex-wrap items-center gap-2">
           <SenderLine
             sender={sender}
             time={message.createdAt.toISOString()}
           />
           {running && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
-              <span className="size-1.5 animate-pulse rounded-full bg-info-emphasis" />
-              正在执行
+            <span className="ai-active-state inline-flex items-center gap-1 text-[11px] text-info-foreground">
+              <AgentActivity />
+              <span className="ai-shimmer">正在执行</span>
             </span>
           )}
         </div>
@@ -294,19 +300,15 @@ function AssistantBubble({ message }: { message: MessageState }) {
         {tools.length > 0 && <ToolList tools={tools} />}
 
         {hasText ? (
-          <div className="rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-4 py-3 text-sm leading-relaxed shadow-sm">
+          <div className="ai-assistant-body text-sm leading-relaxed">
             <MessagePrimitive.Parts components={MARKDOWN_PARTS} />
             {running && <StreamingCaret />}
           </div>
         ) : (
           running && (
-            <div className="inline-flex items-center gap-2 rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-3 py-2 text-xs text-foreground-muted">
-              <span className="flex gap-1">
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle" />
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle [animation-delay:150ms]" />
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle [animation-delay:300ms]" />
-              </span>
-              正在思考 / 调用工具…
+            <div className="ai-waiting-state inline-flex items-center gap-2 text-xs text-foreground-muted">
+              <AgentActivity />
+              <span className="ai-shimmer">正在思考 / 调用工具…</span>
             </div>
           )
         )}
@@ -318,8 +320,8 @@ function AssistantBubble({ message }: { message: MessageState }) {
 function SystemEvent({ message }: { message: MessageState }) {
   const sender = customOf(message).sender ?? FALLBACK_SENDER
   return (
-    <MessagePrimitive.Root className="flex justify-center px-2">
-      <div className="flex max-w-[92%] items-start gap-2 rounded-[var(--radius-md)] border border-border bg-background-subtle px-3 py-1.5 text-xs leading-relaxed text-foreground-muted">
+    <MessagePrimitive.Root className="ai-system-message flex justify-center px-2">
+      <div className="ai-system-event flex max-w-[92%] items-start gap-2 px-3 py-1.5 text-xs leading-relaxed text-foreground-muted">
         {sender.kind !== 'system' && (
           <span className="shrink-0 font-medium text-foreground-emphasis">
             {sender.name}
@@ -355,10 +357,13 @@ function QuestionBubble({
 }: QuestionBubbleProps) {
   const sender = customOf(message).sender ?? FALLBACK_SENDER
   return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <WorkerAvatar sender={sender} size={32} className="mt-0.5" />
-      <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+    <MessagePrimitive.Root className="ai-message ai-question-message flex gap-3 px-1">
+      <span className="ai-avatar-frame">
+        <AiEnergy size={64} />
+        <WorkerAvatar sender={sender} size={32} className="ai-message-avatar" />
+      </span>
+      <div className="ai-message-main min-w-0 flex-1">
+        <div className="ai-message-heading mb-1.5 flex flex-wrap items-center gap-2">
           <SenderLine sender={sender} time={message.createdAt.toISOString()} />
           <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
             <MessageCircleQuestion className="size-3.5" />
@@ -379,11 +384,12 @@ function QuestionBubble({
 
 function ToolList({ tools }: { tools: TaskChatTool[] }) {
   return (
-    <div className="mb-2 flex flex-wrap gap-1.5">
+    <div className="ai-tool-list mb-2 flex flex-wrap gap-1.5">
       {tools.map((tool) => (
         <span
           key={tool.id}
-          className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${
+          data-status={tool.status}
+          className={`ai-tool-chip inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-xs)] border px-2 py-0.5 text-[11px] ${
             tool.status === 'error'
               ? 'border-error-emphasis bg-error-soft text-error-foreground'
               : tool.status === 'success'
@@ -392,10 +398,10 @@ function ToolList({ tools }: { tools: TaskChatTool[] }) {
           }`}
           title={tool.detail}
         >
-          <Wrench className="size-3 shrink-0" />
+          {tool.status === 'running' ? <AgentActivity /> : <Wrench className="size-3 shrink-0" />}
           <span className="max-w-48 truncate font-mono">{tool.name}</span>
           {tool.status === 'running' && (
-            <span className="shrink-0 animate-pulse">运行中</span>
+            <span className="ai-shimmer shrink-0">运行中</span>
           )}
           {tool.status === 'success' && (
             <Check className="size-3 shrink-0" />
@@ -409,7 +415,7 @@ function ToolList({ tools }: { tools: TaskChatTool[] }) {
 
 function StreamingCaret() {
   return (
-    <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
+    <span className="ai-streaming-caret ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
   )
 }
 
@@ -446,7 +452,7 @@ function ChatFooter({
 }) {
   if (task.subStatus === '待反馈') {
     return (
-      <div className="rounded-[var(--radius-lg)] border border-border bg-background p-3 shadow-sm">
+      <div className="ai-feedback-surface rounded-[var(--radius-lg)] border border-border bg-background p-3 shadow-sm">
         {task.missingItems && task.missingItems.length > 0 && (
           <div className="mb-2 rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-xs text-warning-foreground">
             <p className="mb-1 flex items-center gap-1.5 font-medium">
@@ -463,20 +469,20 @@ function ChatFooter({
             </ul>
           </div>
         )}
-        <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
+        <ComposerPrimitive.Root className="ai-composer flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
           <ComposerPrimitive.Input
             rows={1}
             placeholder="补充资料或确认信息，发送后将重新识别任务…"
-            className="max-h-32 min-h-8 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-foreground-subtle"
+            className="ai-composer-input max-h-32 min-h-8 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-foreground-subtle"
           />
           <ComposerPrimitive.Send
-            className={buttonVariants({ variant: 'primary', size: 'icon-sm' })}
+            className={`ai-composer-send ${buttonVariants({ variant: 'primary', size: 'icon-sm' })}`}
             aria-label="发送反馈"
           >
             <Send className="size-4" />
           </ComposerPrimitive.Send>
         </ComposerPrimitive.Root>
-        <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-foreground-muted">
+        <div className="ai-composer-hint mt-1.5 flex items-center justify-between gap-2 text-[11px] text-foreground-muted">
           <span>Enter 发送，Shift+Enter 换行；反馈会追加到任务描述</span>
           <button
             type="button"
@@ -512,7 +518,7 @@ function ChatFooter({
               : '任务已取消'
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-border bg-background-muted px-3 py-2 text-xs text-foreground-muted">
+    <div className="ai-task-state flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-border bg-background-muted px-3 py-2 text-xs text-foreground-muted">
       <span className="min-w-0 truncate">{hint}</span>
       <div className="flex shrink-0 items-center gap-2">
         {task.subStatus === '执行中' && (

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Input } from '@appica/ui-react/input'
 import {
   Toolbar,
@@ -118,7 +118,7 @@ export function ProjectDefectsPage() {
           { label: '缺陷' },
         ]}
       />
-      <div className="mb-4 flex items-center justify-between">
+      <div className="responsive-page-header mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold">缺陷</h1>
           {/* Markdown 视图：后端 .md URL 规范（GET /api/defects.md?projectId=） */}

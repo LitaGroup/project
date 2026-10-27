@@ -22,7 +22,7 @@ export function LoginPage() {
   if (user) return <Navigate to="/" replace />
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background-muted">
+    <div className="square-login flex min-h-screen items-center justify-center bg-background-muted">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>登录</CardTitle>

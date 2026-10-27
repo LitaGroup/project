@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import {
   Select,
   SelectTrigger,
@@ -67,7 +67,7 @@ function SimulatorPanel({
 }) {
   if (!simulators || simulators.length === 0) return null
   return (
-    <aside className="flex w-72 shrink-0 flex-col gap-4">
+    <aside className="apps-simulator-panel flex w-72 shrink-0 flex-col gap-4">
       {simulators.map((s) => (
         <Card key={s.name}>
           <CardHeader>
@@ -224,10 +224,10 @@ export function AppsPage() {
     .sort((a, b) => b.file.localeCompare(a.file))
 
   return (
-    <div className="flex gap-6">
+    <div className="apps-page-layout flex gap-6">
       {/* 左侧：包列表 */}
       <div className="min-w-0 flex-1">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="responsive-page-header mb-4 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">APP</h1>
           <Button variant="secondary" onClick={refresh} disabled={loading}>
             {loading ? '刷新中…' : '刷新'}

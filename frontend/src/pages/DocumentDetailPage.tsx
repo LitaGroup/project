@@ -203,7 +203,7 @@ export function DocumentDetailPage() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="responsive-document-page flex h-full flex-col gap-4">
       {/* 1. 文档属性信息：压缩为不超过 3 行的紧凑布局 */}
       <div className="flex flex-col gap-1.5">
         <PageBreadcrumb
@@ -268,7 +268,7 @@ export function DocumentDetailPage() {
 
       {/* 2. 内容区：apipost 文档为结构化接口视图；其余为 Markdown（Milkdown Crepe） */}
       <section className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="flex items-center justify-between">
+        <div className="detail-section-heading flex items-center justify-between">
           <h2 className="text-base font-semibold">内容</h2>
           <div className="flex gap-2">
             {isExternal ? (
@@ -294,10 +294,10 @@ export function DocumentDetailPage() {
           </>
         ) : (
           <>
-            <div className="flex min-h-0 flex-1 gap-4">
+            <div className="document-editor-layout flex min-h-0 flex-1 gap-4">
               <div
                 ref={editorBoxRef}
-                className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-background"
+                className="document-editor-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-background"
               >
                 {meta.length > 0 && (
                   <div className="shrink-0 border-b border-border-strong bg-background-muted px-4 py-2">

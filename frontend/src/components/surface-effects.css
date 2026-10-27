@@ -1,0 +1,58 @@
+/* A quiet highlight follows the pointer without becoming an interaction layer. */
+.square-shell .square-page :is([data-slot='card-content'], .task-board-card-surface) {
+  position: relative;
+}
+
+.square-shell .square-page :is([data-slot='card-content'], .task-board-card-surface)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    300px circle at var(--pointer-x, 50%) var(--pointer-y, 50%),
+    color-mix(in srgb, var(--foreground-intense) 6%, transparent),
+    color-mix(in srgb, var(--info) 3.5%, transparent) 34%,
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .square-shell .square-page :is([data-slot='card-content'], .task-board-card-surface):hover::after {
+    opacity: 1;
+  }
+}
+
+.square-shell .square-sidebar [data-slot='navigation-link'] svg {
+  transition: translate 180ms ease;
+}
+
+.square-shell .square-sidebar [data-slot='navigation-link']:hover svg {
+  translate: 0 -1.5px;
+}
+
+.square-shell :is(
+  [data-slot='button'],
+  [data-slot='toolbar-button'],
+  .square-page a[class*='inline-flex'][class*='cursor-pointer']
+) {
+  transition:
+    scale 130ms ease,
+    translate 130ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.square-shell :is(
+  [data-slot='button'],
+  [data-slot='toolbar-button'],
+  .square-page a[class*='inline-flex'][class*='cursor-pointer']
+):not(:disabled):not([data-disabled]):active {
+  scale: 0.975;
+  translate: 0 1px;
+}

@@ -1,0 +1,72 @@
+.rabbit-identity,
+.rabbit-identity * {
+  pointer-events: none;
+}
+
+.rabbit-identity {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  vertical-align: middle;
+  container-type: inline-size;
+}
+
+.rabbit-identity__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.rabbit-identity .rabbit-identity__symbol {
+  position: absolute;
+  z-index: 3;
+  top: -14%;
+  right: -14%;
+  width: clamp(11px, 42cqw, 18px);
+  height: auto;
+  aspect-ratio: 1;
+  overflow: visible;
+  border-radius: 50%;
+  background: var(--background-muted);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--square-glow-cyan) 24%, transparent));
+}
+
+.robot-rabbit-avatar[data-slot='avatar'],
+.robot-rabbit-avatar > .robot-rabbit-fallback[data-slot='avatar-fallback'] {
+  overflow: visible;
+}
+
+.robot-rabbit-avatar:has(.robot-rabbit-fallback) {
+  background: transparent;
+}
+
+.robot-rabbit-avatar > .robot-rabbit-fallback {
+  background: transparent;
+}
+
+.square-rabbit-mark {
+  width: 34px;
+  height: 34px;
+  flex: none;
+}
+
+/* Existing working flags gate a five-turn burst, followed by a quiet rest. */
+.ai-avatar-frame:has(> .ai-energy[data-active='true']) .rabbit-identity__symbol,
+[data-working='true'] .robot-rabbit-avatar .rabbit-identity__symbol {
+  --ai-symbol-cycle: 10s;
+  transform-origin: 50% 50%;
+  animation: ai-symbol-burst var(--ai-symbol-cycle) linear infinite;
+}
+
+@keyframes ai-symbol-burst {
+  0% { transform: rotate(0deg); animation-timing-function: cubic-bezier(.7, 0, 1, .4); }
+  18% { transform: rotate(90deg); animation-timing-function: ease-in; }
+  35% { transform: rotate(450deg); animation-timing-function: linear; }
+  45% { transform: rotate(900deg); animation-timing-function: linear; }
+  55% { transform: rotate(1440deg); animation-timing-function: cubic-bezier(0, .6, .25, 1); }
+  68%, 100% { transform: rotate(1800deg); }
+}

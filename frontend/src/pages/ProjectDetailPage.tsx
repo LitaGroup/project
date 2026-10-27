@@ -7,13 +7,13 @@ import {
   CardDescription,
 } from '@appica/ui-react/card'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import {
   Dialog,
   DialogTrigger,
@@ -135,15 +135,15 @@ export function ProjectDetailPage() {
   if (!project) return <p>加载中…</p>
 
   return (
-    <div className="flex gap-6">
+    <div className="responsive-detail-page responsive-detail-columns flex gap-6">
       {/* 左侧：内容区，从上到下平铺 */}
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
+      <div className="responsive-detail-main flex min-w-0 flex-1 flex-col gap-6">
         <PageBreadcrumb
           items={[{ label: '项目', to: '/projects' }, { label: project.name }]}
         />
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">文档</h2>
             <div className="flex gap-2">
               <Link
@@ -160,7 +160,7 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">资源</h2>
             <div className="flex items-center gap-2">
               <Link
@@ -176,7 +176,7 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">节点</h2>
             <div className="flex items-center gap-2">
               <Link
@@ -192,7 +192,7 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">代码分支</h2>
             <div className="flex items-center gap-2">
               <Link
@@ -208,7 +208,7 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">检查</h2>
             <div className="flex items-center gap-2">
               <Link
@@ -225,7 +225,7 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">测试</h2>
             <div className="flex items-center gap-2">
               <Link
@@ -242,7 +242,7 @@ export function ProjectDetailPage() {
         </section>
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">导出</h2>
             <div className="flex items-center gap-2">
               <Link
@@ -272,7 +272,7 @@ export function ProjectDetailPage() {
       </div>
 
       {/* 右侧：项目详情（每个可编辑字段展示态带虚线下划线，hover 提示「点击编辑」，点击即编辑） */}
-      <aside className="w-80 shrink-0">
+      <aside className="responsive-detail-sidebar w-80 shrink-0">
         <TooltipProvider>
           <Card>
             <CardHeader>
@@ -2035,7 +2035,7 @@ function SchedulesSection({ project }: { project: Project }) {
   const displayedSchedules = filteredSchedules.slice(0, 10)
   return (
     <>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="detail-section-heading mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-xl font-semibold">定时任务</h2>
           {/* 快速筛选：未选中=对应语义浅色（启用=success、停用=warning），选中=深色背景浅色字体；再次点击当前项恢复全部 */}
@@ -2351,7 +2351,7 @@ function DefectsPanel({
   const defects = filteredDefects.slice(0, 10)
   return (
     <>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="detail-section-heading mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-xl font-semibold">缺陷</h2>
           {/* 快速筛选：未选中=对应语义浅色（开放=warning、修复=success），选中=深色背景浅色字体；再次点击当前项恢复全部 */}
@@ -3768,7 +3768,7 @@ function ProjectBranchManageDialog({
       >
         分支
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="detail-branch-dialog">
         <DialogHeader>
           <DialogTitle>代码分支</DialogTitle>
         </DialogHeader>
@@ -3779,7 +3779,7 @@ function ProjectBranchManageDialog({
                 已登记（同一仓库仅支持一个分支）
               </span>
               {registered.map((b) => (
-                <div key={b.id} className="flex items-center gap-2 text-sm">
+                <div key={b.id} className="detail-registered-branch flex items-center gap-2 text-sm">
                   <a
                     href={`https://github.com/${b.repo}`}
                     target="_blank"
@@ -3809,7 +3809,7 @@ function ProjectBranchManageDialog({
               添加新分支（可添加多行，保存后逐条登记）
               <div className="flex flex-col gap-2">
                 {rows.map((row, i) => (
-                  <div key={i} className="flex items-center gap-2">
+                  <div key={i} className="detail-branch-fields flex items-center gap-2">
                     <div className="flex-1">
                       <Autocomplete
                         items={repoOptions}
@@ -3931,7 +3931,7 @@ function ReleasesSection({
   const displayed = releases.slice(0, 10)
   return (
     <>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="detail-section-heading mb-3 flex items-center justify-between">
         <h2 className="text-xl font-semibold">提测记录</h2>
         <a
           href={`/api/releases.md?projectId=${project.id}`}
@@ -4251,7 +4251,7 @@ function SubmitReleaseDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button className="w-full" />}>提测</DialogTrigger>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="detail-release-dialog max-w-2xl">
         <DialogHeader>
           <DialogTitle>项目提测</DialogTitle>
         </DialogHeader>
@@ -4318,7 +4318,7 @@ function SubmitReleaseDialog({
               代码分支（默认带入项目已登记的 仓库+分支，仅可选组织内存在的仓库与分支）
               <div className="flex flex-col gap-2">
                 {branches.map((branch, i) => (
-                  <div key={i} className="flex items-center gap-2">
+                  <div key={i} className="detail-branch-fields flex items-center gap-2">
                     <div className="flex-1">
                       <Autocomplete
                         items={repoOptions}

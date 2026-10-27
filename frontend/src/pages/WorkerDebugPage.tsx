@@ -31,10 +31,10 @@ import {
   Brain,
   ChevronDown,
   CircleCheck,
-  Loader,
   MessageCircleQuestion,
   Refresh,
   Send,
+  User,
   X,
 } from '@appica/icons-react'
 import {
@@ -49,6 +49,9 @@ import { QuestionCard } from '../components/QuestionCard'
 import { questionStatusLabel } from '../lib/question'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 import { MermaidDiagram } from '../components/MermaidDiagram'
+import { AgentActivity } from '../components/ai-ui/AgentActivity'
+import { AiEnergy, AiWaveform } from '../components/ai-ui/AiEnergy'
+import '../components/ai-ui/ai-conversation.css'
 
 const MARKDOWN_PLUGINS = [remarkGfm]
 /** language-mermaid 代码块（如 flowchart TD）渲染为流程图 */
@@ -177,7 +180,7 @@ export function WorkerDebugPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
+    <div data-running={running} className="ai-debug-page flex h-full min-h-0 flex-col gap-4">
       {error && (
         <p
           role="alert"
@@ -188,18 +191,21 @@ export function WorkerDebugPage() {
       )}
       {!snapshot ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-foreground-muted">
-          <Loader />
+          <AgentActivity />
           {error ? '会话加载失败，请从机器人列表重新进入' : '加载调试会话…'}
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-3">
-          <header className="flex shrink-0 items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-border bg-background px-4 py-2.5">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <RobotAvatar
-                name={snapshot.worker.name}
-                avatarUrl={snapshot.worker.avatarUrl}
-                size={28}
-              />
+        <div className="ai-debug-session flex min-h-0 flex-1 flex-col gap-3">
+          <header className="ai-session-header flex shrink-0 items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-border bg-background px-4 py-2.5">
+            <div className="ai-session-identity flex min-w-0 items-center gap-2.5">
+              <span className="ai-avatar-frame ai-session-avatar">
+                <AiEnergy active={running} size={84} />
+                <RobotAvatar
+                  name={snapshot.worker.name}
+                  avatarUrl={snapshot.worker.avatarUrl}
+                  size={36}
+                />
+              </span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-foreground-intense">
                   {snapshot.worker.name}
@@ -213,9 +219,9 @@ export function WorkerDebugPage() {
                 </p>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="ai-session-actions flex shrink-0 items-center gap-2">
               {running && (
-                <span className="text-xs text-foreground-muted">回复中…</span>
+                <span className="ai-active-state inline-flex items-center gap-2 text-xs text-foreground-muted"><AiWaveform active className="ai-session-wave" /><span className="ai-shimmer">回复中…</span></span>
               )}
               <AlertDialog>
                 <AlertDialogTrigger
@@ -223,6 +229,7 @@ export function WorkerDebugPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="ai-session-reset"
                       disabled={running || resetting || !snapshot.sessionId}
                     />
                   }
@@ -260,7 +267,7 @@ export function WorkerDebugPage() {
               </AlertDialog>
             </div>
           </header>
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-auto xl:grid-cols-[minmax(0,1fr)_320px] xl:overflow-hidden">
+          <div className="ai-debug-workspace grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-auto xl:grid-cols-[minmax(0,1fr)_320px] xl:overflow-hidden">
             <DebugChat
               key={workerId}
               snapshot={snapshot}
@@ -306,17 +313,20 @@ function DebugChat({
   })
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <section data-running={running} className="ai-conversation ai-debug-conversation flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
       <AssistantRuntimeProvider runtime={runtime}>
         <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-          <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
+          <ThreadPrimitive.Viewport className="ai-conversation-viewport flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
             {snapshot.messages.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
-                <RobotAvatar
-                  name={snapshot.worker.name}
-                  avatarUrl={snapshot.worker.avatarUrl}
-                  size={48}
-                />
+              <div className="ai-conversation-empty flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
+                <span className="ai-avatar-frame ai-empty-avatar">
+                  <AiEnergy size={96} />
+                  <RobotAvatar
+                    name={snapshot.worker.name}
+                    avatarUrl={snapshot.worker.avatarUrl}
+                    size={48}
+                  />
+                </span>
                 <p>发送第一条消息开始调试</p>
                 <p className="text-xs">
                   首条消息沿用工作目录中的 AGENTS.md 与技能，后续消息使用当前会话
@@ -347,17 +357,17 @@ function DebugChat({
               }}
             </ThreadPrimitive.Messages>
           </ThreadPrimitive.Viewport>
-          <div className="shrink-0 border-t border-border bg-background p-3">
-            <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
+          <div className="ai-composer-dock shrink-0 border-t border-border bg-background p-3">
+            <ComposerPrimitive.Root className="ai-composer flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
               <ComposerPrimitive.Input
                 rows={2}
                 placeholder={
                   running ? '机器人正在回复…' : '输入调试消息，Enter 发送，Shift+Enter 换行…'
                 }
-                className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-foreground-muted"
+                className="ai-composer-input max-h-40 min-h-10 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-foreground-muted"
               />
               <ComposerPrimitive.Send asChild>
-                <Button size="icon-sm" aria-label="发送消息">
+                <Button size="icon-sm" className="ai-composer-send" aria-label="发送消息">
                   <Send className="size-4" />
                 </Button>
               </ComposerPrimitive.Send>
@@ -373,7 +383,7 @@ function DebugChat({
 function TodoPanel({ todos }: { todos: WorkerDebugTodo[] }) {
   const completed = todos.filter((todo) => todo.status === 'completed').length
   return (
-    <aside className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <aside className="ai-todo-panel flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
       <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
         <span className="text-sm font-medium">待办</span>
         <span className="text-xs text-foreground-muted">
@@ -397,7 +407,7 @@ function TodoPanel({ todos }: { todos: WorkerDebugTodo[] }) {
 
 function TodoItem({ todo }: { todo: WorkerDebugTodo }) {
   return (
-    <li className="flex items-start gap-2.5 px-1 py-1 text-sm leading-relaxed">
+    <li data-status={todo.status} className="ai-todo-item flex items-start gap-2.5 px-1 py-1 text-sm leading-relaxed">
       <TodoStatusIcon status={todo.status} />
       <span className={todoTextStyle(todo.status)}>{todo.content}</span>
     </li>
@@ -414,7 +424,7 @@ function TodoStatusIcon({ status }: { status: WorkerDebugTodo['status'] }) {
   if (status === 'in_progress') {
     return (
       <span className="mt-1.5 inline-flex size-4 shrink-0 items-center justify-center">
-        <span className="size-2 animate-pulse rounded-full bg-primary" />
+        <AiWaveform active className="ai-todo-activity" />
       </span>
     )
   }
@@ -449,27 +459,30 @@ function DebugReasoning({
   const open = userToggled ?? streaming
   if (!text.trim()) return null
   return (
-    <div className="mb-3 overflow-hidden rounded-[var(--radius-md)] border border-border bg-background-muted">
+    <div className="ai-reasoning mb-3" data-running={streaming}>
       <button
         type="button"
         onClick={() => setUserToggled(!open)}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-foreground-muted transition-colors hover:text-foreground-intense"
+        aria-expanded={open}
+        className="ai-reasoning-trigger flex items-center gap-1.5 text-xs text-foreground-muted transition-colors hover:text-foreground-intense"
       >
         {streaming ? (
-          <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+          <AiWaveform active className="ai-thinking-wave" />
         ) : (
           <Brain className="size-3.5 shrink-0" />
         )}
-        <span className="font-medium">{streaming ? '思考中…' : '思考过程'}</span>
+        <span className={`ai-reasoning-label font-medium ${streaming ? 'ai-shimmer' : ''}`}>{streaming ? '思考中…' : '思考过程'}</span>
         <ChevronDown
-          className={`ml-auto size-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`ai-reasoning-chevron size-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
         />
       </button>
-      {open && (
-        <div className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words border-t border-border px-3 py-2 text-xs leading-relaxed text-foreground-muted">
-          {text}
+      <div className="ai-reasoning-collapse" data-open={open} aria-hidden={!open}>
+        <div className="ai-reasoning-clip">
+          <div className="ai-reasoning-content max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground-muted">
+            {text}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -520,10 +533,11 @@ function toThreadMessage(message: WorkerDebugMessage): ThreadMessageLike {
 
 function UserMessage() {
   return (
-    <MessagePrimitive.Root className="flex justify-end px-1">
-      <div className="max-w-[85%] rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
+    <MessagePrimitive.Root className="ai-message ai-user-message flex justify-end gap-3 px-1">
+      <div className="ai-user-surface max-w-[85%] rounded-[var(--radius-lg)] px-4 py-2.5 text-sm leading-relaxed">
         <MessagePrimitive.Parts components={PLAIN_PARTS} />
       </div>
+      <span aria-hidden className="ai-user-avatar"><User className="size-4" /></span>
     </MessagePrimitive.Root>
   )
 }
@@ -536,17 +550,26 @@ function AssistantMessage({
   worker: WorkerDebugOption
 }) {
   return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <RobotAvatar
-        name={worker.name}
-        avatarUrl={worker.avatarUrl}
-        size={32}
-        className="mt-1"
-      />
-      <div className="min-w-0 max-w-[88%] pt-1 text-sm leading-relaxed">
-        <MessagePrimitive.Parts components={MARKDOWN_PARTS} />
+    <MessagePrimitive.Root data-running={running} className="ai-message ai-assistant-message flex gap-3 px-1">
+      <span className="ai-avatar-frame">
+        <AiEnergy active={running} size={64} />
+        <RobotAvatar
+          name={worker.name}
+          avatarUrl={worker.avatarUrl}
+          size={32}
+          className="ai-message-avatar"
+        />
+      </span>
+      <div className="ai-message-main min-w-0 flex-1 pt-1 text-sm leading-relaxed">
+        <div className="ai-message-heading">
+          <span className="font-medium text-foreground-intense">{worker.name}</span>
+          {running && <AgentActivity className="ai-reply-activity" />}
+        </div>
+        <div className="ai-assistant-body">
+          <MessagePrimitive.Parts components={MARKDOWN_PARTS} />
+        </div>
         {running && (
-          <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
+          <span className="ai-streaming-caret ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
         )}
       </div>
     </MessagePrimitive.Root>
@@ -566,15 +589,18 @@ function DebugQuestionBubble({
   onReply: (questionId: string, answers: string[][] | null) => Promise<void>
 }) {
   return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <RobotAvatar
-        name={worker.name}
-        avatarUrl={worker.avatarUrl}
-        size={32}
-        className="mt-0.5"
-      />
-      <div className="min-w-0 max-w-[88%] pt-1 text-sm leading-relaxed">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+    <MessagePrimitive.Root className="ai-message ai-question-message flex gap-3 px-1">
+      <span className="ai-avatar-frame">
+        <AiEnergy size={64} />
+        <RobotAvatar
+          name={worker.name}
+          avatarUrl={worker.avatarUrl}
+          size={32}
+          className="ai-message-avatar"
+        />
+      </span>
+      <div className="ai-message-main min-w-0 flex-1 pt-1 text-sm leading-relaxed">
+        <div className="ai-message-heading mb-1.5 flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-foreground-muted">
             {worker.name}
           </span>

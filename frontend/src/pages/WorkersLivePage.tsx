@@ -5,6 +5,7 @@ import { Badge } from '@appica/ui-react/badge'
 import { api, type Worker } from '../lib/api'
 import { WorkerLiveBadge } from '../components/StatusBadge'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
+import { DigitSwap } from '../components/motion-ui'
 
 /** 工作概览：全部机器人（系统 + 自定义）实时状态卡片墙（5s 轮询；工作中呼吸动画） */
 export function WorkersLivePage() {
@@ -42,7 +43,7 @@ export function WorkersLivePage() {
       {error && <p className="text-sm">加载失败:{error}</p>}
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">机器人（{workers.length}）</h2>
+        <h2 className="mb-3 text-lg font-semibold">机器人（<DigitSwap value={workers.length} />）</h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {workers.map((w) => (
             <WorkerCard key={w.id} worker={w} />
@@ -61,7 +62,7 @@ export function WorkersLivePage() {
 function WorkerCard({ worker }: { worker: Worker }) {
   const working = worker.liveStatus === '工作中'
   return (
-    <Card className={working ? 'ring-1 ring-success/40' : undefined}>
+    <Card data-working={working} className={working ? 'ring-1 ring-success/40' : undefined}>
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-2">

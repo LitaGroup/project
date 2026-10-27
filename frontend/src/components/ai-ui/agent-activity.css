@@ -1,0 +1,26 @@
+/* Beautiful UI LoadingState adaptation — MIT, Copyright (c) 2026 Shane Levine. */
+.agent-activity {
+  display: inline-grid;
+  flex: none;
+  grid-template-columns: repeat(3, 0.25em);
+  gap: 0.1em;
+  place-content: center;
+  color: inherit;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.agent-activity > span {
+  display: block;
+  width: 0.25em;
+  height: 0.25em;
+  border-radius: calc(var(--radius-xs) * 0.12);
+  background: currentColor;
+  animation: ai-pixel-wave var(--ai-grid-duration) ease-in-out infinite;
+}
+
+@keyframes ai-pixel-wave {
+  0%, 100% { opacity: 0.16; }
+  18%, 42% { opacity: 1; }
+  62% { opacity: 0.16; }
+}

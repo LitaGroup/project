@@ -1,0 +1,279 @@
+/* Detail surfaces respond to the available workspace, including its sidebar. */
+:is(.responsive-detail-page, .responsive-document-page,
+    .responsive-knowledge-directory, .responsive-knowledge-article,
+    .responsive-knowledge-search, .responsive-settings-page,
+    .responsive-profile-page, .responsive-overview-page) {
+  min-width: 0;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.responsive-detail-main,
+.responsive-detail-sidebar,
+.document-editor-surface,
+.knowledge-article-editor,
+.overview-card-grid > * {
+  min-width: 0;
+}
+
+.detail-section-heading,
+.detail-section-heading > :last-child,
+.detail-run-actions,
+.knowledge-article-actions {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.detail-section-heading > :first-child {
+  min-width: 0;
+}
+
+.detail-section-heading > :last-child {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.responsive-detail-sidebar dd,
+.responsive-detail-sidebar dl > div > :last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.responsive-detail-sidebar dl > .justify-between {
+  gap: 0.75rem;
+}
+
+.responsive-detail-sidebar dt {
+  flex-shrink: 0;
+}
+
+.responsive-detail-sidebar dd {
+  text-align: end;
+}
+
+.responsive-detail-sidebar .flex-col > dd {
+  text-align: start;
+}
+
+.knowledge-article-heading > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.knowledge-search-query,
+.knowledge-search-path {
+  max-width: 100%;
+  min-width: 0;
+}
+
+:is(.responsive-settings-page, .responsive-profile-page, .responsive-overview-page)
+  :is(pre, code, a) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.profile-identity-row {
+  flex-wrap: wrap;
+}
+
+.detail-branch-fields > div,
+.detail-release-dialog .flex-1 {
+  min-width: 0;
+}
+
+@container workspace (max-width: 64rem) {
+  .responsive-detail-columns {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .responsive-detail-columns > :is(.responsive-detail-main, .responsive-detail-sidebar) {
+    flex: none;
+    width: 100%;
+  }
+
+  .responsive-run-page .detail-run-output {
+    min-height: 26rem;
+  }
+
+  .responsive-run-page .terminal-gruvbox {
+    min-height: 20rem;
+    max-height: 65dvh;
+  }
+
+  .responsive-run-page .responsive-detail-sidebar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .document-editor-layout {
+    flex-direction: column;
+  }
+
+  .document-editor-layout > [aria-label='文档目录'] {
+    order: -1;
+    width: 100%;
+    max-height: 10rem;
+    flex: none;
+  }
+
+  .document-editor-layout > .document-editor-surface {
+    min-height: 20rem;
+  }
+}
+
+@container workspace (max-width: 60rem) {
+  .responsive-knowledge-directory {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .knowledge-directory-sidebar {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-strong);
+    padding-right: 0;
+    padding-bottom: 1rem;
+  }
+
+  .knowledge-directory-links {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.75rem;
+  }
+
+  .knowledge-directory-links > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+@container workspace (max-width: 48rem) {
+  .detail-description-grid,
+  .overview-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-article-heading {
+    flex-direction: column;
+  }
+
+  .knowledge-article-heading > :first-child,
+  .knowledge-article-actions {
+    width: 100%;
+  }
+
+  .responsive-document-page,
+  .responsive-knowledge-article {
+    height: auto;
+    min-height: 100%;
+  }
+
+  .document-editor-surface,
+  .knowledge-article-editor {
+    min-height: 28rem;
+  }
+}
+
+@container workspace (max-width: 40rem) {
+  .responsive-run-page .responsive-detail-sidebar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container workspace (max-width: 28rem) {
+  .detail-section-heading {
+    align-items: flex-start;
+  }
+
+  .detail-run-actions {
+    width: 100%;
+  }
+
+  .detail-run-actions > * {
+    max-width: 100%;
+  }
+
+  .settings-value-row,
+  .settings-script-row,
+  .profile-info-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settings-value-row > code,
+  .settings-script-row > code {
+    width: 100%;
+    max-width: 100%;
+    white-space: normal;
+    text-overflow: clip;
+  }
+
+  .knowledge-search-query {
+    width: 100%;
+  }
+}
+
+/* Dialogs are portalled outside the workspace container. */
+@media (max-width: 639px) {
+  .detail-branch-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .detail-branch-fields > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .detail-branch-fields > :nth-child(2) {
+    width: 100%;
+  }
+
+  .detail-registered-branch {
+    flex-wrap: wrap;
+  }
+
+  .detail-registered-branch > a {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+}
+
+.responsive-apipost-layout,
+.responsive-apipost-content {
+  min-width: 0;
+}
+
+.responsive-apipost-content {
+  overflow-wrap: anywhere;
+}
+
+.responsive-apipost-sidebar button > [data-slot='badge'] {
+  flex-shrink: 0;
+}
+
+@container workspace (max-width: 60rem) {
+  .responsive-document-page:has(.responsive-apipost-layout) {
+    height: auto;
+  }
+
+  .responsive-apipost-layout {
+    flex: none;
+    flex-direction: column;
+  }
+
+  .responsive-apipost-sidebar {
+    width: 100%;
+    max-height: 12rem;
+    flex: none;
+  }
+
+  .responsive-apipost-content {
+    width: 100%;
+    min-height: 26rem;
+    flex: none;
+  }
+}

@@ -1,0 +1,416 @@
+{
+  "fixtureNotice": "Fictional Swagger data in an isolated headless browser. All API requests intercepted; writes blocked; no business database accessed.",
+  "sourceFingerprint": "f3f8bc36662e46c56d6d616ce248b9c491d7b2fbcb31732298cffdc4c6f8c817",
+  "route": "/documents/1",
+  "documentOverride": {
+    "id": 1,
+    "projectId": 1,
+    "title": "项目协作接口文档",
+    "type": "需求",
+    "source": "apipost",
+    "fileName": "example-1.md",
+    "feishuUrl": null,
+    "apipostUrl": "https://example.test/apipost/project-api",
+    "description": "用于响应式验证的虚构 OpenAPI 示例",
+    "remark": "评审材料已更新",
+    "content": "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"项目协作接口文档\",\"version\":\"1.0.0\",\"description\":\"独立浏览器中的虚构接口示例。\"},\"servers\":[{\"url\":\"https://example.test/api\"}],\"tags\":[{\"name\":\"项目文档\"},{\"name\":\"项目成员\"},{\"name\":\"质量验证\"}],\"paths\":{\"/api/projects/{projectId}/documents/search\":{\"get\":{\"tags\":[\"项目文档\"],\"summary\":\"搜索项目文档\",\"description\":\"根据项目、关键词与类型检索文档。此接口与数据仅用于布局验证，不会访问业务服务。\",\"x-target-id\":\"example-document-search\",\"parameters\":[{\"name\":\"projectId\",\"in\":\"path\",\"required\":true,\"description\":\"项目编号\",\"schema\":{\"type\":\"integer\",\"format\":\"int64\",\"example\":1024}},{\"name\":\"query\",\"in\":\"query\",\"required\":true,\"description\":\"需要匹配标题与正文的检索词\",\"schema\":{\"type\":\"string\",\"example\":\"发布验收\"}},{\"name\":\"documentType\",\"in\":\"query\",\"description\":\"限定文档类型\",\"schema\":{\"type\":\"string\",\"enum\":[\"设计文档\",\"接口文档\",\"测试记录\"],\"example\":\"接口文档\"}},{\"name\":\"page\",\"in\":\"query\",\"description\":\"结果页码\",\"schema\":{\"type\":\"integer\",\"default\":1}}],\"responses\":{\"200\":{\"description\":\"检索成功\",\"content\":{\"application/json\":{\"schema\":{\"$ref\":\"#/components/schemas/DocumentSearchResponse\"},\"example\":{\"total\":1,\"page\":1,\"items\":[{\"id\":42,\"title\":\"项目接口与发布验收\",\"path\":\"/project/1024/document/42\",\"metadata\":{\"owner\":\"示例成员\",\"status\":\"已发布\"}}]}}}}}}},\"/api/projects/{projectId}/documents\":{\"post\":{\"tags\":[\"项目文档\"],\"summary\":\"创建项目文档\",\"description\":\"用于检查现有接口选择、请求体 Schema 与 JSON 示例的排版。\",\"x-target-id\":\"example-document-create\",\"requestBody\":{\"required\":true,\"content\":{\"application/json\":{\"schema\":{\"$ref\":\"#/components/schemas/CreateDocument\"},\"example\":{\"title\":\"发布验收说明\",\"content\":\"记录本次交付与验证结果。\",\"metadata\":{\"owner\":\"示例成员\",\"labels\":[\"验收\",\"交付\"]}}}}},\"responses\":{\"201\":{\"description\":\"文档已创建\",\"content\":{\"application/json\":{\"schema\":{\"$ref\":\"#/components/schemas/Document\"},\"example\":{\"id\":42,\"title\":\"发布验收说明\"}}}}}}},\"/api/projects/{projectId}/members/1\":{\"get\":{\"tags\":[\"项目成员\"],\"summary\":\"项目成员示例 1\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/members/2\":{\"get\":{\"tags\":[\"项目成员\"],\"summary\":\"项目成员示例 2\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/members/3\":{\"get\":{\"tags\":[\"项目成员\"],\"summary\":\"项目成员示例 3\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/members/4\":{\"get\":{\"tags\":[\"项目成员\"],\"summary\":\"项目成员示例 4\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/members/5\":{\"get\":{\"tags\":[\"项目成员\"],\"summary\":\"项目成员示例 5\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/members/6\":{\"get\":{\"tags\":[\"项目成员\"],\"summary\":\"项目成员示例 6\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/checks/7\":{\"get\":{\"tags\":[\"质量验证\"],\"summary\":\"质量验证示例 1\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/checks/8\":{\"get\":{\"tags\":[\"质量验证\"],\"summary\":\"质量验证示例 2\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/checks/9\":{\"get\":{\"tags\":[\"质量验证\"],\"summary\":\"质量验证示例 3\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/checks/10\":{\"get\":{\"tags\":[\"质量验证\"],\"summary\":\"质量验证示例 4\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/checks/11\":{\"get\":{\"tags\":[\"质量验证\"],\"summary\":\"质量验证示例 5\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}},\"/api/projects/{projectId}/checks/12\":{\"get\":{\"tags\":[\"质量验证\"],\"summary\":\"质量验证示例 6\",\"responses\":{\"200\":{\"description\":\"示例结果\"}}}}},\"components\":{\"schemas\":{\"DocumentSearchResponse\":{\"type\":\"object\",\"required\":[\"total\",\"items\"],\"properties\":{\"total\":{\"type\":\"integer\",\"example\":1,\"description\":\"匹配结果总数\"},\"page\":{\"type\":\"integer\",\"example\":1,\"description\":\"当前页码\"},\"items\":{\"type\":\"array\",\"description\":\"当前页文档清单\",\"items\":{\"$ref\":\"#/components/schemas/Document\"}}}},\"Document\":{\"type\":\"object\",\"required\":[\"id\",\"title\"],\"properties\":{\"id\":{\"type\":\"integer\",\"format\":\"int64\",\"example\":42,\"description\":\"文档编号\"},\"title\":{\"type\":\"string\",\"example\":\"项目接口与发布验收\",\"description\":\"文档标题\"},\"path\":{\"type\":\"string\",\"example\":\"/project/1024/document/42\",\"description\":\"知识库中的文档路径\"},\"metadata\":{\"type\":\"object\",\"description\":\"文档属性\",\"properties\":{\"owner\":{\"type\":\"string\",\"example\":\"示例成员\",\"description\":\"文档负责人\"},\"status\":{\"type\":\"string\",\"example\":\"已发布\",\"description\":\"文档状态\"}}}}},\"CreateDocument\":{\"type\":\"object\",\"required\":[\"title\",\"content\"],\"properties\":{\"title\":{\"type\":\"string\",\"example\":\"发布验收说明\",\"description\":\"文档标题\"},\"content\":{\"type\":\"string\",\"example\":\"记录本次交付与验证结果。\",\"description\":\"Markdown 正文\"},\"metadata\":{\"type\":\"object\",\"description\":\"文档属性\",\"properties\":{\"owner\":{\"type\":\"string\",\"example\":\"示例成员\",\"description\":\"文档负责人\"},\"labels\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"example\":[\"验收\",\"交付\"],\"description\":\"文档标签\"}}}}}}}}",
+    "updatedAt": "2026-10-27T07:18:00.000Z"
+  },
+  "cases": [
+    {
+      "viewport": {
+        "width": 360,
+        "height": 800
+      },
+      "documentOverflow": false,
+      "mainOverflow": false,
+      "viewer": {
+        "width": 310,
+        "height": 1547,
+        "x": 25,
+        "y": 412.5,
+        "bottom": 1959.5
+      },
+      "sidebar": {
+        "width": 310,
+        "height": 192,
+        "x": 25,
+        "y": 412.5,
+        "bottom": 604.5
+      },
+      "content": {
+        "width": 310,
+        "height": 1339,
+        "x": 25,
+        "y": 620.5,
+        "bottom": 1959.5
+      },
+      "direction": "column",
+      "navigation": {
+        "clientHeight": 134,
+        "scrollHeight": 496,
+        "canScroll": true
+      },
+      "tables": [
+        {
+          "clientWidth": 276,
+          "scrollWidth": 832,
+          "canScroll": true,
+          "lastColumnReached": true
+        },
+        {
+          "clientWidth": 276,
+          "scrollWidth": 736,
+          "canScroll": true,
+          "lastColumnReached": true
+        }
+      ],
+      "endpointCount": 14,
+      "interactions": {
+        "filtered": 1,
+        "selectedTitle": "创建项目文档",
+        "requestBodyVisible": [
+          "请求体",
+          "响应"
+        ],
+        "restored": 14
+      },
+      "errors": [],
+      "writes": [],
+      "unmatched": [],
+      "screenshot": "design/responsive/screenshots/document-apipost-360x800.png",
+      "passed": true
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "documentOverflow": false,
+      "mainOverflow": false,
+      "viewer": {
+        "width": 340,
+        "height": 1527,
+        "x": 25,
+        "y": 392.5,
+        "bottom": 1919.5
+      },
+      "sidebar": {
+        "width": 340,
+        "height": 192,
+        "x": 25,
+        "y": 392.5,
+        "bottom": 584.5
+      },
+      "content": {
+        "width": 340,
+        "height": 1319,
+        "x": 25,
+        "y": 600.5,
+        "bottom": 1919.5
+      },
+      "direction": "column",
+      "navigation": {
+        "clientHeight": 134,
+        "scrollHeight": 496,
+        "canScroll": true
+      },
+      "tables": [
+        {
+          "clientWidth": 306,
+          "scrollWidth": 832,
+          "canScroll": true,
+          "lastColumnReached": true
+        },
+        {
+          "clientWidth": 306,
+          "scrollWidth": 736,
+          "canScroll": true,
+          "lastColumnReached": true
+        }
+      ],
+      "endpointCount": 14,
+      "interactions": {
+        "filtered": 1,
+        "selectedTitle": "创建项目文档",
+        "requestBodyVisible": [
+          "请求体",
+          "响应"
+        ],
+        "restored": 14
+      },
+      "errors": [],
+      "writes": [],
+      "unmatched": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "viewport": {
+        "width": 768,
+        "height": 1024
+      },
+      "documentOverflow": false,
+      "mainOverflow": false,
+      "viewer": {
+        "width": 522,
+        "height": 1455,
+        "x": 217,
+        "y": 307,
+        "bottom": 1762
+      },
+      "sidebar": {
+        "width": 522,
+        "height": 192,
+        "x": 217,
+        "y": 307,
+        "bottom": 499
+      },
+      "content": {
+        "width": 522,
+        "height": 1247,
+        "x": 217,
+        "y": 515,
+        "bottom": 1762
+      },
+      "direction": "column",
+      "navigation": {
+        "clientHeight": 134,
+        "scrollHeight": 496,
+        "canScroll": true
+      },
+      "tables": [
+        {
+          "clientWidth": 488,
+          "scrollWidth": 832,
+          "canScroll": true,
+          "lastColumnReached": true
+        },
+        {
+          "clientWidth": 488,
+          "scrollWidth": 736,
+          "canScroll": true,
+          "lastColumnReached": true
+        }
+      ],
+      "endpointCount": 14,
+      "interactions": {
+        "filtered": 1,
+        "selectedTitle": "创建项目文档",
+        "requestBodyVisible": [
+          "请求体",
+          "响应"
+        ],
+        "restored": 14
+      },
+      "errors": [],
+      "writes": [],
+      "unmatched": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "viewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "documentOverflow": false,
+      "mainOverflow": false,
+      "viewer": {
+        "width": 778,
+        "height": 1435,
+        "x": 217,
+        "y": 259,
+        "bottom": 1694
+      },
+      "sidebar": {
+        "width": 778,
+        "height": 192,
+        "x": 217,
+        "y": 259,
+        "bottom": 451
+      },
+      "content": {
+        "width": 778,
+        "height": 1227,
+        "x": 217,
+        "y": 467,
+        "bottom": 1694
+      },
+      "direction": "column",
+      "navigation": {
+        "clientHeight": 134,
+        "scrollHeight": 496,
+        "canScroll": true
+      },
+      "tables": [
+        {
+          "clientWidth": 744,
+          "scrollWidth": 832,
+          "canScroll": true,
+          "lastColumnReached": true
+        },
+        {
+          "clientWidth": 744,
+          "scrollWidth": 744,
+          "canScroll": false,
+          "lastColumnReached": true
+        }
+      ],
+      "endpointCount": 14,
+      "interactions": {
+        "filtered": 1,
+        "selectedTitle": "创建项目文档",
+        "requestBodyVisible": [
+          "请求体",
+          "响应"
+        ],
+        "restored": 14
+      },
+      "errors": [],
+      "writes": [],
+      "unmatched": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "documentOverflow": false,
+      "mainOverflow": false,
+      "viewer": {
+        "width": 982,
+        "height": 504,
+        "x": 265,
+        "y": 235,
+        "bottom": 739
+      },
+      "sidebar": {
+        "width": 288,
+        "height": 504,
+        "x": 265,
+        "y": 235,
+        "bottom": 739
+      },
+      "content": {
+        "width": 678,
+        "height": 504,
+        "x": 569,
+        "y": 235,
+        "bottom": 739
+      },
+      "direction": "row",
+      "navigation": {
+        "clientHeight": 446,
+        "scrollHeight": 496,
+        "canScroll": true
+      },
+      "tables": [
+        {
+          "clientWidth": 644,
+          "scrollWidth": 832,
+          "canScroll": true,
+          "lastColumnReached": true
+        },
+        {
+          "clientWidth": 644,
+          "scrollWidth": 736,
+          "canScroll": true,
+          "lastColumnReached": true
+        }
+      ],
+      "endpointCount": 14,
+      "interactions": {
+        "filtered": 1,
+        "selectedTitle": "创建项目文档",
+        "requestBodyVisible": [
+          "请求体",
+          "响应"
+        ],
+        "restored": 14
+      },
+      "errors": [],
+      "writes": [],
+      "unmatched": [],
+      "screenshot": "design/responsive/screenshots/document-apipost-1280x800.png",
+      "passed": true
+    },
+    {
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "documentOverflow": false,
+      "mainOverflow": false,
+      "viewer": {
+        "width": 1606,
+        "height": 776,
+        "x": 273,
+        "y": 239,
+        "bottom": 1015
+      },
+      "sidebar": {
+        "width": 288,
+        "height": 776,
+        "x": 273,
+        "y": 239,
+        "bottom": 1015
+      },
+      "content": {
+        "width": 1302,
+        "height": 776,
+        "x": 577,
+        "y": 239,
+        "bottom": 1015
+      },
+      "direction": "row",
+      "navigation": {
+        "clientHeight": 718,
+        "scrollHeight": 718,
+        "canScroll": false
+      },
+      "tables": [
+        {
+          "clientWidth": 1268,
+          "scrollWidth": 1268,
+          "canScroll": false,
+          "lastColumnReached": true
+        },
+        {
+          "clientWidth": 1268,
+          "scrollWidth": 1268,
+          "canScroll": false,
+          "lastColumnReached": true
+        }
+      ],
+      "endpointCount": 14,
+      "interactions": {
+        "filtered": 1,
+        "selectedTitle": "创建项目文档",
+        "requestBodyVisible": [
+          "请求体",
+          "响应"
+        ],
+        "restored": 14
+      },
+      "errors": [],
+      "writes": [],
+      "unmatched": [],
+      "screenshot": null,
+      "passed": true
+    }
+  ],
+  "summary": {
+    "cases": 6,
+    "passed": 6,
+    "failed": 0
+  },
+  "verification": {
+    "typescript": "frontend/node_modules/.bin/tsc -b frontend — passed",
+    "lint": "node_modules/.bin/oxlint frontend/src/components/ApipostDocViewer.tsx — passed",
+    "businessAstUnchanged": true,
+    "scope": "Only Table import alias and JSX className changed in ApipostDocViewer; CSS appended for this existing document variant."
+  }
+}
