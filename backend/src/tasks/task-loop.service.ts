@@ -26,7 +26,7 @@ const REMIND_BATCH_SIZE = 100;
  * 等待中-待识别 → 置「进行中-识别中」，平台按任务定义/类型直接识别分配处理机器人；
  * 无法匹配时归入「未知任务」并交给系统未知任务定义（ID=6）的处理机器人；
  * 等待中-待反馈 → 每 30 分钟提醒负责人一次，首次提醒满 7 天未处理标记失败（已结束-取消）；
- * 等待中-待验收 → 每 30 分钟提醒负责人一次，首次提醒满 7 天未处理按成功完成（已结束-完成）；
+ * 等待中-待验收 → 每 30 分钟提醒需求方一次，首次提醒满 7 天未处理按成功完成（已结束-完成）；
  * 进行中 / 已结束 → 本轮不处理。
  */
 @Injectable()
@@ -298,6 +298,9 @@ export class TaskLoopService implements OnApplicationBootstrap {
         missingItems: true,
         agentId: true,
         schedulerId: true,
+        createdById: true,
+        parentId: true,
+        rootId: true,
       },
       order: { id: 'ASC' },
       take: REMIND_BATCH_SIZE,
@@ -340,12 +343,20 @@ export class TaskLoopService implements OnApplicationBootstrap {
         kind === 'feedback'
           ? `请补充资料或确认信息后重新提交识别。待反馈事项：${feedbackText || '见任务详情'}`
           : '机器人已完成执行，请到平台验收产出。';
-      const result = await this.taskNotify.notifyTaskOwner(
-        task,
-        kind,
-        title,
-        description,
-      );
+      const result =
+        kind === 'accept'
+          ? await this.taskNotify.notifyTaskRequester(
+              task,
+              kind,
+              title,
+              description,
+            )
+          : await this.taskNotify.notifyTaskOwner(
+              task,
+              kind,
+              title,
+              description,
+            );
       const subStatus =
         kind === 'feedback'
           ? TaskSubStatus.PENDING_FEEDBACK
@@ -359,8 +370,10 @@ export class TaskLoopService implements OnApplicationBootstrap {
         '系统',
         `第 ${count} 次提醒${
           result.sent
-            ? `已发送给负责人${result.ownerName ? `「${result.ownerName}」` : ''}`
-            : '未发送（未找到负责人）'
+            ? `已发送给${kind === 'accept' ? '需求方' : '负责人'}${
+                result.ownerName ? `「${result.ownerName}」` : ''
+              }`
+            : `未发送（未找到${kind === 'accept' ? '需求方' : '负责人'}）`
         }；首次提醒满 ${TASK_REMIND_TIMEOUT_DAYS} 天未处理将自动${
           kind === 'feedback'
             ? '标记为失败（已结束-取消）'

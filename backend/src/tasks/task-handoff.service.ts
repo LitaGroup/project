@@ -11,14 +11,13 @@ import { beijingTime } from '../common/frontmatter';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
 import { runOpencodePrompt } from '../executors/opencode-run';
-import { KnowledgeService } from '../knowledge/knowledge.service';
-import { encodeKnowledgePath } from '../knowledge/knowledge.path';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskMessage } from './task-message.entity';
 import { TaskChatService } from './task-chat.service';
+import { TaskDocumentService } from './task-document.service';
 
 /** 机器人总结超时（报告生成涉及完整上下文整理，比普通识别留更长余量） */
 const HANDOFF_TIMEOUT_MS = 10 * 60_000;
@@ -30,7 +29,6 @@ const MAX_EVENT_CHARS = 800;
 const MAX_MESSAGE_CHARS = 3000;
 const MAX_RESULT_CHARS = 20_000;
 const MAX_SUMMARY_CHARS = 120_000;
-const MAX_PATH_CONFLICT_RETRIES = 20;
 
 /** 机器人总结只负责主观复盘，输入/统计/交付原文由平台确定性拼装 */
 const HANDOFF_PROMPT = `你是刚刚完成该任务的机器人。现在任务已通过验收，请基于任务事实和本次对话记录，做一次诚实、精炼的自我总结，用于交接给后续同事或机器人。
@@ -56,7 +54,6 @@ export interface TaskHandoffStats {
 }
 
 export interface TaskHandoffResult {
-  version: number;
   path: string;
   title: string;
   url: string;
@@ -75,10 +72,6 @@ interface HandoffSections {
   delivery: string;
   process: string;
   lessons: string;
-}
-
-function beijingDateStamp(value: Date): string {
-  return beijingTime(value).slice(0, 10).replace(/-/g, '');
 }
 
 function clip(value: string | null | undefined, limit: number): string {
@@ -163,57 +156,49 @@ export class TaskHandoffService {
     @InjectRepository(Executor)
     private readonly executors: Repository<Executor>,
     private readonly workersService: WorkersService,
-    private readonly knowledge: KnowledgeService,
+    private readonly taskDocuments: TaskDocumentService,
     private readonly taskChat: TaskChatService,
   ) {}
 
   /**
-   * 发起任务总结：验收/重新生成共用入口。
-   * 只负责校验与排队，实际总结在后台执行，不阻塞验收请求。
+   * 发起任务复盘：验收/重新生成共用入口。
+   * 只负责校验与排队，实际复盘在后台执行，不阻塞验收请求。
    */
-  async request(taskId: number): Promise<{ accepted: true; version: number }> {
+  async request(taskId: number): Promise<{ accepted: true }> {
     const task = await this.mustFind(taskId);
     this.assertCompleted(task);
     if (this.generating.has(taskId)) {
-      throw new BadRequestException('任务总结正在生成，请稍候');
+      throw new BadRequestException('任务复盘正在生成，请稍候');
     }
-    const version = task.handoffCount ?? 0;
     this.generating.add(taskId);
     void this.generateNow(taskId)
       .catch(async (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(
-          `任务 ${task.code} 总结报告生成失败（v${version}）：${message}`,
-        );
+        this.logger.error(`任务 ${task.code} 复盘文档生成失败：${message}`);
         await this.taskChat
           .postAssistantMessage(
             taskId,
-            `任务总结报告生成失败：${message}\n\n任务验收结果不受影响；可点击「重新生成总结」重试。`,
+            `任务复盘文档生成失败：${message}\n\n任务验收结果不受影响；可点击「重新生成复盘」重试。`,
             {
-              messageId: this.handoffMessageId(taskId, version),
+              messageId: this.reviewMessageId(taskId),
               status: 'error',
-              meta: { handoff: { status: 'error', version } },
+              meta: { review: { status: 'error' } },
             },
           )
           .catch((notifyError: Error) => {
             this.logger.warn(
-              `任务 ${task.code} 总结失败消息写入聊天失败：${notifyError.message}`,
+              `任务 ${task.code} 复盘失败消息写入聊天失败：${notifyError.message}`,
             );
           });
       })
       .finally(() => this.generating.delete(taskId));
-    return { accepted: true, version };
+    return { accepted: true };
   }
 
-  /** 生成一份新的总结报告并归档。调用方负责用 request() 做任务级互斥。 */
+  /** 生成或覆盖 REVIEW.md。调用方负责用 request() 做任务级互斥。 */
   async generateNow(taskId: number): Promise<TaskHandoffResult> {
     const task = await this.mustFind(taskId);
     this.assertCompleted(task);
-    if (!this.knowledge.isEnabled) {
-      throw new BadRequestException(
-        this.knowledge.disabledMessage || '知识库不可用，无法归档任务总结',
-      );
-    }
     const [events, messages] = await Promise.all([
       this.events.find({
         where: { taskId },
@@ -224,22 +209,17 @@ export class TaskHandoffService {
         order: { id: 'ASC' },
       }),
     ]);
-    const version = task.handoffCount ?? 0;
-    const messageId = this.handoffMessageId(taskId, version);
-    await this.taskChat.postAssistantMessage(
-      taskId,
-      `正在生成任务总结报告（v${version}）…`,
-      {
-        messageId,
-        status: 'running',
-        meta: { handoff: { status: 'running', version } },
-      },
-    );
+    const messageId = this.reviewMessageId(taskId);
+    await this.taskChat.postAssistantMessage(taskId, '正在生成任务复盘文档…', {
+      messageId,
+      status: 'running',
+      meta: { review: { status: 'running' } },
+    });
 
     const endpoint = await this.resolveEndpoint(task);
     const stats = this.statsOf(task, events);
     const raw = await runOpencodePrompt(new OpencodeClient(endpoint.executor), {
-      title: `任务总结 ${task.code} v${version}`.slice(0, 100),
+      title: `任务复盘 ${task.code}`.slice(0, 100),
       model: { id: endpoint.modelId, providerID: endpoint.providerId },
       location: endpoint.workdir
         ? { directory: endpoint.workdir }
@@ -252,72 +232,52 @@ export class TaskHandoffService {
     const sections = splitHandoffSummary(raw);
 
     const now = new Date();
-    const date = beijingDateStamp(now);
-    let archivedVersion = version;
-    let path = '';
-    for (let attempt = 0; attempt < MAX_PATH_CONFLICT_RETRIES; attempt += 1) {
-      path = `/task/handoff/${date}/${task.code}/${archivedVersion}.md`;
-      const title = `${task.code} ${task.title} · 任务总结 v${archivedVersion}`;
-      const content = this.buildReport({
-        task,
-        endpoint,
-        events,
-        stats,
-        sections,
-        path,
-        version: archivedVersion,
-        generatedAt: now,
-      });
-      try {
-        await this.knowledge.createArticleAtPath({ path, title, content });
-        await this.tasks.update(task.id, {
-          handoffCount: archivedVersion + 1,
-        });
-        const url = `/docs/detail/${encodeKnowledgePath(path)}`;
-        const chatContent = [
-          content,
-          '',
-          '---',
-          '',
-          `📚 已归档到知识库：[${path}](${url})`,
-        ].join('\n');
-        await this.taskChat.postAssistantMessage(taskId, chatContent, {
-          messageId,
+    const path = this.taskDocuments.reviewPath(task);
+    const title = `${task.code} ${task.title} · 任务复盘`;
+    const content = this.buildReport({
+      task,
+      endpoint,
+      events,
+      stats,
+      sections,
+      path,
+      generatedAt: now,
+    });
+    const document = await this.taskDocuments.upsertReview({
+      task,
+      title,
+      content,
+    });
+    const chatContent = [
+      content,
+      '',
+      '---',
+      '',
+      `📚 已归档到知识库：[${document.path}](${document.url})`,
+    ].join('\n');
+    await this.taskChat.postAssistantMessage(taskId, chatContent, {
+      messageId,
+      status: 'complete',
+      meta: {
+        review: {
           status: 'complete',
-          meta: {
-            handoff: {
-              status: 'complete',
-              version: archivedVersion,
-              path,
-              url,
-              stats,
-            },
-          },
-        });
-        return {
-          version: archivedVersion,
-          path,
-          title,
-          url,
-          content,
-        };
-      } catch (error) {
-        if (
-          error instanceof BadRequestException &&
-          error.message.includes('已存在')
-        ) {
-          archivedVersion += 1;
-          continue;
-        }
-        throw error;
-      }
-    }
-    throw new BadRequestException('任务总结归档路径连续冲突，请稍后重试');
+          path: document.path,
+          url: document.url,
+          stats,
+        },
+      },
+    });
+    return {
+      path: document.path,
+      title,
+      url: document.url,
+      content,
+    };
   }
 
-  /** 报告消息 key：每个版本独立保留，后续重新生成不覆盖历史报告 */
-  private handoffMessageId(taskId: number, version: number): string {
-    return `chat:${taskId}:handoff:${version}`;
+  /** 复盘消息 key：重新生成覆盖同一条聊天消息 */
+  private reviewMessageId(taskId: number): string {
+    return `chat:${taskId}:review`;
   }
 
   private assertCompleted(task: Task): void {
@@ -326,7 +286,7 @@ export class TaskHandoffService {
       task.subStatus !== TaskSubStatus.COMPLETED
     ) {
       throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可生成总结`,
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可生成复盘`,
       );
     }
   }
@@ -370,7 +330,7 @@ export class TaskHandoffService {
     if (!executor) throw new BadRequestException('任务绑定的执行器不存在');
     if (!executor.online) {
       throw new BadRequestException(
-        `执行器「${executor.name}」离线，无法生成任务总结`,
+        `执行器「${executor.name}」离线，无法生成任务复盘`,
       );
     }
 
@@ -493,7 +453,6 @@ export class TaskHandoffService {
     stats: TaskHandoffStats;
     sections: HandoffSections;
     path: string;
-    version: number;
     generatedAt: Date;
   }): string {
     const { task, endpoint, events, stats, sections } = input;
@@ -501,9 +460,9 @@ export class TaskHandoffService {
     const organizedInput = task.content?.trim() || task.description?.trim();
     const endAt = task.acceptedAt ?? task.deliveredAt;
     return [
-      `# ${task.code} ${task.title} · 任务总结移交`,
+      `# ${task.code} ${task.title} · 任务复盘`,
       '',
-      `> 报告版本：v${input.version} ｜ 生成时间：${beijingTime(input.generatedAt)} ｜ 归档路径：\`${input.path}\``,
+      `> 生成时间：${beijingTime(input.generatedAt)} ｜ 归档路径：\`${input.path}\``,
       '',
       '## 任务信息',
       '',

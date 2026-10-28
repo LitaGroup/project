@@ -528,7 +528,7 @@ function ChatFooter({
               disabled={busy || robotRunning}
               onClick={() => onAction((id) => api.generateTaskHandoff(id))}
             >
-              {robotRunning ? '总结生成中…' : '重新生成总结'}
+              {robotRunning ? '复盘生成中…' : '重新生成复盘'}
             </Button>
           )}
           <AssignTaskDialog

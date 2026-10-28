@@ -1,15 +1,14 @@
-import { BadRequestException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
 import type { Executor } from '../executors/executor.entity';
 import { runOpencodePrompt } from '../executors/opencode-run';
-import type { KnowledgeService } from '../knowledge/knowledge.service';
 import type { Worker } from '../workers/worker.entity';
 import type { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
 import type { TaskMessage } from './task-message.entity';
 import type { TaskEvent } from './task-event.entity';
 import type { TaskChatService } from './task-chat.service';
+import type { TaskDocumentService } from './task-document.service';
 import {
   splitHandoffSummary,
   TaskHandoffService,
@@ -65,7 +64,6 @@ function baseTask(over: Partial<Task> = {}): Task {
     acceptedAt: new Date('2026-10-28T12:00:00+08:00'),
     acceptedBy: '验收人',
     deliveredAt: new Date('2026-10-28T12:00:00+08:00'),
-    handoffCount: 0,
     archivedAt: null,
     canceledAt: null,
     createdById: 8,
@@ -116,10 +114,9 @@ describe('TaskHandoffService', () => {
   let workers: { findOne: jest.Mock };
   let executors: { findOne: jest.Mock };
   let workersService: { workdirOf: jest.Mock };
-  let knowledge: {
-    isEnabled: boolean;
-    disabledMessage: string;
-    createArticleAtPath: jest.Mock;
+  let taskDocuments: {
+    reviewPath: jest.Mock;
+    upsertReview: jest.Mock;
   };
   let taskChat: { postAssistantMessage: jest.Mock };
   let service: TaskHandoffService;
@@ -174,10 +171,13 @@ describe('TaskHandoffService', () => {
     workersService = {
       workdirOf: jest.fn().mockReturnValue('/tmp/worker/1001'),
     };
-    knowledge = {
-      isEnabled: true,
-      disabledMessage: '知识库不可用',
-      createArticleAtPath: jest.fn().mockResolvedValue({ id: 'k1' }),
+    taskDocuments = {
+      reviewPath: jest.fn().mockReturnValue('/task/20261028/TK-0001/REVIEW.md'),
+      upsertReview: jest.fn().mockResolvedValue({
+        path: '/task/20261028/TK-0001/REVIEW.md',
+        url: '/docs/detail/task/20261028/TK-0001/REVIEW.md',
+        title: 'TK-0001 活动页开发 · 任务复盘',
+      }),
     };
     taskChat = {
       postAssistantMessage: jest
@@ -195,18 +195,17 @@ describe('TaskHandoffService', () => {
       workers as unknown as Repository<Worker>,
       executors as unknown as Repository<Executor>,
       workersService as unknown as WorkersService,
-      knowledge as unknown as KnowledgeService,
+      taskDocuments as unknown as TaskDocumentService,
       taskChat as unknown as TaskChatService,
     );
   });
 
-  it('生成任务自身报告，统计确认/补充/时长并归档到版本 0', async () => {
+  it('生成任务复盘，统计确认/补充/时长并写入 REVIEW.md', async () => {
     const result = await service.generateNow(1);
 
-    expect(result.version).toBe(0);
-    expect(result.path).toMatch(/^\/task\/handoff\/\d{8}\/TK-0001\/0\.md$/);
-    expect(result.url).toContain('/docs/detail/task/handoff/');
-    // 只读取当前任务自身记录，子任务由各自验收时独立总结
+    expect(result.path).toBe('/task/20261028/TK-0001/REVIEW.md');
+    expect(result.url).toContain('/docs/detail/task/20261028/TK-0001/');
+    // 只读取当前任务自身记录，子任务由各自验收时独立复盘
     expect(events.find).toHaveBeenCalledWith({
       where: { taskId: 1 },
       order: { id: 'ASC' },
@@ -215,13 +214,12 @@ describe('TaskHandoffService', () => {
       where: { taskId: 1 },
       order: { id: 'ASC' },
     });
-    expect(knowledge.createArticleAtPath).toHaveBeenCalledWith(
+    expect(taskDocuments.upsertReview).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: result.path,
-        title: 'TK-0001 活动页开发 · 任务总结 v0',
+        title: 'TK-0001 活动页开发 · 任务复盘',
       }),
     );
-    const created = knowledge.createArticleAtPath.mock.calls[0] as [
+    const created = taskDocuments.upsertReview.mock.calls[0] as [
       { content: string },
     ];
     const content = created[0].content;
@@ -236,7 +234,8 @@ describe('TaskHandoffService', () => {
     expect(content).toContain('## 四、任务记录与过程复盘');
     expect(content).toContain('中途补充过一次接口字段');
     expect(content).toContain('## 五、经验总结');
-    expect(tasks.update).toHaveBeenCalledWith(1, { handoffCount: 1 });
+    expect(content).toContain('· 任务复盘');
+    expect(content).not.toContain('报告版本');
 
     const posts = taskChat.postAssistantMessage.mock.calls as Array<
       [
@@ -246,70 +245,51 @@ describe('TaskHandoffService', () => {
           messageId?: string;
           status?: string;
           meta?: {
-            handoff?: { status?: string; version?: number; path?: string };
+            review?: { status?: string; path?: string };
           };
         },
       ]
     >;
     expect(posts).toHaveLength(2);
     expect(posts[0][0]).toBe(1);
-    expect(posts[0][1]).toContain('正在生成任务总结报告（v0）');
-    expect(posts[0][2].messageId).toBe('chat:1:handoff:0');
+    expect(posts[0][1]).toContain('正在生成任务复盘文档');
+    expect(posts[0][2].messageId).toBe('chat:1:review');
     expect(posts[0][2].status).toBe('running');
     expect(posts[1][1]).toContain('已归档到知识库');
     expect(posts[1][2]).toMatchObject({
-      messageId: 'chat:1:handoff:0',
+      messageId: 'chat:1:review',
       status: 'complete',
       meta: {
-        handoff: {
+        review: {
           status: 'complete',
-          version: 0,
           path: result.path,
         },
       },
     });
+    expect(tasks.update).not.toHaveBeenCalled();
   });
 
-  it('版本在任务内按已成功生成数量递增', async () => {
-    tasks.findOne.mockResolvedValue(baseTask({ handoffCount: 3 }));
+  it('重新生成复盘覆盖同一路径和同一条聊天消息', async () => {
+    await service.generateNow(1);
+    await service.generateNow(1);
 
-    const result = await service.generateNow(1);
-
-    expect(result.version).toBe(3);
-    expect(result.path).toMatch(/\/TK-0001\/3\.md$/);
-    expect(tasks.update).toHaveBeenCalledWith(1, { handoffCount: 4 });
+    expect(taskDocuments.reviewPath).toHaveBeenCalledTimes(2);
+    expect(taskDocuments.upsertReview).toHaveBeenCalledTimes(2);
     const posts = taskChat.postAssistantMessage.mock.calls as Array<
-      [
-        number,
-        string,
-        { messageId?: string; meta?: { handoff?: { version?: number } } },
-      ]
+      [number, string, { messageId?: string }]
     >;
-    const last = posts[posts.length - 1];
-    expect(last[2].messageId).toBe('chat:1:handoff:3');
-    expect(last[2].meta?.handoff?.version).toBe(3);
+    expect(posts.at(-1)?.[2].messageId).toBe('chat:1:review');
+    expect(posts.some((post) => post[1].includes('v0'))).toBe(false);
   });
 
-  it('归档路径冲突时顺延版本，保证历史报告不被覆盖', async () => {
-    knowledge.createArticleAtPath
-      .mockRejectedValueOnce(new BadRequestException('路径 ... 已存在'))
-      .mockResolvedValueOnce({ id: 'k2' });
-
-    const result = await service.generateNow(1);
-
-    expect(result.version).toBe(1);
-    expect(result.path).toMatch(/\/TK-0001\/1\.md$/);
-    expect(tasks.update).toHaveBeenCalledWith(1, { handoffCount: 2 });
-  });
-
-  it('未完成的任务不能生成总结', async () => {
+  it('未完成的任务不能生成复盘', async () => {
     tasks.findOne.mockResolvedValue(
       baseTask({
         status: TaskStatus.WAITING,
         subStatus: TaskSubStatus.PENDING_ACCEPT,
       }),
     );
-    await expect(service.generateNow(1)).rejects.toThrow('不可生成总结');
+    await expect(service.generateNow(1)).rejects.toThrow('不可生成复盘');
     expect(runPrompt).not.toHaveBeenCalled();
   });
 });

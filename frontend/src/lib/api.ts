@@ -1175,8 +1175,6 @@ export interface TaskPackage {
   acceptedAt: string | null
   acceptedBy: string | null
   deliveredAt: string | null
-  /** 已成功生成的任务总结数量（下一份报告版本号） */
-  handoffCount: number
   archivedAt: string | null
   canceledAt: string | null
   createdAt: string
@@ -2312,12 +2310,12 @@ export const api = {
   /** 中断执行 */
   interruptTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/interrupt`, { method: 'POST' }),
-  /** 验收通过：等待中-待验收 → 已结束-完成（后台生成任务总结） */
+  /** 验收通过：等待中-待验收 → 已结束-完成（后台生成任务复盘） */
   acceptTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/accept`, { method: 'POST' }),
-  /** 重新生成任务总结（版本在任务内递增，历史报告保留） */
+  /** 重新生成任务复盘（固定覆盖 REVIEW.md） */
   generateTaskHandoff: (id: number) =>
-    request<{ accepted: true; version: number }>(`/tasks/${id}/handoff`, {
+    request<{ accepted: true }>(`/tasks/${id}/handoff`, {
       method: 'POST',
     }),
   /** 取消（任意未结束任务） */

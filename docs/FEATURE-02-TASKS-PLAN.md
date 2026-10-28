@@ -103,13 +103,13 @@ type: docs
 |---|---|---|
 | 等待中 | 待识别 | 新任务创建；LOOP 下一秒领取并置「进行中-识别中」 |
 | 等待中 | 待反馈 | 调度器识别发现资料缺失/信息不明；LOOP 每 30 分钟提醒负责人，首次提醒满 7 天未处理标记失败 |
-| 等待中 | 待验收 | 机器人执行完成；LOOP 每 30 分钟提醒负责人，首次提醒满 7 天未处理按成功完成 |
+| 等待中 | 待验收 | 执行机器人主动调用验收申请；LOOP 每 30 分钟提醒任务需求方，首次提醒满 7 天未处理按成功完成 |
 | 进行中 | 识别中 | 调度器正在识别标题/输入/输出/类型/工作计划/机器人 |
 | 进行中 | 执行中 | 机器人 opencode session 运行中（LOOP 暂不处理，后续加超时） |
 | 已结束 | 完成 | 验收通过或待验收超时自动完成 |
 | 已结束 | 取消 | 人工取消或待反馈超时自动判失败 |
 
-每次流转写 `task_events`；任务详情的待反馈/待验收飞书卡片经 `TaskNotifyService` 发送给机器人/调度器负责人。详细实现见 `docs/FETURE-02-TASKS.md` 末尾「LOOP 实现说明」。
+每次流转写 `task_events`；待反馈飞书卡片经 `TaskNotifyService` 发送给机器人/调度器负责人，待验收卡片优先发送给任务需求方（无有效需求方时回退机器人负责人）。执行会话成功只补齐产出，不自动进入待验收；机器人必须用 `X-Worker-Token` 调用 `POST /api/tasks/:id/deliver/apply.md`。详细实现见 `docs/FETURE-02-TASKS.md` 末尾「LOOP 实现说明」。
 
 ---
 
@@ -117,7 +117,7 @@ type: docs
 
 - `workdir = {WORKER_BASE_DIR}/worker/{worker.id}/`；`WORKER_BASE_DIR` 为平台后端 `.env` 环境变量（执行器机器上的路径约定）。
 - 不落库，服务层实时计算；worker API 响应附带 `workdir`；任务包不带 workdir 字段。
-- **创建时机**：派发前由后端调执行器 `POST /api/shell` 执行 `mkdir -p {workdir}`（幂等），成功后再建会话。
+- **创建时机**：派发前由后端调执行器 `POST /api/shell` 执行 `mkdir -p {workdir}/.opencode`（幂等），并写入机器人独立令牌 `.opencode/agent-token`（权限 600），成功后再建会话。
 - **串行约束**：同一机器人 P1 串行执行（workdir 共享工位，避免并行互踩；与智能体状态模型天然一致）。P2 如需并行，按 `{workdir}/{taskId}/` 或 worktree 再隔离。
 
 ---
@@ -130,7 +130,8 @@ type: docs
      → POST /api/session（title=编号+标题, model=机器人选择, permissions=预授权模板, location=workdir）
      → POST /api/session/{id}/prompt（text=角色PROMPT+技能+输入/输出要求, skills=技能附件）
      → 订阅 /api/event 过滤 sessionId → 前端 SSE 转发 + 状态推进
-     → 会话 idle → 「待验收」+ 通知责任人
+     → 会话 idle → 落 result，保持「进行中-执行中」
+     → 机器人 POST /tasks/{id}/deliver/apply.md（X-Worker-Token）→ 「待验收」+ 通知需求方
 ```
 
 ### 7.2 AI 调度链路（PI · DeepSeek）

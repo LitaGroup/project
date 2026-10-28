@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -129,6 +130,14 @@ export class Worker {
   /** 责任人姓名快照（展示用，选人时同步写入） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   ownerName: string | null;
+
+  /**
+   * 机器人独立访问令牌：仅用于需要严格识别执行机器人的 Agent 接口（如任务验收申请）。
+   * 禁止出现在机器人列表/详情响应中；首次派发时自动生成并写入工位。
+   */
+  @Index('IDX_workers_agentToken', { unique: true })
+  @Column({ type: 'varchar', length: 64, nullable: true, select: false })
+  agentToken: string | null;
 
   @Column({ default: true })
   enabled: boolean;

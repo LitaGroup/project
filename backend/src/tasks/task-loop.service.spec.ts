@@ -38,7 +38,10 @@ describe('TaskLoopService', () => {
   let tasksService: { addEvent: jest.Mock };
   let assignmentService: { assign: jest.Mock };
   let dispatchService: { dispatch: jest.Mock };
-  let taskNotify: { notifyTaskOwner: jest.Mock };
+  let taskNotify: {
+    notifyTaskOwner: jest.Mock;
+    notifyTaskRequester: jest.Mock;
+  };
   let service: TaskLoopService;
 
   beforeEach(() => {
@@ -56,6 +59,9 @@ describe('TaskLoopService', () => {
       notifyTaskOwner: jest
         .fn()
         .mockResolvedValue({ sent: true, ownerName: '张三' }),
+      notifyTaskRequester: jest
+        .fn()
+        .mockResolvedValue({ sent: true, ownerName: '需求方' }),
     };
     service = new TaskLoopService(
       tasksRepo as never,
@@ -304,6 +310,30 @@ describe('TaskLoopService', () => {
         subStatus: TaskSubStatus.CANCELED,
       }),
     );
+  });
+
+  it('待验收：提醒发送给任务需求方', async () => {
+    const task = baseTask({
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ACCEPT,
+      agentId: 1001,
+    });
+    tasksRepo.find.mockImplementation(
+      (args?: { where?: { subStatus?: TaskSubStatus } }) =>
+        Promise.resolve(
+          args?.where?.subStatus === TaskSubStatus.PENDING_ACCEPT ? [task] : [],
+        ),
+    );
+
+    await service.tick();
+
+    expect(taskNotify.notifyTaskRequester).toHaveBeenCalledWith(
+      task,
+      'accept',
+      expect.stringContaining('任务待验收'),
+      expect.any(String),
+    );
+    expect(taskNotify.notifyTaskOwner).not.toHaveBeenCalled();
   });
 
   it('待验收：首次提醒满 7 天仍未处理 → 已结束-完成（标记成功）', async () => {

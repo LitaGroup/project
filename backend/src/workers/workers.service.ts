@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomBytes } from 'crypto';
 import { In, Repository } from 'typeorm';
 import {
   TaskStatus,
@@ -135,6 +136,38 @@ export class WorkersService {
     const worker = await this.findOne(id);
     const live = await this.liveByWorker([worker]);
     return this.toView(worker, live);
+  }
+
+  /**
+   * 按机器人独立令牌查找启用中的机器人。
+   * agentToken 为 select:false，内部显式查询，避免出现在普通机器人响应中。
+   */
+  async findByAgentToken(token: string): Promise<Worker | null> {
+    if (!token) return null;
+    return this.workers
+      .createQueryBuilder('worker')
+      .addSelect('worker.agentToken')
+      .where('worker.agentToken = :token', { token })
+      .andWhere('worker.enabled = true')
+      .getOne();
+  }
+
+  /**
+   * 确保机器人有独立令牌并返回明文（仅服务端内部使用）。
+   * 首次派发时生成；之后直接复用，不轮换。
+   */
+  async ensureAgentToken(workerId: number): Promise<string> {
+    const worker = await this.workers
+      .createQueryBuilder('worker')
+      .addSelect('worker.agentToken')
+      .where('worker.id = :workerId', { workerId })
+      .getOne();
+    if (!worker) throw new NotFoundException(`Worker ${workerId} not found`);
+    if (worker.agentToken) return worker.agentToken;
+
+    const token = randomBytes(24).toString('hex');
+    await this.workers.update({ id: workerId }, { agentToken: token });
+    return token;
   }
 
   /**

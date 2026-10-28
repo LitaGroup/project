@@ -114,6 +114,25 @@ export class KnowledgeService {
     return node;
   }
 
+  /** 按路径查找节点；不存在时返回 null（平台内部按路径 upsert 用） */
+  async findNodeByPath(path: string): Promise<KnowledgeNode | null> {
+    this.assertEnabled();
+    const normalized = this.normalize(path);
+    return this.store.getByPath(normalized);
+  }
+
+  /** 列出指定目录前缀下的全部原生文章（历史任务文档迁移用） */
+  async listArticlesByPrefix(prefix: string): Promise<KnowledgeNode[]> {
+    this.assertEnabled();
+    return this.store.listArticlesByPrefix(this.normalize(prefix));
+  }
+
+  /** 自底向上删除指定前缀下已无子节点的原生空目录 */
+  async pruneEmptyDirectories(prefix: string): Promise<number> {
+    this.assertEnabled();
+    return this.store.deleteEmptyDirectoriesUnder(this.normalize(prefix));
+  }
+
   async create(input: {
     kind: 'directory' | 'article';
     parentPath: string;

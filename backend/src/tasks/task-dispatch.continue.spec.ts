@@ -69,6 +69,8 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       {} as never,
       taskRealtime as never,
       taskChat as never,
+      {} as never,
+      { get: jest.fn() } as never,
     );
     dispatchSpy = jest.spyOn(service, 'dispatch').mockResolvedValue(baseTask());
   });

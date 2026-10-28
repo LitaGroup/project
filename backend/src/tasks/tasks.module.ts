@@ -14,7 +14,9 @@ import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskAssignmentService } from './task-assignment.service';
 import { TaskChatService } from './task-chat.service';
+import { TaskDeliveryService } from './task-delivery.service';
 import { TaskDispatchService } from './task-dispatch.service';
+import { TaskDocumentService } from './task-document.service';
 import { TaskHandoffService } from './task-handoff.service';
 import { TaskLoopService } from './task-loop.service';
 import { TaskNotifyService } from './task-notify.service';
@@ -46,7 +48,9 @@ import { TasksService } from './tasks.service';
     TasksService,
     TaskAssignmentService,
     TaskChatService,
+    TaskDeliveryService,
     TaskDispatchService,
+    TaskDocumentService,
     TaskHandoffService,
     TaskLoopService,
     TaskNotifyService,

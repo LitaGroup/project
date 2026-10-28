@@ -349,6 +349,46 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
     return result.rows[0] ? mapNode(result.rows[0]) : null;
   }
 
+  /** 列出原生知识树中指定目录下的全部文章（不读取目录节点） */
+  async listArticlesByPrefix(prefix: string): Promise<KnowledgeNode[]> {
+    const normalized = normalizeKnowledgePath(prefix).path;
+    const result = await this.db().query<NodeRow>(
+      `SELECT * FROM knowledge_nodes
+       WHERE kind = 'article'
+         AND source = 'native'
+         AND (path = $1 OR path LIKE $1 || '/%')
+       ORDER BY path`,
+      [normalized],
+    );
+    return result.rows.map(mapNode);
+  }
+
+  /**
+   * 自底向上删除指定前缀下已无子节点的原生目录。
+   * 单条 DELETE 只能看到语句开始时的快照，外层循环处理多层空目录。
+   */
+  async deleteEmptyDirectoriesUnder(prefix: string): Promise<number> {
+    const normalized = normalizeKnowledgePath(prefix).path;
+    let deleted = 0;
+    for (let pass = 0; pass < 20; pass += 1) {
+      const result = await this.db().query(
+        `DELETE FROM knowledge_nodes node
+         WHERE node.kind = 'directory'
+           AND node.source = 'native'
+           AND (node.path = $1 OR node.path LIKE $1 || '/%')
+           AND NOT EXISTS (
+             SELECT 1 FROM knowledge_nodes child
+             WHERE child.parent_path = node.path
+           )`,
+        [normalized],
+      );
+      const affected = result.rowCount ?? 0;
+      deleted += affected;
+      if (affected === 0) break;
+    }
+    return deleted;
+  }
+
   async listChildren(path: string): Promise<KnowledgeDirectory> {
     const normalized = normalizeKnowledgePath(path);
     const result = await this.db().query<NodeRow>(

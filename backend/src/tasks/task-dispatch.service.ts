@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -7,6 +8,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter } from 'events';
@@ -36,8 +38,15 @@ import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskChatService } from './task-chat.service';
+import { TaskDocumentService } from './task-document.service';
+import type { TaskDocumentResult } from './task-document.service';
 import { TaskNotifyService } from './task-notify.service';
 import { TaskRealtimeService } from './task-realtime.service';
+
+export interface TaskAcceptanceApplication {
+  task: Task;
+  handoff: TaskDocumentResult;
+}
 
 /** 终态快照预留：实时输出缓冲在进程内保留（P1 不做 TTL 清理，重启后由任务历史承担） */
 
@@ -61,6 +70,7 @@ export class TaskDispatchService
   implements OnModuleInit, OnApplicationBootstrap
 {
   private readonly logger = new Logger(TaskDispatchService.name);
+  private readonly apiUrl: string;
 
   constructor(
     @InjectRepository(Task)
@@ -78,7 +88,13 @@ export class TaskDispatchService
     private readonly taskNotify: TaskNotifyService,
     private readonly taskRealtime: TaskRealtimeService,
     private readonly taskChat: TaskChatService,
-  ) {}
+    private readonly taskDocuments: TaskDocumentService,
+    config: ConfigService,
+  ) {
+    this.apiUrl = (
+      config.get<string>('API_URL') ?? 'http://localhost:3100/api'
+    ).replace(/\/+$/, '');
+  }
 
   /** opencodeSessionId → taskId 路由缓存（未命中回库查） */
   private readonly sessionRoutes = new Map<string, number>();
@@ -100,6 +116,9 @@ export class TaskDispatchService
 
   /** 派发中的任务（对账时避免释放刚占用的连接） */
   private readonly dispatching = new Set<number>();
+
+  /** 会话已完成但机器人尚未调用验收申请的任务（对账只补一次产出） */
+  private readonly finishedAwaitingApply = new Set<number>();
 
   /** taskId → 已占用事件流连接的执行器 id（retain/release 配对） */
   private readonly hubRetained = new Map<number, number>();
@@ -172,11 +191,17 @@ export class TaskDispatchService
     if (!workdir) {
       throw new NotFoundException('未配置 WORKER_BASE_DIR，无法确定工位目录');
     }
+    // 机器人独立令牌只在工位文件与数据库中出现，不进入任务 Prompt/聊天/日志
+    const workerToken = await this.workersService.ensureAgentToken(worker.id);
     const client = new OpencodeClient(executor);
     this.dispatching.add(task.id);
     try {
-      // 1. 工位目录（幂等创建；路径单引号包裹防注入）
-      await client.shell(`mkdir -p '${workdir}'`);
+      // 1. 工位目录与机器人令牌（幂等；路径单引号包裹防注入）
+      await client.shell(
+        `mkdir -p '${workdir}' '${workdir}/.opencode' && ` +
+          `printf '%s' '${workerToken}' > '${workdir}/.opencode/agent-token' && ` +
+          `chmod 600 '${workdir}/.opencode/agent-token'`,
+      );
 
       // 2. 固定绑定：一个任务只对应一个 opencode 会话。
       //    同一执行器上复用既有会话；执行器变更或会话已不存在时才新建。
@@ -249,6 +274,7 @@ export class TaskDispatchService
 
       // 4. 新一轮清空输出缓冲与去重标记（结果只取本轮文本）
       this.textBuffers.delete(task.id);
+      this.finishedAwaitingApply.delete(task.id);
       this.failedReconciled.delete(task.id);
       this.permissionNotified.delete(task.id);
       this.questionSyncedAt.delete(task.id);
@@ -1007,7 +1033,99 @@ export class TaskDispatchService
     return typeof value === 'string' ? value : '';
   }
 
-  /** 会话执行完成：取累积文本（兜底读消息）→ 落 result → 待验收 + 通知责任人 */
+  /**
+   * 收集本轮执行产出：优先实时文本缓冲，缺失时从执行器消息详情兜底。
+   * 只读取，不改变任务状态。
+   */
+  private async collectResult(task: Task): Promise<string | null> {
+    const buffers = this.textBuffers.get(task.id);
+    const accumulated = [...(buffers?.values() ?? [])]
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .join('\n\n');
+    if (accumulated) return accumulated;
+    if (!task.executorId || !task.opencodeSessionId) return null;
+    const executor = await this.executors.findOne({
+      where: { id: task.executorId },
+    });
+    if (!executor) return null;
+    return new OpencodeClient(executor)
+      .lastAssistantText(task.opencodeSessionId)
+      .catch((e: Error) => {
+        this.logger.warn(
+          `取会话 ${task.opencodeSessionId} 最终回复失败: ${e.message}`,
+        );
+        return null;
+      });
+  }
+
+  /**
+   * 机器人主动申请验收：保存本轮产出并把任务推进到「等待中-待验收」。
+   * 仅允许当前绑定的执行机器人调用；会话结束不会自动申请验收。
+   */
+  async applyForAcceptance(
+    taskId: number,
+    worker: Worker,
+  ): Promise<TaskAcceptanceApplication> {
+    const task = await this.mustFind(taskId);
+    if (task.agentId !== worker.id) {
+      throw new ForbiddenException(
+        `任务 ${task.code} 的执行机器人不是「${worker.name}」`,
+      );
+    }
+    if (
+      task.status !== TaskStatus.RUNNING ||
+      task.subStatus !== TaskSubStatus.EXECUTING
+    ) {
+      throw new BadRequestException(
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可申请验收`,
+      );
+    }
+    const resultText = await this.collectResult(task);
+    const now = new Date();
+    // 交付文档是验收申请的前置条件：写入失败时任务保持执行中，可修复后重试
+    const handoff = await this.taskDocuments.upsertHandoff({
+      task,
+      result: resultText ?? task.result,
+      worker,
+      appliedAt: now,
+    });
+    task.status = TaskStatus.WAITING;
+    task.subStatus = TaskSubStatus.PENDING_ACCEPT;
+    task.result = resultText ?? task.result;
+    task.remindCount = 1;
+    task.firstRemindedAt = now;
+    task.lastRemindedAt = now;
+    const saved = await this.tasks.save(task);
+    this.finishedAwaitingApply.add(taskId);
+    this.pushLine(taskId, `✔ 机器人已申请验收，交付文档：${handoff.path}`);
+    await this.addEvent(
+      taskId,
+      '状态变更',
+      `状态变更：进行中-执行中 → 等待中-待验收（执行机器人申请验收，交付文档：${handoff.path}）`,
+      worker.name,
+      {
+        workerId: worker.id,
+        deliveryApply: true,
+        handoffPath: handoff.path,
+        handoffUrl: handoff.url,
+      },
+    );
+    await this.taskChat.finishTask(taskId);
+    this.releaseTask(taskId);
+    await this.taskNotify.notifyTaskRequester(
+      saved,
+      'accept',
+      `任务待验收：${saved.code} ${saved.title}`,
+      `执行机器人已提交验收申请，交付文档：${handoff.path}`,
+    );
+    return { task: saved, handoff };
+  }
+
+  /**
+   * 执行器会话成功：只保存产出并释放事件流，任务保持「进行中-执行中」。
+   * 必须由执行机器人显式调用验收申请接口后才进入「等待中-待验收」。
+   */
   private async finalizeSuccess(taskId: number): Promise<void> {
     const task = await this.mustFind(taskId);
     this.releaseTask(taskId);
@@ -1016,55 +1134,25 @@ export class TaskDispatchService
       task.subStatus !== TaskSubStatus.EXECUTING
     )
       return;
-    const buffers = this.textBuffers.get(taskId);
-    const accumulated = [...(buffers?.values() ?? [])]
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .join('\n\n');
-    let resultText: string | null = accumulated || null;
-    if (!resultText && task.executorId && task.opencodeSessionId) {
-      const executor = await this.executors.findOne({
-        where: { id: task.executorId },
-      });
-      if (executor) {
-        resultText = await new OpencodeClient(executor)
-          .lastAssistantText(task.opencodeSessionId)
-          .catch((e: Error) => {
-            this.logger.warn(
-              `取会话 ${task.opencodeSessionId} 最终回复失败: ${e.message}`,
-            );
-            return null;
-          });
-      }
-    }
-    task.status = TaskStatus.WAITING;
-    task.subStatus = TaskSubStatus.PENDING_ACCEPT;
+    if (this.finishedAwaitingApply.has(taskId)) return;
+    const resultText = await this.collectResult(task);
     task.result = resultText ?? task.result;
-    // 立即提醒一次：记录首次/最近提醒时间与次数（30 分钟内不重复打扰，7 天后超时自动验收）
-    const remindedAt = new Date();
-    task.remindCount = 1;
-    task.firstRemindedAt = remindedAt;
-    task.lastRemindedAt = remindedAt;
     await this.tasks.save(task);
-    this.pushLine(taskId, '✔ 执行完成，待验收');
+    this.finishedAwaitingApply.add(taskId);
+    this.pushLine(taskId, '✔ 会话执行完成，等待机器人申请验收');
     await this.addEvent(
       taskId,
-      '状态变更',
-      '状态变更：进行中-执行中 → 等待中-待验收（会话完成）',
+      '系统',
+      `执行器会话已完成，任务保持进行中-执行中；等待执行机器人调用 POST ${this.apiUrl}/tasks/${taskId}/deliver/apply.md 申请验收`,
       null,
+      { waitingDeliveryApply: true },
     );
     await this.taskChat.finishTask(taskId);
-    await this.taskNotify.notifyTaskOwner(
-      task,
-      'accept',
-      `任务待验收：${task.code} ${task.title}`,
-      '机器人已完成执行，请到平台验收产出',
-    );
   }
 
   /**
    * 执行中任务兜底对账（每 2 分钟）：事件流漏收（服务重启/断线期间完成）时，
-   * 直接查会话 outcome 补推进「待验收」，并从消息详情取回产出。
+   * 直接查会话 outcome 补齐产出；不自动申请验收，仍等待机器人显式调用申请接口。
    */
   @Cron('20 */2 * * * *')
   async reconcileExecuting(): Promise<void> {
@@ -1090,6 +1178,11 @@ export class TaskDispatchService
         this.releaseTask(task.id);
         continue;
       }
+      // 会话已完成但机器人尚未申请验收：产出已补齐，不再重复对账
+      if (this.finishedAwaitingApply.has(task.id)) {
+        this.releaseTask(task.id);
+        continue;
+      }
       // 服务重启/断线后恢复订阅（有执行中的任务才保持连接）
       this.retainTask(task.id, executor);
       // 补齐漏收的提问（服务重启/断线期间 question.asked 可能丢失）
@@ -1110,7 +1203,10 @@ export class TaskDispatchService
           continue;
         }
         if (info.outcome === 'succeeded') {
-          this.pushLine(task.id, '↻ 对账补偿：会话已完成，补推进状态');
+          this.pushLine(
+            task.id,
+            '↻ 对账补偿：会话已完成，补齐产出并等待机器人申请验收',
+          );
           await this.finalizeSuccess(task.id);
         } else if (info.outcome === 'failed') {
           if (this.failedReconciled.has(task.id)) continue;
@@ -1203,6 +1299,25 @@ export class TaskDispatchService
         task.workPlan?.trim()
           ? `\n# 工作计划\n\n${task.workPlan.trim()}\n\n请按计划执行；如需调整，请在最终产出中说明原因。`
           : '',
+      ].join('\n'),
+    );
+    sections.push(
+      [
+        '# 完成与验收',
+        '',
+        '完成并自检后，必须主动申请验收；会话结束不会自动进入待验收，未调用申请接口时任务会一直保持「进行中-执行中」。',
+        '',
+        '1. 先完成交付物和交付说明，确保最终产出已经写入回复或项目文档。',
+        '2. 在工位目录执行以下命令申请验收（机器人令牌不要写入聊天或文档）：',
+        '',
+        '```bash',
+        'TOKEN=$(cat .opencode/agent-token)',
+        `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/deliver/apply.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN"',
+        '```',
+        '',
+        '3. 申请成功后任务进入「等待中-待验收」，由任务需求方决定通过或拒绝。',
+        '4. 需求方拒绝后，平台会把反馈意见发回当前会话，按反馈修改后再次申请验收。',
       ].join('\n'),
     );
     return sections.join('\n\n---\n\n');

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Header,
   HttpCode,
@@ -27,6 +28,10 @@ import {
   UpdateTaskInput,
 } from './tasks.service';
 import { TaskChatService } from './task-chat.service';
+import {
+  DeliveryReplyInput,
+  TaskDeliveryService,
+} from './task-delivery.service';
 import { TaskDispatchService } from './task-dispatch.service';
 import { TaskHandoffService } from './task-handoff.service';
 
@@ -78,6 +83,14 @@ class ReplyQuestionDto {
   reject?: boolean;
 }
 
+/** AI 技能 task-deliver-reply：需求方通过或拒绝验收 */
+class DeliveryReplyDto implements DeliveryReplyInput {
+  /** accept=通过验收；refuse=拒绝并退回执行 */
+  action?: string;
+  /** 拒绝验收时的反馈意见（action=refuse 时必填） */
+  content?: string;
+}
+
 /** AI 任务识别更新入参（task-recognize-update；只保存，不改状态、不派发） */
 class RecognizeTaskDto implements RecognizeTaskInput {
   /** 任务标题（必填） */
@@ -103,6 +116,7 @@ export class TasksController {
     private readonly dispatchService: TaskDispatchService,
     private readonly taskChat: TaskChatService,
     private readonly taskHandoff: TaskHandoffService,
+    private readonly deliveryService: TaskDeliveryService,
   ) {}
 
   /** 概览统计（任务概览页顶部卡片） */
@@ -200,6 +214,41 @@ export class TasksController {
     );
   }
 
+  /**
+   * AI 技能 task-deliver-apply：执行机器人申请验收（text/markdown）。
+   * 仅接受 X-Worker-Token，且必须是当前任务的执行机器人。
+   */
+  @Post(':id/deliver/apply.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  deliverApply(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    if (!req.worker) {
+      throw new ForbiddenException(
+        '申请验收仅接受机器人身份（X-Worker-Token）',
+      );
+    }
+    return this.deliveryService.apply(id, req.worker);
+  }
+
+  /**
+   * AI 技能 task-deliver-reply：任务需求方处理验收反馈（text/markdown）。
+   * accept=通过并完成；refuse=拒绝并附反馈，任务退回原机器人重新执行。
+   */
+  @Post(':id/deliver/reply.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  deliverReply(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: DeliveryReplyDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    if (!req.user) {
+      throw new ForbiddenException('处理验收反馈需要用户身份');
+    }
+    return this.deliveryService.reply(id, req.user, dto);
+  }
+
   @Delete(':id')
   remove(
     @Param('id', ParseIntPipe) id: number,
@@ -294,7 +343,7 @@ export class TasksController {
     );
   }
 
-  /** 验收通过：等待中-待验收 → 已结束-完成，并异步生成任务总结移交报告 */
+  /** 验收通过：等待中-待验收 → 已结束-完成，并异步生成 REVIEW.md 复盘 */
   @Post(':id/accept')
   async accept(
     @Param('id', ParseIntPipe) id: number,
@@ -316,7 +365,7 @@ export class TasksController {
     return task;
   }
 
-  /** 重新生成任务总结（已结束-完成；版本在任务内递增，历史报告保留） */
+  /** 重新生成任务复盘（已结束-完成；固定覆盖 REVIEW.md） */
   @Post(':id/handoff')
   @HttpCode(202)
   regenerateHandoff(@Param('id', ParseIntPipe) id: number) {

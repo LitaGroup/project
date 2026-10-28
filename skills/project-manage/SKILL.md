@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、获取任务识别上下文并保存任务识别结果
-version: 1.17.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、获取任务识别上下文并保存任务识别结果、执行机器人申请验收与需求方处理验收反馈
+version: 1.19.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -32,7 +32,8 @@ tags:
 12. 搜索平台知识库、浏览知识目录、读取知识文章与项目文档镜像（见第 11 节；也可单独安装 `knowledge-search` 技能）
 13. 创建知识文章/目录，更新正文、标题，移动/重命名，删除文章或目录（见第 11.4 节）
 14. 任务识别：读取任务识别上下文与有效机器人清单，保存识别出的标题、输入、交付方式、工作计划与执行机器人（见第 12 节）
-15. 上传任意文件（≤50MB）并获取无需登录即可访问的公共 URL（见第 13 节；也可单独安装 `file-upload` 技能）
+15. 任务验收：执行机器人主动申请验收；任务需求方通过或拒绝验收反馈（见第 12.3/12.4 节）
+16. 上传任意文件（≤50MB）并获取无需登录即可访问的公共 URL（见第 13 节；也可单独安装 `file-upload` 技能）
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -43,10 +44,11 @@ tags:
 
 ## 鉴权
 
-所有 `/api/...*.md` 端点要求鉴权，凭 **agent 访问令牌**（`LITA_PROJECT_TOKEN`）调用。令牌分两类：
+所有 `/api/...*.md` 端点要求鉴权。通用接口凭 **agent 访问令牌**（`LITA_PROJECT_TOKEN`）调用；任务验收申请接口使用专用的机器人独立令牌。用户 Agent 令牌分两类：
 
 - **个人令牌**：归属个人，登录网页 → 右上角头像 → 个人中心 → "Agent 访问令牌"可查看、复制与重置，重置后旧令牌立即失效。个人中心另提供「一键设置令牌（Shell）」脚本，可把令牌写入本机配置。
 - **公共 Agent 令牌**：由平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**。同样经 `X-Agent-Token` 头或 `?token=` 参数传递；通过它发起的写操作，操作人统一记录为「公共 Agent」。该令牌未配置时不可用。
+- **机器人独立令牌**：仅用于严格识别执行机器人的接口（任务验收申请）。平台在首次派发时生成并写入工位 `.opencode/agent-token`，调用时放在 `X-Worker-Token` 头；该令牌不能代替用户 Agent 令牌，用户令牌也不能代替机器人令牌。
 
 ### 令牌获取顺序（按优先级）
 
@@ -451,9 +453,9 @@ curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json'
 - 删除不可恢复；项目同步的 `/project/**` 知识只读，拒绝更新/删除
 - 返回内容含节点 ID、原/当前路径、类型、读取地址和网页地址，可直接用于后续复核
 
-## 12. 任务识别（Markdown）
+## 12. 任务（Markdown）
 
-任务由 AI 识别后回写详情。当前提供两个技能接口；识别更新**只保存结果，不改变任务状态、不派发执行**。
+任务由 AI 识别后回写详情，执行机器人完成后主动申请验收，需求方通过或拒绝。识别更新**只保存结果，不改变任务状态、不派发执行**；会话结束也**不会自动待验收**。
 
 ### 12.1 task-recognize-detail：读取识别上下文
 
@@ -478,6 +480,41 @@ curl -X POST {BASE}/api/tasks/{taskId}/recognize.md -H 'Content-Type: applicatio
 - 成功返回 Markdown（任务 ID、状态、执行机器人与已保存字段）；任务不存在 404，参数不合法 400
 - 该接口只更新识别字段，不改状态、不派发执行、不创建子任务
 
+### 12.3 task-deliver-apply：执行机器人申请验收
+
+执行机器人完成交付后调用；会话执行成功不会自动进入待验收，未调用时任务保持「进行中-执行中」。
+
+```bash
+TOKEN=$(cat .opencode/agent-token)
+curl -N -X POST {BASE}/api/tasks/{taskId}/deliver/apply.md \
+  -H "X-Worker-Token: $TOKEN"
+```
+
+- 只接受 `X-Worker-Token`，且必须是任务当前执行机器人；用户令牌/网页会话调用返回 403
+- 只允许「进行中-执行中」；平台先生成/覆盖交付文档 `task/{yyyyMMdd}/{taskId}/HANDOFF.md`，再保存产出并流转「等待中-待验收」
+- 交付文档写入失败时申请验收失败，任务保持执行中；机器人被重新分配后原机器人不能申请
+- 成功返回 Markdown（含交付文档路径）；任务不存在 404
+
+### 12.4 task-deliver-reply：需求方处理验收反馈
+
+只允许任务创建用户调用；子任务回退根任务创建人。公共 Agent 令牌、管理员身份不能绕过需求方校验。
+
+```bash
+# 通过验收：任务 → 已结束-完成，异步生成 REVIEW.md 复盘并销毁执行器会话
+curl -X POST {BASE}/api/tasks/{taskId}/deliver/reply.md \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"action":"accept"}'
+
+# 拒绝验收：必须提供反馈，任务 → 进行中-执行中，原文退回执行机器人
+curl -X POST {BASE}/api/tasks/{taskId}/deliver/reply.md \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"action":"refuse","content":"页面缺少加载状态，请补充后重新申请验收"}'
+```
+
+- `action` 只支持 `accept` / `refuse`；`refuse` 时 `content` 必填
+- 仅允许「等待中-待验收」；拒绝后使用原执行机器人/会话继续处理，完成后需重新申请验收
+- 返回 `text/markdown`；非需求方 403、参数不合法 400
+
 ## 13. 文件上传（Markdown）
 
 将本地任意文件上传到平台，返回可直接分享的公共访问 URL。也可单独安装更精简的 `file-upload` 技能：`http://{host}/file-upload/SKILL.md`。
@@ -499,5 +536,5 @@ curl -X POST {BASE}/api/files/upload.md \
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、任务识别结果更新（tasks/{id}/recognize.md）、文件上传（files/upload.md）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、任务识别结果更新（tasks/{id}/recognize.md）、执行机器人申请验收（tasks/{id}/deliver/apply.md）与需求方处理验收反馈（tasks/{id}/deliver/reply.md）、文件上传（files/upload.md）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

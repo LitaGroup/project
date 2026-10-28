@@ -146,10 +146,6 @@ export class Task {
   @Column({ type: 'timestamptz', nullable: true })
   deliveredAt: Date | null;
 
-  /** 已成功生成的任务总结报告数量（下一份报告版本号即该值；成功归档后才递增） */
-  @Column({ type: 'int', default: 0 })
-  handoffCount: number;
-
   /** 归档（维护中终态）时间 */
   @Column({ type: 'timestamptz', nullable: true })
   archivedAt: Date | null;
