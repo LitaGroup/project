@@ -153,6 +153,34 @@ export class KnowledgeService {
     }
   }
 
+  /**
+   * 按完整路径创建文章，自动创建缺失的父目录。
+   * 供平台内部归档（如任务总结报告）使用；目标路径已存在时直接报错。
+   */
+  async createArticleAtPath(input: {
+    path: string;
+    title?: string;
+    content?: string;
+  }): Promise<KnowledgeNode> {
+    this.assertEnabled();
+    const path = this.normalize(input.path);
+    if (path === '/') throw new BadRequestException('不能创建根目录');
+    this.assertNativePath(path);
+    try {
+      return await this.store.createNode({
+        kind: 'article',
+        path,
+        title: input.title,
+        content: input.content ?? '',
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new BadRequestException(`路径 ${path} 已存在`);
+      }
+      throw this.storeError(error);
+    }
+  }
+
   async update(
     id: string,
     input: {

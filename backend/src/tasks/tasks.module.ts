@@ -4,6 +4,7 @@ import { User } from '../auth/user.entity';
 import { ExecutorsModule } from '../executors/executors.module';
 import { Executor } from '../executors/executor.entity';
 import { FeishuModule } from '../feishu/feishu.module';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { TaskTypesModule } from '../task-types/task-types.module';
 import { WorkersModule } from '../workers/workers.module';
 import { Worker } from '../workers/worker.entity';
@@ -14,6 +15,7 @@ import { TaskTemplate } from './task-template.entity';
 import { TaskAssignmentService } from './task-assignment.service';
 import { TaskChatService } from './task-chat.service';
 import { TaskDispatchService } from './task-dispatch.service';
+import { TaskHandoffService } from './task-handoff.service';
 import { TaskLoopService } from './task-loop.service';
 import { TaskNotifyService } from './task-notify.service';
 import { TaskRealtimeService } from './task-realtime.service';
@@ -37,6 +39,7 @@ import { TasksService } from './tasks.service';
     ExecutorsModule,
     FeishuModule,
     TaskTypesModule,
+    KnowledgeModule,
   ],
   controllers: [TasksController, TaskTemplatesController],
   providers: [
@@ -44,6 +47,7 @@ import { TasksService } from './tasks.service';
     TaskAssignmentService,
     TaskChatService,
     TaskDispatchService,
+    TaskHandoffService,
     TaskLoopService,
     TaskNotifyService,
     TaskRealtimeService,
@@ -53,6 +57,7 @@ import { TasksService } from './tasks.service';
     TasksService,
     TaskChatService,
     TaskDispatchService,
+    TaskHandoffService,
     TaskLoopService,
     TaskNotifyService,
     TaskRealtimeService,

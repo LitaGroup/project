@@ -25,6 +25,8 @@ import type {
   KnowledgeSearchResult,
 } from './knowledge.types';
 
+const DEFAULT_VECTOR_MIN_SIMILARITY = 0.65;
+
 interface NodeRow {
   id: string;
   kind: KnowledgeNodeKind;
@@ -101,6 +103,8 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
   private configured = false;
   private disabledReason = '';
   readonly embeddingDimensions: number;
+  /** 纯向量召回的最低余弦相似度，低于该值不进入 RRF 融合 */
+  private readonly minVectorSimilarity: number;
 
   constructor(private readonly config: ConfigService) {
     const rawDimensions = (
@@ -111,6 +115,24 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
       Number.isInteger(dimensions) && dimensions > 0 && dimensions <= 8192
         ? dimensions
         : 1024;
+
+    const rawMinSimilarity =
+      config
+        .get<string>('PROJECT_KNOWLEDGE_SEARCH_VECTOR_MIN_SIMILARITY')
+        ?.trim() || String(DEFAULT_VECTOR_MIN_SIMILARITY);
+    const minSimilarity = Number(rawMinSimilarity);
+    if (
+      !Number.isFinite(minSimilarity) ||
+      minSimilarity < 0 ||
+      minSimilarity > 1
+    ) {
+      this.logger.warn(
+        `向量召回阈值 ${rawMinSimilarity} 非法，回退为 ${DEFAULT_VECTOR_MIN_SIMILARITY}`,
+      );
+      this.minVectorSimilarity = DEFAULT_VECTOR_MIN_SIMILARITY;
+    } else {
+      this.minVectorSimilarity = minSimilarity;
+    }
   }
 
   get isEnabled(): boolean {
@@ -793,6 +815,7 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
     let vectorRows: Array<ChunkRow & { similarity: number }> = [];
     if (input.queryVector) {
       const value = `[${input.queryVector.join(',')}]`;
+      const thresholdEnabled = this.minVectorSimilarity > 0;
       const vector = await this.db().query<ChunkRow & { similarity: number }>(
         `SELECT c.id, c.node_id, c.title, c.path, c.heading_path, c.content,
                 n.updated_at,
@@ -801,11 +824,19 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
          JOIN knowledge_nodes n ON n.id = c.node_id
          WHERE c.embedding IS NOT NULL
            AND ($2 = '/' OR c.path = $2 OR c.path LIKE $2 || '/%')
+           ${thresholdEnabled ? 'AND 1 - (c.embedding <=> $1::vector) >= $4' : ''}
          ORDER BY c.embedding <=> $1::vector
          LIMIT $3`,
-        [value, path, candidateLimit],
+        thresholdEnabled
+          ? [value, path, candidateLimit, this.minVectorSimilarity]
+          : [value, path, candidateLimit],
       );
-      vectorRows = vector.rows;
+      // SQL 已过滤；内存再兜底一次，保证配置在任意驱动/测试桩下都生效
+      vectorRows = thresholdEnabled
+        ? vector.rows.filter(
+            (row) => row.similarity >= this.minVectorSimilarity,
+          )
+        : vector.rows;
     }
 
     // RRF 融合：不同检索方式的排名直接相加，避免分数量纲不可比
@@ -815,6 +846,7 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
       {
         row: ChunkRow;
         score: number;
+        vectorSimilarity: number | null;
         matched: { vector: boolean; fulltext: boolean };
       }
     >();
@@ -822,6 +854,7 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
       merged.set(row.id, {
         row,
         score: 1 / (k + index + 1),
+        vectorSimilarity: null,
         matched: { vector: false, fulltext: true },
       });
     });
@@ -830,26 +863,42 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
       const contribution = 1 / (k + index + 1);
       if (existing) {
         existing.score += contribution;
+        existing.vectorSimilarity = row.similarity;
         existing.matched.vector = true;
       } else {
         merged.set(row.id, {
           row,
           score: contribution,
+          vectorSimilarity: row.similarity,
           matched: { vector: true, fulltext: false },
         });
       }
     });
 
     const ordered = [...merged.values()].sort((a, b) => b.score - a.score);
-    const results: KnowledgeSearchResult[] = ordered
+    // RRF 原始分与检索方式、候选数量相关，归一化后才能和脚本等其它来源混排
+    const maxScore = (input.queryVector ? 2 : 1) / (k + 1);
+    // 同一文档可能命中多个切片，只保留排名最高的一条，避免结果重复
+    const seenNodeIds = new Set<string>();
+    const uniqueOrdered = ordered.filter(({ row }) => {
+      if (seenNodeIds.has(row.node_id)) return false;
+      seenNodeIds.add(row.node_id);
+      return true;
+    });
+    const results: KnowledgeSearchResult[] = uniqueOrdered
       .slice(offset, offset + limit)
-      .map(({ row, score, matched }) => ({
+      .map(({ row, score, vectorSimilarity, matched }) => ({
         nodeId: row.node_id,
         title: row.title,
         path: row.path,
         headingPath: row.heading_path,
         content: row.content,
         score: Number(score.toFixed(6)),
+        relevance: Number(Math.min(score / maxScore, 1).toFixed(6)),
+        vectorSimilarity:
+          vectorSimilarity === null
+            ? null
+            : Number(vectorSimilarity.toFixed(6)),
         matchedBy:
           matched.vector && matched.fulltext
             ? 'hybrid'
@@ -865,7 +914,8 @@ export class KnowledgeStore implements OnApplicationBootstrap, OnModuleDestroy {
       mode: input.queryVector ? 'hybrid' : 'fulltext',
       results,
       hasMore:
-        ordered.length > offset + limit || ordered.length >= candidateLimit,
+        uniqueOrdered.length > offset + limit ||
+        ordered.length >= candidateLimit,
     };
   }
 

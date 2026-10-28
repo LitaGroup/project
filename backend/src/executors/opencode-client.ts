@@ -144,7 +144,7 @@ export function isQuestionForm(form: OpencodeFormDetail): boolean {
     typeof form.sessionID === 'string' &&
     !!form.metadata &&
     typeof form.metadata === 'object' &&
-    (form.metadata as Record<string, unknown>).kind === 'question'
+    form.metadata.kind === 'question'
   );
 }
 
@@ -153,7 +153,7 @@ export function formToQuestionRequest(
   form: OpencodeFormDetail,
 ): OpencodeQuestionRequest | null {
   if (!isQuestionForm(form)) return null;
-  const metadata = (form.metadata ?? {}) as Record<string, unknown>;
+  const metadata = form.metadata ?? {};
   const rawFields = Array.isArray(form.fields) ? form.fields : [];
   const questions = rawFields
     .map((raw, index): OpencodeQuestionInfo | null => {
@@ -231,7 +231,10 @@ export function formEventToQuestionEvent(
     if (!rawForm || typeof rawForm !== 'object') return null;
     const request = formToQuestionRequest(rawForm as OpencodeFormDetail);
     return request
-      ? { type: 'question.asked', data: request as unknown as Record<string, unknown> }
+      ? {
+          type: 'question.asked',
+          data: request as unknown as Record<string, unknown>,
+        }
       : null;
   }
   if (eventType !== 'form.replied' && eventType !== 'form.cancelled') {
@@ -240,7 +243,8 @@ export function formEventToQuestionEvent(
   const requestId = typeof data.id === 'string' ? data.id : '';
   if (!requestId) return null;
   return {
-    type: eventType === 'form.replied' ? 'question.replied' : 'question.rejected',
+    type:
+      eventType === 'form.replied' ? 'question.replied' : 'question.rejected',
     data: {
       requestID: requestId,
       sessionID: typeof data.sessionID === 'string' ? data.sessionID : '',
@@ -345,6 +349,14 @@ export class OpencodeClient {
     >('/api/model', { signal });
     return (OpencodeClient.unwrap(json) ??
       []) as unknown as OpencodeModelInfo[];
+  }
+
+  /** 删除会话及其全部数据（任务验收后释放执行器资源） */
+  async deleteSession(sessionId: string, signal?: AbortSignal): Promise<void> {
+    await this.request(`/api/session/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+      signal,
+    });
   }
 
   /** 建会话（title/model/location/permissions），返回会话信息 */
@@ -525,7 +537,9 @@ export class OpencodeClient {
   /** 当前正在运行的会话清单（sessionId → { type: 'running' }） */
   async activeSessions(): Promise<Record<string, { type?: string }>> {
     const json = await this.request<
-      Record<string, { type?: string }> | { data?: Record<string, { type?: string }> } | null
+      | Record<string, { type?: string }>
+      | { data?: Record<string, { type?: string }> }
+      | null
     >('/api/session/active');
     const data = OpencodeClient.unwrap(json);
     return data && typeof data === 'object' ? data : {};
@@ -621,9 +635,7 @@ export class OpencodeClient {
   ): Promise<OpencodeQuestionRequest[]> {
     try {
       const json = await this.request<
-        | OpencodeQuestionRequest[]
-        | { data?: OpencodeQuestionRequest[] }
-        | null
+        OpencodeQuestionRequest[] | { data?: OpencodeQuestionRequest[] } | null
       >(`/api/session/${sessionId}/question`);
       const data = OpencodeClient.unwrap(json);
       return Array.isArray(data) ? data : [];
@@ -641,9 +653,7 @@ export class OpencodeClient {
   ): Promise<OpencodeQuestionRequest[]> {
     try {
       const json = await this.request<
-        | OpencodeQuestionRequest[]
-        | { data?: OpencodeQuestionRequest[] }
-        | null
+        OpencodeQuestionRequest[] | { data?: OpencodeQuestionRequest[] } | null
       >('/question');
       const data = OpencodeClient.unwrap(json);
       return Array.isArray(data)
@@ -665,7 +675,9 @@ export class OpencodeClient {
     if (!Array.isArray(forms)) return [];
     return forms
       .map((form) => formToQuestionRequest(form))
-      .filter((request): request is OpencodeQuestionRequest => request !== null);
+      .filter(
+        (request): request is OpencodeQuestionRequest => request !== null,
+      );
   }
 
   /** form 协议答复：按字段 key 组装 answer（multiselect 为数组，其余取首项） */

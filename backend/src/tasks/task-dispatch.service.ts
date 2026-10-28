@@ -454,6 +454,84 @@ export class TaskDispatchService
   }
 
   /**
+   * 验收后销毁原任务会话并解除平台绑定。
+   * 尽力而为：执行器离线/删除失败只告警，不影响验收结果；总结报告使用独立会话。
+   */
+  async destroyAcceptedSession(taskId: number): Promise<void> {
+    const task = await this.tasks.findOne({
+      where: { id: taskId },
+      select: {
+        id: true,
+        code: true,
+        status: true,
+        subStatus: true,
+        executorId: true,
+        opencodeSessionId: true,
+      },
+    });
+    if (
+      !task?.opencodeSessionId ||
+      task.status !== TaskStatus.FINISHED ||
+      task.subStatus !== TaskSubStatus.COMPLETED
+    ) {
+      return;
+    }
+    const sessionId = task.opencodeSessionId;
+    const executorId = task.executorId;
+    if (executorId) {
+      this.sessionRoutes.delete(`${executorId}:${sessionId}`);
+    }
+    this.releaseTask(taskId);
+
+    let destroyed = false;
+    let failure = '';
+    try {
+      const executor = executorId
+        ? await this.executors.findOne({ where: { id: executorId } })
+        : null;
+      if (!executor) {
+        failure = '执行器不存在';
+      } else {
+        await new OpencodeClient(executor).deleteSession(sessionId);
+        destroyed = true;
+      }
+    } catch (error) {
+      if (error instanceof OpencodeClientError && error.status === 404) {
+        // 执行器侧已不存在，视为销毁完成
+        destroyed = true;
+      } else {
+        failure = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    try {
+      await this.tasks.update(taskId, { opencodeSessionId: null });
+      await this.addEvent(
+        taskId,
+        '系统',
+        destroyed
+          ? `已销毁执行器会话（${sessionId}）`
+          : `销毁执行器会话失败，已解除平台绑定（${sessionId}）：${failure || '未知错误'}`,
+        null,
+        {
+          executorId,
+          sessionId,
+          sessionDestroyed: destroyed,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `任务 ${task.code} 会话销毁后清理失败：${(error as Error).message}`,
+      );
+    }
+    if (!destroyed) {
+      this.logger.warn(
+        `任务 ${task.code} 执行器会话 ${sessionId} 销毁失败：${failure || '未知错误'}`,
+      );
+    }
+  }
+
+  /**
    * 回答/跳过机器人提问：转发到 opencode question 接口，
    * 本地卡片同步为回执（事件到达时会再次幂等校准）。
    */

@@ -521,6 +521,16 @@ function ChatFooter({
           >
             取消
           </Button>
+          {task.status === '已结束' && task.subStatus === '完成' && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || robotRunning}
+              onClick={() => onAction((id) => api.generateTaskHandoff(id))}
+            >
+              {robotRunning ? '总结生成中…' : '重新生成总结'}
+            </Button>
+          )}
           <AssignTaskDialog
             task={task}
             agentName={agentName}

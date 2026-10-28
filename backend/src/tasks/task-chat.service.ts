@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -599,6 +600,43 @@ export class TaskChatService implements OnModuleDestroy {
 
   private questionMessageId(taskId: number, requestId: string): string {
     return `chat:${taskId}:question:${requestId}`;
+  }
+
+  /**
+   * 追加一条平台生成的助手消息（如任务总结报告）。
+   * 使用固定 messageId 时按幂等 upsert 覆盖同一条消息，并照常经 SSE 推送。
+   */
+  async postAssistantMessage(
+    taskId: number,
+    content: string,
+    options?: {
+      messageId?: string;
+      status?: 'running' | 'complete' | 'error';
+      meta?: Record<string, unknown>;
+    },
+  ): Promise<TaskChatMessage> {
+    const text = content.trim();
+    if (!text) throw new BadRequestException('消息内容不能为空');
+    const rootTaskId = await this.rootIdOf(taskId);
+    const sender = await this.senderForTask(taskId);
+    const message: InternalChatMessage = {
+      id:
+        options?.messageId ??
+        `chat:${taskId}:assistant:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+      taskId,
+      rootTaskId,
+      role: 'assistant',
+      sender,
+      content: text,
+      createdAt: new Date().toISOString(),
+      status: options?.status ?? 'complete',
+      kind: 'message',
+      meta: options?.meta,
+    };
+    this.store(message);
+    this.broadcastMessage(message);
+    this.persistMessage(message);
+    return this.toPublic(message);
   }
 
   /** 记录一条机器人错误/提示消息 */

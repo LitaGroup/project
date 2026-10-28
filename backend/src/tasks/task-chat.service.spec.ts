@@ -72,6 +72,35 @@ describe('TaskChatService 提问卡片', () => {
     );
   });
 
+  it('平台生成的任务总结按固定 messageId 写入并持久化', async () => {
+    const posted = await service.postAssistantMessage(
+      7,
+      '## 任务总结\n\n已完成。',
+      {
+        messageId: 'chat:7:handoff:0',
+        meta: { handoff: { version: 0 } },
+      },
+    );
+
+    expect(posted).toMatchObject({
+      id: 'chat:7:handoff:0',
+      taskId: 7,
+      role: 'assistant',
+      content: '## 任务总结\n\n已完成。',
+      status: 'complete',
+      meta: { handoff: { version: 0 } },
+    });
+    expect(messagesRepo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 7,
+        messageKey: 'chat:7:handoff:0',
+        role: 'assistant',
+        content: '## 任务总结\n\n已完成。',
+      }),
+      ['taskId', 'messageKey'],
+    );
+  });
+
   it('服务重启后从持久化记录恢复待回答提问，可继续作答', async () => {
     messagesRepo.findOne.mockResolvedValue({
       taskId: 7,

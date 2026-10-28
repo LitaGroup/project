@@ -4,6 +4,8 @@ import {
   Delete,
   Get,
   Header,
+  HttpCode,
+  Logger,
   MessageEvent,
   Param,
   ParseIntPipe,
@@ -26,6 +28,7 @@ import {
 } from './tasks.service';
 import { TaskChatService } from './task-chat.service';
 import { TaskDispatchService } from './task-dispatch.service';
+import { TaskHandoffService } from './task-handoff.service';
 
 class CreateTaskDto implements CreateTaskInput {
   title?: string;
@@ -93,10 +96,13 @@ class RecognizeTaskDto implements RecognizeTaskInput {
 
 @Controller('tasks')
 export class TasksController {
+  private readonly logger = new Logger(TasksController.name);
+
   constructor(
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
     private readonly taskChat: TaskChatService,
+    private readonly taskHandoff: TaskHandoffService,
   ) {}
 
   /** 概览统计（任务概览页顶部卡片） */
@@ -288,10 +294,33 @@ export class TasksController {
     );
   }
 
-  /** 验收通过：等待中-待验收 → 已结束-完成 */
+  /** 验收通过：等待中-待验收 → 已结束-完成，并异步生成任务总结移交报告 */
   @Post(':id/accept')
-  accept(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
-    return this.tasksService.accept(id, req.user?.name ?? null);
+  async accept(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+  ) {
+    const task = await this.tasksService.accept(id, req.user?.name ?? null);
+    void this.taskHandoff.request(id).catch((error: Error) => {
+      this.logger.warn(
+        `任务 ${task.code} 验收后启动总结失败：${error.message}`,
+      );
+    });
+    void this.dispatchService
+      .destroyAcceptedSession(id)
+      .catch((error: Error) => {
+        this.logger.warn(
+          `任务 ${task.code} 验收后销毁执行器会话失败：${error.message}`,
+        );
+      });
+    return task;
+  }
+
+  /** 重新生成任务总结（已结束-完成；版本在任务内递增，历史报告保留） */
+  @Post(':id/handoff')
+  @HttpCode(202)
+  regenerateHandoff(@Param('id', ParseIntPipe) id: number) {
+    return this.taskHandoff.request(id);
   }
 
   /** 取消（任意未结束任务） */

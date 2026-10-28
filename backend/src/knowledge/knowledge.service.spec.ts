@@ -17,6 +17,8 @@ function retrieval(over: Partial<KnowledgeRetrieval> = {}): KnowledgeRetrieval {
         headingPath: '部署',
         content: '# 部署',
         score: 0.01,
+        relevance: 1,
+        vectorSimilarity: null,
         matchedBy: 'fulltext',
         updatedAt: new Date(),
       },
@@ -32,6 +34,7 @@ describe('KnowledgeService.search', () => {
     unavailableMessage: string;
     search: jest.Mock;
     getByPath: jest.Mock;
+    createNode: jest.Mock;
   };
 
   beforeEach(() => {
@@ -40,6 +43,23 @@ describe('KnowledgeService.search', () => {
       unavailableMessage: '知识库不可用',
       search: jest.fn().mockResolvedValue(retrieval()),
       getByPath: jest.fn().mockResolvedValue({ kind: 'directory' }),
+      createNode: jest.fn().mockResolvedValue({
+        id: 'n2',
+        kind: 'article',
+        path: '/task/handoff/20261028/TK-0001/0',
+        parentPath: '/task/handoff/20261028/TK-0001',
+        name: '0.md',
+        title: '任务总结',
+        content: '# 总结',
+        source: 'native',
+        sourceDocumentId: null,
+        contentHash: 'h',
+        indexStatus: 'pending',
+        indexError: null,
+        indexAttempts: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
     };
     service = new KnowledgeService(
       store as unknown as KnowledgeStore,
@@ -84,6 +104,22 @@ describe('KnowledgeService.search', () => {
     await expect(
       service.search({ query: '部署', path: '/missing' }),
     ).rejects.toThrow('搜索目录 /missing 不存在');
+  });
+
+  it('按完整路径创建文章时自动交给存储层创建父目录', async () => {
+    const node = await service.createArticleAtPath({
+      path: '/task/handoff/20261028/TK-0001/0.md',
+      title: '任务总结',
+      content: '# 总结',
+    });
+
+    expect(store.createNode).toHaveBeenCalledWith({
+      kind: 'article',
+      path: '/task/handoff/20261028/TK-0001/0.md',
+      title: '任务总结',
+      content: '# 总结',
+    });
+    expect(node.path).toContain('/task/handoff/');
   });
 
   it('pageSize 最大 100，关键词最多 500 字', async () => {

@@ -66,6 +66,20 @@ export interface ScriptLibraryScript {
   description: string | null;
   /** 描述生成状态（尚无描述记录为 null） */
   descriptionStatus: ScriptDescriptionStatus | null;
+  /** 搜索相关度（0..1）；无关键词或详情接口为 null */
+  relevance: number | null;
+}
+
+interface ScannedScript {
+  path: string;
+  kind: ScriptLibraryKind;
+  size: number;
+  updatedAt: string;
+}
+
+interface RankedScript {
+  script: ScannedScript;
+  relevance: number | null;
 }
 
 /** 脚本详情（含源码与元信息） */
@@ -126,8 +140,9 @@ export class ScriptLibraryService {
   }
 
   /**
-   * 脚本列表：扫描 projects/ 下全部三类脚本，q 匹配路径（不区分大小写），
-   * type 过滤类型，按路径排序后分页；附带登记项目与最近一次运行。
+   * 脚本列表：扫描 projects/ 下全部三类脚本，q 匹配路径或描述（不区分大小写），
+   * type 过滤类型；有关键词按相关度排序，无关键词按路径排序，再分页。
+   * 附带登记项目与最近一次运行。
    */
   async listScripts(
     q?: string,
@@ -138,10 +153,34 @@ export class ScriptLibraryService {
     const kind = this.parseKindFilter(type);
     const all = await this.scanScripts();
     const keyword = q?.trim().toLowerCase();
-    const filtered = all
+    // 关键词可能命中描述：需要先取全量描述再过滤，不能只查分页后的脚本
+    const searchedDescriptions = keyword
+      ? await this.descriptionsByPaths(all.map((s) => s.path))
+      : null;
+    let filtered: RankedScript[] = all
       .filter((s) => !kind || s.kind === kind)
-      .filter((s) => !keyword || s.path.toLowerCase().includes(keyword))
-      .sort((a, b) => a.path.localeCompare(b.path));
+      .map((script) => ({ script, relevance: null }));
+
+    if (keyword) {
+      // 有关键词时先按命中位置计算相关度，再分页，确保返回的是全局最相关结果
+      filtered = filtered
+        .map(({ script }) => ({
+          script,
+          relevance: this.scriptRelevance(
+            script.path,
+            searchedDescriptions?.get(script.path)?.description ?? null,
+            keyword,
+          ),
+        }))
+        .filter((entry) => entry.relevance !== null)
+        .sort(
+          (a, b) =>
+            (b.relevance ?? 0) - (a.relevance ?? 0) ||
+            a.script.path.localeCompare(b.script.path),
+        );
+    } else {
+      filtered.sort((a, b) => a.script.path.localeCompare(b.script.path));
+    }
 
     const size = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
     const current = Math.max(page, 1);
@@ -160,16 +199,18 @@ export class ScriptLibraryService {
 
     const [owners, latest, descriptions] = await Promise.all([
       this.ownershipMap(),
-      this.latestRunsByPaths(slice.map((s) => s.path)),
-      this.descriptionsByPaths(slice.map((s) => s.path)),
+      this.latestRunsByPaths(slice.map(({ script }) => script.path)),
+      searchedDescriptions
+        ? Promise.resolve(searchedDescriptions)
+        : this.descriptionsByPaths(slice.map(({ script }) => script.path)),
     ]);
-    const items = slice.map((s) => ({
+    const items = slice.map(({ script: s, relevance }) => ({
       ...s,
-      updatedAt: s.updatedAt,
       projectIds: [...(owners.get(s.path) ?? [])].sort((a, b) => a - b),
       latestRun: latest.get(s.path) ?? null,
       description: descriptions.get(s.path)?.description ?? null,
       descriptionStatus: descriptions.get(s.path)?.status ?? null,
+      relevance,
     }));
     return { items, total: filtered.length, page: current, pageSize: size };
   }
@@ -205,6 +246,7 @@ export class ScriptLibraryService {
       latestRun: latest.get(normalized) ?? null,
       description: descriptions.get(normalized)?.description ?? null,
       descriptionStatus: descriptions.get(normalized)?.status ?? null,
+      relevance: null,
       content,
       revision: await this.syncService.currentHead(),
       githubUrl: this.githubUrl(normalized),
@@ -347,6 +389,44 @@ export class ScriptLibraryService {
     return normalized;
   }
 
+  /**
+   * 脚本搜索相关度（0..1）：路径命中优先于描述命中，
+   * 命中越精确分数越高；路径与描述同时命中时给少量加成。
+   */
+  private scriptRelevance(
+    scriptPath: string,
+    description: string | null,
+    keyword: string,
+  ): number | null {
+    const pathText = scriptPath.toLowerCase();
+    const name = path.basename(pathText);
+    const descriptionText = (description ?? '').toLowerCase();
+
+    const pathScore =
+      pathText === keyword
+        ? 1
+        : name === keyword
+          ? 0.96
+          : pathText.startsWith(keyword)
+            ? 0.9
+            : name.startsWith(keyword)
+              ? 0.84
+              : pathText.includes(keyword)
+                ? 0.76
+                : null;
+    const descriptionScore =
+      descriptionText === keyword
+        ? 0.62
+        : descriptionText.includes(keyword)
+          ? 0.55
+          : null;
+
+    if (pathScore === null && descriptionScore === null) return null;
+    if (pathScore === null) return descriptionScore;
+    if (descriptionScore === null) return pathScore;
+    return Math.min(1, pathScore + 0.02);
+  }
+
   /** 按后缀识别脚本类型；非脚本后缀返回 null */
   private kindOf(relPath: string): ScriptLibraryKind | null {
     for (const [suffix, kind] of KIND_BY_SUFFIX) {
@@ -372,20 +452,8 @@ export class ScriptLibraryService {
   }
 
   /** 递归扫描 projects/ 下的三类脚本（上限 MAX_SCAN，含 mtime/size；描述生成队列复用） */
-  async scanScripts(): Promise<
-    Array<{
-      path: string;
-      kind: ScriptLibraryKind;
-      size: number;
-      updatedAt: string;
-    }>
-  > {
-    const out: Array<{
-      path: string;
-      kind: ScriptLibraryKind;
-      size: number;
-      updatedAt: string;
-    }> = [];
+  async scanScripts(): Promise<ScannedScript[]> {
+    const out: ScannedScript[] = [];
     const walk = async (relDir: string): Promise<void> => {
       if (out.length >= MAX_SCAN) return;
       let entries: import('fs').Dirent[];

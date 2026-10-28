@@ -15,18 +15,26 @@ describe('ScriptLibraryService', () => {
   let root: string;
   let service: ScriptLibraryService;
 
-  /** 描述表内存桩（列表/详情只读，返回空） */
-  const makeDescriptionsStub = () => ({
-    find: () => Promise.resolve([]),
+  /** 描述表内存桩（列表/详情只读） */
+  const makeDescriptionsStub = (
+    rows: Array<{ scriptPath: string; description: string | null }> = [],
+  ) => ({
+    find: () => Promise.resolve(rows),
   });
 
-  const makeService = (scriptsRoot: string) =>
+  const makeService = (
+    scriptsRoot: string,
+    descriptions: Array<{
+      scriptPath: string;
+      description: string | null;
+    }> = [],
+  ) =>
     new ScriptLibraryService(
       {
         query: () => Promise.resolve([]),
         find: () => Promise.resolve([]),
       } as unknown as Repository<ScriptLibraryRun>,
-      makeDescriptionsStub() as unknown as never,
+      makeDescriptionsStub(descriptions) as unknown as never,
       {} as unknown as never,
       { findByProject: () => Promise.resolve([]) } as unknown as ChecksService,
       { findByProject: () => Promise.resolve([]) } as unknown as TestsService,
@@ -99,6 +107,83 @@ describe('ScriptLibraryService', () => {
     expect(byKeyword.items.map((s) => s.path)).toEqual([
       'projects/basic/exports/all.export.ts',
     ]);
+  });
+
+  it('搜索按相关度排序：路径精确 > 文件名 > 路径包含 > 描述', async () => {
+    const ranked = makeService(root, [
+      {
+        scriptPath: 'projects/basic/exports/all.export.ts',
+        description: '排行榜导出脚本',
+      },
+    ]);
+
+    const exactPath = await ranked.listScripts(
+      'projects/active/pk/tests/rank.test.ts',
+    );
+    expect(exactPath.items[0].relevance).toBe(1);
+
+    const exactName = await ranked.listScripts('rank.test.ts');
+    expect(exactName.items[0].relevance).toBe(0.96);
+
+    const directory = await ranked.listScripts('basic/exports');
+    expect(directory.items[0].relevance).toBe(0.76);
+
+    const byDescription = await ranked.listScripts('排行榜');
+    expect(byDescription.items.map((s) => s.path)).toEqual([
+      'projects/basic/exports/all.export.ts',
+    ]);
+    expect(byDescription.items[0].relevance).toBe(0.55);
+
+    const noKeyword = await ranked.listScripts();
+    expect(noKeyword.items.every((s) => s.relevance === null)).toBe(true);
+  });
+
+  it('路径命中优先于仅描述命中，同分按路径稳定排序', async () => {
+    const ranked = makeService(root, [
+      {
+        scriptPath: 'projects/basic/exports/all.export.ts',
+        description: 'rank 排行榜',
+      },
+      {
+        scriptPath: 'projects/active/pk/tests/rank.test.ts',
+        description: '每日结算',
+      },
+    ]);
+
+    const result = await ranked.listScripts('rank');
+    expect(result.items.map((s) => s.path)).toEqual([
+      'projects/active/pk/tests/rank.test.ts',
+      'projects/basic/exports/all.export.ts',
+    ]);
+    expect(result.items[0].relevance).toBeGreaterThan(
+      result.items[1].relevance ?? 0,
+    );
+  });
+
+  it('按脚本描述模糊搜索（不区分大小写）', async () => {
+    const described = makeService(root, [
+      {
+        scriptPath: 'projects/active/pk/tests/rank.test.ts',
+        description: 'DailyRank 排行榜每日结算检查',
+      },
+    ]);
+
+    const byDescription = await described.listScripts('dailyrank');
+    expect(byDescription.total).toBe(1);
+    expect(byDescription.items.map((s) => s.path)).toEqual([
+      'projects/active/pk/tests/rank.test.ts',
+    ]);
+    expect(byDescription.items[0].description).toBe(
+      'DailyRank 排行榜每日结算检查',
+    );
+
+    const byChineseDescription = await described.listScripts('每日结算');
+    expect(byChineseDescription.items.map((s) => s.path)).toEqual([
+      'projects/active/pk/tests/rank.test.ts',
+    ]);
+
+    const noMatch = await described.listScripts('不存在的描述');
+    expect(noMatch.total).toBe(0);
   });
 
   it('非法 type 返回 400', async () => {

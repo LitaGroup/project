@@ -10,6 +10,12 @@ import { Badge } from '@appica/ui-react/badge'
 import { Button, buttonVariants } from '@appica/ui-react/button'
 import { Kbd, KbdGroup } from '@appica/ui-react/kbd'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@appica/ui-react/tooltip'
+import {
   Avatar,
   AvatarImage,
   AvatarFallback,
@@ -260,21 +266,30 @@ export function Layout() {
           </LayoutGroup>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2 text-foreground-muted"
-            onClick={() => setSearchOpen(true)}
-            aria-label="搜索知识库"
-            aria-keyshortcuts="Meta+K"
-          >
-            <Search size={16} />
-            <span>搜索</span>
-            <KbdGroup size="sm" className="ml-1">
-              <Kbd>⌘</Kbd>
-              <Kbd>K</Kbd>
-            </KbdGroup>
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={() => setSearchOpen(true)}
+                    aria-label="搜索文档和脚本"
+                    aria-keyshortcuts="Meta+K Control+K"
+                  >
+                    <Search size={16} />
+                  </Button>
+                }
+              />
+              <TooltipContent className="flex items-center gap-2">
+                搜索文档和脚本
+                <KbdGroup size="sm">
+                  <Kbd>⌘</Kbd>
+                  <Kbd>K</Kbd>
+                </KbdGroup>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <UserArea />
         </div>
       </header>

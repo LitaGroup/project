@@ -42,7 +42,12 @@ export interface KnowledgeSearchResult {
   path: string;
   headingPath: string;
   content: string;
+  /** RRF 原始分（仅用于诊断，跨来源排序使用 relevance） */
   score: number;
+  /** 归一化相关度（0..1），用于文档与脚本等不同来源统一排序 */
+  relevance: number;
+  /** 原始向量余弦相似度；未命中向量时为 null */
+  vectorSimilarity: number | null;
   matchedBy: 'vector' | 'fulltext' | 'hybrid';
   updatedAt: Date;
 }

@@ -357,9 +357,9 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       }
 
       for (const [executorId, executorRows] of byExecutor) {
-        const context = await this.resolveContext(executorRows[0].workerId).catch(
-          () => null,
-        );
+        const context = await this.resolveContext(
+          executorRows[0].workerId,
+        ).catch(() => null);
         if (!context || context.executor.id !== executorId) continue;
         const client = new OpencodeClient(context.executor);
         let activeSessions: Record<string, { type?: string }>;
@@ -402,18 +402,13 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
           const assistant = [...messages]
             .reverse()
             .find(
-              (message) =>
-                message.role === 'assistant' && !message.question,
+              (message) => message.role === 'assistant' && !message.question,
             );
           if (!assistant) continue;
           const assistantId = assistant.id;
           const afterMs = Date.parse(assistant.createdAt) || Date.now();
 
-          const session = this.newSession(
-            row.userId,
-            row.workerId,
-            rowContext,
-          );
+          const session = this.newSession(row.userId, row.workerId, rowContext);
           session.rowId = row.id;
           session.sessionId = sessionId;
           session.bound = {
@@ -445,9 +440,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
         }
       }
     } catch (error) {
-      this.logger.warn(
-        `调试会话启动重连失败: ${(error as Error).message}`,
-      );
+      this.logger.warn(`调试会话启动重连失败: ${(error as Error).message}`);
     }
   }
 
@@ -716,10 +709,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     this.eventHub.retain(session.context.executor);
     try {
-      await session.client.waitForIdle(
-        session.sessionId!,
-        RUN_TIMEOUT_MS,
-      );
+      await session.client.waitForIdle(session.sessionId!, RUN_TIMEOUT_MS);
       if (session.interruptRequested || session.runSeq !== runSeq) return;
       let output: string | null = null;
       for (let attempt = 0; attempt < 3 && !output; attempt++) {
@@ -736,11 +726,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       const todos = await session.client
         .latestTodos(session.sessionId!)
         .catch(() => null);
-      if (
-        todos &&
-        !session.interruptRequested &&
-        session.runSeq === runSeq
-      ) {
+      if (todos && !session.interruptRequested && session.runSeq === runSeq) {
         session.todos = todos;
       }
       this.finishSuccess(session, assistantId, output.trim());

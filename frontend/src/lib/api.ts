@@ -181,7 +181,12 @@ export interface KnowledgeSearchResult {
   path: string
   headingPath: string
   content: string
+  /** RRF 原始分（仅用于诊断） */
   score: number
+  /** 归一化相关度（0..1），用于与脚本等其它来源统一排序 */
+  relevance: number
+  /** 原始向量余弦相似度；未命中向量时为 null */
+  vectorSimilarity: number | null
   matchedBy: 'vector' | 'fulltext' | 'hybrid'
   updatedAt: string
 }
@@ -384,6 +389,8 @@ export interface ScriptLibraryScript {
   description: string | null
   /** 描述生成状态（尚无描述记录为 null） */
   descriptionStatus: ScriptDescriptionStatus | null
+  /** 搜索相关度（0..1）；无关键词或详情接口为 null */
+  relevance: number | null
 }
 
 /** 脚本详情（含源码与 main HEAD / GitHub 原文链接） */
@@ -1168,6 +1175,8 @@ export interface TaskPackage {
   acceptedAt: string | null
   acceptedBy: string | null
   deliveredAt: string | null
+  /** 已成功生成的任务总结数量（下一份报告版本号） */
+  handoffCount: number
   archivedAt: string | null
   canceledAt: string | null
   createdAt: string
@@ -1583,7 +1592,7 @@ export const api = {
     request<ExportRun[]>(`/exports/${exportId}/runs`),
   /** 单次导出运行详情（含实时进度与产物文件清单） */
   getExportRun: (runId: number) => request<ExportRun>(`/exports/runs/${runId}`),
-  /** 脚本库列表：q 匹配路径，kind 过滤类型，按路径排序分页 */
+  /** 脚本库列表：q 匹配路径或描述，kind 过滤类型；有关键词按相关度、无关键词按路径排序分页 */
   listLibraryScripts: (params?: {
     q?: string
     kind?: ScriptLibraryKind
@@ -2303,9 +2312,14 @@ export const api = {
   /** 中断执行 */
   interruptTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/interrupt`, { method: 'POST' }),
-  /** 验收通过：等待中-待验收 → 已结束-完成 */
+  /** 验收通过：等待中-待验收 → 已结束-完成（后台生成任务总结） */
   acceptTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/accept`, { method: 'POST' }),
+  /** 重新生成任务总结（版本在任务内递增，历史报告保留） */
+  generateTaskHandoff: (id: number) =>
+    request<{ accepted: true; version: number }>(`/tasks/${id}/handoff`, {
+      method: 'POST',
+    }),
   /** 取消（任意未结束任务） */
   cancelTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/cancel`, { method: 'POST' }),

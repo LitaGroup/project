@@ -53,7 +53,7 @@ export class ScriptLibraryController {
     private readonly descriptionService: ScriptLibraryDescriptionService,
   ) {}
 
-  /** 脚本列表：q 匹配路径，type 过滤类型（check/test/export），按路径排序分页 */
+  /** 脚本列表：q 匹配路径或描述，type 过滤类型（check/test/export）；有关键词按相关度、无关键词按路径排序分页 */
   @Get('scripts')
   listScripts(
     @Query('q') q?: string,

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Badge } from '@appica/ui-react/badge'
 import {
   Dialog,
   DialogContent,
@@ -8,11 +9,7 @@ import {
 import { Input } from '@appica/ui-react/input'
 import { Loader } from '@appica/ui-react/loader'
 import { Search } from '@appica/icons-react'
-import {
-  api,
-  knowledgeWebPath,
-  type KnowledgeSearchResult,
-} from '../lib/api'
+import { api, knowledgeWebPath, type ScriptLibraryScript } from '../lib/api'
 
 interface KnowledgeSearchDialogProps {
   open: boolean
@@ -20,8 +17,22 @@ interface KnowledgeSearchDialogProps {
 }
 
 const DEBOUNCE_MS = 300
-const RESULT_LIMIT = 100
+const KNOWLEDGE_RESULT_LIMIT = 100
+const SCRIPT_RESULT_LIMIT = 50
 const EXCERPT_LENGTH = 220
+
+type SearchCategory = '文档' | '脚本'
+
+interface SearchResultItem {
+  key: string
+  category: SearchCategory
+  title: string
+  summary: string
+  /** 统一相关度（0..1），用于文档与脚本整体排序 */
+  relevance: number
+  /** 点击后进入的前端地址 */
+  to: string
+}
 
 /** 去掉正文中的连续空白，便于生成紧凑摘要 */
 function normalizeText(value: string): string {
@@ -94,14 +105,30 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   )
 }
 
+function failureText(label: string, reason: unknown): string {
+  const message = reason instanceof Error ? reason.message : String(reason)
+  return `${label}搜索失败：${message}`
+}
+
+function scriptResult(script: ScriptLibraryScript): SearchResultItem {
+  return {
+    key: `script:${script.path}`,
+    category: '脚本',
+    title: script.path,
+    summary: script.description ?? '暂无描述',
+    relevance: script.relevance ?? 0,
+    to: `/docs/scripts/detail?path=${encodeURIComponent(script.path)}`,
+  }
+}
+
 function ResultItem({
   result,
   query,
   onSelect,
 }: {
-  result: KnowledgeSearchResult
+  result: SearchResultItem
   query: string
-  onSelect: (result: KnowledgeSearchResult) => void
+  onSelect: (result: SearchResultItem) => void
 }) {
   return (
     <button
@@ -109,12 +136,17 @@ function ResultItem({
       onClick={() => onSelect(result)}
       className="flex w-full flex-col gap-1 rounded-[var(--radius-md)] px-3 py-2.5 text-left outline-none transition-colors hover:bg-background-muted focus-visible:bg-background-muted focus-visible:ring-2 focus-visible:ring-ring-primary"
     >
-      <span className="truncate text-sm font-medium text-foreground-intense">
-        {result.title}
+      <span className="flex w-full min-w-0 items-center justify-between gap-3">
+        <span className="truncate text-sm font-medium text-foreground-intense">
+          {result.title}
+        </span>
+        <Badge variant="secondary" className="shrink-0">
+          {result.category}
+        </Badge>
       </span>
       <span className="line-clamp-2 text-xs leading-5 text-foreground-muted">
         <HighlightedText
-          text={extractExcerpt(result.content, query)}
+          text={extractExcerpt(result.summary, query)}
           query={query}
         />
       </span>
@@ -122,16 +154,18 @@ function ResultItem({
   )
 }
 
+/** 全局搜索：同时检索知识文档正文与脚本路径/描述，结果以类型区分 */
 export function KnowledgeSearchDialog({
   open,
   onOpenChange,
 }: KnowledgeSearchDialogProps) {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<KnowledgeSearchResult[]>([])
+  const [results, setResults] = useState<SearchResultItem[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
   const requestIdRef = useRef(0)
 
   useEffect(() => {
@@ -141,18 +175,56 @@ export function KnowledgeSearchDialog({
 
     const requestId = ++requestIdRef.current
     const timer = window.setTimeout(() => {
-      api
-        .searchKnowledge({ q: keyword, page: 1, pageSize: RESULT_LIMIT })
-        .then((data) => {
+      Promise.allSettled([
+        api.searchKnowledge({
+          q: keyword,
+          page: 1,
+          pageSize: KNOWLEDGE_RESULT_LIMIT,
+        }),
+        api.listLibraryScripts({
+          q: keyword,
+          page: 1,
+          pageSize: SCRIPT_RESULT_LIMIT,
+        }),
+      ])
+        .then(([knowledgeOutcome, scriptOutcome]) => {
           if (requestId !== requestIdRef.current) return
-          setResults(data.results)
+
+          const documents: SearchResultItem[] =
+            knowledgeOutcome.status === 'fulfilled'
+              ? knowledgeOutcome.value.results.map((result, index) => ({
+                  key: `document:${result.nodeId}:${result.headingPath}:${index}`,
+                  category: '文档',
+                  title: result.title,
+                  summary: result.content,
+                  relevance: result.relevance,
+                  to: knowledgeWebPath(result.path, false),
+                }))
+              : []
+          const scripts: SearchResultItem[] =
+            scriptOutcome.status === 'fulfilled'
+              ? scriptOutcome.value.items.map(scriptResult)
+              : []
+
+          setResults(
+            [...documents, ...scripts].sort(
+              (a, b) =>
+                b.relevance - a.relevance ||
+                a.title.localeCompare(b.title, 'zh-CN') ||
+                a.key.localeCompare(b.key),
+            ),
+          )
           setSearched(true)
-        })
-        .catch((e: Error) => {
-          if (requestId !== requestIdRef.current) return
-          setResults([])
-          setSearched(true)
-          setError(e.message)
+
+          const failures: string[] = []
+          if (knowledgeOutcome.status === 'rejected') {
+            failures.push(failureText('文档', knowledgeOutcome.reason))
+          }
+          if (scriptOutcome.status === 'rejected') {
+            failures.push(failureText('脚本', scriptOutcome.reason))
+          }
+          setError(failures.length === 2 ? failures.join('；') : null)
+          setWarning(failures.length === 1 ? failures[0] : null)
         })
         .finally(() => {
           if (requestId === requestIdRef.current) setLoading(false)
@@ -170,6 +242,7 @@ export function KnowledgeSearchDialog({
       setLoading(false)
       setSearched(false)
       setError(null)
+      setWarning(null)
     }
     onOpenChange(nextOpen)
   }
@@ -181,11 +254,12 @@ export function KnowledgeSearchDialog({
     setLoading(Boolean(value.trim()))
     setSearched(false)
     setError(null)
+    setWarning(null)
   }
 
-  const selectResult = (result: KnowledgeSearchResult) => {
+  const selectResult = (result: SearchResultItem) => {
     handleOpenChange(false)
-    navigate(knowledgeWebPath(result.path, false))
+    navigate(result.to)
   }
 
   const keyword = query.trim()
@@ -193,21 +267,23 @@ export function KnowledgeSearchDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         closeButton={false}
-        frame={false}
-        className="w-full max-w-2xl gap-0 overflow-hidden p-4 [&_[data-slot=dialog-content]]:pt-0 [&_[data-slot=dialog-content]]:pb-0"
+        className="w-full max-w-2xl gap-0 overflow-hidden [&_[data-slot=dialog-content]]:pt-0 [&_[data-slot=dialog-content]]:pb-0"
       >
-        <DialogTitle className="sr-only">知识搜索</DialogTitle>
+        <DialogTitle className="sr-only">搜索文档和脚本</DialogTitle>
 
         {/* 第一栏：搜索输入 */}
-        <div className="shrink-0 border-b border-border-strong pb-3">
+        <div className="shrink-0 p-3">
           <Input
             autoFocus
+            variant="soft"
+            inputSize="lg"
             value={query}
             onChange={(event) => handleQueryChange(event.target.value)}
-            placeholder="搜索知识文章…"
-            aria-label="搜索知识文章"
+            placeholder="搜索文档或脚本…"
+            aria-label="搜索文档或脚本"
+            className="rounded-[var(--radius-lg)] border-transparent hover:border-transparent has-focus:border-transparent has-focus:bg-background-muted has-focus:ring-0"
             startSlot={
-              <Search size={16} className="text-foreground-muted" />
+              <Search size={18} className="text-foreground-muted" />
             }
             endSlot={
               loading ? (
@@ -223,16 +299,21 @@ export function KnowledgeSearchDialog({
         </div>
 
         {/* 第二栏：搜索结果 */}
-        <div className="min-h-24 max-h-[min(60vh,32rem)] overflow-y-auto py-2">
+        <div className="min-h-24 max-h-[min(60vh,32rem)] overflow-y-auto border-t border-border-muted px-2 py-2">
+          {warning && (
+            <p className="mx-1 mb-2 rounded-[var(--radius-sm)] bg-warning-soft px-3 py-2 text-xs text-foreground-intense">
+              {warning}
+            </p>
+          )}
           {error ? (
             <p className="px-3 py-6 text-center text-sm text-error-foreground">
               搜索失败：{error}
             </p>
           ) : results.length > 0 ? (
             <div className="flex flex-col">
-              {results.map((result, index) => (
+              {results.map((result) => (
                 <ResultItem
-                  key={`${result.nodeId}:${result.headingPath}:${index}`}
+                  key={result.key}
                   result={result}
                   query={keyword}
                   onSelect={selectResult}
@@ -245,11 +326,11 @@ export function KnowledgeSearchDialog({
             </p>
           ) : searched && keyword ? (
             <p className="px-3 py-6 text-center text-sm text-foreground-muted">
-              未找到与“{keyword}”相关的知识
+              未找到与“{keyword}”相关的文档或脚本
             </p>
           ) : (
             <p className="px-3 py-6 text-center text-sm text-foreground-muted">
-              输入关键词，搜索知识库文章
+              输入关键词，搜索文档内容或脚本描述
             </p>
           )}
         </div>

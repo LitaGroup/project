@@ -104,7 +104,7 @@ function SyncStatusLine({ status }: { status: ScriptLibrarySyncStatus }) {
 
 /**
  * 脚本库：scripts 仓库 main 分支 projects/ 目录下的全部脚本
- * （.check.ts 检查 / .test.ts 测试 / .export.ts 导出），支持搜索、类型筛选与直接运行。
+ * （.check.ts 检查 / .test.ts 测试 / .export.ts 导出），支持路径/描述搜索、类型筛选与直接运行。
  */
 export function ScriptLibraryPage() {
   const [data, setData] = useState<ScriptLibraryListResponse | null>(null)
@@ -202,12 +202,12 @@ export function ScriptLibraryPage() {
           className="w-72"
           render={
             <Input
-              placeholder="搜索脚本路径…"
+              placeholder="搜索脚本路径 / 描述…"
               clearable
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               onClear={() => setKeyword('')}
-              aria-label="搜索脚本路径"
+              aria-label="搜索脚本路径或描述"
             />
           }
         />
