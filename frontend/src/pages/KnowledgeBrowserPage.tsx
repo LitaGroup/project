@@ -388,16 +388,19 @@ function KnowledgeArticleView({
       </div>
       {error && <p className="text-sm">保存失败：{error}</p>}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-background">
-        <MarkdownEditor
-          key={`${article.id}:${article.updatedAt}`}
-          ref={editorRef}
-          value={content}
-          readOnly={!editable}
-          onChange={(markdown) => {
-            setContent(markdown)
-            setDirty(true)
-          }}
-        />
+        {/* 正文超出一屏时在面板内滚动：外层 overflow-hidden 只负责圆角裁剪 */}
+        <div className="min-h-0 flex-1 overflow-auto">
+          <MarkdownEditor
+            key={`${article.id}:${article.updatedAt}`}
+            ref={editorRef}
+            value={content}
+            readOnly={!editable}
+            onChange={(markdown) => {
+              setContent(markdown)
+              setDirty(true)
+            }}
+          />
+        </div>
       </div>
       {!editable && (
         <p className="text-sm text-foreground-muted">
