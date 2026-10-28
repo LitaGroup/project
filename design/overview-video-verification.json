@@ -1,0 +1,438 @@
+{
+  "generatedAt": "2026-10-28T00:17:13.616262+08:00",
+  "artifact": "screenshots/project-ui-overview.mp4",
+  "sha256": "fe62483f00b1b606613a23ad607f4d1c2533a08d3fcba03c8e5e0edcca97bdf4",
+  "bytes": 7042464,
+  "durationSeconds": 42.5,
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "fps": 30,
+  "videoCodec": "h264",
+  "pixelFormat": "yuv420p",
+  "audio": "Silent AAC stereo track for player compatibility; no narration or captured microphone.",
+  "fixtureNotice": "All data is isolated existing browser fixtures. API writes and external HTTP requests are blocked. Real runtime animations continue unmodified. Playwright native WebM frame rate is recorded for final 30fps composition.",
+  "captureScript": "preview/record-overview.mjs",
+  "recordingFingerprint": {
+    "before": "91c28150ae616b6464386e9592d9ae9e2b282866b3b5c36a3a5edb82e0494631",
+    "after": "91c28150ae616b6464386e9592d9ae9e2b282866b3b5c36a3a5edb82e0494631",
+    "unchanged": true
+  },
+  "sourceAudit": {
+    "frontendFiles": 99,
+    "backendFiles": 181,
+    "all280HashesUnchanged": true,
+    "head": "9dc32b8b481c4ee2b7c30c27e864387eb65e9d22",
+    "stagingEmpty": true,
+    "committed": false
+  },
+  "chapterTransitionSeconds": 0.25,
+  "chapterLabel": "Small 440x40 chapter label at x=1360,y=10; real UI remains full frame.",
+  "chapters": [
+    {
+      "id": "01-tasks-board",
+      "title": "任务看板",
+      "route": "/tasks/list",
+      "durationSeconds": 6,
+      "actions": [
+        {
+          "label": "Hover the first running task",
+          "atSeconds": 1.199400146484375,
+          "detail": null,
+          "passed": true
+        },
+        {
+          "label": "Expand existing live log",
+          "atSeconds": 2.699400146484375,
+          "detail": {
+            "expanded": "true"
+          },
+          "passed": true
+        },
+        {
+          "label": "Read expanded live output",
+          "atSeconds": 4.500400146484375,
+          "detail": null,
+          "passed": true
+        }
+      ],
+      "errors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "startSeconds": 0,
+      "endSeconds": 6,
+      "knownConsoleWarnings": [],
+      "notes": []
+    },
+    {
+      "id": "02-tasks-overview",
+      "title": "任务概览",
+      "route": "/tasks",
+      "durationSeconds": 4,
+      "actions": [
+        {
+          "label": "Hover the existing status surface",
+          "atSeconds": 1.599300048828125,
+          "detail": null,
+          "passed": true
+        }
+      ],
+      "errors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "startSeconds": 5.75,
+      "endSeconds": 9.75,
+      "knownConsoleWarnings": [],
+      "notes": []
+    },
+    {
+      "id": "03-task-detail",
+      "title": "任务对话与交付物",
+      "route": "/tasks/1",
+      "durationSeconds": 7,
+      "actions": [
+        {
+          "label": "Read existing running tool chip",
+          "atSeconds": 1.101,
+          "detail": null,
+          "passed": true
+        },
+        {
+          "label": "Open existing deliverables tab",
+          "atSeconds": 2.602,
+          "detail": null,
+          "passed": true
+        },
+        {
+          "label": "Return to existing pipeline",
+          "atSeconds": 4.801,
+          "detail": null,
+          "passed": true
+        }
+      ],
+      "errors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "startSeconds": 9.5,
+      "endSeconds": 16.5,
+      "knownConsoleWarnings": [
+        "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1",
+        "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1",
+        "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1"
+      ],
+      "notes": [
+        "Task chat has no reasoning renderer or reasoning fixture; no thought content is fabricated. Actual reasoning is shown in chapter 04."
+      ]
+    },
+    {
+      "id": "04-worker-debug-running",
+      "title": "机器人对话工作台",
+      "route": "/tasks/workers/1001/debug",
+      "durationSeconds": 11,
+      "actions": [
+        {
+          "label": "Fold the existing thought trace",
+          "atSeconds": 1.001,
+          "detail": {
+            "expanded": "false"
+          },
+          "passed": true
+        },
+        {
+          "label": "Expand the existing thought trace",
+          "atSeconds": 2.001,
+          "detail": {
+            "expanded": "true"
+          },
+          "passed": true
+        },
+        {
+          "label": "Focus existing composer without sending",
+          "atSeconds": 3.2,
+          "detail": {
+            "sendDisabled": true
+          },
+          "passed": true
+        },
+        {
+          "label": "Keep active AI identity in view",
+          "atSeconds": 6.702,
+          "detail": null,
+          "passed": true
+        }
+      ],
+      "errors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "startSeconds": 16.25,
+      "endSeconds": 27.25,
+      "knownConsoleWarnings": [],
+      "notes": []
+    },
+    {
+      "id": "05-workers-live",
+      "title": "机器人工作概览",
+      "route": "/tasks/live",
+      "durationSeconds": 5,
+      "actions": [
+        {
+          "label": "Hover working robot",
+          "atSeconds": 1.100199951171875,
+          "detail": null,
+          "passed": true
+        },
+        {
+          "label": "Compare idle robot",
+          "atSeconds": 3.098199951171875,
+          "detail": null,
+          "passed": true
+        }
+      ],
+      "errors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "startSeconds": 27,
+      "endSeconds": 32,
+      "knownConsoleWarnings": [],
+      "notes": []
+    },
+    {
+      "id": "06-project-detail",
+      "title": "项目资料与质量检查",
+      "route": "/projects/1",
+      "durationSeconds": 6,
+      "actions": [
+        {
+          "label": "Read project documents and resources",
+          "atSeconds": 1.101,
+          "detail": {
+            "interrupted": false
+          },
+          "passed": true
+        },
+        {
+          "label": "Scroll to actual quality checks",
+          "atSeconds": 3.102,
+          "detail": {
+            "interrupted": false
+          },
+          "passed": true
+        },
+        {
+          "label": "Hover existing check link",
+          "atSeconds": 4.901,
+          "detail": null,
+          "passed": true
+        }
+      ],
+      "errors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "startSeconds": 31.75,
+      "endSeconds": 37.75,
+      "knownConsoleWarnings": [],
+      "notes": []
+    },
+    {
+      "id": "07-knowledge-search",
+      "title": "知识搜索",
+      "route": "/docs/search?q=%E4%BB%BB%E5%8A%A1",
+      "durationSeconds": 5,
+      "actions": [
+        {
+          "label": "Read an existing result",
+          "atSeconds": 1.001,
+          "detail": null,
+          "passed": true
+        },
+        {
+          "label": "Focus the current query",
+          "atSeconds": 2,
+          "detail": null,
+          "passed": true
+        },
+        {
+          "label": "Scroll existing search snippets",
+          "atSeconds": 3.201,
+          "detail": {
+            "interrupted": false
+          },
+          "passed": true
+        }
+      ],
+      "errors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "startSeconds": 37.5,
+      "endSeconds": 42.5,
+      "knownConsoleWarnings": [],
+      "notes": []
+    }
+  ],
+  "qa": {
+    "checkedAt": "2026-10-27T16:14:39.329624+00:00",
+    "artifact": "design/screenshots/project-ui-overview.mp4",
+    "sha256": "fe62483f00b1b606613a23ad607f4d1c2533a08d3fcba03c8e5e0edcca97bdf4",
+    "metadata": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "width": 1920,
+          "height": 1080,
+          "r_frame_rate": "30/1",
+          "nb_frames": "1275"
+        },
+        {
+          "codec_name": "aac",
+          "r_frame_rate": "0/0",
+          "nb_frames": "1994"
+        }
+      ],
+      "format": {
+        "duration": "42.500000",
+        "size": "7042464"
+      }
+    },
+    "rawBoundarySamples": 14,
+    "finalSamples": 13,
+    "additionalMotionSamples": 9,
+    "manualInspection": [
+      "raw-sheet.jpg: all seven trimmed starts+ends",
+      "final-sheet.jpg: seven chapter midpoints+six crossfades",
+      "final-01-mid.png: board full frame",
+      "final-04-mid.png: debug full frame",
+      "motion-sheet.png: real recorded digit/border/symbol changes"
+    ],
+    "checks": {
+      "rawStartsAndEndsContainRealUI": true,
+      "noLoadingWhiteScreenInSamples": true,
+      "noVisibleErrorBannerInSamples": true,
+      "noCoreContentOrControlsUnexpectedlyClipped": true,
+      "chapterLabelsReadableAndUserInfoUnobstructed": true,
+      "sevenChapterSequenceCorrect": true,
+      "crossfadesShowIntentionalBlendedAdjacentScenes": true,
+      "digitReelsShowIntermediateRowsThenTarget": true,
+      "geminiRingSpectrumChangesOverTime": true,
+      "workingSymbolShowsRotationAndQuietRest": true,
+      "taskLogExpandedInPlace": true,
+      "deliverablesTabActuallyShown": true,
+      "debugThoughtAndComposerFocusActuallyShown": true,
+      "projectContentActuallyScrolls": true,
+      "fullVideoDecodeExitZero": true,
+      "noBlackGapAtStrictThemeSafeThreshold": true
+    },
+    "observations": [
+      "Top board counters show8/8/8 at trim+0.1s, moving rows at+0.32s, and target2/2/2 at+1.0s. This is actual runtime footage, not an overlay of generated values.",
+      "The running-task border changes from blue/violet to warm/cyan across stable post-expansion frames.",
+      "Working-symbol crops at2.2s/3.8s have different orientations;7.2s/8.2s show the intended rest. Small nonzero pixel differences during rest/brand comparison are consistent with compressed video and are not used as proof of DOM motion.",
+      "Project detail begins at documents/resources and ends at branch/check sections. Knowledge search shows actual hover/query focus; its short existing results fit the viewport, so the chapter does not visibly scroll content.",
+      "At crossfade centers, two adjacent page layouts and labels naturally overlap for0.25s. Normal scrolling viewport edges and reel clipping during motion are intentional."
+    ],
+    "recordingEvidence": {
+      "chapters": {
+        "chapters": 7,
+        "recorded": 7,
+        "failed": 0,
+        "totalDurationSeconds": 44
+      },
+      "sourceChangedDuringRecording": false,
+      "pageErrors": 0,
+      "unmatchedApi": 0,
+      "blockedWrites": 0,
+      "knownBaselineConsoleWarnings": 3
+    },
+    "pixelMotionComparison": {
+      "reelChange": {
+        "meanAbsoluteDifference": 4.119135802469136,
+        "maxChannelDifference": 255,
+        "bbox": [
+          950,
+          274,
+          1850,
+          307
+        ]
+      },
+      "geminiBorderChange": {
+        "meanAbsoluteDifference": 15.502380952380951,
+        "maxChannelDifference": 144,
+        "bbox": [
+          828,
+          428,
+          1328,
+          435
+        ]
+      },
+      "workingSymbolDuringMotion": {
+        "meanAbsoluteDifference": 14.98731884057971,
+        "maxChannelDifference": 202,
+        "bbox": [
+          324,
+          112,
+          347,
+          136
+        ]
+      },
+      "workingSymbolDuringRest": {
+        "meanAbsoluteDifference": 2.567028985507246,
+        "maxChannelDifference": 26,
+        "bbox": [
+          324,
+          112,
+          347,
+          136
+        ]
+      },
+      "brandSymbolSameInterval": {
+        "meanAbsoluteDifference": 5.116545893719807,
+        "maxChannelDifference": 42,
+        "bbox": [
+          46,
+          6,
+          69,
+          30
+        ]
+      },
+      "projectContentScroll": {
+        "meanAbsoluteDifference": 14.429612483953788,
+        "maxChannelDifference": 249,
+        "bbox": [
+          280,
+          180,
+          1800,
+          1000
+        ]
+      }
+    },
+    "passed": true,
+    "blackGapCheck": {
+      "filter": "blackdetect=d=0.04:pix_th=0.02:pic_th=0.98",
+      "exitCode": 0,
+      "detectedGaps": [],
+      "passed": true,
+      "notice": "The threshold deliberately distinguishes the existing near-black theme from a missing/all-black video frame."
+    }
+  },
+  "summary": {
+    "chapters": 7,
+    "successfulReadOnlyActions": 19,
+    "pageErrors": 0,
+    "unmatchedApi": 0,
+    "businessWrites": 0,
+    "fullDecodePassed": true,
+    "qaPassed": true,
+    "blackGaps": 0,
+    "sourceUnchanged": true
+  },
+  "cleanup": {
+    "temporaryDirectory": "work/overview-video",
+    "rawWebmAndNormalizedClipsAndFrameSamples": "Removed after final validation; one final overview movie retained.",
+    "sharedRuntimeAndPreviewServices": "Preserved.",
+    "temporaryFilesRemoved": 70,
+    "temporaryBytesRemoved": 27533267,
+    "workDirectoryAbsent": true,
+    "completed": true
+  }
+}

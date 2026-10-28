@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Input } from '@appica/ui-react/input'
 import { Toolbar, ToolbarInput } from '@appica/ui-react/toolbar'
 import { api, type Project, type ProjectCheck } from '../lib/api'
@@ -45,7 +45,7 @@ export function ChecksPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="responsive-page-header mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">检查</h1>
       </div>
 

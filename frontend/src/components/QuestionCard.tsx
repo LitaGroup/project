@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { buttonVariants } from '@appica/ui-react/button'
 import { Check, MessageCircleQuestion } from '@appica/icons-react'
 import type { TaskChatQuestion } from '../lib/api'
+import { questionStatusLabel } from '../lib/question'
+import './beui/beui.css'
 
 interface QuestionCardProps {
   question: TaskChatQuestion
@@ -82,103 +84,107 @@ export function QuestionCard({
   }
 
   return (
-    <div className="rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-4 py-3 shadow-sm">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-info-foreground">
+    <div className="beui-approval-card" data-question-id={question.id} data-question-state={question.state}>
+      <div className="beui-approval-heading">
         <MessageCircleQuestion className="size-4" />
         机器人向你提问
+        {pending && <span className="beui-approval-badge">{questionStatusLabel(question, undefined, disabled)}</span>}
       </div>
 
       {pending ? (
-        <div className="space-y-3">
-          {question.questions.map((info, index) => {
-            const multiple = info.multiple === true
-            const picks = picked[index] ?? []
-            return (
-              <div key={index} className="space-y-1.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  {info.header && (
-                    <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium text-foreground-muted">
-                      {info.header}
-                    </span>
-                  )}
-                  {multiple && (
-                    <span className="text-[10px] text-foreground-subtle">
-                      可多选
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm font-medium text-foreground-intense">
-                  {info.question}
-                </p>
-                {info.options && info.options.length > 0 && (
-                  <div className="grid gap-1.5">
-                    {info.options.map((option) => {
-                      const active = picks.includes(option.label)
-                      return (
-                        <button
-                          key={option.label}
-                          type="button"
-                          disabled={!interactive || submitting}
-                          onClick={() => toggle(index, option.label, multiple)}
-                          className={`flex w-full items-start gap-2 rounded-[var(--radius-md)] border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                            active
-                              ? 'border-primary-strong bg-primary-soft text-foreground-intense'
-                              : 'border-border bg-background hover:border-border-strong'
-                          }`}
-                        >
-                          <span
-                            className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border ${
-                              multiple
-                                ? 'rounded-[var(--radius-sm)]'
-                                : 'rounded-full'
-                            } ${
+        <div className="beui-approval-form">
+          <div className="beui-approval-fields space-y-3">
+            {question.questions.map((info, index) => {
+              const multiple = info.multiple === true
+              const picks = picked[index] ?? []
+              return (
+                <div key={index} className="space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {info.header && (
+                      <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium text-foreground-muted">
+                        {info.header}
+                      </span>
+                    )}
+                    {multiple && (
+                      <span className="text-[10px] text-foreground-subtle">
+                        可多选
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-medium text-foreground-intense">
+                    {info.question}
+                  </p>
+                  {info.options && info.options.length > 0 && (
+                    <div className="grid gap-1.5">
+                      {info.options.map((option) => {
+                        const active = picks.includes(option.label)
+                        return (
+                          <button
+                            key={option.label}
+                            type="button"
+                            aria-pressed={active}
+                            disabled={!interactive || submitting}
+                            onClick={() => toggle(index, option.label, multiple)}
+                            className={`flex w-full items-start gap-2 rounded-[var(--radius-md)] border px-3 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                               active
-                                ? 'border-primary-strong bg-primary text-primary-foreground'
-                                : 'border-border-strong'
+                                ? 'border-primary-strong bg-primary-soft text-foreground-intense'
+                                : 'border-border bg-background hover:border-border-strong'
                             }`}
                           >
-                            {active && <Check className="size-3" />}
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block font-medium">
-                              {option.label}
+                            <span
+                              className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border ${
+                                multiple
+                                  ? 'rounded-[var(--radius-sm)]'
+                                  : 'rounded-full'
+                              } ${
+                                active
+                                  ? 'border-primary-strong bg-primary text-primary-foreground'
+                                  : 'border-border-strong'
+                              }`}
+                            >
+                              {active && <Check className="size-3" />}
                             </span>
-                            {option.description && (
-                              <span className="mt-0.5 block text-xs text-foreground-muted">
-                                {option.description}
+                            <span className="min-w-0">
+                              <span className="block font-medium">
+                                {option.label}
                               </span>
-                            )}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-                {info.custom !== false && (
-                  <input
-                    value={texts[index] ?? ''}
-                    disabled={!interactive || submitting}
-                    onChange={(event) =>
-                      setTexts((current) => ({
-                        ...current,
-                        [index]: event.target.value,
-                      }))
-                    }
-                    placeholder="也可以直接输入你的回答"
-                    className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-foreground-subtle focus:border-border-strong disabled:opacity-60"
-                  />
-                )}
-              </div>
-            )
-          })}
+                              {option.description && (
+                                <span className="mt-0.5 block text-xs text-foreground-muted">
+                                  {option.description}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {info.custom !== false && (
+                    <input
+                      value={texts[index] ?? ''}
+                      disabled={!interactive || submitting}
+                      onChange={(event) =>
+                        setTexts((current) => ({
+                          ...current,
+                          [index]: event.target.value,
+                        }))
+                      }
+                      placeholder="也可以直接输入你的回答"
+                      className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-foreground-subtle focus:border-border-strong disabled:opacity-60"
+                    />
+                  )}
+                </div>
+              )
+            })}
 
-          {error && (
-            <p role="alert" className="text-xs text-error-foreground">
-              {error}
-            </p>
-          )}
+            {error && (
+              <p role="alert" className="text-xs text-error-foreground">
+                {error}
+              </p>
+            )}
+          </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="beui-approval-actions">
             <p className="text-[11px] text-foreground-muted">
               {question.questions.length > 1
                 ? `共 ${question.questions.length} 个问题，全部回答后可提交`
@@ -208,6 +214,8 @@ export function QuestionCard({
           </div>
         </div>
       ) : (
+        <details className="beui-approval-receipt">
+          <summary>确认记录 · {questionStatusLabel(question)}</summary>
         <div className="space-y-2">
           {question.questions.map((info, index) => (
             <div key={index} className="space-y-1">
@@ -238,6 +246,7 @@ export function QuestionCard({
             </div>
           ))}
         </div>
+        </details>
       )}
     </div>
   )

@@ -1,0 +1,741 @@
+{
+  "verifiedAt": "2026-10-28T13:15:21.938Z",
+  "mode": "isolated read-only Docker fixtures; no backend/model/production requests",
+  "baseline": [
+    {
+      "actionsBottom": 882.4666748046875,
+      "approvalFields": [
+        {
+          "height": 160,
+          "scrollHeight": 962
+        }
+      ],
+      "composerBottom": 833.4666748046875,
+      "footerBottom": 902.4666748046876,
+      "footerHeight": 597,
+      "footerOverflow": "visible",
+      "footerScrollHeight": 597,
+      "footerScrollTop": 0,
+      "height": 720,
+      "horizontalOverflow": false,
+      "paneBottom": 687.0682220458984,
+      "paneHeight": 488,
+      "paneTop": 199.06822204589844,
+      "pendingCards": 1,
+      "transcriptHeight": 52,
+      "width": 1280
+    },
+    {
+      "actionsBottom": 890,
+      "approvalFields": [
+        {
+          "height": 194,
+          "scrollHeight": 902
+        }
+      ],
+      "composerBottom": 841,
+      "footerBottom": 910,
+      "footerHeight": 605,
+      "footerOverflow": "visible",
+      "footerScrollHeight": 605,
+      "footerScrollTop": 0,
+      "height": 800,
+      "horizontalOverflow": false,
+      "paneBottom": 767,
+      "paneHeight": 568,
+      "paneTop": 199,
+      "pendingCards": 1,
+      "transcriptHeight": 52,
+      "width": 1440
+    }
+  ],
+  "matrix": [
+    {
+      "task": 4,
+      "width": 1280,
+      "height": 720,
+      "transcriptHeight": 64,
+      "panelBottom": 687.0493621826172,
+      "footerHeight": 369,
+      "footerScrollHeight": 597,
+      "footerScrollTop": 228.5,
+      "actionsBottom": 665.9114990234375,
+      "composerBottom": 616.9114990234375,
+      "pendingCards": 1,
+      "passed": true
+    },
+    {
+      "task": 5,
+      "width": 1280,
+      "height": 720,
+      "transcriptHeight": 64,
+      "panelBottom": 687.0744171142578,
+      "footerHeight": 369,
+      "footerScrollHeight": 585,
+      "footerScrollTop": 216.5,
+      "actionsBottom": 665.9234008789062,
+      "composerBottom": 616.9234008789062,
+      "pendingCards": 3,
+      "passed": true
+    },
+    {
+      "task": 4,
+      "width": 1440,
+      "height": 800,
+      "transcriptHeight": 64,
+      "panelBottom": 767.0640716552734,
+      "footerHeight": 449,
+      "footerScrollHeight": 605,
+      "footerScrollTop": 156,
+      "actionsBottom": 746.0186157226562,
+      "composerBottom": 697.0186157226562,
+      "pendingCards": 1,
+      "passed": true
+    },
+    {
+      "task": 5,
+      "width": 1440,
+      "height": 800,
+      "transcriptHeight": 64,
+      "panelBottom": 767.0726013183594,
+      "footerHeight": 449,
+      "footerScrollHeight": 587,
+      "footerScrollTop": 138,
+      "actionsBottom": 746.02197265625,
+      "composerBottom": 697.02197265625,
+      "pendingCards": 3,
+      "passed": true
+    },
+    {
+      "task": 4,
+      "width": 1440,
+      "height": 600,
+      "transcriptHeight": 64,
+      "panelBottom": 567.0712890625,
+      "footerHeight": 249,
+      "footerScrollHeight": 521,
+      "footerScrollTop": 272,
+      "actionsBottom": 546.041015625,
+      "composerBottom": 497.0410461425781,
+      "pendingCards": 1,
+      "passed": true
+    },
+    {
+      "task": 5,
+      "width": 1440,
+      "height": 600,
+      "transcriptHeight": 64,
+      "panelBottom": 567.0665435791016,
+      "footerHeight": 249,
+      "footerScrollHeight": 503,
+      "footerScrollTop": 254,
+      "actionsBottom": 546.0216064453125,
+      "composerBottom": 497.0216369628906,
+      "pendingCards": 3,
+      "passed": true
+    },
+    {
+      "task": 4,
+      "width": 1920,
+      "height": 1080,
+      "transcriptHeight": 136,
+      "panelBottom": 1043.0640716552734,
+      "footerHeight": 649,
+      "footerScrollHeight": 649,
+      "footerScrollTop": 0,
+      "actionsBottom": 1022.020263671875,
+      "composerBottom": 973.020263671875,
+      "pendingCards": 1,
+      "passed": true
+    },
+    {
+      "task": 5,
+      "width": 1920,
+      "height": 1080,
+      "transcriptHeight": 154,
+      "panelBottom": 1043.046142578125,
+      "footerHeight": 631,
+      "footerScrollHeight": 631,
+      "footerScrollTop": 0,
+      "actionsBottom": 1022.0130615234376,
+      "composerBottom": 973.0130615234376,
+      "pendingCards": 3,
+      "passed": true
+    },
+    {
+      "task": 4,
+      "width": 360,
+      "height": 640,
+      "transcriptHeight": 754,
+      "panelBottom": 1709.9727783203125,
+      "footerHeight": 536,
+      "footerScrollHeight": 536,
+      "footerScrollTop": 0,
+      "actionsBottom": 335.9263916015625,
+      "composerBottom": 262.4263916015625,
+      "pendingCards": 1,
+      "passed": true
+    },
+    {
+      "task": 5,
+      "width": 360,
+      "height": 640,
+      "transcriptHeight": 754,
+      "panelBottom": 1709.9727783203125,
+      "footerHeight": 536,
+      "footerScrollHeight": 536,
+      "footerScrollTop": 0,
+      "actionsBottom": 335.9442138671875,
+      "composerBottom": 262.4442138671875,
+      "pendingCards": 3,
+      "passed": true
+    }
+  ],
+  "selection": {
+    "childDisabled": true,
+    "footerScrollTop": 216.5,
+    "input": "短窗口滚动后保留的确认内容",
+    "selected": "true"
+  },
+  "returnToQuestions": {
+    "fieldsScroll": 2372.5,
+    "footerScroll": 0,
+    "input": "短窗口滚动后保留的确认内容",
+    "selected": "true"
+  },
+  "mouseScroll": {
+    "actionsBottom": 665.8984375,
+    "approvalFields": [
+      {
+        "height": 160,
+        "scrollHeight": 2533
+      },
+      {
+        "height": 160,
+        "scrollHeight": 2533
+      },
+      {
+        "height": 160,
+        "scrollHeight": 2533
+      }
+    ],
+    "composerBottom": 616.8984375,
+    "footerBottom": 686,
+    "footerHeight": 369,
+    "footerOverflow": "auto",
+    "footerScrollHeight": 585,
+    "footerScrollTop": 216.5,
+    "height": 720,
+    "horizontalOverflow": false,
+    "paneBottom": 687,
+    "paneHeight": 488,
+    "paneTop": 199,
+    "pendingCards": 3,
+    "transcriptHeight": 64,
+    "width": 1280
+  },
+  "previousFixRegression": [
+    {
+      "task": 2,
+      "actionsBottom": 666.0682373046875,
+      "approvalFields": [],
+      "composerBottom": 617.0682373046875,
+      "footerBottom": 686.0682373046875,
+      "footerHeight": 328,
+      "footerOverflow": "auto",
+      "footerScrollHeight": 328,
+      "footerScrollTop": 0,
+      "height": 720,
+      "horizontalOverflow": false,
+      "paneBottom": 687.0682220458984,
+      "paneHeight": 488,
+      "paneTop": 199.06822204589844,
+      "pendingCards": 0,
+      "transcriptHeight": 105,
+      "width": 1280
+    },
+    {
+      "task": 3,
+      "actionsBottom": 666.0673828125,
+      "approvalFields": [],
+      "composerBottom": 617.0673828125,
+      "footerBottom": 686.0673828125,
+      "footerHeight": 328,
+      "footerOverflow": "auto",
+      "footerScrollHeight": 328,
+      "footerScrollTop": 0,
+      "height": 720,
+      "horizontalOverflow": false,
+      "paneBottom": 687.0673828125,
+      "paneHeight": 488,
+      "paneTop": 199.0673828125,
+      "pendingCards": 0,
+      "transcriptHeight": 105,
+      "width": 1280
+    }
+  ],
+  "summary": {
+    "passed": 88,
+    "total": 88
+  },
+  "checks": [
+    {
+      "name": "Baseline 1280x720: clipped actions",
+      "passed": true
+    },
+    {
+      "name": "Baseline 1440x800: clipped actions",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task4: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task4: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task4: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task4: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task4: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task4: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task4: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task4: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task5: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task5: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task5: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task5: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task5: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task5: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task5: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "1280x720 task5: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task4: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task4: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task4: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task4: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task4: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task4: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task4: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task4: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task5: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task5: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task5: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task5: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task5: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task5: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task5: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "1440x800 task5: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task4: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task4: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task4: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task4: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task4: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task4: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task4: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task4: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task5: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task5: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task5: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task5: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task5: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task5: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task5: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "1440x600 task5: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task4: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task4: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task4: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task4: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task4: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task4: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task4: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task4: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task5: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task5: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task5: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task5: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task5: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task5: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task5: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "1920x1080 task5: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "360x640 task4: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "360x640 task4: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "360x640 task4: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "360x640 task4: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "360x640 task4: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "360x640 task4: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "360x640 task4: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "360x640 task4: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "360x640 task5: expected viewport",
+      "passed": true
+    },
+    {
+      "name": "360x640 task5: transcript retained",
+      "passed": true
+    },
+    {
+      "name": "360x640 task5: footer bounded by panel",
+      "passed": true
+    },
+    {
+      "name": "360x640 task5: all pending cards retained",
+      "passed": true
+    },
+    {
+      "name": "360x640 task5: fields have scrollable space",
+      "passed": true
+    },
+    {
+      "name": "360x640 task5: actions reachable",
+      "passed": true
+    },
+    {
+      "name": "360x640 task5: composer reachable",
+      "passed": true
+    },
+    {
+      "name": "360x640 task5: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "Selection and free input retained at actions",
+      "passed": true
+    },
+    {
+      "name": "Selection retained on return to questions",
+      "passed": true
+    },
+    {
+      "name": "Child stage original disabled state retained",
+      "passed": true
+    },
+    {
+      "name": "Mouse wheel reaches actions",
+      "passed": true
+    },
+    {
+      "name": "Previous fix task2 remains reachable",
+      "passed": true
+    },
+    {
+      "name": "Previous fix task3 remains reachable",
+      "passed": true
+    }
+  ],
+  "sourceScope": {
+    "auditedAt": "2026-10-28T13:06:32.643Z",
+    "baseline": "ac49bd2581249cdf4c20a02268e56b63521d8b7d",
+    "uiHeadBeforeMerge": "f2bea76e0b42112a7d9a204853a13563ad23ad9f",
+    "checks": [
+      {
+        "name": "All branch-specific changes are frontend or design",
+        "passed": true
+      },
+      {
+        "name": "backend matches main",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/lib/api.ts matches main",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/App.tsx matches main",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/context matches main",
+        "passed": true
+      },
+      {
+        "name": "frontend/package.json matches main",
+        "passed": true
+      },
+      {
+        "name": "package.json matches main",
+        "passed": true
+      },
+      {
+        "name": "pnpm-lock.yaml matches main",
+        "passed": true
+      },
+      {
+        "name": "Debug snapshot/SSE/send/reply/reset unchanged",
+        "passed": true
+      },
+      {
+        "name": "Question state/answers/toggle/submit unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/ScriptLibraryDetailPage.tsx:ScriptLibraryDetailPage business prefix unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/TaskTypesPage.tsx:TypeFormDialog business prefix unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/TaskTypesPage.tsx:DeleteTypeButton business prefix unchanged",
+        "passed": true
+      },
+      {
+        "name": "Debug onNew only adds failed-send draft restoration",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/WorkerDebugPage.tsx:toThreadMessage unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/WorkerDebugPage.tsx:customOf unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:onNew unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:toThreadMessage unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:customOf unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:readAutoAnswer unchanged",
+        "passed": true
+      },
+      {
+        "name": "Task footer/assignment actions and guards unchanged except classes",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/WorkerDebugPage.tsx: original send guard",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx: original send guard",
+        "passed": true
+      },
+      {
+        "name": "All API call expressions match main",
+        "passed": true
+      }
+    ],
+    "outOfScope": [],
+    "apiDifferences": [],
+    "passed": true
+  }
+}

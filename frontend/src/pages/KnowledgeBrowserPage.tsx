@@ -25,13 +25,13 @@ import {
 import { Input } from '@appica/ui-react/input'
 import { Textarea } from '@appica/ui-react/textarea'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Book, Folder } from '@appica/icons-react'
 import {
   api,
@@ -167,8 +167,8 @@ function KnowledgeDirectoryView({
 }) {
   const total = directory.directories.length + directory.articles.length
   return (
-    <div className="flex h-full min-h-0 gap-5">
-      <aside className="w-56 shrink-0 border-r border-border-strong pr-4">
+    <div className="responsive-knowledge-directory flex h-full min-h-0 gap-5">
+      <aside className="knowledge-directory-sidebar w-56 shrink-0 border-r border-border-strong pr-4">
         <Link
           to={knowledgeWebPath('/', true)}
           className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-foreground-intense hover:bg-background-muted"
@@ -177,7 +177,7 @@ function KnowledgeDirectoryView({
           知识库
         </Link>
         <p className="mt-4 mb-1 px-2 text-xs text-foreground-muted">当前目录</p>
-        <div className="flex flex-col gap-0.5">
+        <div className="knowledge-directory-links flex flex-col gap-0.5">
           {directory.directories.map((node) => (
             <Link
               key={node.id}
@@ -197,7 +197,7 @@ function KnowledgeDirectoryView({
 
       <div className="min-w-0 flex-1">
         <PageBreadcrumb items={crumbs} />
-        <div className="mt-3 mb-4 flex items-center justify-between gap-4">
+        <div className="detail-section-heading mt-3 mb-4 flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">
               {directory.path === '/' ? '知识库' : directory.title}
@@ -327,9 +327,9 @@ function KnowledgeArticleView({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="responsive-knowledge-article flex h-full min-h-0 flex-col gap-3">
       <PageBreadcrumb items={crumbs} />
-      <div className="flex items-start justify-between gap-4">
+      <div className="knowledge-article-heading flex items-start justify-between gap-4">
         <div className="min-w-0">
           {editable ? (
             <Input
@@ -352,7 +352,7 @@ function KnowledgeArticleView({
             <span>更新于 {new Date(article.updatedAt).toLocaleString()}</span>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="knowledge-article-actions flex shrink-0 items-center gap-2">
           <a
             href={knowledgeMdPath(article.path, false)}
             target="_blank"
@@ -387,7 +387,7 @@ function KnowledgeArticleView({
         </div>
       </div>
       {error && <p className="text-sm">保存失败：{error}</p>}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-background">
+      <div className="knowledge-article-editor flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-background">
         {/* 正文超出一屏时在面板内滚动：外层 overflow-hidden 只负责圆角裁剪 */}
         <div className="min-h-0 flex-1 overflow-auto">
           <MarkdownEditor

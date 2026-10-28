@@ -1,0 +1,147 @@
+/* Dashboard 5 surfaces and spacing, with localized Gemini task effects. */
+.square-shell { background: var(--square-sidebar); }
+.square-shell .square-header {
+  height: 60px;
+  border-color: var(--border);
+  background: var(--square-sidebar);
+  box-shadow: none;
+}
+.square-shell .square-brand-mark { background: var(--background-strong); box-shadow: none; }
+.square-shell .square-brand-mark span { background: var(--foreground-intense); }
+.square-shell .square-topnav > a { padding: 7px 15px; }
+.square-shell .square-topnav > a[aria-current='page'] { color: var(--foreground-intense); }
+.square-shell .square-topnav > a > span[aria-hidden] { background: var(--background-strong); box-shadow: none; }
+.square-shell .square-sidebar {
+  width: 240px;
+  padding: 18px 12px;
+  border: 0;
+  background: var(--square-sidebar);
+}
+.square-shell .square-sidebar [data-slot='navigation-link'] {
+  --menu-icon: var(--foreground-muted);
+  min-height: 38px;
+  padding: 9px 12px;
+  color: var(--foreground-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.square-shell .square-sidebar [data-slot='navigation-link'][data-active] { color: var(--foreground-intense); font-weight: 500; box-shadow: none; }
+.square-shell .square-sidebar [data-slot='navigation-link'][data-active]::before,
+.square-shell .square-sidebar [data-slot='navigation-link']:hover::before { background: var(--background-strong); border: 0; }
+.square-shell .square-sidebar [data-slot='navigation-link'] svg { width: 17px; height: 17px; color: var(--menu-icon); filter: none; }
+.square-shell .square-sidebar a[href='/'],
+.square-shell .square-sidebar a[href='/tasks'],
+.square-shell .square-sidebar a[href='/checks'] { --menu-icon: var(--square-icon-blue); }
+.square-shell .square-sidebar a[href='/projects'],
+.square-shell .square-sidebar a[href='/tasks/live'],
+.square-shell .square-sidebar a[href='/tests'] { --menu-icon: var(--square-icon-emerald); }
+.square-shell .square-sidebar a[href='/tasks/list'],
+.square-shell .square-sidebar a[href='/documents'],
+.square-shell .square-sidebar a[href='/code/repos'] { --menu-icon: var(--square-icon-cyan); }
+.square-shell .square-sidebar a[href='/tasks/templates'],
+.square-shell .square-sidebar a[href='/docs/detail/'],
+.square-shell .square-sidebar a[href='/scripts'] { --menu-icon: var(--square-icon-violet); }
+.square-shell .square-sidebar a[href='/tasks/workers'],
+.square-shell .square-sidebar a[href='/defects'],
+.square-shell .square-sidebar a[href='/admin/users'] { --menu-icon: var(--square-icon-rose); }
+.square-shell .square-sidebar a[href='/tasks/executors'],
+.square-shell .square-sidebar a[href='/schedules'],
+.square-shell .square-sidebar a[href='/milestones'] { --menu-icon: var(--square-icon-orange); }
+.square-shell .square-sidebar a[href='/tasks/types'],
+.square-shell .square-sidebar a[href='/exports'],
+.square-shell .square-sidebar a[href='/resources'] { --menu-icon: var(--square-icon-amber); }
+.square-shell .square-sidebar a[href='/docs/scripts'],
+.square-shell .square-sidebar a[href='/commits'],
+.square-shell .square-sidebar a[href='/apps'] { --menu-icon: var(--square-icon-sky); }
+.square-shell .square-page {
+  height: calc(100dvh - 76px);
+  margin: 8px 8px 8px 0;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--square-control-radius);
+  background: var(--square-canvas);
+}
+.square-shell .square-page h1 { color: var(--foreground-intense); font-size: 24px; font-weight: 600; letter-spacing: -0.6px; text-shadow: none; }
+.square-shell .square-page h1 + p { margin-top: 6px; font-size: 12px; }
+.square-shell [data-slot='card-content'] { border-color: var(--border); box-shadow: none; }
+.square-shell [data-slot='card-title'] { font-size: 14px; font-weight: 500; }
+.square-shell [data-slot='table'] { padding: 0; border-color: var(--border); border-radius: var(--radius-lg); box-shadow: none; }
+.square-shell [data-slot='table'] > thead > tr > th { background: var(--background); color: var(--foreground-muted); font-size: 12px; font-weight: 500; border-bottom: 1px solid var(--border); }
+.square-shell [data-slot='table'] td { padding-block: 14px; border-color: var(--border-muted); }
+.square-shell [data-slot='table'] tbody > tr:hover { background: color-mix(in srgb,var(--background-strong) 50%,transparent); }
+.square-shell [data-slot='badge'] { border-radius: var(--square-control-radius); font-size: 11px; font-weight: 500; }
+.square-shell .square-page a[class*='inline-flex'][href$='/new'] { border-radius: var(--square-control-radius); box-shadow: none; }
+.square-shell [data-slot='input-wrapper']:focus-within,
+.square-shell [data-slot='input']:focus-visible,
+.square-shell [data-slot='select-trigger']:focus-visible,
+.square-shell [data-slot='textarea']:focus-visible { border-color: var(--border-emphasis); box-shadow: 0 0 0 2px var(--primary-soft); }
+
+/* One compact live strip leaves the workspace to the actual task cards. */
+.square-shell .tasks-page { gap: 20px; }
+.square-shell .tasks-page .tasks-page-header { gap: 16px; padding: 0; }
+.square-shell .tasks-page .tasks-page-title { font-size: 24px; font-weight: 600; letter-spacing: -0.6px; background: none; -webkit-text-fill-color: currentColor; text-shadow: none; animation: none; }
+.square-shell .tasks-page .tasks-page-description { margin-top: 6px; color: var(--foreground-muted); font-size: 12px; }
+.square-shell .tasks-page .tasks-page-create { min-height: 34px; padding-inline: 16px; font-size: 12px; font-weight: 500; color: var(--primary-foreground); background: var(--primary); box-shadow: none; }
+.square-shell .tasks-page .tasks-page-create:hover { background: var(--primary-strong); }
+.square-shell .tasks-page .tasks-page-tabs { gap: 24px; }
+.square-shell .tasks-page .tasks-page-tabs [role='tab'] { padding-bottom: 12px; font-size: 13px; }
+.square-shell .tasks-page .tasks-board { gap: 20px; }
+.square-shell .tasks-page .task-board-overview { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--background); box-shadow: none; }
+.square-shell .tasks-page .task-board-overview-content { display: flex; flex-wrap: nowrap; align-items: center; gap: 24px; padding: 16px 20px; }
+.square-shell .tasks-page .task-board-overview-content > div:first-child { flex: 1.35; min-width: 0; gap: 12px; }
+.square-shell .tasks-page .task-board-overview-icon { width: 36px; height: 36px; color: var(--info); background: var(--info-soft); border-radius: var(--square-control-radius); box-shadow: none; }
+.square-shell .tasks-page .task-board-overview-content > div:first-child p:first-child { font-size: 13px; font-weight: 500; }
+.square-shell .tasks-page .task-board-overview-content > div:first-child p:last-child { color: var(--foreground-subtle); font-size: 10px; }
+.square-shell .tasks-page .task-board-connection { border-radius: var(--square-control-radius); }
+.square-shell .tasks-page .task-board-metrics { flex: 2; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0; }
+.square-shell .tasks-page .task-board-metric { position: relative; padding-left: 24px; border-left: 1px solid var(--border); }
+.square-shell .tasks-page .task-board-metric-value { margin-top: 6px; color: var(--foreground-intense); font-size: 24px; font-weight: 500; line-height: 1; letter-spacing: -0.6px; text-shadow: none; }
+.square-shell .tasks-page .task-board-distribution { height: 2px; opacity: 0.75; }
+.square-shell .tasks-page .tasks-board-columns { gap: 16px; }
+.square-shell .tasks-page .task-board-column { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--background-muted); box-shadow: none; }
+.square-shell .tasks-page .task-board-column-accent { height: 0; }
+.square-shell .tasks-page .task-board-column-header { padding: 16px; border-bottom: 1px solid var(--border); background: var(--background); }
+.square-shell .tasks-page .task-board-column-header h2 { font-size: 13px; font-weight: 500; }
+.square-shell .tasks-page .task-board-column-header p { margin-top: 3px; color: var(--foreground-subtle); font-size: 10px; }
+.square-shell .tasks-page .task-board-column-icon { width: 30px; height: 30px; background: color-mix(in srgb,var(--task-column-status-color) 10%,transparent); color: var(--task-column-status-color); border-radius: var(--square-control-radius); box-shadow: none; }
+.square-shell .tasks-page .task-board-column-count { min-width: 26px; height: 25px; border: 1px solid var(--border); border-radius: var(--square-control-radius); background: var(--background-strong); color: var(--foreground-muted); font-size: 11px; font-weight: 500; }
+.square-shell .tasks-page .task-board-column-list { gap: 16px; padding: 16px 14px 18px; scroll-padding-top: 16px; }
+.square-shell .tasks-page .task-board-card { border-radius: var(--radius-lg); }
+.square-shell .tasks-page .task-board-card-surface { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--background); box-shadow: none; transition: border-color var(--square-hover-duration),background-color var(--square-hover-duration); }
+.square-shell .tasks-page .task-board-card:hover .task-board-card-surface { border-color: var(--border-emphasis); background: var(--background-subtle); }
+.square-shell .tasks-page .task-board-card--running .task-board-card-surface,
+.square-shell .tasks-page .task-board-card--running:hover .task-board-card-surface { border-color: transparent; border-radius: calc(var(--radius-lg) - var(--square-edge-width)); background: var(--background); }
+.square-shell .tasks-page .task-board-card-link { padding: 16px 16px 14px; }
+.square-shell .tasks-page .task-board-card-link > div:first-child > div:first-child { color: var(--foreground-muted); }
+.square-shell .tasks-page .task-board-card-link .font-mono { color: var(--foreground-muted); }
+.square-shell .tasks-page .task-board-card-title { min-height: 0; margin-top: 12px; color: var(--foreground-intense); font-size: 14px; font-weight: 500; line-height: 1.6; }
+.square-shell .tasks-page .task-board-card-meta { margin-top: 18px; padding-top: 12px; border-color: var(--border); color: var(--foreground-subtle); font-size: 10px; }
+.square-shell .tasks-page .task-board-card-log { position: relative; padding: 10px 16px; color: var(--foreground-muted); border-color: var(--border); background: color-mix(in srgb,var(--background-muted) 35%,transparent); }
+.square-shell .tasks-page .task-board-card-log .font-mono { font-size: 10px; line-height: 1.8; }
+.square-shell .tasks-page .task-log-activity { width: 14px; height: 14px; color: var(--info); font-size: 14px; }
+.square-shell .tasks-page .task-board-column:not(:has(.task-board-card)) .agent-activity > span { animation-play-state: paused; opacity: 0.16; }
+.square-shell .task-overview-stats { gap: 16px; }
+.square-shell .task-overview-stat { padding: 0 16px 16px; }
+.square-shell .task-overview-stat-value { color: var(--foreground-intense); font-size: 24px; font-weight: 500; text-shadow: none; }
+@media (min-width:1536px) { .square-shell .square-page { padding: 28px 32px; } }
+@media (max-width:1100px) {
+  .square-shell .square-sidebar { width: 196px; padding-inline: 10px; }
+  .square-shell .square-page { padding: 20px; }
+  .square-shell .tasks-page .task-board-overview-content { gap: 16px; padding-inline: 16px; }
+  .square-shell .tasks-page .task-board-metric { padding-left: 16px; }
+}
+@media (max-width:767px) {
+  .square-shell .square-header { height: 102px; }
+  .square-shell .square-sidebar { width: 100%; height: 54px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .square-shell .square-sidebar [data-slot='navigation-link'] { min-height: 36px; padding: 8px 10px; }
+  .square-shell .square-page { height: calc(100dvh - 164px); margin: 0 8px 8px; padding: 20px 16px; }
+  .square-shell .square-page h1,.square-shell .tasks-page .tasks-page-title { font-size: 22px; }
+  .square-shell .tasks-page .tasks-page-header { align-items: flex-start; }
+  .square-shell .tasks-page .tasks-page-create { padding-inline: 12px; }
+  .square-shell .tasks-page .task-board-overview-content { flex-wrap: wrap; gap: 16px; padding: 16px; }
+  .square-shell .tasks-page .task-board-overview-content > div:first-child { flex-basis: 100%; }
+  .square-shell .tasks-page .task-board-metrics { flex-basis: 100%; }
+  .square-shell .tasks-page .task-board-metric { min-width: 0; padding-left: 12px; }
+  .square-shell .tasks-page .task-board-metric:first-child { padding-left: 0; border-left: 0; }
+  .square-shell .tasks-page .task-board-metric-value { font-size: 24px; }
+}

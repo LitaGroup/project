@@ -1,0 +1,106 @@
+{
+  "auditedAt": "2026-10-28T09:59:12.539Z",
+  "baseline": "ac49bd2581249cdf4c20a02268e56b63521d8b7d",
+  "uiHeadBeforeMerge": "f2bea76e0b42112a7d9a204853a13563ad23ad9f",
+  "checks": [
+    {
+      "name": "All branch-specific changes are frontend or design",
+      "passed": true
+    },
+    {
+      "name": "backend matches main",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/lib/api.ts matches main",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/App.tsx matches main",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/context matches main",
+      "passed": true
+    },
+    {
+      "name": "frontend/package.json matches main",
+      "passed": true
+    },
+    {
+      "name": "package.json matches main",
+      "passed": true
+    },
+    {
+      "name": "pnpm-lock.yaml matches main",
+      "passed": true
+    },
+    {
+      "name": "Debug snapshot/SSE/send/reply/reset unchanged",
+      "passed": true
+    },
+    {
+      "name": "Question state/answers/toggle/submit unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/pages/ScriptLibraryDetailPage.tsx:ScriptLibraryDetailPage business prefix unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/pages/TaskTypesPage.tsx:TypeFormDialog business prefix unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/pages/TaskTypesPage.tsx:DeleteTypeButton business prefix unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/pages/WorkerDebugPage.tsx:onNew unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/pages/WorkerDebugPage.tsx:toThreadMessage unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/pages/WorkerDebugPage.tsx:customOf unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:onNew unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:toThreadMessage unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:customOf unchanged",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:readAutoAnswer unchanged",
+      "passed": true
+    },
+    {
+      "name": "Task footer/assignment actions and guards unchanged except classes",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/pages/WorkerDebugPage.tsx: original send guard",
+      "passed": true
+    },
+    {
+      "name": "frontend/src/components/task-detail/TaskChatPanel.tsx: original send guard",
+      "passed": true
+    },
+    {
+      "name": "All API call expressions match main",
+      "passed": true
+    }
+  ],
+  "outOfScope": [],
+  "apiDifferences": [],
+  "passed": true
+}

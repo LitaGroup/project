@@ -1,0 +1,58 @@
+{
+  "generatedAt": "2026-10-28T09:50:54.921450+00:00",
+  "artifact": "design/screenshots/daylight/conversation-overview.mp4",
+  "sha256": "db686fb64e74fcce88a1e8d8861d9ddfe2695964c535abd4f7d35f31eb676df6",
+  "bytes": 715126,
+  "durationSeconds": 17.166667,
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "fps": 30,
+  "videoCodec": "h264",
+  "pixelFormat": "yuv420p",
+  "audio": "Silent AAC stereo track; no narration or captured microphone.",
+  "captureScript": "design/preview/daylight-check.mjs --record --only=flow --report=work/merge-review/recording.json",
+  "fixtureNotice": "Isolated fictional API fixtures, all actual backend requests intercepted; headless browser only.",
+  "recordingFingerprint": {
+    "algorithm": "sha256(sorted frontend/src paths + file bytes)",
+    "before": "03b15246f593f8440fe549fe52d792b20476ea44120fcca20b7750e0ce5ebb0c",
+    "after": "03b15246f593f8440fe549fe52d792b20476ea44120fcca20b7750e0ce5ebb0c",
+    "unchanged": true
+  },
+  "scenario": {
+    "name": "flow",
+    "passed": true
+  },
+  "verification": {
+    "completeDecode": true,
+    "blackGapsDetected": false,
+    "ffprobe": {
+      "programs": [],
+      "stream_groups": [],
+      "streams": [
+        {
+          "codec_name": "h264",
+          "width": 1920,
+          "height": 1080,
+          "pix_fmt": "yuv420p",
+          "r_frame_rate": "30/1"
+        },
+        {
+          "codec_name": "aac",
+          "r_frame_rate": "0/0"
+        }
+      ],
+      "format": {
+        "duration": "17.166667",
+        "size": "715126"
+      }
+    }
+  },
+  "stateScreenshots": [
+    "design/screenshots/daylight/worker-running.png",
+    "design/screenshots/daylight/worker-confirm.png",
+    "design/screenshots/daylight/worker-complete.png",
+    "design/screenshots/daylight/worker-followup.png"
+  ]
+}

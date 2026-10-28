@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Input } from '@appica/ui-react/input'
 import { Toolbar, ToolbarInput } from '@appica/ui-react/toolbar'
 import { api, type Project, type ProjectTest } from '../lib/api'
@@ -74,9 +74,9 @@ export function ProjectTestsPage() {
           { label: '用例' },
         ]}
       />
-      <div className="mb-4 flex items-center justify-between">
+      <div className="responsive-page-header mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">用例</h1>
-        <div className="flex items-center gap-2">
+        <div className="responsive-page-actions flex items-center gap-2">
           <ImportTestsButton
             projectId={projectId}
             scriptsPath={project?.scriptsPath ?? null}

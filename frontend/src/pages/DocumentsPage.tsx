@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Badge } from '@appica/ui-react/badge'
 import { Input } from '@appica/ui-react/input'
 import {
@@ -65,7 +65,7 @@ export function DocumentsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="responsive-page-header mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">文档</h1>
       </div>
 

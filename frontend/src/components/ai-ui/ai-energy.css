@@ -1,0 +1,95 @@
+@property --ai-orbit-angle {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
+}
+
+.ai-energy,
+.ai-energy *,
+.ai-waveform,
+.ai-waveform * {
+  pointer-events: none;
+}
+
+.ai-energy {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--ai-energy-size);
+  height: var(--ai-energy-size);
+  border-radius: var(--ai-energy-radius, var(--square-pill-radius));
+  overflow: visible;
+  vertical-align: middle;
+  isolation: isolate;
+}
+
+.ai-energy__field {
+  --ai-core-spectrum: conic-gradient(
+    from var(--ai-orbit-angle) in oklch,
+    var(--square-glow-blue),
+    var(--square-glow-violet) 34%,
+    var(--square-glow-cyan) 68%,
+    var(--square-glow-blue) 100%
+  );
+  position: absolute;
+  inset: 8%;
+  border-radius: inherit;
+  opacity: 0;
+}
+
+.ai-energy__ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background-image: var(--ai-core-spectrum);
+  filter: blur(8px);
+}
+
+.ai-energy[data-active='true'] .ai-energy__field {
+  opacity: 0.16;
+  animation: ai-core-spectrum var(--square-ambient-duration) linear infinite;
+}
+
+.ai-waveform {
+  --ai-wave-cycle: calc(var(--square-pulse-duration) * 0.37);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100px;
+  height: 28px;
+  vertical-align: middle;
+  opacity: 0.38;
+  mask: linear-gradient(90deg, transparent, var(--foreground) 10% 90%, transparent);
+}
+
+.ai-waveform > span {
+  --ai-wave-color: color-mix(in oklch, var(--square-glow-blue) calc(100% - var(--ai-wave-step) * 100%), var(--square-glow-pink));
+  display: block;
+  flex: 1;
+  height: 100%;
+  border-radius: var(--square-pill-radius);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ai-wave-color) 75%, var(--square-glow-hot)), var(--ai-wave-color));
+  transform: scaleY(calc(var(--ai-wave-height) * 0.44));
+  transform-origin: center;
+}
+
+.ai-waveform[data-active='true'] {
+  opacity: 0.94;
+}
+
+.ai-waveform[data-active='true'] > span {
+  animation: ai-wave-envelope var(--ai-wave-cycle) ease-in-out infinite alternate;
+  animation-delay: calc(var(--ai-wave-cycle) * var(--ai-wave-step) * -2);
+}
+
+@keyframes ai-core-spectrum {
+  from { --ai-orbit-angle: 0deg; }
+  to { --ai-orbit-angle: 360deg; }
+}
+
+@keyframes ai-wave-envelope {
+  from { transform: scaleY(calc(var(--ai-wave-height) * 0.32)); }
+  to { transform: scaleY(var(--ai-wave-height)); }
+}

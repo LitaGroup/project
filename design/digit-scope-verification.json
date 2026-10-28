@@ -1,0 +1,128 @@
+{
+  "checkedAt": "2026-10-28T10:35:20.509Z",
+  "checks": [
+    {
+      "name": "Task-board top three metrics retain reels",
+      "passed": true
+    },
+    {
+      "name": "Small column badges have no reels",
+      "passed": true
+    },
+    {
+      "name": "Large metric rolls on an SSE value increase",
+      "passed": true,
+      "detail": {
+        "start": {
+          "y": -64.7165,
+          "target": 3,
+          "visible": 2
+        },
+        "end": {
+          "y": -343.2,
+          "target": 3,
+          "visible": 3
+        }
+      }
+    },
+    {
+      "name": "Small badge updates directly with the same SSE value",
+      "passed": true
+    },
+    {
+      "name": "Unchanged large value does not restart rolling",
+      "passed": true
+    },
+    {
+      "name": "Large metric rolls on a value decrease",
+      "passed": true,
+      "detail": {
+        "decreasing": {
+          "y": -94.96,
+          "target": 2,
+          "visible": 4
+        },
+        "decreased": {
+          "y": -316.8,
+          "target": 2,
+          "visible": 2
+        }
+      }
+    },
+    {
+      "name": "Task overview top three large KPIs retain reels",
+      "passed": true
+    },
+    {
+      "name": "Overview large KPI rolls when its existing response updates",
+      "passed": true,
+      "detail": {
+        "centerStart": {
+          "y": -95.6567,
+          "target": 5,
+          "visible": 4
+        },
+        "centerEnd": {
+          "y": -396,
+          "target": 5,
+          "visible": 5
+        }
+      }
+    },
+    {
+      "name": "Robot parenthetical count is static text",
+      "passed": true
+    },
+    {
+      "name": "Parenthetical robot count updates through existing polling without rolling",
+      "passed": true
+    },
+    {
+      "name": "Image and change-record parenthetical counts have no reels",
+      "passed": true
+    },
+    {
+      "name": "Image count remains visible",
+      "passed": true
+    },
+    {
+      "name": "No page errors, unmatched APIs or business writes",
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "unexpectedApi": [],
+  "writes": [],
+  "passed": true,
+  "scope": {
+    "animated": "Task-board top 3 metrics and task-overview top 3 KPIs only",
+    "static": "Column badges and all parenthetical robot, image and change-record counts",
+    "timingMs": 280,
+    "delayPerPositionMs": 10,
+    "businessLogic": "unchanged",
+    "componentImplementation": "unchanged"
+  },
+  "sourceChecks": {
+    "frontendTypescript": "passed",
+    "changedPagesLint": "passed",
+    "independentReview": "passed",
+    "businessRequestsAndCallbacks": "unchanged"
+  },
+  "cleanup": {
+    "removed": [
+      {
+        "path": "work/large-digits",
+        "bytes": 7056
+      },
+      {
+        "path": "frontend/node_modules/.tmp/tsconfig.app.tsbuildinfo",
+        "bytes": 3420
+      },
+      {
+        "path": "frontend/node_modules/.tmp/tsconfig.node.tsbuildinfo",
+        "bytes": 51
+      }
+    ],
+    "workDirectoryAbsent": true
+  }
+}

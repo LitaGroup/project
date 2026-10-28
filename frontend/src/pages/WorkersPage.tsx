@@ -79,9 +79,9 @@ export function WorkersPage() {
         </TableHeader>
         <TableBody>
           {(workers ?? []).map((w) => (
-            <TableRow key={w.id}>
+            <TableRow key={w.id} data-working={w.liveStatus === '工作中'}>
               <TableCell className="max-w-64">
-                <p className="flex items-center gap-2 truncate font-medium" title={w.name}>
+                <p className="flex min-w-0 items-center gap-2 py-1.5 font-medium" title={w.name}>
                   <RobotAvatar name={w.name} avatarUrl={w.avatarUrl} size={26} />
                   <span className="truncate">{w.name}</span>
                   <span className="text-xs font-normal text-foreground-muted">#{w.id}</span>

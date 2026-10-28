@@ -1,0 +1,249 @@
+/* Daylight AI workspace. State colors only describe existing runtime data. */
+.ai-conversation,
+.ai-debug-page {
+  --ai-surface-shadow: 0 4px 18px rgb(23 32 51 / 3%);
+  --ai-focus-shadow: 0 0 0 3px rgb(59 130 246 / 10%), 0 6px 24px rgb(23 32 51 / 5%);
+  background: var(--background);
+  box-shadow: 0 8px 32px rgb(23 32 51 / 4%);
+}
+
+.ai-debug-page {
+  container: conversation / inline-size;
+  border-radius: 18px;
+  overflow: hidden;
+}
+.ai-debug-page .ai-debug-session { gap: 0; }
+.ai-debug-page .ai-session-header {
+  padding: 16px 22px;
+  background: var(--background);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+}
+.ai-debug-page .ai-session-header::after,
+.ai-debug-page[data-running='true'] .ai-session-header::after { display: none; }
+.ai-debug-page .ai-debug-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+  min-height: 0;
+}
+.ai-debug-page .ai-debug-conversation {
+  container: chat / size;
+  grid-row: 2;
+  height: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--background);
+  box-shadow: none;
+}
+.ai-debug-page .ai-todo-panel {
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  max-height: 160px;
+  padding: 10px 16px;
+  overflow: auto;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--square-canvas);
+}
+.ai-debug-page .beui-todo-list { border-radius: 12px; }
+.ai-debug-page .beui-todo-viewport { max-height: 100px; }
+
+@container conversation (min-width: 1040px) {
+  .ai-debug-page .ai-debug-workspace {
+    grid-template-columns: minmax(0, 1fr) 288px;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .ai-debug-page .ai-debug-conversation { grid-row: 1; }
+  .ai-debug-page .ai-todo-panel {
+    grid-row: 1;
+    max-height: none;
+    padding: 20px 16px;
+    border: 0;
+    border-left: 1px solid var(--border);
+  }
+  .ai-debug-page .beui-todo-viewport { max-height: 420px; }
+}
+
+.ai-conversation .ai-conversation-viewport,
+.ai-debug-page .ai-conversation-viewport {
+  min-height: 0;
+  padding: 26px clamp(16px, 3cqi, 40px);
+  gap: 24px;
+  background: linear-gradient(180deg, #f8faff 0, var(--background) 220px);
+  scrollbar-gutter: stable;
+  scroll-padding-block: 20px;
+}
+.ai-conversation .ai-message,
+.ai-debug-page .ai-message { max-width: 960px; margin-inline: auto; gap: 12px; }
+.ai-conversation .ai-message-main,
+.ai-debug-page .ai-message-main { min-width: 0; }
+.ai-debug-page .ai-assistant-message .ai-message-main,
+.ai-debug-page .ai-question-message .ai-message-main { max-width: calc(100% - 48px); }
+.ai-conversation .ai-message-heading,
+.ai-debug-page .ai-message-heading { min-height: 24px; margin-bottom: 10px; }
+.ai-conversation .ai-assistant-body,
+.ai-debug-page .ai-assistant-body { padding: 0; background: transparent; border: 0; box-shadow: none; }
+.ai-conversation .ai-assistant-body::before,
+.ai-conversation .ai-assistant-body::after,
+.ai-conversation .ai-message-main::before,
+.ai-conversation .ai-message-main::after,
+.ai-debug-page .ai-session-header::before,
+.ai-conversation .ai-reasoning::before,
+.ai-conversation .ai-reasoning-trigger::after,
+.ai-conversation .ai-tool-chip::after { display: none; }
+/* Execution is conveyed by the existing indicators and state rings, without text sweeps. */
+.ai-conversation .ai-shimmer,
+.ai-debug-page .ai-shimmer {
+  animation: none;
+  background: none;
+  color: var(--foreground-muted);
+}
+.ai-conversation .ai-response-inner { padding: 18px 20px; min-width: 0; }
+.ai-conversation .chat-response-surface > .border-glow {
+  --border-glow-core-width: 1.4px;
+  border-radius: inherit;
+}
+.ai-conversation .chat-response-surface .border-glow__content { min-width: 0; }
+.ai-conversation .chat-response-surface .border-glow__aura { opacity: .32; }
+.ai-conversation .ai-user-surface,
+.ai-debug-page .ai-user-surface {
+  padding: 12px 16px;
+  background: #172033;
+  color: #fff;
+  border: 1px solid #172033;
+  box-shadow: 0 3px 10px rgb(23 32 51 / 8%);
+  border-radius: 16px 16px 5px 16px;
+}
+.ai-conversation .ai-user-avatar { background: #edf2fa; color: #64748b; border: 1px solid var(--border); }
+
+.ai-conversation .ai-composer-dock,
+.ai-debug-page .ai-composer-dock {
+  z-index: 3;
+  position: relative;
+  padding: 16px clamp(16px, 3cqi, 40px) 20px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 90%), var(--background) 24px);
+  border-top: 0;
+  box-shadow: none;
+}
+.ai-conversation .ai-composer,
+.ai-debug-page .ai-composer {
+  max-width: 960px;
+  width: calc(100% - 16px);
+  margin-inline: auto;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d4ddea;
+  border-radius: 15px;
+  background: #fbfcff;
+  box-shadow: 0 3px 12px rgb(23 32 51 / 3%);
+}
+.ai-conversation .ai-composer::before,
+.ai-conversation .ai-composer::after { display: none; }
+.ai-conversation .ai-composer:focus-within,
+.ai-debug-page .ai-composer:focus-within { border-color: #7ca9ef; box-shadow: var(--ai-focus-shadow); background: #fff; }
+.ai-conversation .ai-composer:focus-within,
+.ai-debug-page[data-running='true'] .ai-composer { animation: none; }
+.ai-conversation .ai-composer-send { color: #fff; background: #172033; box-shadow: none; }
+.ai-conversation .ai-composer-send:hover:enabled { background: #2d426b; box-shadow: 0 3px 10px rgb(59 130 246 / 16%); }
+.ai-conversation .ai-composer-input { min-width: 0; }
+.ai-conversation .ai-approval-dock {
+  --approval-card-max-height: calc(min(42dvh, 380px) - 22px);
+  width: 100%;
+  max-width: 976px;
+  max-height: min(42dvh, 380px);
+  padding: 8px;
+  margin: 0 auto 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: #d2dbe8 transparent;
+}
+.ai-debug-page .ai-approval-dock {
+  --approval-card-max-height: calc(min(35cqh, 320px) - 22px);
+  max-height: min(35cqh, 320px);
+}
+@container conversation (max-width: 1039px) {
+  .ai-debug-page .ai-approval-dock {
+    --approval-card-max-height: calc(min(52cqh, 340px) - 22px);
+    max-height: min(52cqh, 340px);
+  }
+}
+.ai-conversation .ai-approval-dock .beui-approval-card { border: 0; background: var(--background); }
+.ai-conversation .ai-approval-sender { margin: 12px 16px -2px; font-size: 11px; color: var(--foreground-muted); }
+.ai-conversation .ai-question-message .beui-approval-card { background: #f8fafc; border-color: var(--border); }
+.ai-conversation .ai-feedback-surface { background: var(--background); border: 0; padding: 0; box-shadow: none; }
+.ai-task-conversation .ai-conversation-viewport { min-height: 64px; }
+.ai-task-conversation .ai-conversation-footer {
+  margin-top: 0;
+  position: relative;
+  flex-shrink: 1;
+  min-height: 0;
+  max-height: calc(100% - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ai-conversation .task-chat-markdown { color: var(--foreground); overflow-wrap: anywhere; }
+.ai-conversation .task-chat-markdown :is(table, pre) { max-width: 100%; }
+.ai-conversation .task-chat-markdown pre { background: #f4f7fc; color: #24344c; border: 1px solid var(--border); }
+.ai-conversation .task-chat-markdown table { display: block; overflow-x: auto; }
+.ai-conversation .task-chat-markdown th { background: #f3f6fb; color: var(--foreground); }
+.ai-conversation .task-chat-markdown :is(th, td) { border-color: var(--border); }
+.ai-conversation .beui-activity { padding: 9px 12px; border: 1px solid #e8edf6; border-radius: 10px; background: #f7f9fe; }
+.ai-conversation .beui-disclosure { align-items: center; }
+.ai-conversation .beui-reasoning-text { color: #53647d; }
+
+@media (width < 640px) {
+  .ai-debug-page .ai-session-header { padding: 12px; gap: 8px; flex-wrap: nowrap; }
+  .ai-debug-page .ai-session-identity { width: auto; flex: 1; gap: 8px; }
+  .ai-debug-page .ai-session-actions { width: auto; gap: 5px; justify-content: flex-end; }
+  .ai-debug-page .ai-active-state { display: none; }
+  .ai-debug-page .ai-todo-panel { max-height: 118px; padding: 6px 10px; }
+  .ai-debug-page .beui-todo-viewport { max-height: 58px; }
+  .ai-conversation .ai-conversation-viewport,
+  .ai-debug-page .ai-conversation-viewport { padding: 18px 10px; gap: 20px; }
+  .ai-conversation .ai-message,
+  .ai-debug-page .ai-message { gap: 7px; }
+  .ai-debug-page .ai-assistant-message .ai-message-main,
+  .ai-debug-page .ai-question-message .ai-message-main { max-width: calc(100% - 43px); }
+  .ai-conversation .ai-response-inner { padding: 12px; }
+  .ai-conversation .ai-composer-dock,
+  .ai-debug-page .ai-composer-dock { padding: 10px; }
+  .ai-conversation .ai-approval-dock { max-height: 37dvh; }
+  .ai-debug-page .ai-approval-dock {
+    --approval-card-max-height: calc(min(60cqh, 300px, 100cqh - 150px) - 22px);
+    max-height: min(60cqh, 300px, 100cqh - 150px);
+  }
+  .ai-conversation .ai-user-surface { max-width: 88%; padding: 10px 12px; }
+  .ai-conversation .ai-composer { padding: 8px; }
+}
+
+@media (height < 741px) {
+  @container conversation (max-width: 1039px) {
+    .ai-debug-page:has(.ai-approval-dock) .ai-session-header { padding-block: 4px; }
+    .ai-debug-page:has(.ai-approval-dock) .ai-todo-panel { max-height: 40px; padding-block: 3px; }
+    .ai-debug-page:has(.ai-approval-dock) .beui-todo-list .beui-disclosure { padding: 6px 10px; }
+    .ai-debug-page:has(.ai-approval-dock) .ai-conversation-viewport { min-height: 64px; }
+    .ai-debug-page:has(.ai-approval-dock) .ai-composer-dock { padding-block: 6px; }
+    .ai-debug-page:has(.ai-approval-dock) .ai-composer { padding-block: 4px; }
+    .ai-debug-page:has(.ai-approval-dock) .ai-composer-input { min-height: 32px; max-height: 32px; }
+    .ai-debug-page .ai-approval-dock {
+      /* Reserve 64px for the transcript and 62px for the original composer and dock spacing. */
+      --approval-card-max-height: calc(min(300px, 100cqh - 126px) - 22px);
+      max-height: min(300px, 100cqh - 126px);
+      margin-bottom: 4px;
+    }
+    .ai-debug-page .ai-approval-dock .beui-approval-card { padding: 8px; }
+    .ai-debug-page .ai-approval-dock .beui-approval-heading { margin-bottom: 6px; }
+    .ai-debug-page .ai-approval-dock .beui-approval-actions { margin-top: 4px; padding-top: 4px; }
+  }
+}

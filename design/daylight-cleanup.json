@@ -1,0 +1,126 @@
+{
+  "removed": [
+    {
+      "path": "work/daylight",
+      "bytes": 3984128,
+      "files": 7,
+      "reason": "Task-owned regenerable recording, build or compiler intermediate; final media and evidence retained."
+    },
+    {
+      "path": "frontend/dist",
+      "bytes": 11499157,
+      "files": 286,
+      "reason": "Task-owned regenerable recording, build or compiler intermediate; final media and evidence retained."
+    },
+    {
+      "path": "frontend/node_modules/.tmp/tsconfig.app.tsbuildinfo",
+      "bytes": 3291,
+      "files": 1,
+      "reason": "Task-owned regenerable recording, build or compiler intermediate; final media and evidence retained."
+    },
+    {
+      "path": "frontend/node_modules/.tmp/tsconfig.node.tsbuildinfo",
+      "bytes": 51,
+      "files": 1,
+      "reason": "Task-owned regenerable recording, build or compiler intermediate; final media and evidence retained."
+    }
+  ],
+  "totalBytesRemoved": 15486627,
+  "kept": [
+    "source and design definitions",
+    "formal current screenshots",
+    "one current daylight conversation MP4",
+    "reproducible checks and verification evidence",
+    "existing shared dependencies and live preview services"
+  ],
+  "statusApprovalFollowup": {
+    "removed": [
+      {
+        "path": "work/daylight",
+        "bytes": 4999007,
+        "files": 7,
+        "reason": "Task-owned reproducible intermediate; current18-scenario evidence, extended layout probe and final media retained."
+      },
+      {
+        "path": "work/short-approval",
+        "bytes": 105632,
+        "files": 1,
+        "reason": "Task-owned reproducible intermediate; current18-scenario evidence, extended layout probe and final media retained."
+      },
+      {
+        "path": "work/final-approval",
+        "bytes": 4197,
+        "files": 1,
+        "reason": "Task-owned reproducible intermediate; current18-scenario evidence, extended layout probe and final media retained."
+      },
+      {
+        "path": "work/short-approval-test.mjs",
+        "bytes": 4935,
+        "files": 1,
+        "reason": "Task-owned reproducible intermediate; current18-scenario evidence, extended layout probe and final media retained."
+      },
+      {
+        "path": "frontend/dist",
+        "bytes": 11502203,
+        "files": 286,
+        "reason": "Task-owned reproducible intermediate; current18-scenario evidence, extended layout probe and final media retained."
+      },
+      {
+        "path": "frontend/node_modules/.tmp/tsconfig.app.tsbuildinfo",
+        "bytes": 3291,
+        "files": 1,
+        "reason": "Task-owned reproducible intermediate; current18-scenario evidence, extended layout probe and final media retained."
+      },
+      {
+        "path": "frontend/node_modules/.tmp/tsconfig.node.tsbuildinfo",
+        "bytes": 51,
+        "files": 1,
+        "reason": "Task-owned reproducible intermediate; current18-scenario evidence, extended layout probe and final media retained."
+      },
+      {
+        "path": "design/status-flash-verification.json",
+        "bytes": 788,
+        "files": 1,
+        "reason": "Task-owned reproducible intermediate; current18-scenario evidence, extended layout probe and final media retained."
+      }
+    ],
+    "totalBytesRemoved": 16620104,
+    "livePreviewPreserved": true
+  },
+  "surfaceSweepRemoval": {
+    "removed": [
+      {
+        "path": "work/daylight",
+        "bytes": 1593800,
+        "files": 5,
+        "reason": "Verified task recording/build/compiler intermediate; final media and combined evidence retained."
+      },
+      {
+        "path": "work/quiet-surface-interactions.json",
+        "bytes": 29338,
+        "files": 1,
+        "reason": "Verified task recording/build/compiler intermediate; final media and combined evidence retained."
+      },
+      {
+        "path": "frontend/dist",
+        "bytes": 11496668,
+        "files": 286,
+        "reason": "Verified task recording/build/compiler intermediate; final media and combined evidence retained."
+      },
+      {
+        "path": "frontend/node_modules/.tmp/tsconfig.app.tsbuildinfo",
+        "bytes": 3249,
+        "files": 1,
+        "reason": "Verified task recording/build/compiler intermediate; final media and combined evidence retained."
+      },
+      {
+        "path": "frontend/node_modules/.tmp/tsconfig.node.tsbuildinfo",
+        "bytes": 51,
+        "files": 1,
+        "reason": "Verified task recording/build/compiler intermediate; final media and combined evidence retained."
+      }
+    ],
+    "totalBytesRemoved": 13123106,
+    "previewPreserved": true
+  }
+}

@@ -1,0 +1,34 @@
+/* Light editor roles also apply to menus rendered outside the editor surface. */
+html.light .milkdown {
+  --crepe-color-background: var(--background);
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--background);
+  --crepe-color-surface-low: var(--background-subtle);
+  --crepe-color-on-surface: var(--foreground);
+  --crepe-color-on-surface-variant: var(--foreground-muted);
+  --crepe-color-outline: var(--border-strong);
+  --crepe-color-primary: var(--primary);
+  --crepe-color-secondary: var(--primary-soft);
+  --crepe-color-on-secondary: var(--foreground);
+  --crepe-color-inverse: var(--background-strong);
+  --crepe-color-on-inverse: var(--foreground);
+  --crepe-color-inline-code: var(--error);
+  --crepe-color-error: var(--error);
+  --crepe-color-hover: var(--background-strong);
+  --crepe-color-selected: var(--primary-soft);
+  --crepe-color-inline-area: var(--background-muted);
+  --crepe-shadow-1: var(--square-card-shadow);
+  --crepe-shadow-2: var(--square-panel-shadow);
+}
+
+/* Filled action variants need white labels; status badges keep dark text on pastel fills.
+   Keep the interactive gradient's second stop saturated for hover/pressed contrast. */
+html.light :is(button, a, [role='button'], [data-slot='button']).bg-error.text-error-foreground {
+  --error-foreground: #ffffff;
+  --error-muted: var(--error-strong);
+}
+
+html.light :is(button, a, [role='button'], [data-slot='button']).bg-secondary.text-secondary-foreground {
+  --secondary-foreground: #ffffff;
+  --secondary-muted: var(--secondary-strong);
+}

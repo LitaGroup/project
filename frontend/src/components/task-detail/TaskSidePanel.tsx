@@ -1,6 +1,7 @@
 import { Badge } from '@appica/ui-react/badge'
 import type { TaskEvent, TaskPackage } from '../../lib/api'
 import { formatDuration } from '../../lib/duration'
+import './task-pipeline.css'
 
 interface TaskSidePanelProps {
   task: TaskPackage
@@ -26,8 +27,8 @@ export function TaskSidePanel({
   events,
 }: TaskSidePanelProps) {
   return (
-    <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-      <section className="shrink-0 border-b border-border p-4">
+    <aside className="task-side-panel flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+      <section className="task-summary shrink-0 border-b border-border p-4">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-foreground-intense">
             任务信息

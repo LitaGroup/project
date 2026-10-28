@@ -2,13 +2,13 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Badge } from '@appica/ui-react/badge'
 import { Input } from '@appica/ui-react/input'
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from './ResponsiveTable'
 
 /**
  * APIPOST 接口文档展示（swagger/OpenAPI 3.0）：
@@ -456,9 +456,9 @@ export function ApipostDocViewer({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 gap-4">
+    <div className="responsive-apipost-layout flex min-h-0 flex-1 gap-4">
       {/* 左栏：接口目录 */}
-      <aside className="flex w-72 shrink-0 flex-col gap-2 rounded-md border border-border-strong bg-background">
+      <aside className="responsive-apipost-sidebar flex w-72 shrink-0 flex-col gap-2 rounded-md border border-border-strong bg-background">
         <div className="p-2 pb-0">
           <Input
             placeholder="搜索路径 / 摘要…"
@@ -497,7 +497,7 @@ export function ApipostDocViewer({
       </aside>
 
       {/* 右栏：接口详情 */}
-      <div className="min-h-0 flex-1 overflow-auto rounded-md border border-border-strong bg-background p-4">
+      <div className="responsive-apipost-content min-h-0 flex-1 overflow-auto rounded-md border border-border-strong bg-background p-4">
         {selected ? (
           <EndpointDetail endpoint={selected} schemas={schemas} docsUrl={docsUrl} />
         ) : (

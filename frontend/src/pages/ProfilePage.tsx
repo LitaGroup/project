@@ -86,7 +86,7 @@ export function ProfilePage() {
 export LITA_PROJECT_TOKEN=${tokenValue}`
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
+    <div className="responsive-profile-page flex max-w-2xl flex-col gap-8">
       <h1 className="text-2xl font-semibold">个人中心</h1>
 
       {/* 基本信息：头像 / 名称 / 部门 */}
@@ -96,7 +96,7 @@ export LITA_PROJECT_TOKEN=${tokenValue}`
           <CardDescription>来自飞书登录的账号信息，只读</CardDescription>
         </CardHeader>
         <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">
-          <div className="flex items-center gap-4">
+          <div className="profile-identity-row flex items-center gap-4">
             <Avatar size="2xl">
               {user.avatarUrl && (
                 <AvatarImage src={user.avatarUrl} alt={user.name} />
@@ -115,13 +115,13 @@ export LITA_PROJECT_TOKEN=${tokenValue}`
               {user.role}
             </Badge>
           </div>
-          <div className="flex items-center justify-between gap-2">
+          <div className="profile-info-row flex items-center justify-between gap-2">
             <span className="text-sm">邮箱</span>
             <span className="text-sm text-foreground-muted">
               {user.email ?? '—'}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-2">
+          <div className="profile-info-row flex items-center justify-between gap-2">
             <span className="text-sm">最近登录</span>
             <span className="text-sm text-foreground-muted">
               {user.lastLoginAt

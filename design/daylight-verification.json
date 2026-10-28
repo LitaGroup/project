@@ -1,0 +1,467 @@
+{
+  "startedAt": "2026-10-28T09:48:21.256Z",
+  "base": "http://localhost:5273",
+  "isolated": true,
+  "checks": [
+    {
+      "name": "flow",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Running response surface",
+        "Pending question appears once in approval dock",
+        "Original send disabled while running",
+        "Duplicate question id has one interactive card",
+        "Answered question leaves pending dock",
+        "Grouped raw user-assistant-question orders receipt before final response",
+        "Final answer visible after question",
+        "First round context retained",
+        "Follow-up uses composer",
+        "Refresh restores latest context"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [
+        {
+          "path": "/api/workers/1001/debug/questions/daylight-q1/reply",
+          "body": {
+            "answers": [
+              [
+                "保留现有流程"
+              ]
+            ]
+          }
+        },
+        {
+          "path": "/api/workers/1001/debug/messages",
+          "body": {
+            "content": "继续核对下一轮"
+          }
+        }
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "flash",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Attention runs three720ms flashes",
+        "Attention edge visibly changes",
+        "Attention content and geometry stay stable",
+        "Attention stops with a steady glow",
+        "Repeated pending snapshot does not replay the finished flashes",
+        "Completion starts its own three flashes after attention",
+        "Completion stops with a steady green glow"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "reply",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "500 preserves custom input",
+        "Exact original answers payload survives retry"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [
+        {
+          "path": "/api/workers/1001/debug/questions/daylight-q1/reply",
+          "body": {
+            "answers": [
+              [
+                "保留现有流程",
+                "保留输入"
+              ]
+            ]
+          }
+        },
+        {
+          "path": "/api/workers/1001/debug/questions/daylight-q1/reply",
+          "body": {
+            "answers": [
+              [
+                "保留现有流程",
+                "保留输入"
+              ]
+            ]
+          }
+        }
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "multi",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Multi-question multi-select exact payload"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [
+        {
+          "path": "/api/workers/1001/debug/questions/daylight-q1/reply",
+          "body": {
+            "answers": [
+              [
+                "保留现有流程",
+                "仅更新视觉"
+              ],
+              [
+                "浏览器验证"
+              ]
+            ]
+          }
+        }
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "skip",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Skip exact reject payload"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [
+        {
+          "path": "/api/workers/1001/debug/questions/daylight-q1/reply",
+          "body": {
+            "reject": true
+          }
+        }
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "task",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Task tool statuses use real tools disclosure",
+        "Task pending question uses dock",
+        "Task executing state preserves main reply guard",
+        "A temporarily disabled question does not claim the task ended",
+        "Task cancel contrast >=4.5 (17.75)"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "task-ready",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Current task waiting for feedback allows replies",
+        "Task reply keeps main endpoint and exact payload"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [
+        {
+          "path": "/api/tasks/1/questions/daylight-q1/reply",
+          "body": {
+            "answers": [
+              [
+                "保留现有流程"
+              ]
+            ]
+          }
+        }
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "task-other",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "A different task pending question preserves main reply guard"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "empty",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Empty conversation visible",
+        "Empty composer usable"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "error",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Assistant error output retained"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "cancelled",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Cancelled receipt outside pending dock",
+        "Cancelled receipt not interactive"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "ended",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Idle debug session keeps real pending question answerable per main",
+        "Idle debug pending reply uses original main availability",
+        "Active pending card does not claim the session ended"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "history",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Historical assistant uses neutral border",
+        "Historical assistant does not replay completion flashes",
+        "A new user turn does not keep the previous assistant highlighted"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "todos",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Previous completed todos retain status during new round",
+        "New response does not relabel old todos"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "responsive-1920x1080",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "checks": [
+        "Approval and composer edges align",
+        "Approval footer and rounded frame fully visible above composer",
+        "Question and at least one complete option fit in the fields viewport (162)",
+        "Approval uses the neutral conversation background",
+        "No document or main horizontal overflow",
+        "Composer reachable",
+        "Pending approval reachable",
+        "Todo summary and composer fit viewport"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "responsive-1440x1000",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "checks": [
+        "Approval and composer edges align",
+        "Approval footer and rounded frame fully visible above composer",
+        "Question and at least one complete option fit in the fields viewport (137)",
+        "Approval uses the neutral conversation background",
+        "No document or main horizontal overflow",
+        "Composer reachable",
+        "Pending approval reachable",
+        "Todo summary and composer fit viewport"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "responsive-1024x900",
+      "viewport": {
+        "width": 1024,
+        "height": 900
+      },
+      "checks": [
+        "Approval and composer edges align",
+        "Approval footer and rounded frame fully visible above composer",
+        "Question and at least one complete option fit in the fields viewport (141)",
+        "Approval uses the neutral conversation background",
+        "No document or main horizontal overflow",
+        "Composer reachable",
+        "Pending approval reachable",
+        "Todo summary and composer fit viewport",
+        "Narrow todo summary height constrained"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "responsive-768x1000",
+      "viewport": {
+        "width": 768,
+        "height": 1000
+      },
+      "checks": [
+        "Approval and composer edges align",
+        "Approval footer and rounded frame fully visible above composer",
+        "Question and at least one complete option fit in the fields viewport (193)",
+        "Approval uses the neutral conversation background",
+        "No document or main horizontal overflow",
+        "Composer reachable",
+        "Pending approval reachable",
+        "Todo summary and composer fit viewport",
+        "Narrow todo summary height constrained"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "responsive-390x844",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "checks": [
+        "Approval and composer edges align",
+        "Approval footer and rounded frame fully visible above composer",
+        "Question and at least one complete option fit in the fields viewport (158)",
+        "Approval uses the neutral conversation background",
+        "Conversation viewport at least64px (97)",
+        "Composer bottom within screen",
+        "No document or main horizontal overflow",
+        "Composer reachable",
+        "Pending approval reachable",
+        "Todo summary and composer fit viewport",
+        "Narrow todo summary height constrained"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "responsive-360x800",
+      "viewport": {
+        "width": 360,
+        "height": 800
+      },
+      "checks": [
+        "Approval and composer edges align",
+        "Approval footer and rounded frame fully visible above composer",
+        "Question and at least one complete option fit in the fields viewport (132)",
+        "Approval uses the neutral conversation background",
+        "No document or main horizontal overflow",
+        "Composer reachable",
+        "Pending approval reachable",
+        "Todo summary and composer fit viewport",
+        "Narrow todo summary height constrained"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    },
+    {
+      "name": "responsive-360x640",
+      "viewport": {
+        "width": 360,
+        "height": 640
+      },
+      "checks": [
+        "Approval and composer edges align",
+        "Approval footer and rounded frame fully visible above composer",
+        "Question and at least one complete option fit in the fields viewport (116)",
+        "Approval uses the neutral conversation background",
+        "Conversation viewport at least64px (65)",
+        "Composer bottom within screen",
+        "No document or main horizontal overflow",
+        "Composer reachable",
+        "Pending approval reachable",
+        "Todo summary and composer fit viewport",
+        "Narrow todo summary height constrained"
+      ],
+      "unexpectedApi": [],
+      "pageErrors": [],
+      "writes": [],
+      "status": "passed"
+    }
+  ],
+  "videos": [],
+  "finishedAt": "2026-10-28T09:48:47.487Z",
+  "summary": {
+    "total": 21,
+    "passed": 21,
+    "failed": 0
+  }
+}

@@ -1,21 +1,21 @@
 @import 'tailwindcss';
 @import '@appica/ui-react/styles.css';
+@import './styles/square-theme.css';
+@import './styles/cyber-command.css';
+@import './styles/premium-ui.css';
+@import './styles/responsive.css';
+@import './styles/responsive-details.css';
+@import './styles/daylight-theme.css';
+@import './styles/filter-toolbar.css';
+
+/* 本次视觉方案持续启用动效，不跟随系统动态效果偏好。 */
+@custom-variant motion-reduce (&:is([data-disable-animations] *));
+@custom-variant motion-safe (&:not([data-disable-animations] *));
 
 /* Appica UI 规则：必须扫描组件库类名，否则组件无样式。路径相对本文件，勿改成裸包名。 */
 @source '../node_modules/@appica/ui-react/dist';
-
-/* 现有 CSS 呼吸动画在系统「减少动态效果」时关闭；Framer Motion 动画由 MotionConfig 处理。 */
-@media (prefers-reduced-motion: reduce) {
-  .animate-pulse {
-    animation: none;
-  }
-}
-
-/* 机器人默认头像占位：产品约定为「黑图」，刻意使用固定色值（主题例外，同 .terminal-gruvbox），
-   边框圈由组件内的 ring-border-strong 提供。 */
-.worker-avatar-empty {
-  background-color: #000;
-}
+/* 同时兼容 pnpm 的 hoisted 安装布局。 */
+@source '../../node_modules/@appica/ui-react/dist';
 
 /* Milkdown（Crepe）Markdown 编辑器：
    - 背景透明，跟随容器/页面背景（主题自带白底）

@@ -6,11 +6,11 @@ import {
   CardTitle,
 } from '@appica/ui-react/card'
 import {
-  Table,
   TableBody,
   TableRow,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import { Progress } from '@appica/ui-react/progress'
@@ -172,16 +172,16 @@ export function ScriptLibraryDetailPage() {
   const files = run?.files ?? []
 
   return (
-    <div className="flex h-full gap-6">
+    <div className="responsive-detail-page responsive-detail-columns responsive-run-page flex h-full gap-6">
       {/* 左侧：脚本信息 + 终端输出（撑满剩余高度） */}
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
+      <div className="responsive-detail-main flex min-w-0 flex-1 flex-col gap-4">
         <PageBreadcrumb
           items={[
             { label: '脚本库', to: '/docs/scripts' },
             { label: scriptPath },
           ]}
         />
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="detail-section-heading flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-xl font-semibold">
               <span className="truncate" title={scriptPath}>
@@ -198,7 +198,7 @@ export function ScriptLibraryDetailPage() {
               {script?.revision && ` · 提交 ${script.revision.slice(0, 7)}`}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="detail-run-actions flex shrink-0 items-center gap-2">
             {script && (
               <Button
                 variant="outline"
@@ -217,7 +217,7 @@ export function ScriptLibraryDetailPage() {
               {regenerating ? '提交中…' : '重新生成描述'}
             </Button>
             {script?.githubUrl && (
-              <Button variant="ghost" size="sm" render={<a href={script.githubUrl} target="_blank" rel="noreferrer" />}>
+              <Button variant="ghost" size="sm" nativeButton={false} render={<a href={script.githubUrl} target="_blank" rel="noreferrer" />}>
                 GitHub
               </Button>
             )}
@@ -262,7 +262,7 @@ export function ScriptLibraryDetailPage() {
       </div>
 
       {/* 右侧：运行状态 + 产物文件 + 历史记录 */}
-      <aside className="flex w-80 shrink-0 flex-col gap-6">
+      <aside className="responsive-detail-sidebar flex w-80 shrink-0 flex-col gap-6">
         <Card>
           <CardHeader>
             <CardTitle>运行状态</CardTitle>

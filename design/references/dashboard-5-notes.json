@@ -1,0 +1,85 @@
+{
+  "owner": "Local UI design reference",
+  "direction": "Latest user instruction: Square UI Dashboard 5 is the primary visual reference. Keep its comfortable neutral dark dashboard structure, distinct menu icon colors and add Gemini rotation to existing running tasks. Earlier command-center styling is superseded.",
+  "demo": "https://square-ui-dashboard-5.vercel.app/",
+  "officialSource": "https://github.com/zerostaticthemes/square-ui/tree/master/templates/dashboard-5",
+  "sourceFiles": [
+    "app/globals.css",
+    "app/page.tsx",
+    "app/layout.tsx",
+    "components/dashboard/sidebar.tsx",
+    "components/dashboard/header.tsx",
+    "components/dashboard/content.tsx",
+    "components/dashboard/stats-cards.tsx",
+    "components/dashboard/todays-tasks.tsx",
+    "components/dashboard/projects-table.tsx",
+    "components/ui/sidebar.tsx"
+  ],
+  "darkTokens": {
+    "background": "oklch(0.145 0 0) / #0a0a0a",
+    "foreground": "oklch(0.985 0 0) / #fafafa",
+    "card": "oklch(0.205 0 0) / #171717",
+    "sidebar": "oklch(0.205 0 0) / #171717",
+    "primary": "oklch(0.922 0 0) / #e5e5e5",
+    "primaryForeground": "oklch(0.205 0 0) / #171717",
+    "mutedSecondaryAccent": "oklch(0.269 0 0) / #262626",
+    "mutedForeground": "oklch(0.708 0 0) / #a1a1a1",
+    "border": "oklch(1 0 0 / 10%)",
+    "input": "oklch(1 0 0 / 15%)",
+    "ring": "oklch(0.556 0 0) / #737373",
+    "radius": "10px; md=6px; lg=10px; xl=14px"
+  },
+  "layout": {
+    "sidebarWidth": "256px desktop / 288px mobile sheet",
+    "outerContentInset": "8px on desktop; 1px border; 6px radius",
+    "mainContentPadding": "16px",
+    "sectionGap": "24px",
+    "cardGridGap": "16px; mixed content gap 16px to 24px at sm",
+    "statCard": "border1px bg-card padding16px radius14px",
+    "cardHeader": "padding12px 16px; divider1px",
+    "taskRows": "padding12px 16px; gap12px; hover muted at30%",
+    "pageTitle": "20px ->24px at sm, weight600",
+    "metricNumber": "24px weight500",
+    "bodyFont": "Geist Sans; monospace Geist Mono"
+  },
+  "sidebar": {
+    "itemHeight": "36px",
+    "itemPadding": "8px",
+    "gap": "8px",
+    "iconSize": "16px",
+    "labelSize": "14px",
+    "radius": "6px",
+    "hover": "bg-sidebar-accent / #262626, text near-white; retain assigned icon color",
+    "active": "same neutral row background and medium label; no neon/rail effects",
+    "colors": {
+      "Search": "muted-foreground",
+      "Taskplus AI": "violet-500",
+      "Templates": "blue-500",
+      "Notification": "amber-500",
+      "Dashboard": "primary",
+      "Inbox": "cyan-500",
+      "Project": "emerald-500",
+      "Calendar": "orange-500",
+      "Reports": "rose-500",
+      "Help & Center": "sky-500",
+      "Settings": "muted-foreground"
+    }
+  },
+  "scope": "Apply only visual tokens, spacing, radii, icon colors and presentation motion. Preserve all current product routes, content, data, filters, API, permissions and interactions. Do not copy dashboard demo charts, widgets or fixture data.",
+  "lifecycle": "Retain this source note and one verified official screenshot in design/references. Temporary copies are cleaned after verification.",
+  "officialScreenshot": {
+    "repositoryPath": "home/src/images/dashboard-5.png",
+    "rawUrl": "https://raw.githubusercontent.com/zerostaticthemes/square-ui/master/home/src/images/dashboard-5.png",
+    "galleryUrl": "https://square.lndevui.com/_next/static/media/dashboard-5.8f3fe2d9.png",
+    "localEvidence": "design/references/dashboard-5.png",
+    "sizeBytes": 552760,
+    "dimensions": [
+      3024,
+      1896
+    ],
+    "gitBlobSha": "a818d9b066cbdb84d7cc534f62caa7d526c79ade",
+    "matchesOfficialRepositoryBlob": true,
+    "visuallyInspected": true,
+    "observed": "Neutral nearly-black canvas, lighter charcoal sidebar and cards, thin grey borders, separate inset main frame, color restricted to individual navigation icons and local status marks, near-white primary buttons. Large calm surfaces, compact clear type, no command-center rails or all-panel neon."
+  }
+}

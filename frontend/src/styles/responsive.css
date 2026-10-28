@@ -1,0 +1,121 @@
+/* Non-task workspaces adapt to the width left by the existing navigation. */
+.square-page:not([data-section='tasks']) {
+  container: workspace / inline-size;
+}
+
+/* Crepe's native frame otherwise retains light-theme black text on dark pages. */
+.md-editor .milkdown {
+  --crepe-color-background: var(--background);
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--background-subtle);
+  --crepe-color-surface-low: var(--background-muted);
+  --crepe-color-on-surface: var(--foreground-intense);
+  --crepe-color-on-surface-variant: var(--foreground-muted);
+  --crepe-color-outline: var(--border-emphasis);
+  --crepe-color-primary: var(--primary);
+  --crepe-color-secondary: var(--background-strong);
+  --crepe-color-on-secondary: var(--foreground);
+  --crepe-color-inverse: var(--foreground);
+  --crepe-color-on-inverse: var(--background);
+  --crepe-color-inline-code: var(--info-foreground);
+  --crepe-color-error: var(--error-emphasis);
+  --crepe-color-hover: var(--background-strong);
+  --crepe-color-selected: var(--primary-soft);
+  --crepe-color-inline-area: var(--background-strong);
+}
+
+/* Keep Crepe's empty-field prompt readable against the dark canvas. */
+.md-editor .milkdown .crepe-placeholder::before {
+  color: var(--foreground-muted);
+}
+
+.square-page:not([data-section='tasks']) .responsive-page-header,
+.square-page:not([data-section='tasks']) .responsive-page-actions,
+.square-page:not([data-section='tasks']) .responsive-pagination {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.responsive-page-header > :first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.square-page:not([data-section='tasks']) :is([data-slot='breadcrumb-list'], [data-slot='breadcrumb-item']) {
+  min-width: 0;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.responsive-table-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border-radius: var(--radius-lg);
+}
+
+.square-page:not([data-section='tasks']) .responsive-table-scroll > [data-slot='table'] {
+  min-width: 100%;
+}
+
+.square-page:not([data-section='tasks']) .responsive-table-scroll > [data-slot='table']:has(> thead > tr > :nth-child(4)) { min-width: max(100%, 40rem); }
+.square-page:not([data-section='tasks']) .responsive-table-scroll > [data-slot='table']:has(> thead > tr > :nth-child(5)) { min-width: max(100%, 46rem); }
+.square-page:not([data-section='tasks']) .responsive-table-scroll > [data-slot='table']:has(> thead > tr > :nth-child(6)) { min-width: max(100%, 52rem); }
+.square-page:not([data-section='tasks']) .responsive-table-scroll > [data-slot='table']:has(> thead > tr > :nth-child(7)) { min-width: max(100%, 58rem); }
+.square-page:not([data-section='tasks']) .responsive-table-scroll > [data-slot='table']:has(> thead > tr > :nth-child(8)) { min-width: max(100%, 64rem); }
+
+.responsive-table-scroll [data-slot='table-head'] {
+  white-space: nowrap;
+}
+
+.apps-page-layout {
+  align-items: flex-start;
+}
+
+.apps-simulator-panel {
+  min-width: 0;
+}
+
+.apps-simulator-panel dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Portals remain within the viewport; long modal bodies scroll independently. */
+body:has(.square-page:not([data-section='tasks'])) :is([data-slot='dialog-body'], [data-slot='alert-dialog-body']) {
+  overflow-y: auto;
+  overscroll-behavior-block: contain;
+}
+
+body:has(.square-page:not([data-section='tasks'])) :is([data-slot='dialog-popup'], [data-slot='alert-dialog-popup']) {
+  min-width: 0;
+}
+
+body:has(.square-page:not([data-section='tasks'])) :is([data-slot='select-content'], [data-slot='dropdown-menu-content'], [data-slot='popover-content'], [data-slot='autocomplete-popup']) {
+  max-width: calc(100vw - 24px);
+}
+
+@container workspace (max-width: 64rem) {
+  .apps-page-layout { flex-direction: column; gap: 24px; }
+  .apps-page-layout > .min-w-0 { width: 100%; }
+  .apps-simulator-panel { width: 100%; }
+}
+
+@container workspace (max-width: 48rem) {
+  .responsive-page-header { align-items: flex-start; }
+}
+
+@container workspace (max-width: 28rem) {
+  .responsive-page-actions { width: 100%; }
+  .responsive-page-actions > * { flex-shrink: 0; }
+  .responsive-pagination > :first-child { flex-basis: 100%; }
+}
+
+@media (max-width: 639px) {
+  body:has(.square-page:not([data-section='tasks'])) :is([data-slot='dialog-viewport'], [data-slot='alert-dialog-viewport']) { padding: 12px; }
+  body:has(.square-page:not([data-section='tasks'])) :is([data-slot='dialog-header'], [data-slot='dialog-footer'], [data-slot='alert-dialog-header'], [data-slot='alert-dialog-footer']) { padding: 16px; }
+  body:has(.square-page:not([data-section='tasks'])) :is([data-slot='dialog-body'], [data-slot='alert-dialog-body']) { padding-inline: 16px; }
+  body:has(.square-page:not([data-section='tasks'])) :is([data-slot='dialog-title'], [data-slot='alert-dialog-title']) { padding-right: 24px; font-size: 20px; overflow-wrap: anywhere; }
+}

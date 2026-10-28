@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
+  MessageNotSentError,
   MessagePrimitive,
   ThreadPrimitive,
   useExternalStoreRuntime,
@@ -26,12 +27,10 @@ import {
   AlertDialogClose,
 } from '@appica/ui-react/alert-dialog'
 import {
-  CircleCheck,
-  Loader,
   MessageCircleQuestion,
   Refresh,
   Send,
-  X,
+  User,
 } from '@appica/icons-react'
 import {
   api,
@@ -39,15 +38,25 @@ import {
   type WorkerDebugOption,
   type WorkerDebugQuestion,
   type WorkerDebugSnapshot,
-  type WorkerDebugTodo,
 } from '../lib/api'
 import { QuestionCard } from '../components/QuestionCard'
+import { projectConversationMessages } from '../lib/conversation-presentation'
+import { AgentTodoList, ReasoningActivity, ResponseSurface, StreamingResponse, type ResponseSurfaceState } from '../components/beui'
 import { questionStatusLabel } from '../lib/question'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 import {
   CHAT_MARKDOWN_PARTS,
   CHAT_PLAIN_PARTS,
 } from '../components/agent-chat/ChatParts'
+import { AgentActivity } from '../components/ai-ui/AgentActivity'
+import { AiEnergy, AiWaveform } from '../components/ai-ui/AiEnergy'
+import '../components/ai-ui/ai-conversation.css'
+import '../components/ai-ui/daylight-conversation.css'
+
+const DEBUG_MARKDOWN_PARTS = {
+  ...CHAT_MARKDOWN_PARTS,
+  Reasoning: DebugReasoning,
+}
 
 /**
  * 机器人调试：/tasks/workers/:workerId/debug，从机器人列表进入。
@@ -164,7 +173,7 @@ export function WorkerDebugPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
+    <div data-running={running} className="ai-debug-page flex h-full min-h-0 flex-col gap-4">
       {error && (
         <p
           role="alert"
@@ -175,18 +184,21 @@ export function WorkerDebugPage() {
       )}
       {!snapshot ? (
         <div className="flex flex-1 items-center justify-center gap-2 text-sm text-foreground-muted">
-          <Loader />
+          <AgentActivity />
           {error ? '会话加载失败，请从机器人列表重新进入' : '加载调试会话…'}
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-3">
-          <header className="flex shrink-0 items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-border bg-background px-4 py-2.5">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <RobotAvatar
-                name={snapshot.worker.name}
-                avatarUrl={snapshot.worker.avatarUrl}
-                size={28}
-              />
+        <div className="ai-debug-session flex min-h-0 flex-1 flex-col gap-3">
+          <header className="ai-session-header flex shrink-0 items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-border bg-background px-4 py-2.5">
+            <div className="ai-session-identity flex min-w-0 items-center gap-2.5">
+              <span className="ai-avatar-frame ai-session-avatar">
+                <AiEnergy active={running} size={84} />
+                <RobotAvatar
+                  name={snapshot.worker.name}
+                  avatarUrl={snapshot.worker.avatarUrl}
+                  size={36}
+                />
+              </span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-foreground-intense">
                   {snapshot.worker.name}
@@ -200,9 +212,9 @@ export function WorkerDebugPage() {
                 </p>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="ai-session-actions flex shrink-0 items-center gap-2">
               {running && (
-                <span className="text-xs text-foreground-muted">回复中…</span>
+                <span className="ai-active-state inline-flex items-center gap-2 text-xs text-foreground-muted"><AiWaveform active className="ai-session-wave" /><span className="ai-shimmer">回复中…</span></span>
               )}
               <AlertDialog>
                 <AlertDialogTrigger
@@ -210,6 +222,7 @@ export function WorkerDebugPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="ai-session-reset"
                       disabled={running || resetting || !snapshot.sessionId}
                     />
                   }
@@ -247,7 +260,7 @@ export function WorkerDebugPage() {
               </AlertDialog>
             </div>
           </header>
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-auto xl:grid-cols-[minmax(0,1fr)_320px] xl:overflow-hidden">
+          <div className="ai-debug-workspace grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-auto xl:grid-cols-[minmax(0,1fr)_320px] xl:overflow-hidden">
             <DebugChat
               key={workerId}
               snapshot={snapshot}
@@ -255,7 +268,7 @@ export function WorkerDebugPage() {
               onSend={send}
               onReplyQuestion={replyQuestion}
             />
-            <TodoPanel todos={snapshot.todos ?? []} />
+            <aside className="ai-todo-panel"><AgentTodoList todos={snapshot.todos ?? []} /></aside>
           </div>
         </div>
       )}
@@ -281,29 +294,53 @@ function DebugChat({
         .map((part) => part.text)
         .join('\n')
         .trim()
-      if (text) await onSend(text)
+      if (!text) return
+      try {
+        await onSend(text)
+      } catch (error) {
+        // Restore the unsent composer draft; the existing send callback owns the request and error UI.
+        throw new MessageNotSentError(error instanceof Error ? error.message : String(error))
+      }
     },
     [onSend],
   )
+  const view = useMemo(() => projectConversationMessages(snapshot.messages, 'debug'), [snapshot.messages])
+  const latestUserIndex = view.messages.findLastIndex((message) => message.role === 'user')
+  const currentAssistant = view.messages.findLast((message, index) =>
+    index > latestUserIndex && message.role === 'assistant' && !message.question,
+  )
+  const responseState: ResponseSurfaceState = currentAssistant?.status === 'error'
+    ? 'error'
+    : currentAssistant && view.pendingQuestions.length > 0
+      ? 'attention'
+      : currentAssistant?.status === 'running'
+        ? 'running'
+        : currentAssistant?.status === 'complete'
+          ? 'complete'
+          : 'idle'
   const runtime = useExternalStoreRuntime<WorkerDebugMessage>({
-    messages: snapshot.messages,
+    messages: view.messages,
     convertMessage: toThreadMessage,
     onNew,
+    isRunning: running,
     isSendDisabled: running,
   })
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <section data-running={running} className="ai-conversation ai-debug-conversation flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
       <AssistantRuntimeProvider runtime={runtime}>
         <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-          <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
+          <ThreadPrimitive.Viewport className="ai-conversation-viewport flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
             {snapshot.messages.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
-                <RobotAvatar
-                  name={snapshot.worker.name}
-                  avatarUrl={snapshot.worker.avatarUrl}
-                  size={48}
-                />
+              <div className="ai-conversation-empty flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
+                <span className="ai-avatar-frame ai-empty-avatar">
+                  <AiEnergy size={96} />
+                  <RobotAvatar
+                    name={snapshot.worker.name}
+                    avatarUrl={snapshot.worker.avatarUrl}
+                    size={48}
+                  />
+                </span>
                 <p>发送第一条消息开始调试</p>
                 <p className="text-xs">
                   首条消息沿用工作目录中的 AGENTS.md 与技能，后续消息使用当前会话
@@ -326,24 +363,35 @@ function DebugChat({
                   <UserMessage />
                 ) : (
                   <AssistantMessage
-                    running={message.status?.type === 'running'}
+                    running={message.id === currentAssistant?.id && message.status?.type === 'running'}
                     worker={snapshot.worker}
+                    messageId={message.id}
+                    surfaceState={message.id === currentAssistant?.id ? responseState : 'idle'}
                   />
                 )
               }}
             </ThreadPrimitive.Messages>
           </ThreadPrimitive.Viewport>
-          <div className="shrink-0 border-t border-border bg-background p-3">
-            <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
+          <div className="ai-composer-dock shrink-0 border-t border-border bg-background p-3">
+            {view.pendingQuestions.length > 0 && (
+              <div className="ai-approval-dock" aria-label="待确认问题">
+                {view.pendingQuestions.map((message) => message.question && (
+                  <ResponseSurface key={message.question.id} state="attention" seed={message.id}>
+                    <QuestionCard question={message.question} onReply={onReplyQuestion} />
+                  </ResponseSurface>
+                ))}
+              </div>
+            )}
+            <ComposerPrimitive.Root className="ai-composer flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
               <ComposerPrimitive.Input
                 rows={2}
                 placeholder={
                   running ? '机器人正在回复…' : '输入调试消息，Enter 发送，Shift+Enter 换行…'
                 }
-                className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-foreground-muted"
+                className="ai-composer-input max-h-40 min-h-10 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-foreground-muted"
               />
               <ComposerPrimitive.Send asChild>
-                <Button size="icon-sm" aria-label="发送消息">
+                <Button size="icon-sm" className="ai-composer-send" aria-label="发送消息">
                   <Send className="size-4" />
                 </Button>
               </ComposerPrimitive.Send>
@@ -355,73 +403,11 @@ function DebugChat({
   )
 }
 
-/** 右侧待办面板：最近一次 todowrite 的清单（只读，SSE 实时刷新） */
-function TodoPanel({ todos }: { todos: WorkerDebugTodo[] }) {
-  const completed = todos.filter((todo) => todo.status === 'completed').length
-  return (
-    <aside className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-      <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
-        <span className="text-sm font-medium">待办</span>
-        <span className="text-xs text-foreground-muted">
-          {completed}/{todos.length}
-        </span>
-      </header>
-      {todos.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-4 text-center text-sm text-foreground-muted">
-          暂无待办
-        </div>
-      ) : (
-        <ul className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-3">
-          {todos.map((todo, index) => (
-            <TodoItem key={index} todo={todo} />
-          ))}
-        </ul>
-      )}
-    </aside>
-  )
+/** Render only the reasoning already supplied by the existing runtime. */
+function DebugReasoning({ text, status }: { text: string; status?: { type?: string } }) {
+  return <ReasoningActivity text={text} streaming={status?.type === 'running'} />
 }
 
-function TodoItem({ todo }: { todo: WorkerDebugTodo }) {
-  return (
-    <li className="flex items-start gap-2.5 px-1 py-1 text-sm leading-relaxed">
-      <TodoStatusIcon status={todo.status} />
-      <span className={todoTextStyle(todo.status)}>{todo.content}</span>
-    </li>
-  )
-}
-
-function TodoStatusIcon({ status }: { status: WorkerDebugTodo['status'] }) {
-  if (status === 'completed') {
-    return <CircleCheck className="mt-0.5 size-4 shrink-0 text-foreground-muted" />
-  }
-  if (status === 'cancelled') {
-    return <X className="mt-0.5 size-4 shrink-0 text-foreground-muted" />
-  }
-  if (status === 'in_progress') {
-    return (
-      <span className="mt-1.5 inline-flex size-4 shrink-0 items-center justify-center">
-        <span className="size-2 animate-pulse rounded-full bg-primary" />
-      </span>
-    )
-  }
-  return (
-    <span className="mt-1.5 inline-flex size-4 shrink-0 items-center justify-center">
-      <span className="size-2 rounded-full border border-border-strong" />
-    </span>
-  )
-}
-
-function todoTextStyle(status: WorkerDebugTodo['status']): string {
-  if (status === 'in_progress') {
-    return 'min-w-0 break-words font-medium text-foreground-intense'
-  }
-  if (status === 'completed' || status === 'cancelled') {
-    return 'min-w-0 break-words text-foreground-muted line-through'
-  }
-  return 'min-w-0 break-words text-foreground-intense'
-}
-
-/** 思考（reasoning）分片：流式时默认展开，结束后折叠，可点击回看 */
 interface ChatCustom {
   question?: WorkerDebugQuestion
 }
@@ -468,10 +454,11 @@ function toThreadMessage(message: WorkerDebugMessage): ThreadMessageLike {
 
 function UserMessage() {
   return (
-    <MessagePrimitive.Root className="flex justify-end px-1">
-      <div className="min-w-0 max-w-[85%] rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
+    <MessagePrimitive.Root className="ai-message ai-user-message flex justify-end gap-3 px-1">
+      <div className="ai-user-surface max-w-[85%] rounded-[var(--radius-lg)] px-4 py-2.5 text-sm leading-relaxed">
         <MessagePrimitive.Parts components={CHAT_PLAIN_PARTS} />
       </div>
+      <span aria-hidden className="ai-user-avatar"><User className="size-4" /></span>
     </MessagePrimitive.Root>
   )
 }
@@ -479,23 +466,42 @@ function UserMessage() {
 function AssistantMessage({
   running,
   worker,
+  messageId,
+  surfaceState,
 }: {
   running: boolean
   worker: WorkerDebugOption
+  messageId: string
+  surfaceState: ResponseSurfaceState
 }) {
   return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <RobotAvatar
-        name={worker.name}
-        avatarUrl={worker.avatarUrl}
-        size={32}
-        className="mt-1"
-      />
-      <div className="min-w-0 max-w-[88%] pt-1 text-sm leading-relaxed">
-        <MessagePrimitive.Parts components={CHAT_MARKDOWN_PARTS} />
+    <MessagePrimitive.Root data-running={running} className="ai-message ai-assistant-message flex gap-3 px-1">
+      <span className="ai-avatar-frame">
+        <AiEnergy active={running} size={64} />
+        <RobotAvatar
+          name={worker.name}
+          avatarUrl={worker.avatarUrl}
+          size={32}
+          className="ai-message-avatar"
+        />
+      </span>
+      <div className="ai-message-main min-w-0 flex-1 pt-1 text-sm leading-relaxed">
+        <ResponseSurface state={surfaceState} seed={messageId}>
+        <div className="ai-response-inner">
+        <div className="ai-message-heading">
+          <span className="font-medium text-foreground-intense">{worker.name}</span>
+          {running && <AgentActivity className="ai-reply-activity" />}
+        </div>
+        <StreamingResponse streaming={running}>
+          <div className="ai-assistant-body">
+            <MessagePrimitive.Parts components={DEBUG_MARKDOWN_PARTS} />
+          </div>
+        </StreamingResponse>
         {running && (
-          <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
+          <span className="ai-streaming-caret ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
         )}
+        </div>
+        </ResponseSurface>
       </div>
     </MessagePrimitive.Root>
   )
@@ -512,15 +518,18 @@ function DebugQuestionBubble({
   onReply: (questionId: string, answers: string[][] | null) => Promise<void>
 }) {
   return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <RobotAvatar
-        name={worker.name}
-        avatarUrl={worker.avatarUrl}
-        size={32}
-        className="mt-0.5"
-      />
-      <div className="min-w-0 max-w-[88%] pt-1 text-sm leading-relaxed">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+    <MessagePrimitive.Root className="ai-message ai-question-message flex gap-3 px-1">
+      <span className="ai-avatar-frame">
+        <AiEnergy size={64} />
+        <RobotAvatar
+          name={worker.name}
+          avatarUrl={worker.avatarUrl}
+          size={32}
+          className="ai-message-avatar"
+        />
+      </span>
+      <div className="ai-message-main min-w-0 flex-1 pt-1 text-sm leading-relaxed">
+        <div className="ai-message-heading mb-1.5 flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-foreground-muted">
             {worker.name}
           </span>

@@ -1,0 +1,301 @@
+{
+  "verifiedAt": "2026-10-28T11:56:10.327Z",
+  "agentRealRounds": 7,
+  "baseline": {
+    "startedAt": "2026-10-28T11:13:33.993Z",
+    "mode": "real local Docker backend and executor; no mock responses except one explicit failed-send probe",
+    "cases": [
+      {
+        "name": "failed-send-draft",
+        "injectedFailure": true,
+        "expected": "本地UI故障探针：请保留这段输入，等待手动重试。",
+        "actual": "",
+        "draftRetained": false
+      },
+      {
+        "name": "real-long-response",
+        "sessionRetained": true,
+        "textLength": 903,
+        "sha256": "18d76b227ada08e626ed3b94b4f024dd8b793a661ec3fe01d289caf2692d3f65",
+        "error": null
+      },
+      {
+        "name": "send-after-reading-history",
+        "before": {
+          "top": 0,
+          "max": 1374
+        },
+        "during": {
+          "top": 0,
+          "max": 1568
+        },
+        "after": {
+          "top": 0,
+          "max": 1585
+        },
+        "followedNewTurn": false,
+        "sessionRetained": true,
+        "error": null,
+        "finalAnswer": "你最初选择的展示形式是**表格**（在“简洁列表”和“表格”中选择了表格）。本轮已完成 ✅"
+      }
+    ],
+    "pageErrors": [],
+    "sessionId": "ses_e7dcd3b16ffelzi4Qsp1mpAYJl",
+    "firstRealRound": {
+      "messages": 3,
+      "questions": [
+        "answered"
+      ],
+      "assistantTextLengths": [
+        341
+      ],
+      "todos": 3,
+      "error": null
+    },
+    "finishedAt": "2026-10-28T11:13:45.111Z"
+  },
+  "after": {
+    "startedAt": "2026-10-28T11:17:02.365Z",
+    "mode": "real local Docker backend and executor; no mock responses except one explicit failed-send probe",
+    "cases": [
+      {
+        "name": "failed-send-draft",
+        "injectedFailure": true,
+        "expected": "本地UI故障探针：请保留这段输入，等待手动重试。",
+        "actual": "本地UI故障探针：请保留这段输入，等待手动重试。",
+        "draftRetained": true
+      },
+      {
+        "name": "manual-retry-uses-original-draft",
+        "storedOriginalText": true,
+        "sessionRetained": true,
+        "error": null
+      },
+      {
+        "name": "real-long-response",
+        "sessionRetained": true,
+        "textLength": 838,
+        "sha256": "81a1abc0315669da1dceae3a5e98adf14bdf222c2709ed3fdde1e22d3e56f796",
+        "error": null
+      },
+      {
+        "name": "send-after-reading-history",
+        "before": {
+          "top": 0,
+          "max": 4526
+        },
+        "during": {
+          "top": 4720,
+          "max": 4720
+        },
+        "after": {
+          "top": 4737,
+          "max": 4737
+        },
+        "followedNewTurn": true,
+        "sessionRetained": true,
+        "error": null,
+        "finalAnswer": "你最初选择的展示形式是**表格**（在“简洁列表”与“表格”之间选了表格），本轮已完成 ✅"
+      }
+    ],
+    "pageErrors": [],
+    "sessionId": "ses_e7dcd3b16ffelzi4Qsp1mpAYJl",
+    "firstRealRound": {
+      "messages": 14,
+      "questions": [
+        "answered",
+        "answered"
+      ],
+      "assistantTextLengths": [
+        341,
+        903,
+        45,
+        117,
+        228,
+        182
+      ],
+      "todos": 3,
+      "error": null
+    },
+    "finishedAt": "2026-10-28T11:17:25.232Z"
+  },
+  "finalRound": {
+    "verifiedAt": "2026-10-28T11:54:46.959Z",
+    "origin": "http://127.0.0.1:5275",
+    "status": "idle",
+    "sessionRetained": true,
+    "question": {
+      "id": "frm_1825ad415001KS9SMwNb3C1Mmg",
+      "state": "answered",
+      "answers": [
+        [
+          "长内容折行",
+          "多选状态"
+        ],
+        [
+          "本地 Docker 真实多轮验收"
+        ]
+      ]
+    },
+    "assistantMessages": 10,
+    "todos": [
+      {
+        "content": "确认展示形式（简洁列表 / 表格）",
+        "status": "completed"
+      },
+      {
+        "content": "输出 5 条示例",
+        "status": "completed"
+      },
+      {
+        "content": "完成核对",
+        "status": "completed"
+      }
+    ],
+    "error": null,
+    "lastReply": "1. 第1题「选择要验证的交互」：你选择了多选，实际收到 **长内容折行、多选状态** 这两项。\n2. 第2题「填写验收备注」：你没有使用「默认备注」，而是自由输入了「**本地 Docker 真实多轮验收**」。\n3. 结论：两个问题都成功提交并回传答案，多选和自由输入均正常工作。本轮未访问网络、文件或 shell ✅",
+    "browser": {
+      "whilePending": {
+        "assistantMessages": 10,
+        "pendingCards": 1,
+        "sendDisabled": true,
+        "horizontalOverflow": false
+      },
+      "afterReply": {
+        "assistantMessages": 10,
+        "pendingCards": 0,
+        "sendDisabled": false,
+        "draftRetained": true,
+        "receiptOrder": [
+          "receipt",
+          "assistant"
+        ],
+        "horizontalOverflow": false
+      }
+    }
+  },
+  "scope": {
+    "auditedAt": "2026-10-28T11:53:53.344Z",
+    "baseline": "ac49bd2581249cdf4c20a02268e56b63521d8b7d",
+    "uiHeadBeforeMerge": "f2bea76e0b42112a7d9a204853a13563ad23ad9f",
+    "checks": [
+      {
+        "name": "All branch-specific changes are frontend or design",
+        "passed": true
+      },
+      {
+        "name": "backend matches main",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/lib/api.ts matches main",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/App.tsx matches main",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/context matches main",
+        "passed": true
+      },
+      {
+        "name": "frontend/package.json matches main",
+        "passed": true
+      },
+      {
+        "name": "package.json matches main",
+        "passed": true
+      },
+      {
+        "name": "pnpm-lock.yaml matches main",
+        "passed": true
+      },
+      {
+        "name": "Debug snapshot/SSE/send/reply/reset unchanged",
+        "passed": true
+      },
+      {
+        "name": "Question state/answers/toggle/submit unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/ScriptLibraryDetailPage.tsx:ScriptLibraryDetailPage business prefix unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/TaskTypesPage.tsx:TypeFormDialog business prefix unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/TaskTypesPage.tsx:DeleteTypeButton business prefix unchanged",
+        "passed": true
+      },
+      {
+        "name": "Debug onNew only adds failed-send draft restoration",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/WorkerDebugPage.tsx:toThreadMessage unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/WorkerDebugPage.tsx:customOf unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:onNew unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:toThreadMessage unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:customOf unchanged",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:readAutoAnswer unchanged",
+        "passed": true
+      },
+      {
+        "name": "Task footer/assignment actions and guards unchanged except classes",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/pages/WorkerDebugPage.tsx: original send guard",
+        "passed": true
+      },
+      {
+        "name": "frontend/src/components/task-detail/TaskChatPanel.tsx: original send guard",
+        "passed": true
+      },
+      {
+        "name": "All API call expressions match main",
+        "passed": true
+      }
+    ],
+    "outOfScope": [],
+    "apiDifferences": [],
+    "passed": true
+  },
+  "verification": {
+    "typescript": true,
+    "changedFileLint": true,
+    "viteBuild": true,
+    "conversationProjection": {
+      "total": 7,
+      "passed": 7
+    }
+  },
+  "isolation": {
+    "productionBusinessOperations": false,
+    "localDatabase": true,
+    "localBackend": true,
+    "localExecutor": true,
+    "modelService": "api.deepseek.com",
+    "hostDependencies": "read-only",
+    "runtimeDirectory": "work/local-runtime (ignored)"
+  }
+}

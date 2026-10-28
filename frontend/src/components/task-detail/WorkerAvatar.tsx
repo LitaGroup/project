@@ -5,6 +5,7 @@ import {
 } from '@appica/ui-react/avatar'
 import { Robot, User } from '@appica/icons-react'
 import type { TaskChatSender } from '../../lib/api'
+import { RabbitIdentity } from '../ai-ui/RabbitIdentity'
 
 /** 用户/系统消息的底色（机器人头像走 RobotAvatar，不使用配色轮换） */
 const SENDER_TONES: Record<'user' | 'system', string> = {
@@ -25,7 +26,7 @@ interface RobotAvatarProps {
 
 /**
  * 机器人头像（机器人/调度机器人通用）：
- * 设置了头像显示图片；未设置或加载失败显示纯黑占位（黑图）+ 一圈边框。
+ * 设置了头像显示图片；未设置或加载失败显示项目兔子标记。
  */
 export function RobotAvatar({
   name,
@@ -34,9 +35,11 @@ export function RobotAvatar({
   className = '',
 }: RobotAvatarProps) {
   return (
-    <Avatar size={size} className={`shrink-0 ${className}`}>
+    <Avatar size={size} className={`robot-rabbit-avatar shrink-0 ${className}`}>
       {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
-      <AvatarFallback className="worker-avatar-empty ring-1 ring-border-strong" />
+      <AvatarFallback className="robot-rabbit-fallback">
+        <RabbitIdentity />
+      </AvatarFallback>
     </Avatar>
   )
 }

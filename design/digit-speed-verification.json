@@ -1,0 +1,197 @@
+{
+  "checkedAt": "2026-10-28T10:10:49.769Z",
+  "timing": {
+    "before": {
+      "durationMs": 600,
+      "delayPerPositionMs": 25,
+      "extraTurns": 2
+    },
+    "after": {
+      "durationMs": 280,
+      "delayPerPositionMs": 10,
+      "extraTurns": 1
+    }
+  },
+  "pages": [
+    {
+      "route": "/tasks/list",
+      "errors": [],
+      "unmatched": [],
+      "writes": [],
+      "reels": [
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 252.0999999642372,
+          "moved": true,
+          "samples": 49
+        },
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 252.0999999642372,
+          "moved": true,
+          "samples": 49
+        },
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 252.0999999642372,
+          "moved": true,
+          "samples": 49
+        },
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 252.0999999642372,
+          "moved": true,
+          "samples": 49
+        },
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 252.0999999642372,
+          "moved": true,
+          "samples": 49
+        },
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 252.0999999642372,
+          "moved": true,
+          "samples": 49
+        }
+      ],
+      "passed": true
+    },
+    {
+      "route": "/tasks",
+      "errors": [],
+      "unmatched": [],
+      "writes": [],
+      "reels": [
+        {
+          "target": 4,
+          "accessibleValue": "4",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 4,
+          "settledMs": 271,
+          "moved": true,
+          "samples": 36
+        },
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 271,
+          "moved": true,
+          "samples": 36
+        },
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 271,
+          "moved": true,
+          "samples": 36
+        }
+      ],
+      "passed": true
+    },
+    {
+      "route": "/tasks/live",
+      "errors": [],
+      "unmatched": [],
+      "writes": [],
+      "reels": [
+        {
+          "target": 6,
+          "accessibleValue": "6",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 6,
+          "settledMs": 276.19999998807907,
+          "moved": true,
+          "samples": 51
+        }
+      ],
+      "passed": true
+    },
+    {
+      "route": "/projects/1/defects/1",
+      "errors": [],
+      "unmatched": [],
+      "writes": [],
+      "reels": [
+        {
+          "target": 1,
+          "accessibleValue": "1",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 1,
+          "settledMs": 289.80000001192093,
+          "moved": true,
+          "samples": 53
+        },
+        {
+          "target": 2,
+          "accessibleValue": "2",
+          "position": 0,
+          "rowCount": 20,
+          "visibleDigit": 2,
+          "settledMs": 289.80000001192093,
+          "moved": true,
+          "samples": 53
+        }
+      ],
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "checks": {
+    "frontendTypescript": "passed",
+    "componentLint": "passed",
+    "independentStaticReview": "passed",
+    "sourceScope": "DigitSwap presentation track length, target offset and timing only; all original values and business consumers unchanged."
+  },
+  "cleanup": {
+    "removed": [
+      {
+        "path": "work/digit-speed",
+        "bytes": 4364
+      },
+      {
+        "path": "frontend/node_modules/.tmp/tsconfig.app.tsbuildinfo",
+        "bytes": 3420
+      },
+      {
+        "path": "frontend/node_modules/.tmp/tsconfig.node.tsbuildinfo",
+        "bytes": 51
+      }
+    ],
+    "workDirectoryAbsent": true
+  }
+}

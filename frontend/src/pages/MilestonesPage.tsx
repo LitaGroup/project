@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Input } from '@appica/ui-react/input'
 import {
   Toolbar,
@@ -67,7 +67,7 @@ export function MilestonesPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="responsive-page-header mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">节点</h1>
       </div>
       <Toolbar aria-label="节点筛选" className="mb-4">

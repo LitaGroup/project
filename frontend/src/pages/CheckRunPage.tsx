@@ -6,11 +6,11 @@ import {
   CardTitle,
 } from '@appica/ui-react/card'
 import {
-  Table,
   TableBody,
   TableRow,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Button } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
 import { Progress } from '@appica/ui-react/progress'
@@ -135,9 +135,9 @@ export function CheckRunPage() {
     run && run.total ? Math.round((run.current / run.total) * 100) : null
 
   return (
-    <div className="flex h-full gap-6">
+    <div className="responsive-detail-page responsive-detail-columns responsive-run-page flex h-full gap-6">
       {/* 左侧：终端输出（撑满剩余高度，底部与页面对齐） */}
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
+      <div className="responsive-detail-main flex min-w-0 flex-1 flex-col gap-6">
         <PageBreadcrumb
           items={[
             { label: '检查', to: '/checks' },
@@ -145,8 +145,8 @@ export function CheckRunPage() {
             { label: check?.code ?? '…' },
           ]}
         />
-        <section className="flex min-h-0 flex-1 flex-col">
-          <div className="mb-3 flex items-center justify-between">
+        <section className="detail-run-output flex min-h-0 flex-1 flex-col">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <div>
               <h2 className="text-xl font-semibold">
                 检查：{check?.code ?? '…'}
@@ -168,7 +168,7 @@ export function CheckRunPage() {
       </div>
 
       {/* 右侧：运行状态 + 历史记录 */}
-      <aside className="flex w-80 shrink-0 flex-col gap-6">
+      <aside className="responsive-detail-sidebar flex w-80 shrink-0 flex-col gap-6">
         <Card>
           <CardHeader>
             <CardTitle>运行状态</CardTitle>

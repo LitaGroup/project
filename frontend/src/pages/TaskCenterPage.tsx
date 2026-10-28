@@ -32,6 +32,7 @@ import {
   type Worker,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
+import { DigitSwap } from '../components/motion-ui'
 
 /** 主状态分组：概览卡片按主状态汇总，并展示子状态构成 */
 const STAGE_GROUPS: {
@@ -117,14 +118,14 @@ export function TaskCenterPage() {
       </div>
 
       {/* 主状态统计卡 + 子状态构成 */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="task-overview-stats grid grid-cols-1 gap-3 md:grid-cols-3">
         {STAGE_GROUPS.map((group) => {
           const count = overview?.statuses[group.status] ?? 0
           return (
             <Card key={group.label}>
-              <div className="px-6 pb-5">
+              <div className="task-overview-stat px-6 pb-5">
                 <p className="text-xs text-foreground-muted">{group.label}</p>
-                <p className="mt-1 text-2xl font-semibold">{count}</p>
+                <p className="task-overview-stat-value mt-1 text-2xl font-semibold"><DigitSwap value={count} /></p>
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-foreground-muted">
                   {group.subStatuses.map((subStatus) => (
                     <span key={subStatus}>

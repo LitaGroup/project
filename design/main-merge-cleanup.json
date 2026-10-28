@@ -1,0 +1,45 @@
+{
+  "cleanedAt": "2026-10-28T09:59:11.520203+00:00",
+  "removed": [
+    {
+      "path": "work",
+      "bytes": 15031531
+    },
+    {
+      "path": "frontend/dist",
+      "bytes": 11542152
+    },
+    {
+      "path": "frontend/node_modules/.tmp/tsconfig.app.tsbuildinfo",
+      "bytes": 3420
+    },
+    {
+      "path": "frontend/node_modules/.tmp/tsconfig.node.tsbuildinfo",
+      "bytes": 51
+    },
+    {
+      "path": "backend/dist/tsconfig.build.tsbuildinfo",
+      "bytes": 370065
+    }
+  ],
+  "replacedObsoleteCurrentScreenshots": [
+    {
+      "path": "design/screenshots/daylight/pages/knowledge-search.png",
+      "bytes": 200552
+    },
+    {
+      "path": "design/screenshots/daylight/pages/scripts.png",
+      "bytes": 194915
+    }
+  ],
+  "releasedBytes": 27342686,
+  "retained": [
+    "frontend and design source",
+    "69 current full-page screenshots",
+    "current conversation state screenshots",
+    "one current 17.17-second conversation MP4",
+    "formal verification and scope reports"
+  ],
+  "workDirectoryAbsent": true,
+  "frontendBuildDirectoryAbsent": true
+}

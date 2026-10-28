@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import {
-  Table,
   TableHeader,
   TableBody,
   TableRow,
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
+import { ResponsiveTable as Table } from '../components/ResponsiveTable'
 import { Input } from '@appica/ui-react/input'
 import {
   Toolbar,
@@ -111,7 +111,7 @@ export function ReposPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="responsive-page-header mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">仓库</h1>
         <Button variant="outline" size="sm" disabled={syncing} onClick={sync}>
           {syncing ? '同步中…' : '同步'}

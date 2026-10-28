@@ -1,0 +1,65 @@
+@property --task-ring-angle {
+  syntax: '<angle>';
+  inherits: true;
+  initial-value: 0deg;
+}
+
+/* Continuous colors and a soft energy peak, without a separate light source. */
+.border-glow {
+  --border-glow-core-width: calc(var(--square-edge-width) * 0.75);
+  --border-glow-spectrum: conic-gradient(
+    from var(--task-ring-angle) at 50% 50% in oklch,
+    color-mix(in oklch, var(--square-glow-blue) 55%, transparent) 0%,
+    var(--square-glow-blue) 12%,
+    var(--square-glow-violet) 25%,
+    var(--square-glow-pink) 39%,
+    var(--square-glow-orange) 53%,
+    color-mix(in oklch, var(--square-glow-blue) 45%, transparent) 70%,
+    color-mix(in oklch, var(--square-glow-violet) 25%, transparent) 84%,
+    color-mix(in oklch, var(--square-glow-blue) 55%, transparent) 100%
+  );
+  position: relative;
+  isolation: isolate;
+  padding: var(--border-glow-core-width);
+  border-radius: var(--radius-lg);
+  background: var(--border);
+  animation: task-ring-rotate var(--task-motion-duration) linear var(--task-motion-delay) infinite;
+}
+
+.border-glow__aura,
+.border-glow__ring {
+  position: absolute;
+  pointer-events: none;
+  background-image: var(--border-glow-spectrum);
+}
+
+.border-glow__aura {
+  z-index: 0;
+  inset: calc(var(--square-edge-width) * -1);
+  border-radius: calc(var(--radius-lg) + var(--square-edge-width));
+  filter: blur(calc(var(--square-glow-blur) * 0.55));
+  opacity: 0.23;
+}
+
+.border-glow__ring {
+  z-index: 2;
+  inset: 0;
+  padding: var(--border-glow-core-width);
+  border-radius: var(--radius-lg);
+  mask:
+    linear-gradient(var(--square-glow-hot) 0 0) content-box,
+    linear-gradient(var(--square-glow-hot) 0 0);
+  mask-composite: exclude;
+}
+
+.border-glow__content {
+  position: relative;
+  z-index: 1;
+  border-radius: calc(var(--radius-lg) - var(--border-glow-core-width));
+  background: var(--background);
+}
+
+@keyframes task-ring-rotate {
+  from { --task-ring-angle: 0deg; }
+  to { --task-ring-angle: 360deg; }
+}

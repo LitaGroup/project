@@ -58,6 +58,8 @@ import type { IconComponent } from '@appica/icons-react'
 import { LayoutGroup, m } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
 import { PageTransition } from './PageTransition'
+import './surface-effects.css'
+import { RabbitIdentity } from './ai-ui/RabbitIdentity'
 import { KnowledgeSearchDialog } from './KnowledgeSearchDialog'
 import { navIndicatorTransition } from '../lib/motion'
 
@@ -225,18 +227,19 @@ export function Layout() {
   }, [])
 
   return (
-    <div className="flex min-h-screen flex-col bg-background-muted">
+    <div className="square-shell flex min-h-screen flex-col bg-background-muted">
       {/* 顶部导航 */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border-strong bg-background px-6">
-        <div className="flex items-center gap-8">
+      <header className="square-header flex h-14 shrink-0 items-center justify-between border-b border-border-strong bg-background px-6">
+        <div className="square-header-start flex items-center gap-8">
           <Link
             to="/"
-            className="text-base font-semibold text-foreground-intense"
+            className="square-brand text-base font-semibold text-foreground-intense"
           >
+            <RabbitIdentity className="square-rabbit-mark" />
             AI 项目管理平台
           </Link>
           <LayoutGroup id="top-navigation">
-            <nav className="flex items-center gap-1">
+            <nav className="square-topnav flex items-center gap-1">
               {NAV_SECTIONS.map((section) => {
                 const active = section.key === activeSection.key
                 return (
@@ -298,9 +301,9 @@ export function Layout() {
         onOpenChange={setSearchOpen}
       />
 
-      <div className="flex flex-1">
+      <div className="square-body flex flex-1">
         {/* 左侧导航 */}
-        <aside className="w-52 shrink-0 border-r border-border-strong bg-background p-3">
+        <aside className="square-sidebar w-52 shrink-0 border-r border-border-strong bg-background p-3">
           <Navigation orientation="vertical" activeLink={pathname}>
             <NavigationList className="gap-1">
               {activeSection.items.map((item) => (
@@ -326,7 +329,7 @@ export function Layout() {
 
         {/* 内容区（min-w-0：允许内容收缩，宽内容才能在面板内出现横向滚动；
             高度限定为视口减顶栏，页面可用 h-full 撑满剩余空间） */}
-        <main className="h-[calc(100vh-3.5rem)] min-w-0 flex-1 overflow-auto p-6 text-foreground-intense">
+        <main data-section={activeSection.key} data-page={pathname} className="square-page h-[calc(100vh-3.5rem)] min-w-0 flex-1 overflow-auto p-6 text-foreground-intense">
           <PageTransition pageKey={pathname}>
             <Outlet />
           </PageTransition>

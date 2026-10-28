@@ -30,11 +30,9 @@ import {
 } from '@appica/ui-react/select'
 import {
   AlertCircle,
-  Check,
   MessageCircleQuestion,
   Send,
   Wrench,
-  X,
 } from '@appica/icons-react'
 import {
   api,
@@ -48,6 +46,12 @@ import {
 } from '../../lib/api'
 import { questionStatusLabel } from '../../lib/question'
 import { QuestionCard } from '../QuestionCard'
+import { projectConversationMessages } from '../../lib/conversation-presentation'
+import { ReasoningActivity, ResponseSurface, StreamingResponse, ToolActivity } from '../beui'
+import { AgentActivity } from '../ai-ui/AgentActivity'
+import { AiEnergy } from '../ai-ui/AiEnergy'
+import '../ai-ui/ai-conversation.css'
+import '../ai-ui/daylight-conversation.css'
 import { SenderLine, WorkerAvatar } from './WorkerAvatar'
 import {
   CHAT_MARKDOWN_PARTS,
@@ -114,12 +118,21 @@ export function TaskChatPanel({
     [onSendMessage],
   )
 
+  const view = useMemo(() => projectConversationMessages(messages, 'task'), [messages])
+  const currentTurnAssistantIds = useMemo(() => {
+    const lastUserIndex = messages.findLastIndex((message) => message.role === 'user')
+    return new Set(
+      messages.slice(lastUserIndex + 1)
+        .filter((message) => message.role === 'assistant' && !message.question)
+        .map((message) => message.id),
+    )
+  }, [messages])
   const finished = task.status === '已结束'
   const robotRunning = messages.some(
     (message) => message.role === 'assistant' && message.status === 'running',
   )
   const runtime = useExternalStoreRuntime<TaskChatMessage>({
-    messages,
+    messages: view.messages,
     convertMessage: toThreadMessage,
     onNew,
     isSendDisabled: finished || busy || robotRunning,
@@ -139,8 +152,8 @@ export function TaskChatPanel({
   )?.agent?.name
 
   return (
-    <section className="flex min-h-[60vh] min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background xl:min-h-0">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+    <section className="ai-conversation ai-task-conversation flex min-h-[60vh] min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background xl:min-h-0">
+      <header className="ai-conversation-header flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <ConnectionDot state={connection} />
           <span className="truncate text-sm font-medium text-foreground-intense">
@@ -161,9 +174,9 @@ export function TaskChatPanel({
 
       <AssistantRuntimeProvider runtime={runtime}>
         <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-          <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
+          <ThreadPrimitive.Viewport className="ai-conversation-viewport flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
             {messages.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
+              <div className="ai-conversation-empty flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
                 <span className="rounded-full bg-background-muted p-3">
                   <Wrench className="size-5" />
                 </span>
@@ -192,21 +205,58 @@ export function TaskChatPanel({
                 return message.role === 'user' ? (
                   <UserBubble message={message} />
                 ) : (
-                  <AssistantBubble message={message} />
+                  <AssistantBubble
+                    message={message}
+                    currentTurn={currentTurnAssistantIds.has(message.id)}
+                    attention={
+                      task.subStatus === '待反馈' &&
+                      view.pendingQuestions.some((item) => item.taskId === custom.taskId) &&
+                      message.id === view.messages.findLast(
+                        (item) => item.taskId === custom.taskId && item.role === 'assistant' && !item.question,
+                      )?.id
+                    }
+                  />
                 )
               }}
             </ThreadPrimitive.Messages>
 
-            <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background pt-2">
-              <ChatFooter
-                task={task}
-                agentName={currentAgentName}
-                busy={busy}
-                robotRunning={robotRunning}
-                onAction={onAction}
-              />
-            </ThreadPrimitive.ViewportFooter>
           </ThreadPrimitive.Viewport>
+          <div className="ai-composer-dock ai-conversation-footer shrink-0 border-t border-border bg-background p-3">
+            {view.pendingQuestions.length > 0 && (
+              <div className="ai-approval-dock" aria-label="待确认问题">
+                {view.pendingQuestions.map((message) => {
+                  if (!message.question) return null
+                  const disabled = task.subStatus !== '待反馈' ||
+                    (message.taskId !== undefined && message.taskId !== task.id)
+                  return (
+                    <ResponseSurface
+                      key={`${message.taskId}:${message.question.id}`}
+                      state={disabled ? 'idle' : 'attention'}
+                      seed={message.id}
+                    >
+                      <div className="ai-approval-sender flex flex-wrap items-center gap-2">
+                        <span>{message.sender.name}</span>
+                        <AutoAnswerStatus question={message.question} autoAnswer={readAutoAnswer(message.meta)} />
+                      </div>
+                      <QuestionCard
+                        question={message.question}
+                        busy={busy}
+                        disabled={disabled}
+                        onReply={onReplyQuestion}
+                      />
+                    </ResponseSurface>
+                  )
+                })}
+              </div>
+            )}
+            <ChatFooter
+              task={task}
+              agentName={currentAgentName}
+              busy={busy}
+              robotRunning={robotRunning}
+              onAction={onAction}
+            />
+          </div>
         </ThreadPrimitive.Root>
       </AssistantRuntimeProvider>
     </section>
@@ -280,6 +330,21 @@ function readAutoAnswer(
   }
 }
 
+function TaskChatReasoning({
+  text,
+  status,
+}: {
+  text: string
+  status?: { type?: string }
+}) {
+  return <ReasoningActivity text={text} streaming={status?.type === 'running'} />
+}
+
+const TASK_MARKDOWN_PARTS = {
+  ...CHAT_MARKDOWN_PARTS,
+  Reasoning: TaskChatReasoning,
+}
+
 function UserBubble({ message }: { message: MessageState }) {
   const sender = customOf(message).sender ?? {
     id: 'user',
@@ -288,23 +353,31 @@ function UserBubble({ message }: { message: MessageState }) {
     roleLabel: '用户',
   }
   return (
-    <MessagePrimitive.Root className="flex justify-end gap-3 px-1">
-      <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1.5">
+    <MessagePrimitive.Root className="ai-message ai-user-message flex justify-end gap-3 px-1">
+      <div className="ai-message-main flex min-w-0 max-w-[85%] flex-col items-end gap-1.5">
         <SenderLine
           sender={sender}
           time={message.createdAt.toISOString()}
           align="right"
         />
-        <div className="min-w-0 max-w-full rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
+        <div className="ai-user-surface min-w-0 max-w-full rounded-[var(--radius-lg)] px-4 py-2.5 text-sm leading-relaxed">
           <MessagePrimitive.Parts components={CHAT_PLAIN_PARTS} />
         </div>
       </div>
-      <WorkerAvatar sender={sender} size={30} className="mt-5" />
+      <WorkerAvatar sender={sender} size={30} className="ai-message-avatar mt-5" />
     </MessagePrimitive.Root>
   )
 }
 
-function AssistantBubble({ message }: { message: MessageState }) {
+function AssistantBubble({
+  message,
+  currentTurn,
+  attention,
+}: {
+  message: MessageState
+  currentTurn: boolean
+  attention: boolean
+}) {
   const custom = customOf(message)
   const sender = custom.sender ?? FALLBACK_SENDER
   // question 工具由独立问答卡片展示，不在工具链里重复出现
@@ -312,47 +385,59 @@ function AssistantBubble({ message }: { message: MessageState }) {
   const hasText = message.content.some(
     (part) => part.type === 'text' && part.text?.trim(),
   )
-  const hasReasoning = message.content.some(
+  const hasReasoning = message.role === 'assistant' && message.content.some(
     (part) => part.type === 'reasoning' && part.text?.trim(),
   )
   const running = message.status?.type === 'running'
 
   return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <WorkerAvatar sender={sender} size={32} className="mt-0.5" />
-      <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
-          <SenderLine
-            sender={sender}
-            time={message.createdAt.toISOString()}
-          />
-          {running && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
-              <span className="size-1.5 animate-pulse rounded-full bg-info-emphasis" />
-              正在执行
-            </span>
-          )}
-        </div>
-
-        {tools.length > 0 && <ToolList tools={tools} />}
-
-        {hasText || hasReasoning ? (
-          <div className="rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-4 py-3 text-sm leading-relaxed shadow-sm">
-            <MessagePrimitive.Parts components={CHAT_MARKDOWN_PARTS} />
-            {running && hasText && <StreamingCaret />}
-          </div>
-        ) : (
-          running && (
-            <div className="inline-flex items-center gap-2 rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-3 py-2 text-xs text-foreground-muted">
-              <span className="flex gap-1">
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle" />
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle [animation-delay:150ms]" />
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle [animation-delay:300ms]" />
-              </span>
-              正在思考 / 调用工具…
+    <MessagePrimitive.Root data-running={running} className="ai-message ai-assistant-message flex gap-3 px-1">
+      <span className="ai-avatar-frame">
+        <AiEnergy active={currentTurn && running} size={64} />
+        <WorkerAvatar sender={sender} size={32} className="ai-message-avatar" />
+      </span>
+      <div className="ai-message-main min-w-0 flex-1">
+        <ResponseSurface
+          state={
+            !currentTurn ? 'idle'
+              : message.status?.type === 'incomplete' ? 'error'
+                : attention ? 'attention'
+                  : running ? 'running'
+                    : message.status?.type === 'complete' ? 'complete'
+                      : 'idle'
+          }
+          seed={message.id}
+        >
+          <div className="ai-response-inner">
+            <div className="ai-message-heading mb-1.5 flex flex-wrap items-center gap-2">
+              <SenderLine sender={sender} time={message.createdAt.toISOString()} />
+              {running && (
+                <span className="ai-active-state inline-flex items-center gap-1 text-[11px] text-info-foreground">
+                  <AgentActivity />
+                  <span className="ai-shimmer">正在执行</span>
+                </span>
+              )}
             </div>
-          )
-        )}
+
+            {tools.length > 0 && <ToolActivity tools={tools} />}
+
+            <StreamingResponse streaming={running}>
+              {hasText || hasReasoning ? (
+                <div className="ai-assistant-body text-sm leading-relaxed">
+                  <MessagePrimitive.Parts components={TASK_MARKDOWN_PARTS} />
+                  {running && hasText && <StreamingCaret />}
+                </div>
+              ) : (
+                running && (
+                  <div className="ai-waiting-state inline-flex items-center gap-2 text-xs text-foreground-muted">
+                    <AgentActivity />
+                    <span className="ai-shimmer">正在思考 / 调用工具…</span>
+                  </div>
+                )
+              )}
+            </StreamingResponse>
+          </div>
+        </ResponseSurface>
       </div>
     </MessagePrimitive.Root>
   )
@@ -379,34 +464,19 @@ function QuestionBubble({
   const sender = custom.sender ?? FALLBACK_SENDER
   const autoAnswer = custom.autoAnswer
   return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <WorkerAvatar sender={sender} size={32} className="mt-0.5" />
-      <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+    <MessagePrimitive.Root className="ai-message ai-question-message flex gap-3 px-1">
+      <span className="ai-avatar-frame">
+        <AiEnergy size={64} />
+        <WorkerAvatar sender={sender} size={32} className="ai-message-avatar" />
+      </span>
+      <div className="ai-message-main min-w-0 flex-1">
+        <div className="ai-message-heading mb-1.5 flex flex-wrap items-center gap-2">
           <SenderLine sender={sender} time={message.createdAt.toISOString()} />
           <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
             <MessageCircleQuestion className="size-3.5" />
             {questionStatusLabel(question)}
           </span>
-          {question.state === 'pending' &&
-            autoAnswer?.status === 'running' && (
-              <span className="text-[11px] text-foreground-muted">
-                父任务机器人
-                {autoAnswer.parentAgentName
-                  ? `「${autoAnswer.parentAgentName}」`
-                  : ''}
-                回答中…
-              </span>
-            )}
-          {question.state === 'pending' &&
-            autoAnswer?.status === 'failed' && (
-              <span
-                className="text-[11px] text-warning-foreground"
-                title={autoAnswer.error}
-              >
-                父任务机器人答复失败，等待需求方回答
-              </span>
-            )}
+          <AutoAnswerStatus question={question} autoAnswer={autoAnswer} />
         </div>
 
         <QuestionCard
@@ -420,39 +490,37 @@ function QuestionBubble({
   )
 }
 
-function ToolList({ tools }: { tools: TaskChatTool[] }) {
+function AutoAnswerStatus({
+  question,
+  autoAnswer,
+}: {
+  question: TaskChatQuestion
+  autoAnswer?: TaskQuestionAutoAnswer
+}) {
   return (
-    <div className="mb-2 flex flex-wrap gap-1.5">
-      {tools.map((tool) => (
-        <span
-          key={tool.id}
-          className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${
-            tool.status === 'error'
-              ? 'border-error-emphasis bg-error-soft text-error-foreground'
-              : tool.status === 'success'
-                ? 'border-border bg-background-subtle text-foreground-muted'
-                : 'border-info-emphasis bg-info-soft text-info-foreground'
-          }`}
-          title={tool.detail}
-        >
-          <Wrench className="size-3 shrink-0" />
-          <span className="max-w-48 truncate font-mono">{tool.name}</span>
-          {tool.status === 'running' && (
-            <span className="shrink-0 animate-pulse">运行中</span>
-          )}
-          {tool.status === 'success' && (
-            <Check className="size-3 shrink-0" />
-          )}
-          {tool.status === 'error' && <X className="size-3 shrink-0" />}
+    <>
+      {question.state === 'pending' && autoAnswer?.status === 'running' && (
+        <span className="text-[11px] text-foreground-muted">
+          父任务机器人
+          {autoAnswer.parentAgentName ? `「${autoAnswer.parentAgentName}」` : ''}
+          回答中…
         </span>
-      ))}
-    </div>
+      )}
+      {question.state === 'pending' && autoAnswer?.status === 'failed' && (
+        <span
+          className="text-[11px] text-warning-foreground"
+          title={autoAnswer.error}
+        >
+          父任务机器人答复失败，等待需求方回答
+        </span>
+      )}
+    </>
   )
 }
 
 function StreamingCaret() {
   return (
-    <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
+    <span className="ai-streaming-caret ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
   )
 }
 
@@ -537,7 +605,7 @@ function ChatFooter({
                           : '等待任务状态更新'
 
   return (
-    <div className="rounded-[var(--radius-lg)] border border-border bg-background p-3 shadow-sm">
+    <div className="ai-feedback-surface rounded-[var(--radius-lg)] border border-border bg-background p-3 shadow-sm">
       {task.missingItems && task.missingItems.length > 0 && (
         <div className="mb-2 rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-xs text-warning-foreground">
           <p className="mb-1 flex items-center gap-1.5 font-medium">
@@ -557,7 +625,7 @@ function ChatFooter({
 
       {(task.subStatus === '已拒绝' || task.subStatus === '失败') && (
         <div
-          className={`mb-2 rounded-[var(--radius-md)] px-3 py-2 text-xs ${
+          className={`mb-2 max-h-[min(24dvh,12rem)] overflow-y-auto overscroll-contain rounded-[var(--radius-md)] px-3 py-2 text-xs ${
             task.subStatus === '失败'
               ? 'bg-error-soft text-error-foreground'
               : 'bg-warning-soft text-warning-foreground'
@@ -585,15 +653,15 @@ function ChatFooter({
         </div>
       )}
 
-      <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
+      <ComposerPrimitive.Root className="ai-composer flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
         <ComposerPrimitive.Input
           rows={2}
           disabled={finished || robotRunning}
           placeholder={placeholder}
-          className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed disabled:opacity-60"
+          className="ai-composer-input max-h-40 min-h-10 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed disabled:opacity-60"
         />
         <ComposerPrimitive.Send
-          className={buttonVariants({ variant: 'primary', size: 'icon-sm' })}
+          className={`ai-composer-send ${buttonVariants({ variant: 'primary', size: 'icon-sm' })}`}
           aria-label="发送消息"
           disabled={finished || robotRunning}
         >

@@ -221,7 +221,7 @@ function SkillInstallSection() {
 
 export function OverviewPage() {
   return (
-    <div className="flex flex-col gap-8">
+    <div className="responsive-overview-page flex flex-col gap-8">
       <section>
         <h1 className="mb-4 text-2xl font-semibold">概览</h1>
         <p className="mb-4 text-sm text-foreground-muted">
@@ -233,7 +233,7 @@ export function OverviewPage() {
 
       <section>
         <h2 className="mb-4 text-xl font-semibold">常用使用方法</h2>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="overview-card-grid grid gap-4 md:grid-cols-2">
           {usageCards.map((card) => (
             <InfoCardItem key={card.title} card={card} />
           ))}
@@ -242,7 +242,7 @@ export function OverviewPage() {
 
       <section>
         <h2 className="mb-4 text-xl font-semibold">核心功能</h2>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="overview-card-grid grid gap-4 md:grid-cols-2">
           {featureCards.map((card) => (
             <InfoCardItem key={card.title} card={card} />
           ))}

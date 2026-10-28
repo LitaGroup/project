@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, m } from 'framer-motion'
 import { BorderBeam } from '@appica/ui-react/border-beam'
@@ -36,6 +36,9 @@ import {
   type Worker,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
+import { BorderGlow } from '../components/BorderGlow'
+import { AgentActivity } from '../components/ai-ui/AgentActivity'
+import { ActionSwapText, DigitSwap, TiltCard } from '../components/motion-ui'
 import {
   boardCardTransition,
   boardCardVariants,
@@ -325,17 +328,17 @@ export function TasksPage() {
   }, [tasks])
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="flex shrink-0 items-center justify-between gap-4">
+    <div className="tasks-page flex h-full flex-col gap-4">
+      <div className="tasks-page-header flex shrink-0 items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">任务</h1>
-          <p className="mt-1 text-sm text-foreground-muted">
+          <h1 className="tasks-page-title text-2xl font-semibold">任务</h1>
+          <p className="tasks-page-description mt-1 text-sm text-foreground-muted">
             任务由机器人执行、由人验收；LOOP 每秒推进，看板变更实时推送
           </p>
         </div>
         <Link
           to="/tasks/new"
-          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          className={`tasks-page-create ${buttonVariants({ variant: 'outline', size: 'sm' })}`}
         >
           新建任务
         </Link>
@@ -356,18 +359,18 @@ export function TasksPage() {
         variant="line"
         className="flex min-h-0 flex-1 flex-col gap-0"
       >
-        <TabsList className="shrink-0">
+        <TabsList className="tasks-page-tabs shrink-0">
           <TabsTrigger value="board">进行任务</TabsTrigger>
           <TabsTrigger value="all">所有任务</TabsTrigger>
         </TabsList>
 
         <TabsContent value="board" keepMounted className="min-h-0 flex-1 pt-4">
-          <div className="flex h-full min-h-0 flex-col gap-4">
+          <div className="tasks-board flex h-full min-h-0 flex-col gap-4">
             <TaskBoardOverview
               groups={boardTasks}
               connection={connection}
             />
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pb-1 lg:grid-cols-3 lg:overflow-hidden">
+            <div className="tasks-board-columns grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pb-1 lg:grid-cols-3 lg:overflow-hidden">
               {BOARD_COLUMNS.map((column) => (
                 <TaskBoardColumn
                   key={column.key}
@@ -429,10 +432,10 @@ function TaskBoardOverview({
           }
 
   return (
-    <section className="shrink-0 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-      <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 pt-3.5 pb-3">
+    <section className="task-board-overview shrink-0 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+      <div className="task-board-overview-content flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 pt-3.5 pb-3">
         <div className="flex min-w-52 flex-1 items-center gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-info-soft text-info-foreground">
+          <span className="task-board-overview-icon flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-info-soft text-info-foreground">
             <ActivityIcon className="size-4.5" />
           </span>
           <div className="min-w-0">
@@ -441,7 +444,7 @@ function TaskBoardOverview({
                 实时任务态势
               </p>
               <span
-                className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${connectionMeta.badgeClass}`}
+                className={`task-board-connection flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${connectionMeta.badgeClass}`}
               >
                 <span
                   className={`size-1.5 animate-pulse rounded-full ${connectionMeta.dotClass}`}
@@ -457,9 +460,9 @@ function TaskBoardOverview({
           </div>
         </div>
 
-        <div className="flex items-center gap-5 sm:gap-7">
+        <div className="task-board-metrics flex items-center gap-5 sm:gap-7">
           {BOARD_COLUMNS.map((column) => (
-            <div key={column.key} className="min-w-14">
+            <div key={column.key} className="task-board-metric min-w-14" data-state={column.key}>
               <p className="flex items-center gap-1.5 text-[11px] text-foreground-muted">
                 <span
                   aria-hidden
@@ -467,7 +470,7 @@ function TaskBoardOverview({
                 />
                 {column.metricLabel}
               </p>
-              <p className="mt-0.5 text-lg font-semibold text-foreground-intense">
+              <p className="task-board-metric-value mt-0.5 text-lg font-semibold text-foreground-intense">
                 <AnimatedCount value={groups[column.key].length} />
               </p>
             </div>
@@ -478,7 +481,7 @@ function TaskBoardOverview({
       {/* 阶段分布：用一条连续的态势条呈现任务构成 */}
       <div
         aria-hidden
-        className="flex h-1 overflow-hidden bg-background-muted"
+        className="task-board-distribution flex h-1 overflow-hidden bg-background-muted"
       >
         {total === 0 ? (
           <span className="h-full w-full bg-background-strong" />
@@ -517,12 +520,12 @@ function TaskBoardColumn({
   loading: boolean
 }) {
   return (
-    <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background-subtle lg:h-full lg:min-h-0">
-      <div aria-hidden className={`h-0.5 shrink-0 ${column.accentClass}`} />
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-3.5 py-3">
+    <section data-state={column.key} className="task-board-column flex min-h-[18rem] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background-subtle lg:h-full lg:min-h-0">
+      <div aria-hidden className={`task-board-column-accent h-0.5 shrink-0 ${column.accentClass}`} />
+      <header className="task-board-column-header flex shrink-0 items-center justify-between gap-3 border-b border-border px-3.5 py-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <span
-            className={`flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-md)] ${column.iconClass}`}
+            className={`task-board-column-icon flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-md)] ${column.iconClass}`}
           >
             <BoardStatusIcon kind={column.key} className="size-4" />
           </span>
@@ -536,13 +539,13 @@ function TaskBoardColumn({
           </div>
         </div>
         <span
-          className={`flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full px-2 text-xs font-semibold ${column.countClass}`}
+          className={`task-board-column-count flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full px-2 text-xs font-semibold ${column.countClass}`}
         >
-          <AnimatedCount value={tasks.length} />
+          {tasks.length}
         </span>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <div className="task-board-column-list flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         {loading ? (
           <BoardColumnSkeleton />
         ) : (
@@ -574,19 +577,9 @@ function TaskBoardColumn({
   )
 }
 
-/** 数字变化时轻微上浮，避免实时推送造成生硬跳变 */
+/** 顶部大号统计在入场与数值变化时翻滚，小计直接显示。 */
 function AnimatedCount({ value }: { value: number }) {
-  return (
-    <m.span
-      key={value}
-      className="inline-block tabular-nums"
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={boardDetailTransition}
-    >
-      {value}
-    </m.span>
-  )
+  return <DigitSwap value={value} />
 }
 
 /** 列加载占位：保持与真实卡片接近的版式，避免加载完成时布局跳动 */
@@ -596,7 +589,7 @@ function BoardColumnSkeleton() {
       {[0, 1].map((item) => (
         <div
           key={item}
-          className="rounded-[var(--radius-lg)] border border-border bg-background p-3.5"
+          className="task-board-skeleton rounded-[var(--radius-lg)] border border-border bg-background p-3.5"
         >
           <div className="flex items-center justify-between gap-2">
             <Skeleton className="h-3 w-16" />
@@ -618,7 +611,7 @@ function BoardColumnSkeleton() {
 /** 空列：保持纵向居中，给出下一步提示 */
 function BoardEmpty({ column }: { column: BoardColumn }) {
   return (
-    <div className="flex min-h-40 flex-1 flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-border-strong bg-background/60 px-5 py-8 text-center">
+    <div className="task-board-empty flex min-h-40 flex-1 flex-col items-center justify-center rounded-[var(--radius-lg)] border border-dashed border-border-strong bg-background/60 px-5 py-8 text-center">
       <span className="flex size-10 items-center justify-center rounded-full bg-background-muted text-foreground-subtle">
         <BoardStatusIcon kind={column.key} className="size-5" />
       </span>
@@ -656,25 +649,17 @@ function TaskBoardCard({
       exit="exit"
       transition={boardCardTransition}
       whileHover={{ y: -2 }}
-      className="group/card relative"
+      className={`task-board-card group/card relative ${running ? 'task-board-card--running' : ''}`}
     >
-      <BorderBeam
-        color={column.beamColor}
-        length={running ? 22 : 16}
-        thickness={1}
-        speed={running ? 5.5 : 4}
-        delay={running ? -(task.id % 4) : 0}
-        revealOn={running ? undefined : 'hover'}
-        className="rounded-[var(--radius-lg)]"
-      >
+      <TaskCardFrame taskId={task.id} running={running} beamColor={column.beamColor}>
         <article
-          className={`overflow-hidden rounded-[var(--radius-lg)] border bg-background shadow-sm transition-[border-color,box-shadow] ${
+          className={`task-board-card-surface overflow-hidden rounded-[var(--radius-lg)] border bg-background shadow-sm transition-[border-color,box-shadow] ${
             running
               ? 'border-info-emphasis/30'
               : 'border-border group-hover/card:border-border-strong'
           }`}
         >
-          <Link to={`/tasks/${task.id}`} className="block px-3.5 pt-3.5 pb-3">
+          <Link to={`/tasks/${task.id}`} className="task-board-card-link block px-3.5 pt-3.5 pb-3">
             <div className="flex items-start justify-between gap-2">
               <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-foreground-muted">
                 <span className="shrink-0 font-mono text-[10px] font-medium tracking-wide text-foreground-subtle">
@@ -694,11 +679,11 @@ function TaskBoardCard({
               </span>
             </div>
 
-            <h3 className="mt-2 line-clamp-2 min-h-10 text-sm font-medium leading-5 text-foreground-intense">
+            <h3 className="task-board-card-title mt-2 line-clamp-2 min-h-10 text-sm font-medium leading-5 text-foreground-intense">
               {task.title}
             </h3>
 
-            <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-border pt-2.5 text-[11px] text-foreground-muted">
+            <div className="task-board-card-meta mt-2.5 flex items-center justify-between gap-2 border-t border-border pt-2.5 text-[11px] text-foreground-muted">
               <span
                 className="flex min-w-0 items-center gap-1.5"
                 title={robot ?? '未分配机器人'}
@@ -723,8 +708,45 @@ function TaskBoardCard({
             running={running}
           />
         </article>
-      </BorderBeam>
+      </TaskCardFrame>
     </m.div>
+  )
+}
+
+/** 只切换装饰外壳，任务内容与交互共用同一份子节点。 */
+function TaskCardFrame({
+  taskId,
+  running,
+  beamColor,
+  children,
+}: {
+  taskId: number
+  running: boolean
+  beamColor: string
+  children: ReactNode
+}) {
+  if (running) {
+    return (
+      <TiltCard>
+        <BorderGlow animationSeed={taskId}>{children}</BorderGlow>
+      </TiltCard>
+    )
+  }
+
+  return (
+    <TiltCard>
+      <BorderBeam
+        color={beamColor}
+        length={16}
+        thickness={1}
+        speed={4}
+        delay={-((taskId * 0.61803398875) % 1) * 4}
+        revealOn="hover"
+        className="rounded-[var(--radius-lg)]"
+      >
+        {children}
+      </BorderBeam>
+    </TiltCard>
   )
 }
 
@@ -747,7 +769,7 @@ function TaskLogPreview({
   const panelId = `task-log-${taskId}`
 
   return (
-    <div className="border-t border-border px-3.5 py-2">
+    <div className="task-board-card-log border-t border-border px-3.5 py-2">
       <button
         type="button"
         onClick={() => canExpand && setExpanded((value) => !value)}
@@ -760,23 +782,26 @@ function TaskLogPreview({
             : 'cursor-default'
         }`}
       >
-        <span
-          aria-hidden
-          className={`size-1.5 shrink-0 rounded-full ${accentClass} ${
-            running ? 'animate-pulse' : ''
-          }`}
-        />
-        <span
-          className="min-w-0 flex-1 truncate py-0.5 font-mono text-[11px] text-foreground-muted"
+        {running ? (
+          <AgentActivity animationSeed={taskId} className="task-log-activity shrink-0 text-info" />
+        ) : (
+          <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${accentClass}`} />
+        )}
+        <m.span
+          key={latest ?? taskId}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ ...boardDetailTransition, delay: ((taskId * 0.61803398875) % 1) * 0.12 }}
+          className="task-board-log-latest min-w-0 flex-1 truncate py-0.5 font-mono text-[11px] text-foreground-muted"
           title={latest ?? '暂无执行日志'}
         >
           {latest ?? '暂无执行日志'}
-        </span>
+        </m.span>
         {canExpand && (
           <>
-            <span className="shrink-0 text-[10px] text-foreground-subtle">
+            <ActionSwapText swapKey={expanded ? 'expanded' : 'collapsed'} className="shrink-0 text-[10px] text-foreground-subtle">
               {expanded ? '收起' : `${recent.length} 行`}
-            </span>
+            </ActionSwapText>
             <ChevronIcon
               className={`size-3 shrink-0 text-foreground-subtle transition-transform ${
                 expanded ? 'rotate-180' : ''
@@ -828,7 +853,7 @@ function BoardStatusIcon({
   kind: BoardKey
   className?: string
 }) {
-  if (kind === 'running') return <ActivityIcon className={className} />
+  if (kind === 'running') return <AgentActivity className={className} animationSeed={2} />
   if (kind === 'review') {
     return (
       <svg

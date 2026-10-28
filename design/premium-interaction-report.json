@@ -1,0 +1,2350 @@
+{
+  "fixtureNotice": "All data is fictional example data. Every API request is intercepted; no backend or business data is accessed.",
+  "startedAt": "2026-10-27T15:20:06.592Z",
+  "base": "http://localhost:5273",
+  "scenarios": [
+    {
+      "name": "projects",
+      "route": "/projects",
+      "fixtureVariant": "default",
+      "longInfo": false,
+      "debugEmpty": false,
+      "colorScheme": "dark",
+      "reducedMotion": "no-preference",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "errors": [],
+      "consoleErrors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/page"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/page"
+        }
+      ],
+      "rabbitIdentity": {
+        "cases": [
+          {
+            "role": "brand-logo",
+            "width": 34,
+            "height": 34,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 14.265625,
+            "symbolHeight": 14.265625,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          }
+        ],
+        "passed": true,
+        "notice": "Original rabbit image and graphical SVG AI symbol are checked separately; no AI letter badge is expected."
+      },
+      "premiumInteractions": {
+        "tablePointer": {
+          "x": 100,
+          "y": 75,
+          "scrollLeft": 0,
+          "clientWidth": 1142,
+          "scrollWidth": 1142,
+          "rowEdgePointerEvents": "none",
+          "expectedX": 100,
+          "passed": true
+        },
+        "toolbarFocus": {
+          "focused": true,
+          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 3px 0px inset, oklab(0.985098 0.0000447631 0.0000197291 / 0.03) 0px 1px 0px 0px, oklab(0 0 0 / 0) 0px 0px 0px 0px",
+          "passed": true
+        },
+        "toolbarHit": {
+          "label": "搜索项目标题",
+          "x": 387,
+          "y": 166,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "buttonGlint": {
+          "before": "130%",
+          "middle": "-89.992%",
+          "after": {
+            "position": "-130%",
+            "opacity": "0.4",
+            "pointerEvents": "none",
+            "animationName": "none"
+          },
+          "dataSlot": "dialog-trigger",
+          "applicable": true,
+          "passed": true,
+          "notice": "The premium glint targets existing native buttons, including composed dialog triggers. The original data-slot is retained in this record."
+        },
+        "buttonHit": {
+          "label": "新建项目",
+          "x": 1367,
+          "y": 109,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "passed": true,
+        "notice": "Pointer/focus/disclosure checks only. Disabled hit results and non-applicable glint slots remain explicit. No send, save, sync, reset, or mutation action is invoked."
+      },
+      "url": "http://localhost:5273/projects",
+      "title": "项目",
+      "bodyText": "AI 项目管理平台\n项目\n任务\n知识\n代码\n管理\n林\n林舟\n概览\n项目\n用例\n检查\n导出\n缺陷\n文档\n资源\n节点\n提交\n脚本\n定时任务\nAPP\n设置\n项目\n从飞书同步\n新建项目\n不限迭代\n不限状态\n不限类型\n不限优先级\nID\t标题\t类型\t优先级\t预期\t迭代\t状态\t操作\n1\t智能协作工作台\t功能\tP0\t2026-10-30\t2026 · 第 22 迭代\t开发中\t\n详情\n删除\n\n2\t知识搜索体验优化\t技术\tP1\t2026-10-30\t2026 · 第 22 迭代\t测试中\t\n详情\n删除\n\n3\t移动端发布流程\t活动\tP1\t2026-10-30\t2026 · 第 22 迭代\t已发布\t\n详情\n删除\n\n4\t自动化质量保障\t技术\tP2\t2026-10-30\t2026 · 第 22 迭代\t开发中\t\n详情\n删除\n\n5\t设计系统与组件库\t其它\tP2\t2026-10-30\t2026 · 第 22 迭代\t待分配\t\n详情\n删除\n\n6\t团队数据周报\t数据\tP3\t2026-10-30\t2026 · 第 22 迭代\t已关闭\t\n详情\n删除\n共 6 条，第 1 / 1 页\n上一页\n下一页",
+      "menuIconColors": [
+        {
+          "href": "/",
+          "label": "概览",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/projects",
+          "label": "项目",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/tests",
+          "label": "用例",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/checks",
+          "label": "检查",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/exports",
+          "label": "导出",
+          "color": "rgb(251, 191, 36)"
+        },
+        {
+          "href": "/defects",
+          "label": "缺陷",
+          "color": "rgb(251, 113, 133)"
+        },
+        {
+          "href": "/documents",
+          "label": "文档",
+          "color": "rgb(34, 211, 238)"
+        },
+        {
+          "href": "/resources",
+          "label": "资源",
+          "color": "rgb(251, 191, 36)"
+        },
+        {
+          "href": "/milestones",
+          "label": "节点",
+          "color": "rgb(251, 146, 60)"
+        },
+        {
+          "href": "/commits",
+          "label": "提交",
+          "color": "rgb(56, 189, 248)"
+        },
+        {
+          "href": "/scripts",
+          "label": "脚本",
+          "color": "rgb(167, 139, 250)"
+        },
+        {
+          "href": "/schedules",
+          "label": "定时任务",
+          "color": "rgb(251, 146, 60)"
+        },
+        {
+          "href": "/apps",
+          "label": "APP",
+          "color": "rgb(56, 189, 248)"
+        },
+        {
+          "href": "/settings",
+          "label": "设置",
+          "color": "rgb(161, 161, 161)"
+        }
+      ],
+      "menuIconColorCount": 9,
+      "layout": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "mainWidth": 1190,
+        "mainScrollWidth": 1190,
+        "overflowCandidates": [],
+        "reducedMotion": false,
+        "theme": "dark",
+        "cardCount": 0,
+        "tableRows": 6
+      },
+      "animations": [
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 300
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 480
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        }
+      ],
+      "knownConsoleWarnings": [],
+      "unexpectedConsoleErrors": [],
+      "status": "captured"
+    },
+    {
+      "name": "project-detail",
+      "route": "/projects/1",
+      "fixtureVariant": "default",
+      "longInfo": false,
+      "debugEmpty": false,
+      "colorScheme": "dark",
+      "reducedMotion": "no-preference",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "errors": [],
+      "consoleErrors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/1"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/1"
+        },
+        {
+          "method": "GET",
+          "path": "/api/schedules"
+        },
+        {
+          "method": "GET",
+          "path": "/api/schedules"
+        }
+      ],
+      "rabbitIdentity": {
+        "cases": [
+          {
+            "role": "brand-logo",
+            "width": 34,
+            "height": 34,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 14.265625,
+            "symbolHeight": 14.265625,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          }
+        ],
+        "passed": true,
+        "notice": "Original rabbit image and graphical SVG AI symbol are checked separately; no AI letter badge is expected."
+      },
+      "premiumInteractions": {
+        "tablePointer": {
+          "x": 100,
+          "y": 75,
+          "scrollLeft": 0,
+          "clientWidth": 798,
+          "scrollWidth": 798,
+          "rowEdgePointerEvents": "none",
+          "expectedX": 100,
+          "passed": true
+        },
+        "buttonGlint": {
+          "before": "130%",
+          "middle": "-89.9782%",
+          "after": {
+            "position": "-130%",
+            "opacity": "0.4",
+            "pointerEvents": "none",
+            "animationName": "none"
+          },
+          "dataSlot": "dialog-trigger",
+          "applicable": true,
+          "passed": true,
+          "notice": "The premium glint targets existing native buttons, including composed dialog triggers. The original data-slot is retained in this record."
+        },
+        "buttonHit": {
+          "label": "导入文档",
+          "x": 1023,
+          "y": 153,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "cardEdge": {
+          "transform": "matrix(1, 0, 0, 1, 0, -1.5)",
+          "opacity": "0.45",
+          "pointerEvents": "none",
+          "passed": true
+        },
+        "existingButton:提测": {
+          "label": "提测",
+          "x": 1247,
+          "y": 936.890625,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "passed": true,
+        "notice": "Pointer/focus/disclosure checks only. Disabled hit results and non-applicable glint slots remain explicit. No send, save, sync, reset, or mutation action is invoked."
+      },
+      "url": "http://localhost:5273/projects/1",
+      "title": "文档",
+      "bodyText": "AI 项目管理平台\n项目\n任务\n知识\n代码\n管理\n林\n林舟\n概览\n项目\n用例\n检查\n导出\n缺陷\n文档\n资源\n节点\n提交\n脚本\n定时任务\nAPP\n设置\n项目\n智能协作工作台\n文档\n查看全部\n创建文档\n导入文档\n标题\t类型\t描述\t来源\t操作\n智能任务协作规范\t需求\t界面验证使用的示例文档\t手写\t\n搜索体验优化方案\t技术\t界面验证使用的示例文档\t飞书\t同步\n用户界面验收清单\t测试\t界面验证使用的示例文档\t手写\t\n任务中心接口说明\t接口\t界面验证使用的示例文档\tAPIPOST\t同步\n开发环境配置\t配置\t界面验证使用的示例文档\t手写\t\n总共 5 条，展示 5 条\n资源\n查看全部\n添加资源\n标题\t类型\t状态\t链接 / 前缀\t操作\n搜索交互设计稿\tUI\t确认\thttps://example.test/resources/preview\t\n编辑\n删除\n\n任务中心多语言文案\t多语言\t草稿\tFrontend$workspace\t\n同步\n编辑\n删除\n\n服务环境与接口配置\t配置\t确认\thttps://example.test/resources/preview\t\n同步\n编辑\n删除\n\n发布验收资料\t文件资源\t缺",
+      "menuIconColors": [
+        {
+          "href": "/",
+          "label": "概览",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/projects",
+          "label": "项目",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/tests",
+          "label": "用例",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/checks",
+          "label": "检查",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/exports",
+          "label": "导出",
+          "color": "rgb(251, 191, 36)"
+        },
+        {
+          "href": "/defects",
+          "label": "缺陷",
+          "color": "rgb(251, 113, 133)"
+        },
+        {
+          "href": "/documents",
+          "label": "文档",
+          "color": "rgb(34, 211, 238)"
+        },
+        {
+          "href": "/resources",
+          "label": "资源",
+          "color": "rgb(251, 191, 36)"
+        },
+        {
+          "href": "/milestones",
+          "label": "节点",
+          "color": "rgb(251, 146, 60)"
+        },
+        {
+          "href": "/commits",
+          "label": "提交",
+          "color": "rgb(56, 189, 248)"
+        },
+        {
+          "href": "/scripts",
+          "label": "脚本",
+          "color": "rgb(167, 139, 250)"
+        },
+        {
+          "href": "/schedules",
+          "label": "定时任务",
+          "color": "rgb(251, 146, 60)"
+        },
+        {
+          "href": "/apps",
+          "label": "APP",
+          "color": "rgb(56, 189, 248)"
+        },
+        {
+          "href": "/settings",
+          "label": "设置",
+          "color": "rgb(161, 161, 161)"
+        }
+      ],
+      "menuIconColorCount": 9,
+      "layout": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "mainWidth": 1190,
+        "mainScrollWidth": 1190,
+        "overflowCandidates": [],
+        "reducedMotion": false,
+        "theme": "dark",
+        "cardCount": 1,
+        "tableRows": 39
+      },
+      "animations": [
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 480
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        }
+      ],
+      "knownConsoleWarnings": [],
+      "unexpectedConsoleErrors": [],
+      "status": "captured"
+    },
+    {
+      "name": "settings",
+      "route": "/settings",
+      "fixtureVariant": "default",
+      "longInfo": false,
+      "debugEmpty": false,
+      "colorScheme": "dark",
+      "reducedMotion": "no-preference",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "errors": [],
+      "consoleErrors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings"
+        },
+        {
+          "method": "GET",
+          "path": "/api/settings"
+        }
+      ],
+      "rabbitIdentity": {
+        "cases": [
+          {
+            "role": "brand-logo",
+            "width": 34,
+            "height": 34,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 14.265625,
+            "symbolHeight": 14.265625,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          }
+        ],
+        "passed": true,
+        "notice": "Original rabbit image and graphical SVG AI symbol are checked separately; no AI letter badge is expected."
+      },
+      "premiumInteractions": {
+        "buttonGlint": {
+          "before": "130%",
+          "middle": "-89.9472%",
+          "after": {
+            "position": "-130%",
+            "opacity": "0.4",
+            "pointerEvents": "none",
+            "animationName": "none"
+          },
+          "dataSlot": "button",
+          "applicable": true,
+          "passed": true,
+          "notice": "The premium glint targets existing native buttons, including composed dialog triggers. The original data-slot is retained in this record."
+        },
+        "buttonHit": {
+          "label": "git pull",
+          "x": 869.96875,
+          "y": 279.890625,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "cardEdge": {
+          "transform": "matrix(1, 0, 0, 1, 0, -1.5)",
+          "opacity": "0.45",
+          "pointerEvents": "none",
+          "passed": true
+        },
+        "existingButton:git pull": {
+          "label": "git pull",
+          "x": 869.96875,
+          "y": 279.890625,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "passed": true,
+        "notice": "Pointer/focus/disclosure checks only. Disabled hit results and non-applicable glint slots remain explicit. No send, save, sync, reset, or mutation action is invoked."
+      },
+      "url": "http://localhost:5273/settings",
+      "title": "设置",
+      "bodyText": "AI 项目管理平台\n项目\n任务\n知识\n代码\n管理\n林\n林舟\n概览\n项目\n用例\n检查\n导出\n缺陷\n文档\n资源\n节点\n提交\n脚本\n定时任务\nAPP\n设置\n设置\n脚本目录\n\n检查 / 测试脚本的根目录，来源于后端配置（CHECK_SCRIPTS_DIR），只读\n\n/workspace/scripts\ngit pull\n运行环境与访问域名\n\n服务端口、环境与对外访问地址，均来源于后端配置，只读\n\n运行环境\ndevelopment\n服务端口\n3100\n浏览器访问\nhttps://example.test\n接口访问\nhttps://example.test/api\n公共 Agent 访问令牌\n\n供多个公共 Agent 共用的 agent 访问令牌，权限与管理员等同，仅用于 .md 端点；来源于后端配置 PUBLIC_AGENT_TOKEN，不回显明文\n\n配置状态\n已配置\n\n请求头携带 X-Agent-Token（或 URL 加 ?token= 参数）调用 /api/...*.md；写操作的操作人统一记录为「公共 Agent」。需要更换时由部署环境更新 PUBLIC_AGENT_TOKEN 并重启后",
+      "menuIconColors": [
+        {
+          "href": "/",
+          "label": "概览",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/projects",
+          "label": "项目",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/tests",
+          "label": "用例",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/checks",
+          "label": "检查",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/exports",
+          "label": "导出",
+          "color": "rgb(251, 191, 36)"
+        },
+        {
+          "href": "/defects",
+          "label": "缺陷",
+          "color": "rgb(251, 113, 133)"
+        },
+        {
+          "href": "/documents",
+          "label": "文档",
+          "color": "rgb(34, 211, 238)"
+        },
+        {
+          "href": "/resources",
+          "label": "资源",
+          "color": "rgb(251, 191, 36)"
+        },
+        {
+          "href": "/milestones",
+          "label": "节点",
+          "color": "rgb(251, 146, 60)"
+        },
+        {
+          "href": "/commits",
+          "label": "提交",
+          "color": "rgb(56, 189, 248)"
+        },
+        {
+          "href": "/scripts",
+          "label": "脚本",
+          "color": "rgb(167, 139, 250)"
+        },
+        {
+          "href": "/schedules",
+          "label": "定时任务",
+          "color": "rgb(251, 146, 60)"
+        },
+        {
+          "href": "/apps",
+          "label": "APP",
+          "color": "rgb(56, 189, 248)"
+        },
+        {
+          "href": "/settings",
+          "label": "设置",
+          "color": "rgb(161, 161, 161)"
+        }
+      ],
+      "menuIconColorCount": 9,
+      "layout": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "mainWidth": 1190,
+        "mainScrollWidth": 1190,
+        "overflowCandidates": [],
+        "reducedMotion": false,
+        "theme": "dark",
+        "cardCount": 6,
+        "tableRows": 0
+      },
+      "animations": [
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 480
+        }
+      ],
+      "knownConsoleWarnings": [],
+      "unexpectedConsoleErrors": [],
+      "status": "captured"
+    },
+    {
+      "name": "task-feedback",
+      "route": "/tasks/1",
+      "fixtureVariant": "task-feedback",
+      "longInfo": false,
+      "debugEmpty": false,
+      "colorScheme": "dark",
+      "reducedMotion": "no-preference",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "errors": [],
+      "consoleErrors": [
+        "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1",
+        "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1",
+        "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1"
+      ],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/tasks/1/chat"
+        },
+        {
+          "method": "GET",
+          "path": "/api/tasks/1/chat"
+        },
+        {
+          "method": "GET",
+          "path": "/api/tasks/1/chat"
+        }
+      ],
+      "conversation": {
+        "scrollTop": 0,
+        "messageCount": 3,
+        "activeGridCount": 0,
+        "toolChipCount": 1,
+        "senderNames": [
+          "前端研发机器人工作者2026/10/27 15:18:00",
+          "前端研发机器人工作者2026/10/27 15:18:00等待回答（任务已结束）"
+        ],
+        "draft": "补充现有任务资料：按既定目录范围整理检索摘要。",
+        "sendDisabled": false,
+        "sendLabel": "发送反馈",
+        "expected": true
+      },
+      "aiMotion": {
+        "intervalMs": 270,
+        "artwork": "Single spectral field; static transform is intentional. Rabbit avatar/AI badge supersedes the former black fallback requirement.",
+        "energies": [
+          {
+            "index": 0,
+            "active": false,
+            "ariaHidden": "true",
+            "fields": [
+              {
+                "angle": "0deg",
+                "transform": "none",
+                "duration": "0s",
+                "background": "conic-gradient(in oklch, rgb(66, 133, 244), rgb(155, 114, 239) 34%, rgb(103, 213, 255) 68%, rgb(66, 133, 244) 100%)",
+                "angleChanged": false,
+                "transformChanged": false,
+                "backgroundChanged": false
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "active": false,
+            "ariaHidden": "true",
+            "fields": [
+              {
+                "angle": "0deg",
+                "transform": "none",
+                "duration": "0s",
+                "background": "conic-gradient(in oklch, rgb(66, 133, 244), rgb(155, 114, 239) 34%, rgb(103, 213, 255) 68%, rgb(66, 133, 244) 100%)",
+                "angleChanged": false,
+                "transformChanged": false,
+                "backgroundChanged": false
+              }
+            ]
+          }
+        ],
+        "owners": [
+          {
+            "target": "pane",
+            "animationName": "none",
+            "layerOpacity": "1",
+            "edgeVisible": false,
+            "gradientExpected": false,
+            "angle": "0deg",
+            "spectrum": "conic-gradient(\n    from 0deg at 50% 50% in oklch,\n    #4285f4 0%,\n    #67d5ff 18%,\n    #9b72ef 38%,\n    #ef78be 58%,\n    #4285f4 82%,\n    #67d5ff 100%\n  )",
+            "background": "none",
+            "pointerEvents": "auto",
+            "beforeAngle": "0deg",
+            "angleChanged": false,
+            "gradientChanged": false
+          },
+          {
+            "target": "composer",
+            "animationName": "ai-energy-orbit",
+            "layerOpacity": "0.6",
+            "edgeVisible": true,
+            "gradientExpected": true,
+            "angle": "44.0041deg",
+            "spectrum": "conic-gradient(\n    from 44.0041deg at 50% 50% in oklch,\n    #4285f4 0%,\n    #67d5ff 18%,\n    #9b72ef 38%,\n    #ef78be 58%,\n    #4285f4 82%,\n    #67d5ff 100%\n  )",
+            "background": "conic-gradient(from 44.0041deg in oklch, rgb(66, 133, 244) 0%, rgb(103, 213, 255) 18%, rgb(155, 114, 239) 38%, rgb(239, 120, 190) 58%, rgb(66, 133, 244) 82%, rgb(103, 213, 255) 100%)",
+            "pointerEvents": "none",
+            "beforeAngle": "27.0018deg",
+            "angleChanged": true,
+            "gradientChanged": true
+          }
+        ],
+        "waveCount": 0,
+        "waveBefore": [],
+        "waveAfter": [],
+        "waveChanged": [],
+        "avatarBackings": [],
+        "images": [
+          {
+            "src": "/src/assets/lita-rabbit.png",
+            "loaded": true,
+            "width": 34,
+            "height": 34
+          },
+          {
+            "src": "data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='spectrum'%20x1='3'%20y1='3'%20x2='21'%20y2='21'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20stop-color='%23A9EBFF'/%3e%3cstop%20offset='.38'%20stop-color='%2367D5FF'/%3e%3cstop%20offset='.68'%20stop-color='%234285F4'/%3e%3cstop%20offset='1'%20stop-color='%23B08AF6'/%3e%3c/linearGradient%3e%3c/defs%3e%3cpath%20d='M12%201C13.4%207.2%2016.8%2010.6%2023%2012C16.8%2013.4%2013.4%2016.8%2012%2023C10.6%2016.8%207.2%2013.4%201%2012C7.2%2010.6%2010.6%207.2%2012%201Z'%20fill='url(%23spectrum)'/%3e%3c/svg%3e",
+            "loaded": true,
+            "width": 14.265625,
+            "height": 14.265625
+          },
+          {
+            "src": "/src/assets/lita-rabbit.png",
+            "loaded": true,
+            "width": 32,
+            "height": 32
+          },
+          {
+            "src": "data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='spectrum'%20x1='3'%20y1='3'%20x2='21'%20y2='21'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20stop-color='%23A9EBFF'/%3e%3cstop%20offset='.38'%20stop-color='%2367D5FF'/%3e%3cstop%20offset='.68'%20stop-color='%234285F4'/%3e%3cstop%20offset='1'%20stop-color='%23B08AF6'/%3e%3c/linearGradient%3e%3c/defs%3e%3cpath%20d='M12%201C13.4%207.2%2016.8%2010.6%2023%2012C16.8%2013.4%2013.4%2016.8%2012%2023C10.6%2016.8%207.2%2013.4%201%2012C7.2%2010.6%2010.6%207.2%2012%201Z'%20fill='url(%23spectrum)'/%3e%3c/svg%3e",
+            "loaded": true,
+            "width": 13.4375,
+            "height": 13.4375
+          },
+          {
+            "src": "/src/assets/lita-rabbit.png",
+            "loaded": true,
+            "width": 32,
+            "height": 32
+          },
+          {
+            "src": "data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='spectrum'%20x1='3'%20y1='3'%20x2='21'%20y2='21'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20stop-color='%23A9EBFF'/%3e%3cstop%20offset='.38'%20stop-color='%2367D5FF'/%3e%3cstop%20offset='.68'%20stop-color='%234285F4'/%3e%3cstop%20offset='1'%20stop-color='%23B08AF6'/%3e%3c/linearGradient%3e%3c/defs%3e%3cpath%20d='M12%201C13.4%207.2%2016.8%2010.6%2023%2012C16.8%2013.4%2013.4%2016.8%2012%2023C10.6%2016.8%207.2%2013.4%201%2012C7.2%2010.6%2010.6%207.2%2012%201Z'%20fill='url(%23spectrum)'/%3e%3c/svg%3e",
+            "loaded": true,
+            "width": 13.4375,
+            "height": 13.4375
+          },
+          {
+            "src": "/src/assets/lita-rabbit.png",
+            "loaded": true,
+            "width": 30,
+            "height": 30
+          },
+          {
+            "src": "data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='spectrum'%20x1='3'%20y1='3'%20x2='21'%20y2='21'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20stop-color='%23A9EBFF'/%3e%3cstop%20offset='.38'%20stop-color='%2367D5FF'/%3e%3cstop%20offset='.68'%20stop-color='%234285F4'/%3e%3cstop%20offset='1'%20stop-color='%23B08AF6'/%3e%3c/linearGradient%3e%3c/defs%3e%3cpath%20d='M12%201C13.4%207.2%2016.8%2010.6%2023%2012C16.8%2013.4%2013.4%2016.8%2012%2023C10.6%2016.8%207.2%2013.4%201%2012C7.2%2010.6%2010.6%207.2%2012%201Z'%20fill='url(%23spectrum)'/%3e%3c/svg%3e",
+            "loaded": true,
+            "width": 12.59375,
+            "height": 12.59375
+          },
+          {
+            "src": "/src/assets/lita-rabbit.png",
+            "loaded": true,
+            "width": 30,
+            "height": 30
+          },
+          {
+            "src": "data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='spectrum'%20x1='3'%20y1='3'%20x2='21'%20y2='21'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20stop-color='%23A9EBFF'/%3e%3cstop%20offset='.38'%20stop-color='%2367D5FF'/%3e%3cstop%20offset='.68'%20stop-color='%234285F4'/%3e%3cstop%20offset='1'%20stop-color='%23B08AF6'/%3e%3c/linearGradient%3e%3c/defs%3e%3cpath%20d='M12%201C13.4%207.2%2016.8%2010.6%2023%2012C16.8%2013.4%2013.4%2016.8%2012%2023C10.6%2016.8%207.2%2013.4%201%2012C7.2%2010.6%2010.6%207.2%2012%201Z'%20fill='url(%23spectrum)'/%3e%3c/svg%3e",
+            "loaded": true,
+            "width": 12.59375,
+            "height": 12.59375
+          }
+        ],
+        "checks": {
+          "activeFieldsMove": true,
+          "idleFieldsStatic": true,
+          "wavesMove": true,
+          "gradientsFollowAngles": true,
+          "decorativeOnly": true,
+          "imagesLoaded": true
+        },
+        "passed": true
+      },
+      "rabbitIdentity": {
+        "cases": [
+          {
+            "role": "brand-logo",
+            "width": 34,
+            "height": 34,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 14.265625,
+            "symbolHeight": 14.265625,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          },
+          {
+            "role": "robot-avatar",
+            "width": 32,
+            "height": 32,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 13.4375,
+            "symbolHeight": 13.4375,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          },
+          {
+            "role": "robot-avatar",
+            "width": 32,
+            "height": 32,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 13.4375,
+            "symbolHeight": 13.4375,
+            "visible": false,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          },
+          {
+            "role": "robot-avatar",
+            "width": 30,
+            "height": 30,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 12.59375,
+            "symbolHeight": 12.59375,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          },
+          {
+            "role": "robot-avatar",
+            "width": 30,
+            "height": 30,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 12.59375,
+            "symbolHeight": 12.59375,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          }
+        ],
+        "passed": true,
+        "notice": "Original rabbit image and graphical SVG AI symbol are checked separately; no AI letter badge is expected."
+      },
+      "conversationGeometry": {
+        "parts": {
+          ".ai-debug-page": null,
+          ".ai-debug-session": null,
+          ".ai-debug-workspace": null,
+          ".ai-debug-conversation": null,
+          ".ai-task-conversation": {
+            "height": 768,
+            "top": 199,
+            "bottom": 967,
+            "width": 706,
+            "clientHeight": 766,
+            "scrollHeight": 766,
+            "computedHeight": "768px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "hidden",
+            "gridRows": "none"
+          },
+          ".ai-conversation-viewport": {
+            "height": 713,
+            "top": 253,
+            "bottom": 966,
+            "width": 704,
+            "clientHeight": 713,
+            "scrollHeight": 1327,
+            "computedHeight": "713px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "auto",
+            "gridRows": "none"
+          },
+          ".ai-composer-dock": null,
+          ".ai-composer": {
+            "height": 74,
+            "top": 810.5,
+            "bottom": 884.5,
+            "width": 618,
+            "clientHeight": 72,
+            "scrollHeight": 74,
+            "computedHeight": "74px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "visible",
+            "gridRows": "none"
+          },
+          ".ai-todo-panel": null
+        },
+        "main": {
+          "height": 924,
+          "top": 68,
+          "bottom": 992,
+          "width": 1192,
+          "clientHeight": 922,
+          "scrollHeight": 922,
+          "computedHeight": "924px",
+          "minHeight": "auto",
+          "maxHeight": "none",
+          "overflowY": "auto",
+          "gridRows": "none"
+        },
+        "expectedDebugHeight": null,
+        "emptyState": null,
+        "checks": {
+          "debugHeightBounded": true,
+          "mobileWorkspaceBounded": true,
+          "viewportScrollable": true,
+          "composerContained": true
+        },
+        "passed": true
+      },
+      "premiumInteractions": {
+        "composerPointer": {
+          "first": {
+            "x": "36px",
+            "y": "11px"
+          },
+          "second": {
+            "x": "96px",
+            "y": "19px",
+            "pointerEvents": "none",
+            "opacity": "1"
+          },
+          "passed": true
+        },
+        "composerFocus": {
+          "before": "63.0007deg",
+          "after": "79.0007deg",
+          "borderOpacity": "0.6",
+          "pointerEvents": "none",
+          "focused": true,
+          "passed": true
+        },
+        "send": {
+          "label": "发送反馈",
+          "x": 892,
+          "y": 848.5,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "passed": true,
+        "notice": "Pointer/focus/disclosure checks only. Disabled hit results and non-applicable glint slots remain explicit. No send, save, sync, reset, or mutation action is invoked."
+      },
+      "url": "http://localhost:5273/tasks/1",
+      "title": "T-20261027-001 完善知识搜索体验与结果摘要",
+      "bodyText": "AI 项目管理平台\n项目\n任务\n知识\n代码\n管理\n林\n林舟\n任务\n任务概览\n工作概览\n任务定义\n机器人\n执行器\n任务\n完善知识搜索体验与结果摘要\nT-20261027-001 完善知识搜索体验与结果摘要\n待反馈\n前端开发\n\n前端研发机器人\n·\nPIPELINE 2 个阶段 · 调度机器人 系统调度机器人\n·\n创建于 2026/10/20 10:00:00\n\n取消\n任务对话\n1 个机器人\nSSE 实时\n林舟\n2026/10/27 14:30:00\n请完善知识搜索体验，保留目录筛选和分页，并为搜索结果提供清晰的摘要与高亮。\n任务已识别，交由前端研发机器人执行\n14:31:00\n前端研发机器人\n工作者\n2026/10/27 15:18:00\nread\n\n已完成当前检索链路分析，开始整理搜索结果的展示。\n\n实施进度\n已核对全文与向量检索的返回结构\n已检查目录筛选与分页行为\n正在验证摘要长度与关键词高亮\n检查项\t结果\n目录限定\t通过\n分页切换\t通过\n摘要展示\t验证中\n\n以上为界面验证使用的示例对话。\n\n前端研发机器人\n工作者\n2026/10/27 15:18:00\n等待回答（任务已结束）\n机器人",
+      "menuIconColors": [
+        {
+          "href": "/tasks/list",
+          "label": "任务",
+          "color": "rgb(34, 211, 238)"
+        },
+        {
+          "href": "/tasks",
+          "label": "任务概览",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/tasks/live",
+          "label": "工作概览",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/tasks/templates",
+          "label": "任务定义",
+          "color": "rgb(167, 139, 250)"
+        },
+        {
+          "href": "/tasks/workers",
+          "label": "机器人",
+          "color": "rgb(251, 113, 133)"
+        },
+        {
+          "href": "/tasks/executors",
+          "label": "执行器",
+          "color": "rgb(251, 146, 60)"
+        }
+      ],
+      "menuIconColorCount": 6,
+      "taskMenuHasSixColors": true,
+      "layout": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "mainWidth": 1190,
+        "mainScrollWidth": 1190,
+        "overflowCandidates": [],
+        "reducedMotion": false,
+        "theme": "dark",
+        "cardCount": 0,
+        "tableRows": 3
+      },
+      "animations": [
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 240
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "ping",
+          "state": "running",
+          "duration": 1000
+        },
+        {
+          "name": "ai-energy-orbit",
+          "state": "running",
+          "duration": 6000
+        }
+      ],
+      "knownConsoleWarnings": [
+        {
+          "message": "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1",
+          "source": "Existing TaskPackageDetailPage uses key={taskId} for both sibling chat and side panels."
+        },
+        {
+          "message": "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1",
+          "source": "Existing TaskPackageDetailPage uses key={taskId} for both sibling chat and side panels."
+        },
+        {
+          "message": "Encountered two children with the same key, `%s`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version. 1",
+          "source": "Existing TaskPackageDetailPage uses key={taskId} for both sibling chat and side panels."
+        }
+      ],
+      "unexpectedConsoleErrors": [],
+      "status": "captured"
+    },
+    {
+      "name": "worker-debug-running",
+      "route": "/tasks/workers/1001/debug",
+      "fixtureVariant": "debug-running",
+      "longInfo": false,
+      "debugEmpty": false,
+      "colorScheme": "dark",
+      "reducedMotion": "no-preference",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "errors": [],
+      "consoleErrors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/workers/1001/debug"
+        },
+        {
+          "method": "GET",
+          "path": "/api/workers/1001/debug"
+        }
+      ],
+      "conversation": {
+        "scrollTop": 0,
+        "messageCount": 2,
+        "activeGridCount": 1,
+        "toolChipCount": 0,
+        "senderNames": [
+          "前端研发机器人"
+        ],
+        "draft": "等待上一条回复",
+        "sendDisabled": true,
+        "sendLabel": "发送消息",
+        "expected": true
+      },
+      "aiMotion": {
+        "intervalMs": 270,
+        "artwork": "Single spectral field; static transform is intentional. Rabbit avatar/AI badge supersedes the former black fallback requirement.",
+        "energies": [
+          {
+            "index": 0,
+            "active": true,
+            "ariaHidden": "true",
+            "fields": [
+              {
+                "angle": "51.0003deg",
+                "transform": "none",
+                "duration": "12s",
+                "background": "conic-gradient(from 51.0003deg in oklch, rgb(66, 133, 244), rgb(155, 114, 239) 34%, rgb(103, 213, 255) 68%, rgb(66, 133, 244) 100%)",
+                "angleChanged": true,
+                "transformChanged": false,
+                "backgroundChanged": true
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "active": true,
+            "ariaHidden": "true",
+            "fields": [
+              {
+                "angle": "51.0003deg",
+                "transform": "none",
+                "duration": "12s",
+                "background": "conic-gradient(from 51.0003deg in oklch, rgb(66, 133, 244), rgb(155, 114, 239) 34%, rgb(103, 213, 255) 68%, rgb(66, 133, 244) 100%)",
+                "angleChanged": true,
+                "transformChanged": false,
+                "backgroundChanged": true
+              }
+            ]
+          }
+        ],
+        "owners": [
+          {
+            "target": "pane",
+            "animationName": "none",
+            "layerOpacity": "1",
+            "edgeVisible": false,
+            "gradientExpected": false,
+            "angle": "0deg",
+            "spectrum": "conic-gradient(\n    from 0deg at 50% 50% in oklch,\n    #4285f4 0%,\n    #67d5ff 18%,\n    #9b72ef 38%,\n    #ef78be 58%,\n    #4285f4 82%,\n    #67d5ff 100%\n  )",
+            "background": "none",
+            "pointerEvents": "auto",
+            "beforeAngle": "0deg",
+            "angleChanged": false,
+            "gradientChanged": false
+          },
+          {
+            "target": "composer",
+            "animationName": "ai-energy-orbit",
+            "layerOpacity": "0.6",
+            "edgeVisible": true,
+            "gradientExpected": true,
+            "angle": "102.001deg",
+            "spectrum": "conic-gradient(\n    from 102.001deg at 50% 50% in oklch,\n    #4285f4 0%,\n    #67d5ff 18%,\n    #9b72ef 38%,\n    #ef78be 58%,\n    #4285f4 82%,\n    #67d5ff 100%\n  )",
+            "background": "conic-gradient(from 102.001deg in oklch, rgb(66, 133, 244) 0%, rgb(103, 213, 255) 18%, rgb(155, 114, 239) 38%, rgb(239, 120, 190) 58%, rgb(66, 133, 244) 82%, rgb(103, 213, 255) 100%)",
+            "pointerEvents": "none",
+            "beforeAngle": "85.001deg",
+            "angleChanged": true,
+            "gradientChanged": true
+          }
+        ],
+        "waveCount": 3,
+        "waveBefore": [
+          {
+            "rootClass": "ai-waveform ai-session-wave",
+            "barIndex": 7,
+            "preferredBarHidden": false,
+            "transform": "matrix(1, 0, 0, 0.394373, 0, 0)"
+          },
+          {
+            "rootClass": "ai-waveform ai-thinking-wave",
+            "barIndex": 7,
+            "preferredBarHidden": false,
+            "transform": "matrix(1, 0, 0, 0.394373, 0, 0)"
+          },
+          {
+            "rootClass": "ai-waveform ai-todo-activity",
+            "barIndex": 3,
+            "preferredBarHidden": true,
+            "transform": "matrix(1, 0, 0, 0.506655, 0, 0)"
+          }
+        ],
+        "waveAfter": [
+          {
+            "rootClass": "ai-waveform ai-session-wave",
+            "barIndex": 7,
+            "preferredBarHidden": false,
+            "transform": "matrix(1, 0, 0, 0.320412, 0, 0)"
+          },
+          {
+            "rootClass": "ai-waveform ai-thinking-wave",
+            "barIndex": 7,
+            "preferredBarHidden": false,
+            "transform": "matrix(1, 0, 0, 0.320412, 0, 0)"
+          },
+          {
+            "rootClass": "ai-waveform ai-todo-activity",
+            "barIndex": 3,
+            "preferredBarHidden": true,
+            "transform": "matrix(1, 0, 0, 0.37493, 0, 0)"
+          }
+        ],
+        "waveChanged": [
+          true,
+          true,
+          true
+        ],
+        "avatarBackings": [],
+        "images": [
+          {
+            "src": "/src/assets/lita-rabbit.png",
+            "loaded": true,
+            "width": 34,
+            "height": 34
+          },
+          {
+            "src": "data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='spectrum'%20x1='3'%20y1='3'%20x2='21'%20y2='21'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20stop-color='%23A9EBFF'/%3e%3cstop%20offset='.38'%20stop-color='%2367D5FF'/%3e%3cstop%20offset='.68'%20stop-color='%234285F4'/%3e%3cstop%20offset='1'%20stop-color='%23B08AF6'/%3e%3c/linearGradient%3e%3c/defs%3e%3cpath%20d='M12%201C13.4%207.2%2016.8%2010.6%2023%2012C16.8%2013.4%2013.4%2016.8%2012%2023C10.6%2016.8%207.2%2013.4%201%2012C7.2%2010.6%2010.6%207.2%2012%201Z'%20fill='url(%23spectrum)'/%3e%3c/svg%3e",
+            "loaded": true,
+            "width": 14.265625,
+            "height": 14.265625
+          },
+          {
+            "src": "/src/assets/lita-rabbit.png",
+            "loaded": true,
+            "width": 36,
+            "height": 36
+          },
+          {
+            "src": "data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='spectrum'%20x1='3'%20y1='3'%20x2='21'%20y2='21'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20stop-color='%23A9EBFF'/%3e%3cstop%20offset='.38'%20stop-color='%2367D5FF'/%3e%3cstop%20offset='.68'%20stop-color='%234285F4'/%3e%3cstop%20offset='1'%20stop-color='%23B08AF6'/%3e%3c/linearGradient%3e%3c/defs%3e%3cpath%20d='M12%201C13.4%207.2%2016.8%2010.6%2023%2012C16.8%2013.4%2013.4%2016.8%2012%2023C10.6%2016.8%207.2%2013.4%201%2012C7.2%2010.6%2010.6%207.2%2012%201Z'%20fill='url(%23spectrum)'/%3e%3c/svg%3e",
+            "loaded": true,
+            "width": 15.109375,
+            "height": 15.109375
+          },
+          {
+            "src": "/src/assets/lita-rabbit.png",
+            "loaded": true,
+            "width": 32,
+            "height": 32
+          },
+          {
+            "src": "data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%20viewBox='0%200%2024%2024'%20fill='none'%3e%3cdefs%3e%3clinearGradient%20id='spectrum'%20x1='3'%20y1='3'%20x2='21'%20y2='21'%20gradientUnits='userSpaceOnUse'%3e%3cstop%20stop-color='%23A9EBFF'/%3e%3cstop%20offset='.38'%20stop-color='%2367D5FF'/%3e%3cstop%20offset='.68'%20stop-color='%234285F4'/%3e%3cstop%20offset='1'%20stop-color='%23B08AF6'/%3e%3c/linearGradient%3e%3c/defs%3e%3cpath%20d='M12%201C13.4%207.2%2016.8%2010.6%2023%2012C16.8%2013.4%2013.4%2016.8%2012%2023C10.6%2016.8%207.2%2013.4%201%2012C7.2%2010.6%2010.6%207.2%2012%201Z'%20fill='url(%23spectrum)'/%3e%3c/svg%3e",
+            "loaded": true,
+            "width": 13.4375,
+            "height": 13.4375
+          }
+        ],
+        "checks": {
+          "activeFieldsMove": true,
+          "idleFieldsStatic": true,
+          "wavesMove": true,
+          "gradientsFollowAngles": true,
+          "decorativeOnly": true,
+          "imagesLoaded": true
+        },
+        "passed": true
+      },
+      "rabbitIdentity": {
+        "cases": [
+          {
+            "role": "brand-logo",
+            "width": 34,
+            "height": 34,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 14.265625,
+            "symbolHeight": 14.265625,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          },
+          {
+            "role": "robot-avatar",
+            "width": 36,
+            "height": 36,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 15.109375,
+            "symbolHeight": 15.109375,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          },
+          {
+            "role": "robot-avatar",
+            "width": 32,
+            "height": 32,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 13.4375,
+            "symbolHeight": 13.4375,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          }
+        ],
+        "passed": true,
+        "notice": "Original rabbit image and graphical SVG AI symbol are checked separately; no AI letter badge is expected."
+      },
+      "conversationGeometry": {
+        "parts": {
+          ".ai-debug-page": {
+            "height": 874,
+            "top": 93,
+            "bottom": 967,
+            "width": 1142,
+            "clientHeight": 872,
+            "scrollHeight": 872,
+            "computedHeight": "874px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "hidden",
+            "gridRows": "none"
+          },
+          ".ai-debug-session": {
+            "height": 872,
+            "top": 94,
+            "bottom": 966,
+            "width": 1140,
+            "clientHeight": 872,
+            "scrollHeight": 872,
+            "computedHeight": "872px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "visible",
+            "gridRows": "none"
+          },
+          ".ai-debug-workspace": {
+            "height": 792,
+            "top": 174,
+            "bottom": 966,
+            "width": 1140,
+            "clientHeight": 792,
+            "scrollHeight": 792,
+            "computedHeight": "792px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "hidden",
+            "gridRows": "792px"
+          },
+          ".ai-debug-conversation": {
+            "height": 792,
+            "top": 174,
+            "bottom": 966,
+            "width": 876,
+            "clientHeight": 792,
+            "scrollHeight": 792,
+            "computedHeight": "792px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "hidden",
+            "gridRows": "none"
+          },
+          ".ai-task-conversation": null,
+          ".ai-conversation-viewport": {
+            "height": 694,
+            "top": 174,
+            "bottom": 868,
+            "width": 876,
+            "clientHeight": 694,
+            "scrollHeight": 694,
+            "computedHeight": "694px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "auto",
+            "gridRows": "none"
+          },
+          ".ai-composer-dock": {
+            "height": 98,
+            "top": 868,
+            "bottom": 966,
+            "width": 876,
+            "clientHeight": 98,
+            "scrollHeight": 98,
+            "computedHeight": "98px",
+            "minHeight": "auto",
+            "maxHeight": "none",
+            "overflowY": "visible",
+            "gridRows": "none"
+          },
+          ".ai-composer": {
+            "height": 66,
+            "top": 882,
+            "bottom": 948,
+            "width": 764,
+            "clientHeight": 64,
+            "scrollHeight": 66,
+            "computedHeight": "66px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "visible",
+            "gridRows": "none"
+          },
+          ".ai-todo-panel": {
+            "height": 792,
+            "top": 174,
+            "bottom": 966,
+            "width": 264,
+            "clientHeight": 792,
+            "scrollHeight": 792,
+            "computedHeight": "792px",
+            "minHeight": "0px",
+            "maxHeight": "none",
+            "overflowY": "hidden",
+            "gridRows": "none"
+          }
+        },
+        "main": {
+          "height": 924,
+          "top": 68,
+          "bottom": 992,
+          "width": 1192,
+          "clientHeight": 922,
+          "scrollHeight": 922,
+          "computedHeight": "924px",
+          "minHeight": "auto",
+          "maxHeight": "none",
+          "overflowY": "auto",
+          "gridRows": "none"
+        },
+        "expectedDebugHeight": null,
+        "emptyState": null,
+        "checks": {
+          "debugHeightBounded": true,
+          "mobileWorkspaceBounded": true,
+          "viewportScrollable": true,
+          "composerContained": true
+        },
+        "passed": true
+      },
+      "premiumInteractions": {
+        "composerPointer": {
+          "first": {
+            "x": "36px",
+            "y": "11px"
+          },
+          "second": {
+            "x": "96px",
+            "y": "19px",
+            "pointerEvents": "none",
+            "opacity": "1"
+          },
+          "passed": true
+        },
+        "composerFocus": {
+          "before": "124.999deg",
+          "after": "140.999deg",
+          "borderOpacity": "0.6",
+          "pointerEvents": "none",
+          "focused": true,
+          "passed": true
+        },
+        "send": {
+          "label": "发送消息",
+          "x": 1055,
+          "y": 916,
+          "disabled": true,
+          "actualHit": false,
+          "pointerEvents": "none",
+          "actionableExpected": false,
+          "passed": true,
+          "notice": "This existing disabled control is intentionally non-actionable; the actual hit result is retained."
+        },
+        "runningAvatar": {
+          "property": "--ai-orbit-angle",
+          "before": "70.9995deg",
+          "after": "78.9994deg",
+          "passed": true
+        },
+        "reasoningPointer": {
+          "x": "35px",
+          "y": "9.996246337890625px",
+          "overlayPointerEvents": "none",
+          "overlayOpacity": "0.983538",
+          "passed": true
+        },
+        "reasoningToggle": {
+          "initial": "true",
+          "toggled": "false",
+          "restored": "true",
+          "passed": true
+        },
+        "passed": true,
+        "notice": "Pointer/focus/disclosure checks only. Disabled hit results and non-applicable glint slots remain explicit. No send, save, sync, reset, or mutation action is invoked."
+      },
+      "url": "http://localhost:5273/tasks/workers/1001/debug",
+      "title": "worker-debug-running",
+      "bodyText": "AI 项目管理平台\n项目\n任务\n知识\n代码\n管理\n林\n林舟\n任务\n任务概览\n工作概览\n任务定义\n机器人\n执行器\n\n前端研发机器人\n\n研发执行器 · example/example-model · 会话 example-\n\n回复中…\n重置会话\n请检查任务协作流程，并给出验证步骤。\n前端研发机器人\n思考中…\n先检查任务状态与事件流，再核对交付内容和验收动作。\n\n任务流程已梳理，建议按以下步骤验证。\n\n新建任务并确认描述保存完整。\n检查调度与机器人分配。\n查看执行日志与最终交付物。\n由负责人完成验收。\n\n这是独立测试浏览器中的示例回复。\n\n待办\n2/3\n核对任务状态与执行阶段\n检查实时日志与交付物展示\n完成验收流程检查",
+      "menuIconColors": [
+        {
+          "href": "/tasks/list",
+          "label": "任务",
+          "color": "rgb(34, 211, 238)"
+        },
+        {
+          "href": "/tasks",
+          "label": "任务概览",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/tasks/live",
+          "label": "工作概览",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/tasks/templates",
+          "label": "任务定义",
+          "color": "rgb(167, 139, 250)"
+        },
+        {
+          "href": "/tasks/workers",
+          "label": "机器人",
+          "color": "rgb(251, 113, 133)"
+        },
+        {
+          "href": "/tasks/executors",
+          "label": "执行器",
+          "color": "rgb(251, 146, 60)"
+        }
+      ],
+      "menuIconColorCount": 6,
+      "taskMenuHasSixColors": true,
+      "layout": {
+        "viewportWidth": 1440,
+        "documentWidth": 1440,
+        "bodyWidth": 1440,
+        "mainWidth": 1190,
+        "mainScrollWidth": 1190,
+        "overflowCandidates": [],
+        "reducedMotion": false,
+        "theme": "dark",
+        "cardCount": 0,
+        "tableRows": 0
+      },
+      "animations": [
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 150
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 150
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 319.7390467982386
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 319.7390467982386
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 319.7390467982386
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        },
+        {
+          "name": "ai-tool-flow",
+          "state": "running",
+          "duration": 4200
+        },
+        {
+          "name": "ai-energy-orbit",
+          "state": "running",
+          "duration": 6000
+        },
+        {
+          "name": "ai-core-spectrum",
+          "state": "running",
+          "duration": 12000
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-label-shimmer",
+          "state": "running",
+          "duration": 1400
+        },
+        {
+          "name": "ai-energy-orbit",
+          "state": "running",
+          "duration": 6000
+        },
+        {
+          "name": "ai-core-spectrum",
+          "state": "running",
+          "duration": 12000
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-pixel-wave",
+          "state": "running",
+          "duration": 650
+        },
+        {
+          "name": "ai-trace-flow",
+          "state": "running",
+          "duration": 2400
+        },
+        {
+          "name": "ai-tool-flow",
+          "state": "running",
+          "duration": 3600
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        },
+        {
+          "name": "ai-wave-envelope",
+          "state": "running",
+          "duration": 1332
+        }
+      ],
+      "knownConsoleWarnings": [],
+      "unexpectedConsoleErrors": [],
+      "status": "captured"
+    },
+    {
+      "name": "projects-mobile",
+      "route": "/projects",
+      "fixtureVariant": "default",
+      "longInfo": false,
+      "debugEmpty": false,
+      "colorScheme": "dark",
+      "reducedMotion": "no-preference",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "errors": [],
+      "consoleErrors": [],
+      "unmatchedApi": [],
+      "blockedWrites": [],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/page"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/page"
+        }
+      ],
+      "rabbitIdentity": {
+        "cases": [
+          {
+            "role": "brand-logo",
+            "width": 34,
+            "height": 34,
+            "imageSrc": "/src/assets/lita-rabbit.png",
+            "naturalWidth": 512,
+            "naturalHeight": 512,
+            "symbolSrc": "data:image/svg+xml (Vite inlined graphical asset)",
+            "symbolWidth": 14.265625,
+            "symbolHeight": 14.265625,
+            "visible": true,
+            "photoLoaded": true,
+            "symbolLoaded": true,
+            "topRight": true,
+            "noLetters": true,
+            "pointerSafe": true,
+            "clippedBy": [],
+            "passed": true
+          }
+        ],
+        "passed": true,
+        "notice": "Original rabbit image and graphical SVG AI symbol are checked separately; no AI letter badge is expected."
+      },
+      "premiumInteractions": {
+        "tablePointer": {
+          "x": 220,
+          "y": 75,
+          "scrollLeft": 120,
+          "clientWidth": 340,
+          "scrollWidth": 1024,
+          "rowEdgePointerEvents": "none",
+          "expectedX": 220,
+          "passed": true
+        },
+        "toolbarFocus": {
+          "focused": true,
+          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 3px 0px inset, oklab(0.985098 0.0000447631 0.0000197291 / 0.03) 0px 1px 0px 0px, oklab(0 0 0 / 0) 0px 0px 0px 0px",
+          "passed": true
+        },
+        "toolbarHit": {
+          "label": "搜索项目标题",
+          "x": 147,
+          "y": 289.5,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "buttonGlint": {
+          "before": "130%",
+          "middle": "-89.9989%",
+          "after": {
+            "position": "-130%",
+            "opacity": "0.4",
+            "pointerEvents": "none",
+            "animationName": "none"
+          },
+          "dataSlot": "dialog-trigger",
+          "applicable": true,
+          "passed": true,
+          "notice": "The premium glint targets existing native buttons, including composed dialog triggers. The original data-slot is retained in this record."
+        },
+        "buttonHit": {
+          "label": "新建项目",
+          "x": 168.515625,
+          "y": 232.5,
+          "disabled": false,
+          "actualHit": true,
+          "pointerEvents": "auto",
+          "actionableExpected": true,
+          "passed": true,
+          "notice": null
+        },
+        "passed": true,
+        "notice": "Pointer/focus/disclosure checks only. Disabled hit results and non-applicable glint slots remain explicit. No send, save, sync, reset, or mutation action is invoked."
+      },
+      "url": "http://localhost:5273/projects",
+      "title": "项目",
+      "bodyText": "AI 项目管理平台\n项目\n任务\n知识\n代码\n管理\n林\n林舟\n概览\n项目\n用例\n检查\n导出\n缺陷\n文档\n资源\n节点\n提交\n脚本\n定时任务\nAPP\n设置\n项目\n从飞书同步\n新建项目\n不限迭代\n不限状态\n不限类型\n不限优先级\nID\t标题\t类型\t优先级\t预期\t迭代\t状态\t操作\n1\t智能协作工作台\t功能\tP0\t2026-10-30\t2026 · 第 22 迭代\t开发中\t\n详情\n删除\n\n2\t知识搜索体验优化\t技术\tP1\t2026-10-30\t2026 · 第 22 迭代\t测试中\t\n详情\n删除\n\n3\t移动端发布流程\t活动\tP1\t2026-10-30\t2026 · 第 22 迭代\t已发布\t\n详情\n删除\n\n4\t自动化质量保障\t技术\tP2\t2026-10-30\t2026 · 第 22 迭代\t开发中\t\n详情\n删除\n\n5\t设计系统与组件库\t其它\tP2\t2026-10-30\t2026 · 第 22 迭代\t待分配\t\n详情\n删除\n\n6\t团队数据周报\t数据\tP3\t2026-10-30\t2026 · 第 22 迭代\t已关闭\t\n详情\n删除\n共 6 条，第 1 / 1 页\n上一页\n下一页",
+      "menuIconColors": [
+        {
+          "href": "/",
+          "label": "概览",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/projects",
+          "label": "项目",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/tests",
+          "label": "用例",
+          "color": "rgb(52, 211, 153)"
+        },
+        {
+          "href": "/checks",
+          "label": "检查",
+          "color": "rgb(96, 165, 250)"
+        },
+        {
+          "href": "/exports",
+          "label": "导出",
+          "color": "rgb(251, 191, 36)"
+        },
+        {
+          "href": "/defects",
+          "label": "缺陷",
+          "color": "rgb(251, 113, 133)"
+        },
+        {
+          "href": "/documents",
+          "label": "文档",
+          "color": "rgb(34, 211, 238)"
+        },
+        {
+          "href": "/resources",
+          "label": "资源",
+          "color": "rgb(251, 191, 36)"
+        },
+        {
+          "href": "/milestones",
+          "label": "节点",
+          "color": "rgb(251, 146, 60)"
+        },
+        {
+          "href": "/commits",
+          "label": "提交",
+          "color": "rgb(56, 189, 248)"
+        },
+        {
+          "href": "/scripts",
+          "label": "脚本",
+          "color": "rgb(167, 139, 250)"
+        },
+        {
+          "href": "/schedules",
+          "label": "定时任务",
+          "color": "rgb(251, 146, 60)"
+        },
+        {
+          "href": "/apps",
+          "label": "APP",
+          "color": "rgb(56, 189, 248)"
+        },
+        {
+          "href": "/settings",
+          "label": "设置",
+          "color": "rgb(161, 161, 161)"
+        }
+      ],
+      "menuIconColorCount": 9,
+      "layout": {
+        "viewportWidth": 390,
+        "documentWidth": 390,
+        "bodyWidth": 390,
+        "mainWidth": 372,
+        "mainScrollWidth": 372,
+        "overflowCandidates": [
+          {
+            "tag": "UL",
+            "slot": "navigation-list",
+            "className": "flex flex-col gap-1",
+            "text": "概览项目用例检查导出缺陷文档资源节点提交脚本定时任务APP设置",
+            "width": 1129,
+            "right": 1141
+          },
+          {
+            "tag": "LI",
+            "slot": "navigation-item",
+            "className": "",
+            "text": "导出",
+            "width": 75,
+            "right": 403
+          },
+          {
+            "tag": "A",
+            "slot": "navigation-link",
+            "className": "relative inline-flex items-center gap-1.5 transform-gpu cursor-pointer font-medium outline-none transition duration-250 ease-spring select-none not-da",
+            "text": "导出",
+            "width": 75,
+            "right": 403
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "flex w-full items-center justify-between gap-2",
+            "text": "导出",
+            "width": 55,
+            "right": 393
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "flex min-w-0 items-center gap-2.5",
+            "text": "导出",
+            "width": 55,
+            "right": 393
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "truncate",
+            "text": "导出",
+            "width": 28,
+            "right": 393
+          },
+          {
+            "tag": "LI",
+            "slot": "navigation-item",
+            "className": "",
+            "text": "缺陷",
+            "width": 75,
+            "right": 482
+          },
+          {
+            "tag": "A",
+            "slot": "navigation-link",
+            "className": "relative inline-flex items-center gap-1.5 transform-gpu cursor-pointer font-medium outline-none transition duration-250 ease-spring select-none not-da",
+            "text": "缺陷",
+            "width": 75,
+            "right": 482
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "flex w-full items-center justify-between gap-2",
+            "text": "缺陷",
+            "width": 55,
+            "right": 472
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "flex min-w-0 items-center gap-2.5",
+            "text": "缺陷",
+            "width": 55,
+            "right": 472
+          },
+          {
+            "tag": "svg",
+            "slot": null,
+            "className": "[object SVGAnimatedString]",
+            "text": "",
+            "width": 17,
+            "right": 434
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "truncate",
+            "text": "缺陷",
+            "width": 28,
+            "right": 472
+          },
+          {
+            "tag": "LI",
+            "slot": "navigation-item",
+            "className": "",
+            "text": "文档",
+            "width": 75,
+            "right": 561
+          },
+          {
+            "tag": "A",
+            "slot": "navigation-link",
+            "className": "relative inline-flex items-center gap-1.5 transform-gpu cursor-pointer font-medium outline-none transition duration-250 ease-spring select-none not-da",
+            "text": "文档",
+            "width": 75,
+            "right": 561
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "flex w-full items-center justify-between gap-2",
+            "text": "文档",
+            "width": 55,
+            "right": 551
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "flex min-w-0 items-center gap-2.5",
+            "text": "文档",
+            "width": 55,
+            "right": 551
+          },
+          {
+            "tag": "svg",
+            "slot": null,
+            "className": "[object SVGAnimatedString]",
+            "text": "",
+            "width": 17,
+            "right": 513
+          },
+          {
+            "tag": "SPAN",
+            "slot": null,
+            "className": "truncate",
+            "text": "文档",
+            "width": 28,
+            "right": 551
+          }
+        ],
+        "reducedMotion": false,
+        "theme": "dark",
+        "cardCount": 0,
+        "tableRows": 6
+      },
+      "animations": [
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 300
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 480
+        },
+        {
+          "name": "web-animation",
+          "state": "running",
+          "duration": 180
+        }
+      ],
+      "knownConsoleWarnings": [],
+      "unexpectedConsoleErrors": [],
+      "status": "captured"
+    }
+  ],
+  "finishedAt": "2026-10-27T15:20:28.395Z",
+  "summary": {
+    "total": 6,
+    "captured": 6,
+    "needsReview": 0,
+    "failed": 0
+  }
+}

@@ -1,0 +1,568 @@
+{
+  "startedAt": "2026-10-28T09:28:31.166Z",
+  "base": "http://127.0.0.1:5273",
+  "headless": true,
+  "isolation": "New disposable browser contexts. All /api requests and external HTTP traffic intercepted. All business writes blocked. Existing fixture data only. No user browser tabs accessed.",
+  "sourceChecks": [
+    {
+      "name": "Product changes confined to five approved presentation files",
+      "pass": true,
+      "changedFiles": [
+        "frontend/src/components/Layout.tsx",
+        "frontend/src/components/SurfaceEffects.tsx",
+        "frontend/src/components/ai-ui/daylight-conversation.css",
+        "frontend/src/components/surface-effects.css",
+        "frontend/src/styles/premium-ui.css"
+      ]
+    },
+    {
+      "name": "API and backend unchanged",
+      "pass": true
+    },
+    {
+      "name": "Task board, Gemini, finite edge flashes and digit source unchanged",
+      "pass": true
+    },
+    {
+      "name": "Layout diff replaces decorative component with stylesheet and removes only its mount",
+      "pass": true,
+      "diff": "diff --git a/frontend/src/components/Layout.tsx b/frontend/src/components/Layout.tsx\nindex 6d8f898..ed20afb 100644\n--- a/frontend/src/components/Layout.tsx\n+++ b/frontend/src/components/Layout.tsx\n@@ -49,7 +49,7 @@ import type { IconComponent } from '@appica/icons-react'\n import { LayoutGroup, m } from 'framer-motion'\n import { useAuth } from '../context/AuthContext'\n import { PageTransition } from './PageTransition'\n-import { SurfaceEffects } from './SurfaceEffects'\n+import './surface-effects.css'\n import { RabbitIdentity } from './ai-ui/RabbitIdentity'\n import { navIndicatorTransition } from '../lib/motion'\n \n@@ -205,7 +205,6 @@ export function Layout() {\n     NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0]\n   return (\n     <div className=\"square-shell flex min-h-screen flex-col bg-background-muted\">\n-      <SurfaceEffects />\n       {/* 顶部导航 */}\n       <header className=\"square-header flex h-14 shrink-0 items-center justify-between border-b border-border-strong bg-background px-6\">\n         <div className=\"square-header-start flex items-center gap-8\">\n"
+    },
+    {
+      "name": "Attention and completion edge flashes still finite at 3 × 720 ms",
+      "pass": true
+    }
+  ],
+  "cases": [
+    {
+      "name": "projects-and-card-pointer-feedback",
+      "checks": [
+        {
+          "label": "New project button has no visible sweeping ::after",
+          "pass": true,
+          "evidence": {
+            "pointerX": "",
+            "pointerY": "",
+            "before": {
+              "content": "\"\"",
+              "display": "block",
+              "opacity": "1",
+              "backgroundImage": "radial-gradient(138.15% 78.13% at 52.05% 50%, rgb(37, 99, 235) 0%, rgb(147, 180, 237) 80%)",
+              "animationName": "none"
+            },
+            "after": {
+              "content": "none",
+              "display": "block",
+              "opacity": "1",
+              "backgroundImage": "none",
+              "animationName": "none"
+            }
+          }
+        },
+        {
+          "label": "Existing new project dialog opens by its button",
+          "pass": true
+        },
+        {
+          "label": "Cancel closes existing dialog and restores control access",
+          "pass": true
+        },
+        {
+          "label": "Project card receives no pointer CSS variables after hover/move",
+          "pass": true,
+          "evidence": {
+            "initial": {
+              "pointerX": "",
+              "pointerY": "",
+              "before": {
+                "content": "none",
+                "display": "block",
+                "opacity": "1",
+                "backgroundImage": "none",
+                "animationName": "none"
+              },
+              "after": {
+                "content": "none",
+                "display": "block",
+                "opacity": "1",
+                "backgroundImage": "none",
+                "animationName": "none"
+              }
+            },
+            "left": {
+              "pointerX": "",
+              "pointerY": "",
+              "before": {
+                "content": "none",
+                "display": "block",
+                "opacity": "1",
+                "backgroundImage": "none",
+                "animationName": "none"
+              },
+              "after": {
+                "content": "none",
+                "display": "block",
+                "opacity": "1",
+                "backgroundImage": "none",
+                "animationName": "none"
+              }
+            },
+            "right": {
+              "pointerX": "",
+              "pointerY": "",
+              "before": {
+                "content": "none",
+                "display": "block",
+                "opacity": "1",
+                "backgroundImage": "none",
+                "animationName": "none"
+              },
+              "after": {
+                "content": "none",
+                "display": "block",
+                "opacity": "1",
+                "backgroundImage": "none",
+                "animationName": "none"
+              }
+            }
+          }
+        },
+        {
+          "label": "Project card has no visible highlight pseudo layer at any pointer position",
+          "pass": true
+        },
+        {
+          "label": "Hovered card pixels stay identical across blank surface pointer positions",
+          "pass": true,
+          "evidence": {
+            "leftSha256": "a716644632a1c145923dbaa0356063d4df5155a12abab7e417dcd874c0751d34",
+            "rightSha256": "a716644632a1c145923dbaa0356063d4df5155a12abab7e417dcd874c0751d34",
+            "diffMetrics": {
+              "width": 320,
+              "height": 891,
+              "changed": 0,
+              "ratio": 0,
+              "maxChannelDelta": 0,
+              "bounds": {
+                "minX": 320,
+                "minY": 891,
+                "maxX": -1,
+                "maxY": -1
+              }
+            }
+          }
+        },
+        {
+          "label": "Project table background has no pointer radial light",
+          "pass": true,
+          "evidence": "linear-gradient(155deg, color(srgb 0.991137 0.993059 0.998471), rgb(255, 255, 255) 40%, color(srgb 0.992157 0.993725 0.996863))"
+        },
+        {
+          "label": "Every API read had an existing fixture",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No business writes attempted",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No external requests attempted",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No page runtime errors",
+          "pass": true,
+          "evidence": []
+        }
+      ],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/page",
+          "query": "?page=1&pageSize=20"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/page",
+          "query": "?page=1&pageSize=20"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/1",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/1",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/schedules",
+          "query": "?projectId=1"
+        },
+        {
+          "method": "GET",
+          "path": "/api/schedules",
+          "query": "?projectId=1"
+        }
+      ],
+      "blockedWrites": [],
+      "externalRequests": [],
+      "unmatchedApi": [],
+      "pageErrors": [],
+      "consoleErrors": [
+        "In HTML, %s cannot be a descendant of <%s>.\nThis will cause a hydration error.%s <button> button \n\n  ...\n    <FloatingPortal ref={null}>\n      <div>\n      <InternalBackdrop>\n      <DialogBackdrop>\n      <DialogViewport data-slot=\"dialog-vie...\" className=\"fixed inse...\">\n        <div data-open=\"\" data-starting-style=\"\" role=\"presentation\" hidden={false} style={{...}} ...>\n          <DialogPopup data-slot=\"dialog-popup\" data-frame=\"\" className=\"group/dial...\">\n            <FloatingFocusManager context={{...}} openInteractionType=\"mouse\" disabled={false} closeOnFocusOut={true} ...>\n              <FocusGuard>\n              <div data-open=\"\" data-starting-style=\"\" onKeyDown={function} onPointerDown={function} ...>\n                <div data-slot=\"dialog-con...\" className={\"relative...\"}>\n                  <DialogHeader>\n                  <DialogBody>\n                  <DialogFooter>\n                    <div data-slot=\"dialog-footer\" className=\"flex flex-...\">\n                      <DialogClose>\n                        <DialogClose data-slot=\"dialog-close\" className=\"\">\n>                         <button\n>                           type=\"button\"\n>                           onClick={function}\n>                           onMouseDown={function}\n>                           onKeyDown={function}\n>                           onKeyUp={function}\n>                           onPointerDown={function}\n>                           tabIndex={0}\n>                           disabled={false}\n>                           data-slot=\"dialog-close\"\n>                           ref={function}\n>                           className={undefined}\n>                         >\n                            <Button variant=\"outline\" size=\"sm\">\n                              <Button data-slot=\"button\" disabled={undefined} className={\"relative...\"}>\n>                               <button\n>                                 type=\"button\"\n>                                 onClick={function}\n>                                 onMouseDown={function}\n>                                 onKeyDown={function}\n>                                 onKeyUp={function}\n>                                 onPointerDown={function}\n>                                 tabIndex={0}\n>                                 disabled={false}\n>                                 data-slot=\"button\"\n>                                 ref={function}\n>                                 className={\"relative isolate inline-flex shrink-0 transform-gpu cursor-pointer item...\"}\n>                               >\n                      ...\n                  ...\n              ...\n",
+        "<%s> cannot contain a nested %s.\nSee this log for the ancestor stack trace. button <button>"
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "task-board-idle-beams-and-running-gemini",
+      "checks": [
+        {
+          "label": "Waiting/review BorderBeam rings remain invisible and stopped on hover",
+          "pass": true,
+          "evidence": [
+            {
+              "display": "none",
+              "animationName": "none",
+              "opacity": "1"
+            },
+            {
+              "display": "none",
+              "animationName": "none",
+              "opacity": "0"
+            },
+            {
+              "display": "none",
+              "animationName": "none",
+              "opacity": "0"
+            },
+            {
+              "display": "none",
+              "animationName": "none",
+              "opacity": "0"
+            }
+          ]
+        },
+        {
+          "label": "Waiting/review card surface has no pointer tracking or highlight",
+          "pass": true,
+          "evidence": {
+            "pointerX": "",
+            "pointerY": "",
+            "before": {
+              "content": "none",
+              "display": "inline",
+              "opacity": "1",
+              "backgroundImage": "none",
+              "animationName": "none"
+            },
+            "after": {
+              "content": "none",
+              "display": "inline",
+              "opacity": "1",
+              "backgroundImage": "none",
+              "animationName": "none"
+            }
+          }
+        },
+        {
+          "label": "Running Gemini edge still continuously rotates",
+          "pass": true,
+          "evidence": {
+            "first": {
+              "angle": "288.117deg",
+              "animationName": "task-ring-rotate",
+              "animationPlayState": "running"
+            },
+            "second": {
+              "angle": "313.424deg",
+              "animationName": "task-ring-rotate",
+              "animationPlayState": "running"
+            }
+          }
+        },
+        {
+          "label": "Running Gemini ring remains visible",
+          "pass": true
+        },
+        {
+          "label": "Task card link still navigates",
+          "pass": true
+        },
+        {
+          "label": "Every API read had an existing fixture",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No business writes attempted",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No external requests attempted",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No page runtime errors",
+          "pass": true,
+          "evidence": []
+        }
+      ],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/workers",
+          "query": "?role=%E5%B7%A5%E4%BD%9C%E8%80%85"
+        },
+        {
+          "method": "GET",
+          "path": "/api/workers",
+          "query": "?role=%E5%B7%A5%E4%BD%9C%E8%80%85"
+        }
+      ],
+      "blockedWrites": [],
+      "externalRequests": [],
+      "unmatchedApi": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "status": "passed"
+    },
+    {
+      "name": "running-debug-surfaces-and-input",
+      "checks": [
+        {
+          "label": "Running debug header has no visible pointer light or bottom sweep",
+          "pass": true,
+          "evidence": {
+            "pointerX": "",
+            "pointerY": "",
+            "before": {
+              "content": "\"\"",
+              "display": "none",
+              "opacity": "1",
+              "backgroundImage": "radial-gradient(260px at 0% 50%, color(srgb 0.113725 0.305882 0.847059 / 0.05), rgba(0, 0, 0, 0) 75%)",
+              "animationName": "none"
+            },
+            "after": {
+              "content": "\"\"",
+              "display": "none",
+              "opacity": "0.6",
+              "backgroundImage": "linear-gradient(90deg, rgba(0, 0, 0, 0), rgb(66, 133, 244), rgb(103, 213, 255), rgb(155, 114, 239), rgb(239, 120, 190), rgba(0, 0, 0, 0))",
+              "animationName": "ai-tool-flow"
+            }
+          }
+        },
+        {
+          "label": "Running labels are static readable text without shimmer",
+          "pass": true,
+          "evidence": [
+            {
+              "text": "回复中…",
+              "animationName": "none",
+              "backgroundImage": "none",
+              "color": "rgb(82, 97, 118)"
+            }
+          ]
+        },
+        {
+          "label": "Existing composer accepts a draft without sending",
+          "pass": true
+        },
+        {
+          "label": "Focused running composer has no orbit or decorative sweep",
+          "pass": true,
+          "evidence": {
+            "animationName": "none",
+            "before": "none",
+            "after": "none"
+          }
+        },
+        {
+          "label": "Running assistant response retains its Gemini edge animation",
+          "pass": true,
+          "evidence": {
+            "firstAngle": "280.922deg",
+            "secondAngle": "302.632deg"
+          }
+        },
+        {
+          "label": "Every API read had an existing fixture",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No business writes attempted",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No external requests attempted",
+          "pass": true,
+          "evidence": []
+        },
+        {
+          "label": "No page runtime errors",
+          "pass": true,
+          "evidence": []
+        }
+      ],
+      "apiRequests": [
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/workers/1001/debug",
+          "query": ""
+        },
+        {
+          "method": "GET",
+          "path": "/api/workers/1001/debug",
+          "query": ""
+        }
+      ],
+      "blockedWrites": [],
+      "externalRequests": [],
+      "unmatchedApi": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "status": "passed"
+    }
+  ],
+  "finishedAt": "2026-10-28T09:28:42.279Z",
+  "browserClosed": true,
+  "pass": true,
+  "existingInteractionChecks": {
+    "summary": {
+      "total": 2,
+      "captured": 2,
+      "needsReview": 0,
+      "failed": 0
+    },
+    "scenarios": [
+      {
+        "name": "projects",
+        "status": "captured",
+        "premiumInteractions": {
+          "toolbarFocus": {
+            "focused": true,
+            "shadow": "rgba(23, 32, 51, 0.03) 0px 1px 3px 0px inset, oklab(0.20991 -0.003893 -0.0339065 / 0.03) 0px 1px 0px 0px, oklab(0 0 0 / 0) 0px 0px 0px 0px",
+            "passed": true
+          },
+          "toolbarHit": {
+            "label": "搜索项目标题",
+            "x": 387,
+            "y": 166,
+            "disabled": false,
+            "actualHit": true,
+            "pointerEvents": "auto",
+            "actionableExpected": true,
+            "passed": true,
+            "notice": null
+          },
+          "buttonHit": {
+            "label": "新建项目",
+            "x": 1367,
+            "y": 109,
+            "disabled": false,
+            "actualHit": true,
+            "pointerEvents": "auto",
+            "actionableExpected": true,
+            "passed": true,
+            "notice": null
+          },
+          "passed": true,
+          "notice": "Existing focus, disclosure and hit targets only. Removed pointer lights and glints are verified separately. No send, save, sync, reset, or mutation action is invoked."
+        },
+        "errors": [],
+        "blockedWrites": [],
+        "unmatchedApi": []
+      },
+      {
+        "name": "worker-debug-running",
+        "status": "captured",
+        "premiumInteractions": {
+          "composerFocus": {
+            "focused": true,
+            "shadow": "rgba(59, 130, 246, 0.1) 0px 0px 0px 3px, rgba(23, 32, 51, 0.05) 0px 6px 24px 0px",
+            "passed": true
+          },
+          "send": {
+            "label": "发送消息",
+            "x": 1053.453125,
+            "y": 917,
+            "disabled": true,
+            "actualHit": false,
+            "pointerEvents": "none",
+            "actionableExpected": false,
+            "passed": true,
+            "notice": "This existing disabled control is intentionally non-actionable; the actual hit result is retained."
+          },
+          "runningAvatar": {
+            "property": "--ai-orbit-angle",
+            "before": "50.0005deg",
+            "after": "58.5001deg",
+            "passed": true
+          },
+          "reasoningToggle": {
+            "initial": "true",
+            "toggled": "false",
+            "restored": "true",
+            "passed": true
+          },
+          "buttonHit": {
+            "label": "发送消息",
+            "x": 1053.453125,
+            "y": 917,
+            "disabled": true,
+            "actualHit": false,
+            "pointerEvents": "none",
+            "actionableExpected": false,
+            "passed": true,
+            "notice": "This existing disabled control is intentionally non-actionable; the actual hit result is retained."
+          },
+          "passed": true,
+          "notice": "Existing focus, disclosure and hit targets only. Removed pointer lights and glints are verified separately. No send, save, sync, reset, or mutation action is invoked."
+        },
+        "errors": [],
+        "blockedWrites": [],
+        "unmatchedApi": []
+      }
+    ]
+  }
+}

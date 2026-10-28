@@ -1,0 +1,227 @@
+{
+  "verifiedAt": "2026-10-28T12:42:11.782Z",
+  "mode": "read-only isolated fixtures against actual frontend build",
+  "before": {
+    "task": {
+      "composerBottom": 1987,
+      "height": 720,
+      "noticeHeight": 1596,
+      "noticeOverflow": "visible",
+      "noticeScrollHeight": 1596,
+      "pageOverflow": false,
+      "transcriptHeight": 52,
+      "width": 1280
+    },
+    "terminal": {
+      "height": 720,
+      "lineCount": 401,
+      "maxHeight": "none",
+      "pageOverflow": false,
+      "scrollHeight": 8072,
+      "scrollTop": 0,
+      "terminalHeight": 8072,
+      "width": 1280
+    }
+  },
+  "after": {
+    "terminal": {
+      "height": 720,
+      "lineCount": 401,
+      "maxHeight": "468px",
+      "pageOverflow": false,
+      "scrollHeight": 8072,
+      "scrollTop": 7604,
+      "terminalHeight": 468,
+      "width": 1280
+    },
+    "terminalAfterSse": {
+      "height": 720,
+      "lineCount": 402,
+      "maxHeight": "468px",
+      "pageOverflow": false,
+      "scrollHeight": 8092,
+      "scrollTop": 7624,
+      "terminalHeight": 468,
+      "width": 1280
+    },
+    "task": {
+      "composerBottom": 617.0703735351562,
+      "height": 720,
+      "noticeHeight": 173,
+      "noticeOverflow": "auto",
+      "noticeScrollHeight": 1596,
+      "pageOverflow": false,
+      "transcriptHeight": 105,
+      "width": 1280
+    },
+    "rejection": {
+      "composerBottom": 617.0467529296875,
+      "height": 720,
+      "noticeHeight": 173,
+      "noticeOverflow": "auto",
+      "noticeScrollHeight": 3164,
+      "pageOverflow": false,
+      "transcriptHeight": 105,
+      "width": 1280
+    }
+  },
+  "checks": [
+    {
+      "name": "Baseline: long note moves composer beyond viewport",
+      "passed": true
+    },
+    {
+      "name": "Baseline: terminal grows with all output",
+      "passed": true
+    },
+    {
+      "name": "task: note scrolls internally",
+      "passed": true
+    },
+    {
+      "name": "task: transcript and composer remain reachable",
+      "passed": true
+    },
+    {
+      "name": "task: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "rejection: note scrolls internally",
+      "passed": true
+    },
+    {
+      "name": "rejection: transcript and composer remain reachable",
+      "passed": true
+    },
+    {
+      "name": "rejection: no horizontal overflow",
+      "passed": true
+    },
+    {
+      "name": "Terminal is bounded and scrollable",
+      "passed": true
+    },
+    {
+      "name": "Terminal follows initial logs",
+      "passed": true
+    },
+    {
+      "name": "Original SSE follow continues after append",
+      "passed": true
+    },
+    {
+      "name": "Terminal has no horizontal page overflow",
+      "passed": true
+    }
+  ],
+  "sourceScope": {
+    "onlyClassNameChanges": true,
+    "mainScope": {
+      "auditedAt": "2026-10-28T12:39:42.906Z",
+      "baseline": "ac49bd2581249cdf4c20a02268e56b63521d8b7d",
+      "uiHeadBeforeMerge": "f2bea76e0b42112a7d9a204853a13563ad23ad9f",
+      "checks": [
+        {
+          "name": "All branch-specific changes are frontend or design",
+          "passed": true
+        },
+        {
+          "name": "backend matches main",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/lib/api.ts matches main",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/App.tsx matches main",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/context matches main",
+          "passed": true
+        },
+        {
+          "name": "frontend/package.json matches main",
+          "passed": true
+        },
+        {
+          "name": "package.json matches main",
+          "passed": true
+        },
+        {
+          "name": "pnpm-lock.yaml matches main",
+          "passed": true
+        },
+        {
+          "name": "Debug snapshot/SSE/send/reply/reset unchanged",
+          "passed": true
+        },
+        {
+          "name": "Question state/answers/toggle/submit unchanged",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/pages/ScriptLibraryDetailPage.tsx:ScriptLibraryDetailPage business prefix unchanged",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/pages/TaskTypesPage.tsx:TypeFormDialog business prefix unchanged",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/pages/TaskTypesPage.tsx:DeleteTypeButton business prefix unchanged",
+          "passed": true
+        },
+        {
+          "name": "Debug onNew only adds failed-send draft restoration",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/pages/WorkerDebugPage.tsx:toThreadMessage unchanged",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/pages/WorkerDebugPage.tsx:customOf unchanged",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:onNew unchanged",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:toThreadMessage unchanged",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:customOf unchanged",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/components/task-detail/TaskChatPanel.tsx:readAutoAnswer unchanged",
+          "passed": true
+        },
+        {
+          "name": "Task footer/assignment actions and guards unchanged except classes",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/pages/WorkerDebugPage.tsx: original send guard",
+          "passed": true
+        },
+        {
+          "name": "frontend/src/components/task-detail/TaskChatPanel.tsx: original send guard",
+          "passed": true
+        },
+        {
+          "name": "All API call expressions match main",
+          "passed": true
+        }
+      ],
+      "outOfScope": [],
+      "apiDifferences": [],
+      "passed": true
+    }
+  }
+}

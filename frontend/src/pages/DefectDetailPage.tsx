@@ -244,9 +244,9 @@ export function DefectDetailPage() {
   if (!defect) return <p>加载中…</p>
 
   return (
-    <div className="flex gap-6">
+    <div className="responsive-detail-page responsive-detail-columns flex gap-6">
       {/* 左侧：预期 + 实际 + 图片 + 测试运行结果 + 变更记录 */}
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
+      <div className="responsive-detail-main flex min-w-0 flex-1 flex-col gap-6">
         <PageBreadcrumb
           items={[
             { label: '缺陷', to: '/defects' },
@@ -254,7 +254,7 @@ export function DefectDetailPage() {
             { label: defect.expected.split('\n')[0] || `缺陷 ${defect.id}` },
           ]}
         />
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div className="detail-description-grid grid grid-cols-1 gap-6 md:grid-cols-2">
           <section>
             <h2 className="mb-3 text-xl font-semibold">预期功能描述</h2>
             <Card>
@@ -365,7 +365,7 @@ export function DefectDetailPage() {
           )}
         </section>
         <section>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="detail-section-heading mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">
               变更记录（{records.length}）
             </h2>
@@ -405,7 +405,7 @@ export function DefectDetailPage() {
       </div>
 
       {/* 右侧：属性 */}
-      <aside className="w-80 shrink-0">
+      <aside className="responsive-detail-sidebar w-80 shrink-0">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-2">
@@ -730,7 +730,7 @@ function EditContentDialog({
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm">
                 端
                 <Select

@@ -34,10 +34,7 @@ export const boardDetailTransition: Transition = {
   ease: [0.22, 1, 0.36, 1],
 }
 
-/** 原生滚动等非 Framer Motion 场景的减少动态判断。 */
+/** 本次 UI 设计固定启用动态效果，原生滚动沿用同一视觉配置。 */
 export function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
+  return false
 }

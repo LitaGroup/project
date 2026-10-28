@@ -1,0 +1,236 @@
+/* Task-only presentation, using the application theme's warm neutral tokens. */
+.tasks-page {
+  gap: 22px;
+}
+
+.tasks-page .tasks-page-header {
+  padding: 1px 1px 2px;
+  gap: 20px;
+}
+
+.tasks-page .tasks-page-title {
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+}
+
+.tasks-page .tasks-page-description {
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.tasks-page .tasks-page-create {
+  min-height: 34px;
+  padding-inline: 15px;
+  border-color: var(--primary);
+  border-radius: var(--square-control-radius);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: var(--square-card-shadow);
+}
+
+.tasks-page .tasks-page-create:hover {
+  background: color-mix(in oklch, var(--primary) 91%, var(--foreground));
+}
+
+.tasks-page .tasks-page-tabs {
+  gap: 22px;
+}
+
+.tasks-page .tasks-page-tabs [role='tab'] {
+  padding-inline: 1px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tasks-page .tasks-board {
+  gap: 20px;
+}
+
+.tasks-page .tasks-board-columns {
+  gap: 18px;
+}
+
+.tasks-page .task-board-overview {
+  border-radius: var(--radius-lg);
+  border-color: var(--border);
+  background: var(--background);
+  box-shadow: var(--square-card-shadow);
+}
+
+.tasks-page .task-board-overview-content {
+  padding: 19px 21px 18px;
+}
+
+.tasks-page .task-board-overview-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--square-control-radius);
+  background: color-mix(in oklch, var(--primary) 20%, var(--background));
+  color: var(--primary);
+}
+
+.tasks-page .task-board-connection {
+  padding-inline: 7px;
+}
+
+.tasks-page .task-board-metrics {
+  gap: 38px;
+}
+
+.tasks-page .task-board-metric-value {
+  margin-top: 3px;
+  font-size: 30px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+}
+
+.tasks-page .task-board-distribution {
+  height: 3px;
+  opacity: 1;
+}
+
+.tasks-page .task-board-column {
+  border: thin solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--background-muted);
+}
+
+.tasks-page .task-board-column-accent {
+  height: 0;
+}
+
+.tasks-page .task-board-column-header {
+  padding: 17px 16px 16px;
+  border-bottom: 0;
+}
+
+.tasks-page .task-board-column-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--square-control-radius);
+}
+
+.tasks-page .task-board-column-header h2 {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.tasks-page .task-board-column-header p {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.tasks-page .task-board-column-count {
+  height: 25px;
+  min-width: 25px;
+  border-radius: var(--square-control-radius);
+  background: var(--background);
+  color: var(--foreground-muted);
+  font-weight: 750;
+}
+
+.tasks-page .task-board-column[data-state='waiting'] {
+  --task-column-status-color: var(--warning-emphasis);
+}
+
+.tasks-page .task-board-column[data-state='running'] {
+  --task-column-status-color: var(--info-emphasis);
+}
+
+.tasks-page .task-board-column[data-state='review'] {
+  --task-column-status-color: var(--success-emphasis);
+}
+
+.tasks-page .task-board-column-icon,
+.tasks-page .task-board-column-count {
+  background: color-mix(in oklch, var(--task-column-status-color) 20%, var(--background-muted));
+  color: var(--task-column-status-color);
+}
+
+.tasks-page .task-board-column-list {
+  padding: 16px 14px 17px;
+  scroll-padding-top: 16px;
+  gap: 14px;
+}
+
+.tasks-page .task-board-card {
+  isolation: isolate;
+  border-radius: var(--radius-lg);
+}
+
+.tasks-page .task-board-card-surface,
+.tasks-page .task-board-skeleton {
+  border-radius: var(--radius-lg);
+  border-color: var(--border);
+  background: var(--background);
+  box-shadow: var(--square-card-shadow);
+}
+
+.tasks-page .task-board-card--running .task-board-card-surface {
+  border-color: transparent;
+  border-radius: calc(var(--radius-lg) - var(--square-edge-width));
+  box-shadow: none;
+}
+
+.tasks-page .task-board-card-link {
+  padding: 16px 16px 13px;
+}
+
+.tasks-page .task-board-card-title {
+  margin-top: 10px;
+  min-height: 42px;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 21px;
+  letter-spacing: -0.01em;
+}
+
+.tasks-page .task-board-card-meta {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-color: var(--border);
+  font-size: 11px;
+}
+
+.tasks-page .task-board-card-log {
+  padding: 9px 16px;
+  border-color: var(--border);
+  background: color-mix(in oklch, var(--background-muted) 29%, transparent);
+}
+
+.tasks-page .task-board-empty {
+  min-height: 160px;
+  border-radius: var(--radius);
+  border-color: color-mix(in oklch, var(--border) 85%, transparent);
+  background: color-mix(in oklch, var(--background) 40%, transparent);
+}
+
+@media (width < 640px) {
+  .tasks-page {
+    gap: 18px;
+  }
+
+  .tasks-page .tasks-page-header {
+    align-items: flex-start;
+  }
+
+  .tasks-page .tasks-page-description {
+    max-width: 30ch;
+  }
+
+  .tasks-page .task-board-overview-content {
+    padding: 16px;
+    gap: 17px;
+  }
+
+  .tasks-page .task-board-metrics {
+    width: 100%;
+    justify-content: space-between;
+    gap: 20px;
+  }
+}

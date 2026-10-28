@@ -1,0 +1,78 @@
+{
+  "baseCommit": "b6911445289eb869e40f9f3b462c18c41e096569",
+  "checks": {
+    "worker_loading_sse_send_reply_reset_unchanged": true,
+    "worker_append_message_callback_unchanged": true,
+    "worker_message_runtime_conversion_unchanged": true,
+    "question_state_answers_toggle_submit_unchanged": true,
+    "task_feedback_append_callback_unchanged": true,
+    "task_footer_actions_and_send_rules_unchanged": true,
+    "worker_send_disabled_running_unchanged": true,
+    "task_send_disabled_guard_unchanged": true,
+    "all_changes_within_frontend_design_or_temporary_work": true,
+    "api_router_auth_manifests_and_lockfile_unchanged": true,
+    "backend_unchanged": true,
+    "task_board_source_and_glow_unchanged": true
+  },
+  "outOfScopePaths": [],
+  "allPassed": true,
+  "notice": "Exact source comparisons protect business callbacks, API, SSE and guards. The approved new immutable conversation projection only changes presentation; it is separately regression-tested. Shared CSS palette changes affect task colors; task board JSX, geometry and original glow implementation are unchanged.",
+  "baseline": {
+    "summary": {
+      "total": 1,
+      "passed": 0,
+      "failed": 1
+    },
+    "failures": [
+      {
+        "name": "flow",
+        "error": "Running response surface"
+      }
+    ]
+  },
+  "verification": {
+    "projectionTests": {
+      "total": 7,
+      "passed": 7
+    },
+    "browserScenarios": {
+      "total": 18,
+      "passed": 18
+    },
+    "pageCapture": {
+      "total": 55,
+      "captured": 55
+    },
+    "typescript": "passed",
+    "frontendLint": "passed",
+    "viteBuild": "passed",
+    "buildNotice": "Vite reports a pre-existing >500kB chunk size warning; build exits0.",
+    "independentReviews": "scope approved; destructive-button contrast and short-height viewport findings fixed and reverified"
+  },
+  "statusAndApprovalFollowup": {
+    "baseCommit": "bc01b92",
+    "questionBehaviorByteIdentical": true,
+    "frontendSourcePaths": [
+      "frontend/src/components/QuestionCard.tsx",
+      "frontend/src/components/beui/beui.css",
+      "frontend/src/components/ai-ui/daylight-conversation.css"
+    ],
+    "newBusinessRequests": false,
+    "stateFlashCycles": 3,
+    "cycleMilliseconds": 720,
+    "pendingAndComposerAligned": true,
+    "shortScreenQuestionFieldsPx": 116,
+    "shortScreenTranscriptPx": 65,
+    "review": "independent scope and actual screenshot reviews passed"
+  },
+  "surfaceSweepRemoval": {
+    "baseCommit": "4eed88f",
+    "protectedBusinessAndExplicitMotionUnchanged": true,
+    "removedUiOnlyController": "frontend/src/components/SurfaceEffects.tsx",
+    "businessLogicChanges": false,
+    "sourceChecks": 5,
+    "focusedBrowserChecks": 29,
+    "existingInteractionScenariosPassed": 2,
+    "report": "quiet-surfaces-verification.json"
+  }
+}

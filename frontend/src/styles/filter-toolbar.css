@@ -1,0 +1,143 @@
+/* Shared list filters: separate controls, one quiet surface per control. */
+.square-shell .square-page [data-slot='toolbar'] {
+  --filter-control-height: 2.5rem;
+  --filter-control-gap: 0.625rem;
+  container: filters / inline-size;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--filter-control-gap);
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.square-shell .square-page [data-slot='toolbar'] > [data-slot='input-wrapper'] {
+  flex: 0 1 20rem;
+  width: 20rem;
+  min-width: 0;
+  max-width: 100%;
+  gap: 0.625rem;
+}
+
+.square-shell .square-page [data-slot='toolbar'] [data-slot='toolbar-group'] {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--filter-control-gap);
+}
+
+.square-shell .square-page [data-slot='toolbar'] :is(
+  [data-slot='input-wrapper'],
+  [data-slot='select-trigger'],
+  [data-slot='toolbar-button']
+) {
+  height: var(--filter-control-height);
+  min-height: var(--filter-control-height);
+  min-width: 0;
+  max-width: 100%;
+  padding-inline: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: var(--square-card-shadow);
+  font-size: 0.875rem;
+  font-weight: 450;
+  transition: border-color var(--square-hover-duration) ease,
+    background-color var(--square-hover-duration) ease,
+    box-shadow var(--square-hover-duration) ease;
+}
+
+.square-shell .square-page [data-slot='toolbar'] [data-slot='toolbar-input'] {
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--foreground-intense);
+  font-size: inherit;
+}
+
+.square-shell .square-page [data-slot='toolbar'] [data-slot='toolbar-input']::placeholder {
+  color: var(--foreground-subtle);
+}
+
+.square-shell .square-page [data-slot='toolbar'] > [data-slot='input-wrapper']:not(:has([data-slot='input-start']))::before {
+  content: '';
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  pointer-events: none;
+  background: var(--foreground-subtle);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5' fill='none' stroke='black' stroke-width='1.6'/%3E%3Cpath d='m15.5 15.5 4.5 4.5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.square-shell .square-page [data-slot='toolbar'] :is(
+  [data-slot='input-wrapper'],
+  [data-slot='select-trigger'],
+  [data-slot='toolbar-button']
+):hover {
+  border-color: var(--border-strong);
+}
+
+.square-shell .square-page [data-slot='toolbar'] :is(
+  [data-slot='input-wrapper']:focus-within,
+  [data-slot='select-trigger']:focus-visible,
+  [data-slot='toolbar-button']:focus-visible,
+  [data-slot='select-trigger'][data-popup-open],
+  [data-slot='toolbar-button'][data-popup-open]
+) {
+  border-color: color-mix(in srgb, var(--primary) 65%, var(--border));
+  background: var(--background);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+/* Select.Icon renders an SVG, so its replacement remains a decorative SVG mask. */
+.square-shell .square-page [data-slot='toolbar'] [data-slot='select-icon'] {
+  width: 1rem;
+  height: 1rem;
+  margin-inline-end: 0;
+  color: var(--foreground-subtle);
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m4.5 6.25 3.5 3.5 3.5-3.5' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.square-shell .square-page [data-slot='toolbar'] [data-slot='select-icon'] > * {
+  visibility: hidden;
+}
+
+@container filters (max-width: 48rem) {
+  .square-shell .square-page [data-slot='toolbar'] > [data-slot='input-wrapper'] {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .square-shell .square-page [data-slot='toolbar'] [data-slot='toolbar-group'] {
+    flex-basis: 100%;
+  }
+}
+
+@container filters (max-width: 30rem) {
+  .square-shell .square-page [data-slot='toolbar'] :is(
+    [data-slot='select-trigger'],
+    [data-slot='toolbar-button']
+  ) {
+    flex: 1 1 8rem;
+    width: auto;
+  }
+
+  .square-shell .square-page [data-slot='toolbar'] > span.ml-auto {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+}

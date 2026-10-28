@@ -218,10 +218,8 @@ function TypeFormDialog({
           </div>
         </DialogBody>
         <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">
-              取消
-            </Button>
+          <DialogClose render={<Button variant="outline" size="sm" />}>
+            取消
           </DialogClose>
           <Button
             size="sm"
@@ -262,14 +260,12 @@ function DeleteTypeButton({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogClose>
-            <Button variant="outline" size="sm">
-              取消
-            </Button>
+          <AlertDialogClose render={<Button variant="outline" size="sm" />}>
+            取消
           </AlertDialogClose>
           {!isSystem && (
-            <AlertDialogClose>
-              <Button
+            <AlertDialogClose
+              render={<Button
                 variant="destructive"
                 size="sm"
                 onClick={() =>
@@ -278,9 +274,9 @@ function DeleteTypeButton({
                     .then(onDeleted)
                     .catch((e: Error) => onError(e.message))
                 }
-              >
-                确认删除
-              </Button>
+              />}
+            >
+              确认删除
             </AlertDialogClose>
           )}
         </AlertDialogFooter>

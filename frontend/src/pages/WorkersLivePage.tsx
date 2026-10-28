@@ -61,7 +61,7 @@ export function WorkersLivePage() {
 function WorkerCard({ worker }: { worker: Worker }) {
   const working = worker.liveStatus === '工作中'
   return (
-    <Card className={working ? 'ring-1 ring-success/40' : undefined}>
+    <Card data-working={working} className={working ? 'ring-1 ring-success/40' : undefined}>
       <CardHeader>
         <CardTitle className="flex items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-2">
