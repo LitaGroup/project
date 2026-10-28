@@ -9,11 +9,15 @@ import {
   Patch,
   Post,
   Query,
+  Sse,
 } from '@nestjs/common';
+import type { MessageEvent } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { WorkerLiveStatus, WorkerRole, WorkerRuntime } from '../common/enums';
 import { Worker } from './worker.entity';
 import { OptimizePromptInput, WorkerAiService } from './worker-ai.service';
 import { WorkerEnvironmentService } from './worker-environment.service';
+import type { WorkerInitializeSnapshot } from './worker-environment.service';
 import {
   SkillCatalogItem,
   WorkerSkillCatalogService,
@@ -149,12 +153,32 @@ export class WorkersController {
     return this.standardCatalog.search(q);
   }
 
-  /** 初始化/同步工作环境：写入工位 AGENTS.md、按清单同步 .opencode/skills 与规范目录 */
+  /**
+   * 启动工作环境初始化：异步执行并立即返回运行快照（配置类错误同步 400），
+   * 进度经 SSE GET /workers/:id/initialize/stream 推送——同步长请求会被网关
+   * （如 ALB 60s）以 504 掐断而后端继续跑完，故刻意异步化。
+   */
   @Post(':id/initialize')
   initialize(
     @Param('id', ParseIntPipe) id: number,
-  ): Promise<{ status: 'success'; workdir: string }> {
-    return this.workerEnvironment.initialize(id);
+  ): Promise<WorkerInitializeSnapshot> {
+    return this.workerEnvironment.start(id);
+  }
+
+  /** 最近一次初始化快照（无任务为 idle；页面刷新后恢复进度展示用） */
+  @Get(':id/initialize')
+  initializeSnapshot(
+    @Param('id', ParseIntPipe) id: number,
+  ): WorkerInitializeSnapshot {
+    return this.workerEnvironment.snapshotOf(id);
+  }
+
+  /** 初始化进度实时流（SSE）：订阅即收快照，进度行/终态实时推送，心跳保活 */
+  @Sse(':id/initialize/stream')
+  streamInitialize(
+    @Param('id', ParseIntPipe) id: number,
+  ): Observable<MessageEvent> {
+    return this.workerEnvironment.stream(id);
   }
 
   @Get(':id')

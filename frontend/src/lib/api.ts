@@ -981,6 +981,21 @@ export interface WorkerDebugSnapshot {
   updatedAt: string
 }
 
+/** 机器人工作环境初始化状态 */
+export type WorkerInitializeStatus = 'idle' | 'running' | 'success' | 'failed'
+
+/** 初始化快照：POST 响应、GET 查询与 SSE snapshot 事件共用 */
+export interface WorkerInitializeSnapshot {
+  workerId: number
+  status: WorkerInitializeStatus
+  /** 进度行（时间正序，最新在末尾） */
+  lines: string[]
+  error: string | null
+  workdir: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
 /** 任务待反馈事项（需要用户补充/确认什么） */
 export interface TaskMissingItem {
   item: string
@@ -1954,12 +1969,14 @@ export const api = {
       `/workers/standard-catalog${qs.toString() ? `?${qs.toString()}` : ''}`,
     )
   },
-  /** 初始化/同步工作环境：写入工位 AGENTS.md，并按清单同步 .opencode/skills 与规范目录 */
+  /** 启动工作环境初始化：异步执行立即返回运行快照，进度经 SSE /workers/:id/initialize/stream 推送 */
   initializeWorker: (id: number) =>
-    request<{ status: 'success'; workdir: string }>(
-      `/workers/${id}/initialize`,
-      { method: 'POST' },
-    ),
+    request<WorkerInitializeSnapshot>(`/workers/${id}/initialize`, {
+      method: 'POST',
+    }),
+  /** 最近一次初始化快照（无任务为 idle；页面刷新后恢复进度展示用） */
+  getWorkerInitialize: (id: number) =>
+    request<WorkerInitializeSnapshot>(`/workers/${id}/initialize`),
   /** 工作概览卡片数据（实时状态，前端轮询） */
   listWorkersLive: () => request<Worker[]>('/workers/live'),
   /** 当前用户与机器人的调试会话快照（含最近一次 todowrite 待办） */

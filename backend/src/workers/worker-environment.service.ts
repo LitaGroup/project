@@ -1,10 +1,19 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+} from '@nestjs/common';
+import type { MessageEvent } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter } from 'events';
+import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
 import { WorkerRuntime } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
-import { OpencodeClient } from '../executors/opencode-client';
-import { runOpencodePrompt } from '../executors/opencode-run';
+import { OpencodeEventHub } from '../executors/opencode-event-hub.service';
+import type { OpencodeEvent } from '../executors/opencode-event-hub.service';
+import { isFreshOutcome, OpencodeClient } from '../executors/opencode-client';
 import { Worker } from './worker.entity';
 import { WorkersService } from './workers.service';
 import {
@@ -14,6 +23,64 @@ import {
 
 /** 初始化任务超时（含技能下载与规范文档同步） */
 const INITIALIZE_TIMEOUT_MS = 10 * 60_000;
+/** 轮询会话终态的间隔 */
+const POLL_MS = 2_000;
+/** 终态快照保留时长（晚订阅/刷新页面的客户端可立即拿到结果） */
+const JOB_TTL_MS = 5 * 60_000;
+/** SSE 心跳间隔（须小于网关空闲超时，如 ALB 60s） */
+const STREAM_PING_MS = 15_000;
+/** 进度行上限（防失控任务撑爆内存） */
+const MAX_LINES = 500;
+
+/** 初始化状态：idle=无任务（从未初始化或快照已过期清理） */
+export type WorkerInitializeStatus = 'idle' | 'running' | 'success' | 'failed';
+
+/** 初始化快照：POST 响应、GET 查询与 SSE snapshot 事件共用（JSON 安全） */
+export interface WorkerInitializeSnapshot {
+  workerId: number;
+  status: WorkerInitializeStatus;
+  /** 进度行（时间正序，最新在末尾） */
+  lines: string[];
+  error: string | null;
+  workdir: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** SSE 载荷：snapshot=全量快照（订阅即推+终态）；line=进度行增量；ping=心跳 */
+type InitializeStreamPayload =
+  | { type: 'snapshot'; snapshot: WorkerInitializeSnapshot }
+  | { type: 'line'; line: string }
+  | { type: 'ping' };
+
+/** 一次初始化任务的内存态（不落库：平台重启即丢失，前端会提示重试） */
+interface InitializeJob {
+  workerId: number;
+  status: WorkerInitializeStatus;
+  lines: string[];
+  error: string | null;
+  workdir: string | null;
+  startedAt: Date;
+  finishedAt: Date | null;
+  /** SSE 订阅广播 */
+  emitter: EventEmitter;
+  /** 终态后的 TTL 清理定时器 */
+  ttlTimer?: NodeJS.Timeout;
+}
+
+/** 执行器工具名 → 进度行展示文案（未收录的原样展示） */
+const TOOL_LABELS: Record<string, string> = {
+  read: '读取文件',
+  write: '写入文件',
+  edit: '编辑文件',
+  bash: '执行命令',
+  glob: '查找文件',
+  grep: '搜索内容',
+  webfetch: '访问网页',
+  task: '委派子任务',
+  todowrite: '更新待办',
+  todoread: '读取待办',
+};
 
 /**
  * 机器人工作环境初始化：把数据库中的 AGENTS.md、技能引用与规范引用应用到工位。
@@ -21,10 +88,15 @@ const INITIALIZE_TIMEOUT_MS = 10 * 60_000;
  * - AGENTS.md
  * - .opencode/skills/
  * - .opencode/docs/（选中规范的目录镜像，另有 .standards-manifest.json 受管清单）
+ *
+ * 执行模型：POST 启动后台任务并立即返回运行快照，进度经 SSE 实时推送。
+ * 同步长请求会被网关（ALB 60s）以 504 掐断而后端继续跑完，故刻意异步化。
  */
 @Injectable()
-export class WorkerEnvironmentService {
+export class WorkerEnvironmentService implements OnModuleDestroy {
   private readonly logger = new Logger(WorkerEnvironmentService.name);
+  /** workerId → 最近一次初始化任务（终态保留 JOB_TTL_MS 供晚订阅查询） */
+  private readonly jobs = new Map<number, InitializeJob>();
 
   constructor(
     @InjectRepository(Worker)
@@ -33,12 +105,14 @@ export class WorkerEnvironmentService {
     private readonly executors: Repository<Executor>,
     private readonly workersService: WorkersService,
     private readonly standardCatalog: WorkerStandardCatalogService,
+    private readonly eventHub: OpencodeEventHub,
   ) {}
 
-  /** 初始化/同步指定机器人的工作环境；成功返回 DONE 校验后的工位路径 */
-  async initialize(
-    id: number,
-  ): Promise<{ status: 'success'; workdir: string }> {
+  /**
+   * 启动初始化任务：同步完成全部前置校验（配置类错误立即 400），
+   * 随后后台执行并立即返回运行快照；同一机器人进行中时幂等返回现有快照。
+   */
+  async start(id: number): Promise<WorkerInitializeSnapshot> {
     const worker = await this.workers.findOne({ where: { id } });
     if (!worker) throw new BadRequestException('机器人不存在');
     if (worker.runtime !== WorkerRuntime.OPENCODE) {
@@ -66,21 +140,259 @@ export class WorkerEnvironmentService {
       );
     }
 
-    const client = new OpencodeClient(executor);
-    // 幂等建立工位骨架，初始化会话内仍会按需补齐
-    await client.shell(
-      `mkdir -p '${workdir}' '${workdir}/.opencode/skills' '${workdir}/.opencode/docs'`,
-    );
-    const text = await runOpencodePrompt(client, {
-      title: `初始化机器人 #${worker.id} ${worker.name}`.slice(0, 100),
-      model: { id: worker.modelId, providerID: worker.providerId },
-      location: { directory: workdir },
-      prompt: await this.buildPrompt(worker),
-      timeoutMs: INITIALIZE_TIMEOUT_MS,
+    const running = this.jobs.get(id);
+    if (running && running.status === 'running') {
+      return this.toSnapshot(running);
+    }
+    // 覆盖终态旧任务：先清其 TTL 定时器，避免误清新任务
+    if (running?.ttlTimer) clearTimeout(running.ttlTimer);
+    const job: InitializeJob = {
+      workerId: id,
+      status: 'running',
+      lines: [],
+      error: null,
+      workdir: null,
+      startedAt: new Date(),
+      finishedAt: null,
+      emitter: new EventEmitter(),
+    };
+    // 编辑页/详情页可能同时订阅同一任务的进度
+    job.emitter.setMaxListeners(50);
+    this.jobs.set(id, job);
+    // 刻意不 await：HTTP 请求立刻返回，任务在后台跑完（10 分钟预算）
+    void this.run(job, worker, executor, workdir);
+    return this.toSnapshot(job);
+  }
+
+  /** 最近一次初始化快照（无任务返回 idle） */
+  snapshotOf(id: number): WorkerInitializeSnapshot {
+    const job = this.jobs.get(id);
+    if (job) return this.toSnapshot(job);
+    return {
+      workerId: id,
+      status: 'idle',
+      lines: [],
+      error: null,
+      workdir: null,
+      startedAt: null,
+      finishedAt: null,
+    };
+  }
+
+  /**
+   * 初始化进度 SSE：订阅即推当前快照，进度行增量推送，终态快照推送后完成流，
+   * 心跳保活（小于 ALB 等网关的空闲超时）。
+   */
+  stream(id: number): Observable<MessageEvent> {
+    return new Observable<MessageEvent>((subscriber) => {
+      const job = this.jobs.get(id);
+      if (!job) {
+        // 无任务（从未初始化/服务重启后丢失）：推 idle 快照后结束，前端据此提示重试
+        subscriber.next({
+          data: {
+            type: 'snapshot',
+            snapshot: this.snapshotOf(id),
+          } satisfies InitializeStreamPayload,
+        });
+        subscriber.complete();
+        return;
+      }
+      let closed = false;
+      const finishStream = () => {
+        closed = true;
+        clearInterval(keepalive);
+        subscriber.complete();
+      };
+      const listener = (payload: InitializeStreamPayload) => {
+        if (closed) return;
+        subscriber.next({ data: payload });
+        if (
+          payload.type === 'snapshot' &&
+          (payload.snapshot.status === 'success' ||
+            payload.snapshot.status === 'failed')
+        ) {
+          finishStream();
+        }
+      };
+      // 心跳先建（须小于网关空闲超时），保证任何触发路径都能安全清理
+      const keepalive = setInterval(() => {
+        if (!closed) {
+          subscriber.next({
+            data: { type: 'ping' } satisfies InitializeStreamPayload,
+          });
+        }
+      }, STREAM_PING_MS);
+      // 先挂监听再推快照，避免间隙漏事件
+      job.emitter.on('payload', listener);
+      listener({ type: 'snapshot', snapshot: this.toSnapshot(job) });
+      return () => {
+        closed = true;
+        clearInterval(keepalive);
+        job.emitter.off('payload', listener);
+      };
     });
-    this.assertDone(text);
-    this.logger.log(`机器人 #${worker.id} 工作环境已初始化：${workdir}`);
-    return { status: 'success', workdir };
+  }
+
+  /** 后台执行：建工位 → 建会话 → 下发初始化指令 → 轮询终态 → 校验 DONE */
+  private async run(
+    job: InitializeJob,
+    worker: Worker,
+    executor: Executor,
+    workdir: string,
+  ): Promise<void> {
+    const client = new OpencodeClient(executor);
+    // 执行期间占用执行器事件流，结束后释放（引用归零延迟断开）
+    this.eventHub.retain(executor);
+    try {
+      this.pushLine(job, `▶ 开始初始化工位 ${workdir}`);
+      // 幂等建立工位骨架，初始化会话内仍会按需补齐
+      this.pushLine(job, '· 创建工位目录…');
+      await client.shell(
+        `mkdir -p '${workdir}' '${workdir}/.opencode/skills' '${workdir}/.opencode/docs'`,
+      );
+      this.pushLine(job, '· 生成初始化指令（AGENTS.md + 技能 + 规范）…');
+      const prompt = await this.buildPrompt(worker);
+      this.pushLine(
+        job,
+        `· 创建执行器会话（${worker.providerId}/${worker.modelId}）…`,
+      );
+      const session = await client.createSession({
+        title: `初始化机器人 #${worker.id} ${worker.name}`.slice(0, 100),
+        // 空值已在 start() 校验过（缺失即 400），此处断言非空
+        model: { id: worker.modelId!, providerID: worker.providerId! },
+        location: { directory: workdir },
+      });
+      // 订阅执行器事件：把该会话的工具调用转成进度行（先订阅再下发，避免漏事件）
+      const unsubscribe = this.eventHub.onEvent((event) =>
+        this.onExecutorEvent(job, session.id, event),
+      );
+      let text: string | null = null;
+      try {
+        this.pushLine(job, '· 下发初始化任务…');
+        // prompt 为异步接口；outcome 具有粘性，以本轮用户消息时间为新鲜度基准
+        const promptResult = await client.prompt(session.id, {
+          text: prompt,
+        });
+        const afterMs = promptResult?.time?.created ?? 0;
+        const deadline = Date.now() + INITIALIZE_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+          const info = await client.session(session.id);
+          if (isFreshOutcome(info, afterMs)) {
+            if (info.outcome !== 'succeeded') {
+              throw new Error(`执行器会话 ${session.id} 执行失败`);
+            }
+            // 会话终态与消息落库可能有短暂延迟，重试几次再取文本
+            for (let attempt = 0; attempt < 3 && !text; attempt++) {
+              text = await client.lastAssistantText(session.id, afterMs);
+              if (!text && attempt < 2) await sleep(500);
+            }
+            if (!text?.trim()) {
+              throw new Error('执行器会话已结束但没有文本输出');
+            }
+            break;
+          }
+          await sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
+        }
+      } finally {
+        unsubscribe();
+      }
+      if (!text?.trim()) {
+        await client.interrupt(session.id).catch(() => undefined);
+        throw new Error(
+          `执行器会话执行超时（超过 ${Math.round(INITIALIZE_TIMEOUT_MS / 60_000)} 分钟）`,
+        );
+      }
+      this.pushLine(job, '· 校验初始化结果…');
+      this.assertDone(text);
+      this.finish(job, 'success', null, workdir);
+    } catch (e) {
+      this.finish(job, 'failed', (e as Error).message);
+    } finally {
+      this.eventHub.release(executor.id);
+    }
+  }
+
+  /** 执行器事件 → 进度行：仅取初始化会话的工具调用（与任务详情的终端行同风格） */
+  private onExecutorEvent(
+    job: InitializeJob,
+    sessionId: string,
+    event: OpencodeEvent,
+  ): void {
+    if (job.status !== 'running') return;
+    const data = event.data as { sessionID?: string; name?: string } | null;
+    if (!data || data.sessionID !== sessionId) return;
+    if (event.type === 'session.execution.started') {
+      this.pushLine(job, '▶ 执行器开始执行');
+      return;
+    }
+    if (event.type === 'session.tool.input.started') {
+      const name = data.name || '?';
+      this.pushLine(job, `🔧 ${TOOL_LABELS[name] ?? name}`);
+    }
+  }
+
+  /** 追加进度行并广播（超上限丢弃最旧行） */
+  private pushLine(job: InitializeJob, line: string): void {
+    job.lines.push(line);
+    if (job.lines.length > MAX_LINES) {
+      job.lines.splice(0, job.lines.length - MAX_LINES);
+    }
+    job.emitter.emit('payload', {
+      type: 'line',
+      line,
+    } satisfies InitializeStreamPayload);
+  }
+
+  /** 终态落快照、广播、保留 TTL 后清理 */
+  private finish(
+    job: InitializeJob,
+    status: 'success' | 'failed',
+    error: string | null,
+    workdir?: string,
+  ): void {
+    if (job.status !== 'running') return;
+    job.status = status;
+    job.error = error;
+    job.workdir = workdir ?? null;
+    job.finishedAt = new Date();
+    if (status === 'success') {
+      this.pushLine(job, `✅ 工作环境初始化完成：${workdir}`);
+      this.logger.log(`机器人 #${job.workerId} 工作环境已初始化：${workdir}`);
+    } else {
+      this.pushLine(job, `✗ 初始化失败：${error ?? '未知错误'}`);
+      this.logger.warn(
+        `机器人 #${job.workerId} 工作环境初始化失败：${error ?? '未知错误'}`,
+      );
+    }
+    job.emitter.emit('payload', {
+      type: 'snapshot',
+      snapshot: this.toSnapshot(job),
+    } satisfies InitializeStreamPayload);
+    const timer = setTimeout(() => {
+      // 仅清理自己：TTL 期间同机器人可能已启动新任务
+      if (this.jobs.get(job.workerId) === job) this.jobs.delete(job.workerId);
+    }, JOB_TTL_MS);
+    timer.unref();
+    job.ttlTimer = timer;
+  }
+
+  private toSnapshot(job: InitializeJob): WorkerInitializeSnapshot {
+    return {
+      workerId: job.workerId,
+      status: job.status,
+      lines: [...job.lines],
+      error: job.error,
+      workdir: job.workdir,
+      startedAt: job.startedAt.toISOString(),
+      finishedAt: job.finishedAt?.toISOString() ?? null,
+    };
+  }
+
+  onModuleDestroy(): void {
+    for (const job of this.jobs.values()) {
+      if (job.ttlTimer) clearTimeout(job.ttlTimer);
+    }
+    this.jobs.clear();
   }
 
   /** 初始化任务指令：AGENTS.md 原文 + 技能库链接 + 规范目录同步要求 + 工位结构约定 */
@@ -225,4 +537,8 @@ ${requiredFileLines}
     const fenced = trimmed.match(/^```(?:\w+)?\s*\n([\s\S]*?)\n```$/);
     return (fenced ? fenced[1] : trimmed).trim();
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

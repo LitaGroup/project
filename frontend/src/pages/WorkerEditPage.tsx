@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { AnimatePresence, m } from 'framer-motion'
 import {
   Card,
   CardHeader,
@@ -33,6 +34,8 @@ import {
   type Executor,
   type PlatformUser,
   type Worker,
+  type WorkerInitializeSnapshot,
+  type WorkerInitializeStatus,
   type WorkerRole,
   type WorkerSkill,
   type WorkerSkillCatalogItem,
@@ -100,12 +103,19 @@ export function WorkerEditPage() {
   const [initError, setInitError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [initializing, setInitializing] = useState(false)
+  /** 工作环境初始化进度（异步任务，SSE 实时推送） */
+  const [initStatus, setInitStatus] = useState<WorkerInitializeStatus>('idle')
+  const [initLines, setInitLines] = useState<string[]>([])
+  /** 非 null 时订阅该机器人的初始化 SSE 进度流 */
+  const [trackedWorkerId, setTrackedWorkerId] = useState<number | null>(null)
   const [optimizePhase, setOptimizePhase] = useState<OptimizePhase>('idle')
   const [optimizeSnapshot, setOptimizeSnapshot] = useState<string | null>(null)
   const [optimizeError, setOptimizeError] = useState<string | null>(null)
   const [editorEpoch, setEditorEpoch] = useState(0)
   const promptRef = useRef<MarkdownEditorHandle>(null)
   const editorEpochRef = useRef(0)
+  /** 初始化成功后延迟回列表的定时器（卸载时清理） */
+  const navigateTimerRef = useRef<number | null>(null)
 
   const listPath = '/tasks/workers'
   const isScheduler = role === '调度器'
@@ -164,6 +174,98 @@ export function WorkerEditPage() {
     }
   }, [workerId])
 
+  /** 以一份初始化快照校准本地进度状态并开始订阅 SSE */
+  const beginTracking = useCallback(
+    (workerId: number, snapshot: WorkerInitializeSnapshot) => {
+      setInitStatus(snapshot.status)
+      setInitLines(snapshot.lines)
+      setInitError(snapshot.status === 'failed' ? snapshot.error : null)
+      setInitializing(snapshot.status === 'running')
+      setTrackedWorkerId(workerId)
+    },
+    [],
+  )
+
+  // 编辑页挂载时探测一次：刷新页面时若有进行中的初始化，恢复进度展示
+  useEffect(() => {
+    if (!workerId) return
+    let alive = true
+    api
+      .getWorkerInitialize(Number(workerId))
+      .then((snapshot) => {
+        if (alive && snapshot.status === 'running') {
+          beginTracking(Number(workerId), snapshot)
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [workerId, beginTracking])
+
+  // 初始化进度 SSE：snapshot 校准全量状态，line 增量推送；终态后由服务端完成流
+  useEffect(() => {
+    if (trackedWorkerId === null) return
+    const source = new EventSource(
+      `/api/workers/${trackedWorkerId}/initialize/stream`,
+    )
+    source.onmessage = (event: MessageEvent<string>) => {
+      let payload:
+        | { type: 'snapshot'; snapshot: WorkerInitializeSnapshot }
+        | { type: 'line'; line: string }
+        | { type: 'ping' }
+        | { type?: string }
+      try {
+        payload = JSON.parse(event.data) as typeof payload
+      } catch {
+        return
+      }
+      if (payload.type === 'line' && 'line' in payload && payload.line) {
+        setInitLines((prev) => [...prev.slice(-199), payload.line])
+        return
+      }
+      if (payload.type !== 'snapshot' || !('snapshot' in payload)) return
+      const snapshot = payload.snapshot
+      if (snapshot.status === 'running') {
+        // 断线重连后以服务端快照校准（防止漏收增量行）
+        setInitStatus('running')
+        if (snapshot.lines.length) setInitLines(snapshot.lines)
+        return
+      }
+      if (snapshot.status === 'idle') {
+        // 服务端无任务（平台重启丢失）：提示重试
+        setInitStatus('idle')
+        setInitError('初始化进程已中断（平台已重启），请重试保存')
+        setInitializing(false)
+        setTrackedWorkerId(null)
+        source.close()
+        return
+      }
+      setInitStatus(snapshot.status)
+      if (snapshot.lines.length) setInitLines(snapshot.lines)
+      if (snapshot.status === 'failed') {
+        setInitError(snapshot.error ?? '未知错误')
+        setInitializing(false)
+        setTrackedWorkerId(null)
+        source.close()
+        return
+      }
+      // success：停留片刻展示完成行，再回列表
+      setInitializing(false)
+      source.close()
+      navigateTimerRef.current = window.setTimeout(() => {
+        navigate(listPath)
+      }, 1200)
+    }
+    return () => {
+      source.close()
+      if (navigateTimerRef.current !== null) {
+        window.clearTimeout(navigateTimerRef.current)
+        navigateTimerRef.current = null
+      }
+    }
+  }, [trackedWorkerId, navigate, listPath])
+
   const executor = executors.find((e) => String(e.id) === executorId)
   const providers = executor?.providersCache ?? []
   const provider = providers.find((p) => p.id === providerId)
@@ -173,6 +275,8 @@ export function WorkerEditPage() {
     if (saving || initializing) return
     setError(null)
     setInitError(null)
+    setInitStatus('idle')
+    setInitLines([])
     // 初始化必须在机器人选择的执行器上执行，供应商/模型用于创建同步会话
     if (!executorId || !providerId || !modelId) {
       setError('请先选择执行器、供应商与模型；否则无法初始化工作环境')
@@ -202,19 +306,23 @@ export function WorkerEditPage() {
         ? await api.updateWorker(worker.id, payload)
         : await api.createWorker(payload)
       setWorker(saved)
-      // 2. 再调用执行器，把 AGENTS.md、技能与规范同步到工位
+      // 2. 启动工位同步（异步任务，立即返回运行快照）：
+      //    停留在本页经 SSE 展示进度，成功后自动回列表，失败提示可重试保存
       setSaving(false)
       stage = 'init'
       setInitializing(true)
-      await api.initializeWorker(saved.id)
-      navigate(listPath)
+      const snapshot = await api.initializeWorker(saved.id)
+      beginTracking(saved.id, snapshot)
     } catch (e) {
       const message = e instanceof Error ? e.message : '保存失败'
-      if (stage === 'init') setInitError(message)
-      else setError(message)
+      if (stage === 'init') {
+        setInitError(message)
+        setInitializing(false)
+      } else {
+        setError(message)
+      }
     } finally {
       setSaving(false)
-      setInitializing(false)
     }
   }
 
@@ -311,6 +419,9 @@ export function WorkerEditPage() {
               ? '系统调度机器人：历史识别与调度能力保留，新任务由平台直接识别分配'
               : '机器人的负责人对机器人的产出结果负责'}
           </p>
+          {initStatus !== 'idle' && (
+            <InitTicker status={initStatus} lines={initLines} />
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => navigate(listPath)}>
@@ -1054,6 +1165,55 @@ function WorkerStandardPickerDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * 工作环境初始化进度条（页头标题下方的单行展示）。
+ * 只显示最新一行进度；新行自下而上滑入、旧行向上滑出（overflow-hidden 裁切）。
+ */
+function InitTicker({
+  status,
+  lines,
+}: {
+  status: 'running' | 'success' | 'failed'
+  lines: string[]
+}) {
+  const index = lines.length - 1
+  const line = index >= 0 ? lines[index] : '正在连接执行器…'
+  const lineClass =
+    status === 'failed'
+      ? 'text-error-foreground'
+      : status === 'success'
+        ? 'text-success-foreground'
+        : 'text-foreground-muted'
+  return (
+    <div
+      className="relative mt-2 h-5 overflow-hidden"
+      role="status"
+      aria-live="polite"
+    >
+      <AnimatePresence initial={false}>
+        {/* key 取行下标：每条新进度都会触发一次「下方滑入」动画 */}
+        <m.span
+          key={index}
+          initial={{ y: '100%', opacity: 0 }}
+          animate={{ y: '0%', opacity: 1 }}
+          exit={{ y: '-100%', opacity: 0 }}
+          transition={{ duration: 0.35, ease: 'easeInOut' }}
+          className="absolute inset-0 flex items-center gap-2 text-sm"
+        >
+          {status === 'running' && (
+            <Loader
+              variant="dots"
+              currentColor
+              className="shrink-0 text-xs"
+            />
+          )}
+          <span className={`min-w-0 truncate ${lineClass}`}>{line}</span>
+        </m.span>
+      </AnimatePresence>
+    </div>
   )
 }
 
