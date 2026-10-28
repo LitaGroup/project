@@ -11,7 +11,7 @@ import {
 import type { MessageEvent } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter } from 'events';
-import { In, LessThan, Repository } from 'typeorm';
+import { In, LessThan, MoreThanOrEqual, Repository } from 'typeorm';
 import { Observable } from 'rxjs';
 import { WorkerRuntime } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
@@ -27,6 +27,7 @@ import {
 import {
   OpencodeClient,
   OpencodeClientError,
+  formEventToQuestionEvent,
   isFreshOutcome,
   type OpencodeQuestionRequest,
 } from '../executors/opencode-client';
@@ -327,6 +328,134 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
         // 待办/流式采集失败不影响调试主流程
       }
     });
+    // 平台重启后恢复未完成的调试会话：正在运行的继续接管，等待提问的补建卡片后继续监控
+    void this.reconnectRunningSessions();
+  }
+
+  /**
+   * 启动重连：扫描 TTL 内绑定过 opencode 会话的调试记录，
+   * 命中「执行器侧仍在运行」或「仍有待回答提问」的会话时恢复事件流与收尾监控。
+   */
+  private async reconnectRunningSessions(): Promise<void> {
+    try {
+      const deadline = new Date(Date.now() - SESSION_TTL_MS);
+      const rows = await this.debugSessions.find({
+        where: { updatedAt: MoreThanOrEqual(deadline) },
+        order: { updatedAt: 'DESC' },
+      });
+      const candidates = rows.filter((row) => row.sessionId);
+      if (candidates.length === 0) return;
+      this.logger.log(`发现 ${candidates.length} 个调试会话，开始重连检查`);
+
+      const byExecutor = new Map<number, typeof candidates>();
+      for (const row of candidates) {
+        const executorId = row.executorId;
+        if (!executorId) continue;
+        const list = byExecutor.get(executorId) ?? [];
+        list.push(row);
+        byExecutor.set(executorId, list);
+      }
+
+      for (const [executorId, executorRows] of byExecutor) {
+        const context = await this.resolveContext(executorRows[0].workerId).catch(
+          () => null,
+        );
+        if (!context || context.executor.id !== executorId) continue;
+        const client = new OpencodeClient(context.executor);
+        let activeSessions: Record<string, { type?: string }>;
+        try {
+          activeSessions = await client.activeSessions();
+        } catch (error) {
+          this.logger.warn(
+            `执行器 #${executorId} 活动会话查询失败，跳过本轮重连: ${(error as Error).message}`,
+          );
+          continue;
+        }
+
+        for (const row of executorRows) {
+          if (!row.sessionId) continue;
+          // 机器人/执行器配置变更后不能沿用旧上下文，交给进入页面时的显式重置流程
+          if (
+            !row.executorId ||
+            !row.providerId ||
+            !row.modelId ||
+            !this.sameBinding(
+              {
+                executorId: row.executorId,
+                providerId: row.providerId,
+                modelId: row.modelId,
+              },
+              context,
+            )
+          ) {
+            continue;
+          }
+
+          const sessionId = row.sessionId;
+          const rowContext =
+            row.workerId === context.worker.id
+              ? context
+              : await this.resolveContext(row.workerId).catch(() => null);
+          if (!rowContext || rowContext.executor.id !== executorId) continue;
+          const remoteActive = activeSessions[sessionId]?.type === 'running';
+          const messages = row.messages ?? [];
+          const assistant = [...messages]
+            .reverse()
+            .find(
+              (message) =>
+                message.role === 'assistant' && !message.question,
+            );
+          if (!assistant) continue;
+          const assistantId = assistant.id;
+          const afterMs = Date.parse(assistant.createdAt) || Date.now();
+
+          const session = this.newSession(
+            row.userId,
+            row.workerId,
+            rowContext,
+          );
+          session.rowId = row.id;
+          session.sessionId = sessionId;
+          session.bound = {
+            executorId: row.executorId,
+            providerId: row.providerId,
+            modelId: row.modelId,
+          };
+          session.initialized = true;
+          // 不做中断恢复：活跃会话里的 pending 提问仍要保留并可回答
+          session.messages = messages;
+          session.todos = (row.todos ?? []).map((todo) => ({ ...todo }));
+          session.updatedAt = row.updatedAt;
+          session.runSeq = 1;
+
+          // 补建漏收的 question/form 卡片；远端已不存在的本地 pending 会置为失效
+          await this.reconcileDebugQuestions(session, session.runSeq);
+          const hasPending = this.pendingDebugQuestionsOf(session).length > 0;
+          // 只重连真正未完成的会话：执行器侧仍在运行，或仍有待回答提问
+          if (!remoteActive && !hasPending) continue;
+
+          session.running = true;
+          assistant.status = 'running';
+          this.sessions.set(session.key, session);
+          this.logger.log(
+            `重连调试会话 ${sessionId}（机器人 #${row.workerId}）`,
+          );
+          this.eventHub.retain(rowContext.executor);
+          void this.resumeRun(session, assistantId, afterMs, session.runSeq);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `调试会话启动重连失败: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  /** pendingDebugQuestions 的私有封装（启动恢复也复用同一判断） */
+  private pendingDebugQuestionsOf(
+    session: DebugSession,
+  ): WorkerDebugQuestion[] {
+    return pendingDebugQuestions(session.messages);
   }
 
   /** 仅返回可立即调试的机器人：启用、模型配置完整、执行器启用且在线、工位可用 */
@@ -371,6 +500,9 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     const context = await this.resolveContext(workerId);
     const session = await this.findSession(userId, workerId, context);
     if (!session) return this.emptySnapshot(context.option);
+    // 进入页面/服务重启后对账一次：漏收 question/form 事件的提问补建卡片，
+    // opencode 侧已不存在的本地待答卡片置为失效。
+    await this.reconcileDebugQuestions(session, session.runSeq);
     // 机器人模型/执行器配置变更后，旧上下文不能继续沿用；重置后才能用新配置。
     return this.toSnapshot(session);
   }
@@ -534,16 +666,90 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException('每个问题至少需要选择一个选项或输入回答');
       }
       try {
-        await session.client.replyQuestion(sessionId, questionId, answers);
+        await session.client.replyQuestion(
+          sessionId,
+          questionId,
+          answers,
+          question.questions,
+        );
       } catch (error) {
         throw this.questionSubmitError(error);
       }
       settleDebugQuestion(session.messages, questionId, 'answered', answers);
     }
     session.updatedAt = new Date();
+    // 平台重启/页面丢失后提问卡片可能处于 idle 会话：提交答案时接管仍在进行的执行，
+    // 否则 opencode 会继续跑，但调试页会停在“已中断/空闲”。
+    if (!session.running) {
+      const assistant = [...session.messages]
+        .reverse()
+        .find((message) => message.role === 'assistant' && !message.question);
+      if (assistant) {
+        const answerAt = Date.now();
+        const resumedSeq = ++session.runSeq;
+        session.running = true;
+        session.interruptRequested = false;
+        session.error = null;
+        assistant.status = 'running';
+        if (
+          assistant.content ===
+          '本轮回复已中断（平台重启或会话已断开），可继续发送新消息。'
+        ) {
+          assistant.content = '';
+        }
+        await this.persist(session);
+        this.emitUpdate(session);
+        void this.resumeRun(session, assistant.id, answerAt, resumedSeq);
+      }
+    }
     await this.persist(session);
     this.emitUpdate(session);
     return this.toSnapshot(session);
+  }
+
+  /** 接管提问提交后的既有执行：等会话空闲 → 取最终文本 → 正常收尾 */
+  private async resumeRun(
+    session: DebugSession,
+    assistantId: string,
+    afterMs: number,
+    runSeq: number,
+  ): Promise<void> {
+    this.eventHub.retain(session.context.executor);
+    try {
+      await session.client.waitForIdle(
+        session.sessionId!,
+        RUN_TIMEOUT_MS,
+      );
+      if (session.interruptRequested || session.runSeq !== runSeq) return;
+      let output: string | null = null;
+      for (let attempt = 0; attempt < 3 && !output; attempt++) {
+        output = await session.client.lastAssistantText(
+          session.sessionId!,
+          afterMs,
+        );
+        if (!output && attempt < 2) await sleep(POLL_MS);
+      }
+      if (!output?.trim()) {
+        throw new Error('执行完成，但机器人没有文本输出');
+      }
+      if (session.interruptRequested || session.runSeq !== runSeq) return;
+      const todos = await session.client
+        .latestTodos(session.sessionId!)
+        .catch(() => null);
+      if (
+        todos &&
+        !session.interruptRequested &&
+        session.runSeq === runSeq
+      ) {
+        session.todos = todos;
+      }
+      this.finishSuccess(session, assistantId, output.trim());
+    } catch (error) {
+      if (session.interruptRequested || session.runSeq !== runSeq) return;
+      this.finishError(session, assistantId, (error as Error).message);
+    } finally {
+      this.eventHub.release(session.context.executor.id);
+    }
   }
 
   private questionSubmitError(error: unknown): Error {
@@ -770,10 +976,13 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     const data = event.data as Record<string, unknown>;
     const sessionId = typeof data.sessionID === 'string' ? data.sessionID : '';
     if (!sessionId) return;
-    // question 事件有 v1（question.asked）与 v2（question.v2.asked）两套命名，统一处理
-    const eventType = event.type.startsWith('question.v2.')
+    // question 事件有 v1（question.v2.asked）、v2（question.asked）与 form（form.*）三套协议，统一处理
+    const legacyQuestionType = event.type.startsWith('question.v2.')
       ? event.type.replace('question.v2.', 'question.')
       : event.type;
+    const formEvent = formEventToQuestionEvent(event.type, data);
+    const eventType = formEvent?.type ?? legacyQuestionType;
+    const questionData = formEvent?.data ?? data;
     for (const session of this.sessions.values()) {
       if (
         session.sessionId !== sessionId ||
@@ -795,7 +1004,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       if (session.running) {
         switch (eventType) {
           case 'question.asked': {
-            const request = parseQuestionEvent(data);
+            const request = parseQuestionEvent(questionData);
             if (
               request &&
               upsertDebugQuestion(
@@ -811,14 +1020,14 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
             break;
           }
           case 'question.replied': {
-            const requestId = questionEventRequestId(data);
+            const requestId = questionEventRequestId(questionData);
             if (
               requestId &&
               settleDebugQuestion(
                 session.messages,
                 requestId,
                 'answered',
-                normalizeDebugAnswers(data.answers) ?? undefined,
+                normalizeDebugAnswers(questionData.answers) ?? undefined,
               )
             ) {
               session.updatedAt = new Date();
@@ -827,7 +1036,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
             break;
           }
           case 'question.rejected': {
-            const requestId = questionEventRequestId(data);
+            const requestId = questionEventRequestId(questionData);
             if (
               requestId &&
               settleDebugQuestion(session.messages, requestId, 'rejected')

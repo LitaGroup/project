@@ -317,7 +317,6 @@ function DebugChat({
                   return (
                     <DebugQuestionBubble
                       question={question}
-                      running={running}
                       worker={snapshot.worker}
                       onReply={onReplyQuestion}
                     />
@@ -505,12 +504,10 @@ function AssistantMessage({
 /** 机器人提问卡片：多问题 + 选项 + 自由输入，提交后变成回执（本轮结束后不可再答） */
 function DebugQuestionBubble({
   question,
-  running,
   worker,
   onReply,
 }: {
   question: WorkerDebugQuestion
-  running: boolean
   worker: WorkerDebugOption
   onReply: (questionId: string, answers: string[][] | null) => Promise<void>
 }) {
@@ -529,10 +526,10 @@ function DebugQuestionBubble({
           </span>
           <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
             <MessageCircleQuestion className="size-3.5" />
-            {questionStatusLabel(question, '等待回答（本轮已结束）')}
+            {questionStatusLabel(question, '等待回答')}
           </span>
         </div>
-        <QuestionCard question={question} disabled={!running} onReply={onReply} />
+        <QuestionCard question={question} onReply={onReply} />
       </div>
     </MessagePrimitive.Root>
   )

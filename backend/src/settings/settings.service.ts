@@ -1,22 +1,9 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { spawn } from 'child_process';
 import * as path from 'path';
 import { AgentGateway } from '../agent/agent.gateway';
 import { DEFAULT_PROJECT_SOURCE_URL } from '../projects/project-sync.service';
-
-/** git pull 超时时间（毫秒） */
-const PULL_TIMEOUT_MS = 60_000;
-
-/** git pull 失败（非零退出/超时/进程错误），携带已收集的输出供流式返回 */
-export class PullError extends Error {
-  constructor(
-    message: string,
-    readonly output: string[],
-  ) {
-    super(message);
-  }
-}
+import { ScriptLibrarySyncService } from '../scripts/script-library-sync.service';
 
 export interface Settings {
   /** 运行环境（NODE_ENV） */
@@ -44,7 +31,7 @@ export interface Settings {
     tokenConfigured: boolean;
     org: string;
   };
-  /** 公共 Agent 访问令牌是否已配置（PUBLIC_AGENT_TOKEN，不回显明文） */
+  /** 公共 Agent 访问令牌是否已配置（不暴露明文） */
   publicAgentTokenConfigured: boolean;
   /** appium-agent 连接信息（实时：离线时 name/appiumUrl 为 null） */
   agent: {
@@ -79,6 +66,8 @@ export class SettingsService {
   constructor(
     config: ConfigService,
     private readonly agentGateway: AgentGateway,
+    /** 脚本仓库更新复用脚本库 main 分支同步（同一定时任务的实现） */
+    private readonly scriptLibrarySync: ScriptLibrarySyncService,
   ) {
     this.environment = config.get<string>('NODE_ENV') ?? 'development';
     this.port = config.get<number>('PORT') ?? 3100;
@@ -132,77 +121,28 @@ export class SettingsService {
     };
   }
 
-  /** 在脚本根目录执行 git pull，返回合并后的输出（前端 JSON 接口用） */
+  /**
+   * 更新脚本仓库：复用脚本库 main 分支同步（GitHub API 比对 + ff-only 拉取，仅 main），
+   * 返回合并后的输出（前端 JSON 接口用）。
+   */
   async pullScripts(): Promise<PullResult> {
-    const lines: string[] = [];
-    try {
-      await this.spawnPull((line) => lines.push(line));
-    } catch (e) {
-      if (e instanceof PullError) {
-        throw new InternalServerErrorException(
-          e.output.join('\n') || e.message,
-        );
-      }
-      throw e;
+    const status = await this.scriptLibrarySync.syncOnce('设置页手动');
+    if (!status.lastSyncOk) {
+      throw new InternalServerErrorException(
+        status.lastError ?? '脚本仓库更新失败',
+      );
     }
-    return { output: lines.join('\n') || '已是最新' };
+    return { output: status.lastOutput.join('\n') || '已是最新' };
   }
 
   /**
-   * 在脚本根目录执行 git pull（spawn 流式）：onLine 逐行回调 stdout/stderr。
-   * 成功 resolve；失败/超时 reject PullError（携带已收集的输出，流式接口仍可展示过程）。
+   * 更新脚本仓库（流式版本）：onLine 逐行回调 git 输出。
+   * 成功 resolve；失败 reject（携带错误信息，流式接口仍可展示已收集的输出）。
    */
-  spawnPull(onLine: (line: string) => void): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const lines: string[] = [];
-      let timedOut = false;
-      let settled = false;
-      // 兼容 CRLF 与无换行结尾的最后一段
-      let buffer = '';
-      const feed = (chunk: Buffer) => {
-        buffer += chunk.toString();
-        let idx = buffer.indexOf('\n');
-        while (idx >= 0) {
-          dispatch(buffer.slice(0, idx));
-          buffer = buffer.slice(idx + 1);
-          idx = buffer.indexOf('\n');
-        }
-      };
-      const dispatch = (raw: string) => {
-        const line = raw.trim();
-        if (!line) return;
-        lines.push(line);
-        onLine(line);
-      };
-
-      const child = spawn('git', ['pull'], { cwd: this.scriptsDir });
-      const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGTERM');
-      }, PULL_TIMEOUT_MS);
-
-      const finalize = (error?: Error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (buffer.trim()) dispatch(buffer);
-        if (timedOut) {
-          reject(
-            new PullError(`脚本更新超时（>${PULL_TIMEOUT_MS / 1000}s）`, lines),
-          );
-        } else if (error) {
-          reject(new PullError(`git pull 失败: ${error.message}`, lines));
-        } else {
-          resolve();
-        }
-      };
-
-      child.stdout.on('data', feed);
-      child.stderr.on('data', feed);
-      child.on('error', (e) => finalize(e));
-      child.on('close', (code) =>
-        finalize(code === 0 ? undefined : new Error(`exit ${code}`)),
-      );
-    });
+  async spawnPull(onLine: (line: string) => void): Promise<void> {
+    const status = await this.scriptLibrarySync.syncOnce('设置页手动', onLine);
+    if (!status.lastSyncOk) {
+      throw new Error(status.lastError ?? '脚本仓库更新失败');
+    }
   }
 }

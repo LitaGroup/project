@@ -22,6 +22,7 @@ import { Executor } from '../executors/executor.entity';
 import {
   OpencodeClient,
   OpencodeClientError,
+  formEventToQuestionEvent,
   isFreshOutcome,
   type OpencodeQuestionRequest,
 } from '../executors/opencode-client';
@@ -319,11 +320,13 @@ export class TaskDispatchService
     if (task.status === TaskStatus.FINISHED) {
       throw new BadRequestException(`任务 ${task.code} 已结束，不能继续对话`);
     }
-    if (
-      task.status === TaskStatus.WAITING ||
+    // 识别阶段的消息走补充需求重新识别；待验收任务允许继续对话并重新派发
+    const needsIdentify =
+      (task.status === TaskStatus.WAITING &&
+        task.subStatus !== TaskSubStatus.PENDING_ACCEPT) ||
       (task.status === TaskStatus.RUNNING &&
-        task.subStatus === TaskSubStatus.IDENTIFYING)
-    ) {
+        task.subStatus === TaskSubStatus.IDENTIFYING);
+    if (needsIdentify) {
       throw new BadRequestException('当前任务应先补充需求并重新识别');
     }
     if (this.taskChat.isRunning(taskId)) {
@@ -505,7 +508,12 @@ export class TaskDispatchService
       throw new BadRequestException('每个问题至少需要选择一个选项或输入回答');
     }
     try {
-      await client.replyQuestion(sessionId, questionId, answers);
+      await client.replyQuestion(
+        sessionId,
+        questionId,
+        answers,
+        question.questions,
+      );
     } catch (e) {
       throw this.questionSubmitError(e);
     }
@@ -688,10 +696,13 @@ export class TaskDispatchService
     const str = (key: string): string =>
       typeof data[key] === 'string' ? data[key] : '';
     const messageId = str('assistantMessageID');
-    // question 事件有 v1（question.asked）与 v2（question.v2.asked）两套命名，统一处理
-    const eventType = event.type.startsWith('question.v2.')
+    // question 事件有 v1（question.v2.asked）、v2（question.asked）与 form（form.*）三套协议，统一处理
+    const legacyQuestionType = event.type.startsWith('question.v2.')
       ? event.type.replace('question.v2.', 'question.')
       : event.type;
+    const formEvent = formEventToQuestionEvent(event.type, data);
+    const eventType = formEvent?.type ?? legacyQuestionType;
+    const questionData = formEvent?.data ?? data;
 
     switch (true) {
       case event.type === 'session.execution.started': {
@@ -760,15 +771,15 @@ export class TaskDispatchService
         break;
       }
       case eventType === 'question.asked': {
-        await this.handleQuestionAsked(taskId, data);
+        await this.handleQuestionAsked(taskId, questionData);
         break;
       }
       case eventType === 'question.replied': {
-        this.handleQuestionReplied(taskId, data);
+        this.handleQuestionReplied(taskId, questionData);
         break;
       }
       case eventType === 'question.rejected': {
-        this.handleQuestionRejected(taskId, data);
+        this.handleQuestionRejected(taskId, questionData);
         break;
       }
       case event.type.startsWith('permission'): {

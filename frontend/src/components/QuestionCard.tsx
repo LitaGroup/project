@@ -5,8 +5,8 @@ import type { TaskChatQuestion } from '../lib/api'
 
 interface QuestionCardProps {
   question: TaskChatQuestion
-  /** 会话/任务已结束（提问不可再答） */
-  disabled: boolean
+  /** 会话/任务已结束（提问不可再答）；缺省 false，提问 pending 即可作答 */
+  disabled?: boolean
   /** 外部繁忙状态（提交中、上下文不可用等） */
   busy?: boolean
   /** 回答（answers）或跳过（null）机器人提问 */
@@ -19,7 +19,7 @@ interface QuestionCardProps {
  */
 export function QuestionCard({
   question,
-  disabled,
+  disabled = false,
   busy = false,
   onReply,
 }: QuestionCardProps) {

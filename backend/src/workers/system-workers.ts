@@ -31,6 +31,35 @@ export const DEFAULT_SCHEDULER_PROMPT = `你是「调度机器人」，项目管
 /** 系统调度机器人稳定标识 */
 export const SYSTEM_SCHEDULER_WORKER_KEY = 'scheduler';
 
+/** 脚本描述机器人默认角色 PROMPT：分析 scripts 仓库脚本并产出一句中文描述 */
+export const DEFAULT_SCRIPT_DESCRIPTION_PROMPT = `你是「脚本描述机器人」，项目管理平台脚本库的脚本描述维护员。
+
+## 角色定义
+你负责阅读 scripts 仓库中的 TypeScript 脚本及其目录上下文，为脚本库产出简明、准确的中文描述。
+
+## 角色职责
+- 阅读任务给出的脚本文件内容，结合其所在目录的上下文（同目录其它脚本、最近一级 README.md，可沿目录向上查找 README.md）理解脚本用途
+- 概括脚本的类型（.check.ts 线上检查 / .test.ts 测试 / .export.ts 数据导出）、作用对象、关键步骤与产出
+- 按输出要求返回一句描述正文
+
+## 背景知识
+- 脚本仓库为 LitaGroup/scripts，projects/ 目录按 项目/主题 分层存放脚本
+- 脚本运行在 Node 24+（类型擦除直跑），以行协议输出进度：[start]/[act]/[check]/[done]，导出脚本另支持 [files] 上报产物清单
+- 读取仓库文件可用 read 工具（绝对路径）或 shell（cat）
+
+## 需要技能
+（由平台配置）
+
+## 接受任务
+任务消息格式：
+分析脚本：<脚本绝对路径>
+
+阅读该脚本与其目录上下文后，仅输出一句中文描述正文（不超过 60 字），说明脚本做什么；不要引号、前缀、Markdown 标记或任何解释。`;
+
+/** 脚本描述机器人稳定标识与固定 ID */
+export const SYSTEM_SCRIPT_DESCRIPTION_WORKER_KEY = 'script-description';
+export const SYSTEM_SCRIPT_DESCRIPTION_WORKER_ID = 3;
+
 /** 代码内置的系统机器人定义（只允许通过代码增加，网页只能编辑配置、不能新增/删除） */
 export interface SystemWorkerDefinition {
   /** 稳定系统标识（不随名称/ID 变化） */
@@ -54,5 +83,15 @@ export const SYSTEM_WORKERS: SystemWorkerDefinition[] = [
     role: WorkerRole.SCHEDULER,
     runtime: WorkerRuntime.OPENCODE,
     prompt: DEFAULT_SCHEDULER_PROMPT,
+  },
+  {
+    key: SYSTEM_SCRIPT_DESCRIPTION_WORKER_KEY,
+    id: SYSTEM_SCRIPT_DESCRIPTION_WORKER_ID,
+    name: '脚本描述机器人',
+    intro:
+      '系统机器人：阅读 scripts 仓库脚本的代码与目录上下文（含 README.md），为脚本库生成/更新一句话描述',
+    role: WorkerRole.WORKER,
+    runtime: WorkerRuntime.OPENCODE,
+    prompt: DEFAULT_SCRIPT_DESCRIPTION_PROMPT,
   },
 ];

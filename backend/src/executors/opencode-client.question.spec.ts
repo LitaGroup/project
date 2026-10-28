@@ -80,13 +80,14 @@ describe('OpencodeClient question', () => {
     });
   });
 
-  it('旧版服务端 404 时回退全局端点', async () => {
+  it('会话级 404 时先回退 form 端点，再回退全局端点', async () => {
     legacy = true;
     const client = new OpencodeClient(endpoint);
     await client.replyQuestion('s1', 'q2', [['生产']]);
 
     expect(received.map((item) => item.path)).toEqual([
       '/api/session/s1/question/q2/reply',
+      '/api/session/s1/form/q2/reply',
       '/question/q2/reply',
     ]);
   });

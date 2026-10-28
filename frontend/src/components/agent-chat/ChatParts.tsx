@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ComponentPropsWithoutRef } from 'react'
 import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Brain, ChevronDown } from '@appica/icons-react'
@@ -9,6 +9,16 @@ const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
   mermaid: { SyntaxHighlighter: MermaidDiagram },
 }
 
+/** 链接默认新窗口打开（外部页面不应覆盖聊天会话） */
+function ChatMarkdownLink({
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<'a'> & { node?: unknown }) {
+  return <a {...props} target="_blank" rel="noopener noreferrer" />
+}
+
+const MARKDOWN_COMPONENTS = { a: ChatMarkdownLink }
+
 /** 机器人对话 Markdown（任务详情与机器人调试共用） */
 export function ChatMarkdownText() {
   return (
@@ -17,6 +27,7 @@ export function ChatMarkdownText() {
       smooth={false}
       defer
       remarkPlugins={MARKDOWN_PLUGINS}
+      components={MARKDOWN_COMPONENTS}
       componentsByLanguage={MARKDOWN_COMPONENTS_BY_LANGUAGE}
     />
   )

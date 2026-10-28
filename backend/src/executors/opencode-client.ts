@@ -113,6 +113,18 @@ export interface OpencodeQuestionInfo {
   multiple?: boolean;
   /** 是否接受自由输入（false 时只能选选项） */
   custom?: boolean;
+  /** form 协议下的字段 key（答复 form 时按 key 提交） */
+  fieldKey?: string;
+}
+
+/** opencode Form API 条目（2.1+ question 工具经 form 呈现） */
+export interface OpencodeFormDetail {
+  id: string;
+  sessionID: string;
+  title?: string;
+  metadata?: Record<string, unknown> | null;
+  fields?: Array<Record<string, unknown>> | null;
+  state?: Record<string, unknown> | null;
 }
 
 /** 待回答的提问请求（2.x 会话级 question） */
@@ -122,6 +134,118 @@ export interface OpencodeQuestionRequest {
   questions: OpencodeQuestionInfo[];
   /** 关联的工具调用（用于把提问挂到对应 tool part 上） */
   tool?: { messageID?: string; callID?: string };
+}
+
+/** 判断 Form 条目是否由 question 工具产生（metadata.kind=question） */
+export function isQuestionForm(form: OpencodeFormDetail): boolean {
+  return (
+    !!form &&
+    typeof form.id === 'string' &&
+    typeof form.sessionID === 'string' &&
+    !!form.metadata &&
+    typeof form.metadata === 'object' &&
+    (form.metadata as Record<string, unknown>).kind === 'question'
+  );
+}
+
+/** Form 条目 → QuestionRequest（question 工具在 2.1+ 经 form API 呈现） */
+export function formToQuestionRequest(
+  form: OpencodeFormDetail,
+): OpencodeQuestionRequest | null {
+  if (!isQuestionForm(form)) return null;
+  const metadata = (form.metadata ?? {}) as Record<string, unknown>;
+  const rawFields = Array.isArray(form.fields) ? form.fields : [];
+  const questions = rawFields
+    .map((raw, index): OpencodeQuestionInfo | null => {
+      const field = raw ?? {};
+      const title = typeof field.title === 'string' ? field.title : '';
+      const description =
+        typeof field.description === 'string' ? field.description : '';
+      if (!title && !description) return null;
+      const options = Array.isArray(field.options)
+        ? field.options
+            .map((rawOption): OpencodeQuestionOption | null => {
+              const option = rawOption ?? {};
+              const value =
+                typeof option.value === 'string' ? option.value : '';
+              const label =
+                typeof option.label === 'string' && option.label
+                  ? option.label
+                  : value;
+              if (!label) return null;
+              return {
+                label,
+                description:
+                  typeof option.description === 'string'
+                    ? option.description
+                    : undefined,
+              };
+            })
+            .filter(
+              (option): option is OpencodeQuestionOption => option !== null,
+            )
+        : undefined;
+      return {
+        question: description || title,
+        header: title || `问题 ${index + 1}`,
+        options: options?.length ? options : undefined,
+        multiple: field.type === 'multiselect',
+        custom: field.custom !== false,
+        fieldKey: typeof field.key === 'string' ? field.key : `q${index}`,
+      };
+    })
+    .filter((question): question is OpencodeQuestionInfo => question !== null);
+  if (questions.length === 0) return null;
+  const rawTool =
+    metadata.tool && typeof metadata.tool === 'object'
+      ? (metadata.tool as Record<string, unknown>)
+      : null;
+  return {
+    id: form.id,
+    sessionID: form.sessionID,
+    questions,
+    tool: rawTool
+      ? {
+          messageID:
+            typeof rawTool.messageID === 'string'
+              ? rawTool.messageID
+              : undefined,
+          callID:
+            typeof rawTool.callID === 'string'
+              ? rawTool.callID
+              : typeof rawTool.id === 'string'
+                ? rawTool.id
+                : undefined,
+        }
+      : undefined,
+  };
+}
+
+/** opencode form.* 事件 → 既有 question.* 事件（form 协议兼容层） */
+export function formEventToQuestionEvent(
+  eventType: string,
+  data: Record<string, unknown>,
+): { type: string; data: Record<string, unknown> } | null {
+  if (eventType === 'form.created') {
+    const rawForm = data.form;
+    if (!rawForm || typeof rawForm !== 'object') return null;
+    const request = formToQuestionRequest(rawForm as OpencodeFormDetail);
+    return request
+      ? { type: 'question.asked', data: request as unknown as Record<string, unknown> }
+      : null;
+  }
+  if (eventType !== 'form.replied' && eventType !== 'form.cancelled') {
+    return null;
+  }
+  const requestId = typeof data.id === 'string' ? data.id : '';
+  if (!requestId) return null;
+  return {
+    type: eventType === 'form.replied' ? 'question.replied' : 'question.rejected',
+    data: {
+      requestID: requestId,
+      sessionID: typeof data.sessionID === 'string' ? data.sessionID : '',
+    },
+  };
 }
 
 /** opencode 请求错误（保留状态码与响应体摘要） */
@@ -390,6 +514,23 @@ export class OpencodeClient {
     });
   }
 
+  /** 等待会话 agent loop 空闲（experimental wait；用于回答提问后接管既有执行） */
+  async waitForIdle(sessionId: string, timeoutMs: number): Promise<void> {
+    await this.request(`/api/experimental/session/${sessionId}/wait`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  }
+
+  /** 当前正在运行的会话清单（sessionId → { type: 'running' }） */
+  async activeSessions(): Promise<Record<string, { type?: string }>> {
+    const json = await this.request<
+      Record<string, { type?: string }> | { data?: Record<string, { type?: string }> } | null
+    >('/api/session/active');
+    const data = OpencodeClient.unwrap(json);
+    return data && typeof data === 'object' ? data : {};
+  }
+
   /** 批复权限请求（decision：once=本次允许 / always=总是 / reject=拒绝） */
   async replyPermission(
     sessionId: string,
@@ -403,24 +544,13 @@ export class OpencodeClient {
     );
   }
 
-  /** 待回答的提问（2.x 会话级端点；旧版回退全局 /question 后按会话过滤） */
+  /** 待回答的提问：兼容 question 端点（新）与 form 端点（2.1+ question 工具） */
   async listQuestions(sessionId: string): Promise<OpencodeQuestionRequest[]> {
-    try {
-      const json = await this.request<
-        OpencodeQuestionRequest[] | { data?: OpencodeQuestionRequest[] } | null
-      >(`/api/session/${sessionId}/question`);
-      const data = OpencodeClient.unwrap(json);
-      if (Array.isArray(data)) return data;
-    } catch (e) {
-      if (!(e instanceof OpencodeClientError) || e.status !== 404) throw e;
-    }
-    const json = await this.request<
-      OpencodeQuestionRequest[] | { data?: OpencodeQuestionRequest[] } | null
-    >('/question');
-    const data = OpencodeClient.unwrap(json);
-    return Array.isArray(data)
-      ? data.filter((item) => item.sessionID === sessionId)
-      : [];
+    const direct = await this.listDirectQuestions(sessionId);
+    if (direct.length > 0) return direct;
+    const forms = await this.listFormQuestions(sessionId);
+    if (forms.length > 0) return forms;
+    return this.listLegacyGlobalQuestions(sessionId);
   }
 
   /** 回答提问（answers 与问题顺序一致，每项为所选 label 与自定义文本） */
@@ -428,35 +558,132 @@ export class OpencodeClient {
     sessionId: string,
     requestId: string,
     answers: string[][],
+    questions: OpencodeQuestionInfo[] = [],
   ): Promise<void> {
-    await this.requestQuestionAction(
-      `/api/session/${sessionId}/question/${requestId}/reply`,
-      `/question/${requestId}/reply`,
-      { method: 'POST', body: JSON.stringify({ answers }) },
-    );
+    try {
+      await this.request(
+        `/api/session/${sessionId}/question/${requestId}/reply`,
+        { method: 'POST', body: JSON.stringify({ answers }) },
+      );
+      return;
+    } catch (error) {
+      if (!(error instanceof OpencodeClientError) || error.status !== 404) {
+        throw error;
+      }
+    }
+    try {
+      await this.replyQuestionForm(sessionId, requestId, answers, questions);
+      return;
+    } catch (error) {
+      if (!(error instanceof OpencodeClientError) || error.status !== 404) {
+        throw error;
+      }
+    }
+    await this.request(`/question/${requestId}/reply`, {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    });
   }
 
   /** 跳过提问 */
   async rejectQuestion(sessionId: string, requestId: string): Promise<void> {
-    await this.requestQuestionAction(
-      `/api/session/${sessionId}/question/${requestId}/reject`,
-      `/question/${requestId}/reject`,
-      { method: 'POST', body: JSON.stringify({}) },
-    );
+    try {
+      await this.request(
+        `/api/session/${sessionId}/question/${requestId}/reject`,
+        { method: 'POST', body: JSON.stringify({}) },
+      );
+      return;
+    } catch (error) {
+      if (!(error instanceof OpencodeClientError) || error.status !== 404) {
+        throw error;
+      }
+    }
+    try {
+      await this.request(
+        `/api/session/${sessionId}/form/${encodeURIComponent(requestId)}`,
+        { method: 'DELETE' },
+      );
+      return;
+    } catch (error) {
+      if (!(error instanceof OpencodeClientError) || error.status !== 404) {
+        throw error;
+      }
+    }
+    await this.request(`/question/${requestId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   }
 
-  /** 2.x 会话级端点优先，404 时回退旧版全局端点（服务端版本差异） */
-  private async requestQuestionAction(
-    path: string,
-    fallback: string,
-    init: RequestInit,
-  ): Promise<void> {
+  /** question 专用端点（部分版本提供；无该端点时返回空） */
+  private async listDirectQuestions(
+    sessionId: string,
+  ): Promise<OpencodeQuestionRequest[]> {
     try {
-      await this.request(path, init);
-    } catch (e) {
-      if (!(e instanceof OpencodeClientError) || e.status !== 404) throw e;
-      await this.request(fallback, init);
+      const json = await this.request<
+        | OpencodeQuestionRequest[]
+        | { data?: OpencodeQuestionRequest[] }
+        | null
+      >(`/api/session/${sessionId}/question`);
+      const data = OpencodeClient.unwrap(json);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      if (error instanceof OpencodeClientError && error.status === 404) {
+        return [];
+      }
+      throw error;
     }
+  }
+
+  /** 旧版全局 question 端点兜底（按会话过滤；无该端点时返回空） */
+  private async listLegacyGlobalQuestions(
+    sessionId: string,
+  ): Promise<OpencodeQuestionRequest[]> {
+    try {
+      const json = await this.request<
+        | OpencodeQuestionRequest[]
+        | { data?: OpencodeQuestionRequest[] }
+        | null
+      >('/question');
+      const data = OpencodeClient.unwrap(json);
+      return Array.isArray(data)
+        ? data.filter((item) => item.sessionID === sessionId)
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** form 端点中的 question 表单（question 工具经 form 呈现） */
+  private async listFormQuestions(
+    sessionId: string,
+  ): Promise<OpencodeQuestionRequest[]> {
+    const json = await this.request<
+      OpencodeFormDetail[] | { data?: OpencodeFormDetail[] } | null
+    >(`/api/session/${sessionId}/form`);
+    const forms = OpencodeClient.unwrap(json) ?? [];
+    if (!Array.isArray(forms)) return [];
+    return forms
+      .map((form) => formToQuestionRequest(form))
+      .filter((request): request is OpencodeQuestionRequest => request !== null);
+  }
+
+  /** form 协议答复：按字段 key 组装 answer（multiselect 为数组，其余取首项） */
+  private async replyQuestionForm(
+    sessionId: string,
+    requestId: string,
+    answers: string[][],
+    questions: OpencodeQuestionInfo[],
+  ): Promise<void> {
+    const answer: Record<string, string | string[]> = {};
+    answers.forEach((row, index) => {
+      const key = questions[index]?.fieldKey || `q${index}`;
+      answer[key] = questions[index]?.multiple === true ? row : (row[0] ?? '');
+    });
+    await this.request(
+      `/api/session/${sessionId}/form/${encodeURIComponent(requestId)}/reply`,
+      { method: 'POST', body: JSON.stringify({ answer }) },
+    );
   }
 
   /** 执行 shell 命令（建工位目录等；在 server 默认目录下用绝对路径操作） */

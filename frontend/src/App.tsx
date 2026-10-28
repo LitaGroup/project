@@ -14,12 +14,12 @@ import { ChecksPage } from './pages/ChecksPage'
 import { ExportsPage } from './pages/ExportsPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { KnowledgeBrowserPage } from './pages/KnowledgeBrowserPage'
-import { KnowledgeSearchPage } from './pages/KnowledgeSearchPage'
 import { ResourcesPage } from './pages/ResourcesPage'
 import { MilestonesPage } from './pages/MilestonesPage'
 import { CommitsPage } from './pages/CommitsPage'
 import { ReposPage } from './pages/ReposPage'
-import { ScriptsPage } from './pages/ScriptsPage'
+import { ScriptLibraryPage } from './pages/ScriptLibraryPage'
+import { ScriptLibraryDetailPage } from './pages/ScriptLibraryDetailPage'
 import { SchedulesPage } from './pages/SchedulesPage'
 import { TaskCenterPage } from './pages/TaskCenterPage'
 import { TasksPage } from './pages/TasksPage'
@@ -109,15 +109,19 @@ function App() {
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/docs" element={<Navigate to="/docs/detail/" replace />} />
-          <Route path="/docs/search" element={<KnowledgeSearchPage />} />
           <Route path="/docs/detail" element={<KnowledgeBrowserPage />} />
           <Route path="/docs/detail/*" element={<KnowledgeBrowserPage />} />
+          <Route path="/docs/scripts" element={<ScriptLibraryPage />} />
+          <Route
+            path="/docs/scripts/detail"
+            element={<ScriptLibraryDetailPage />}
+          />
           <Route path="/resources" element={<ResourcesPage />} />
           <Route path="/milestones" element={<MilestonesPage />} />
           <Route path="/commits" element={<CommitsPage />} />
           <Route path="/code" element={<Navigate to="/code/repos" replace />} />
           <Route path="/code/repos" element={<ReposPage />} />
-          <Route path="/scripts" element={<ScriptsPage />} />
+          <Route path="/scripts" element={<Navigate to="/docs/scripts" replace />} />
           <Route path="/schedules" element={<SchedulesPage />} />
           <Route path="/tasks" element={<TaskCenterPage />} />
           <Route path="/tasks/list" element={<TasksPage />} />

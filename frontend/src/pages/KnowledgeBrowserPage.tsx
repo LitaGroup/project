@@ -32,7 +32,7 @@ import {
   TableHead,
   TableCell,
 } from '@appica/ui-react/table'
-import { Book, FileSearch, Folder } from '@appica/icons-react'
+import { Book, Folder } from '@appica/icons-react'
 import {
   api,
   knowledgeMdPath,
@@ -193,13 +193,6 @@ function KnowledgeDirectoryView({
             <span className="px-2 text-xs text-foreground-muted">暂无子目录</span>
           )}
         </div>
-        <Link
-          to="/docs/search"
-          className="mt-5 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground-muted hover:bg-background-muted hover:text-foreground-intense"
-        >
-          <FileSearch size={16} />
-          知识搜索
-        </Link>
       </aside>
 
       <div className="min-w-0 flex-1">

@@ -331,6 +331,98 @@ export interface ExportRunFile {
   file: string
 }
 
+// ===== 脚本库（scripts 仓库 main 分支）=====
+
+/** 脚本库脚本类型：按文件后缀区分 */
+export type ScriptLibraryKind = 'check' | 'test' | 'export'
+
+/** 类型展示文案与筛选选项（value 与中文不一致，Select 须传 items 映射） */
+export const SCRIPT_LIBRARY_KIND_ITEMS: Record<ScriptLibraryKind, string> = {
+  check: '检查',
+  test: '测试',
+  export: '导出',
+}
+
+/** 脚本库的一次运行记录（与导出运行结构一致，另记脚本路径/类型/运行时提交） */
+export interface ScriptLibraryRun {
+  id: number
+  /** 相对脚本根目录的路径（projects/ 下） */
+  scriptPath: string
+  kind: ScriptLibraryKind
+  /** 运行时脚本仓库 main HEAD */
+  revision: string | null
+  status: 'running' | 'success' | 'fail' | 'error'
+  total: number | null
+  current: number
+  success: number | null
+  fail: number | null
+  skip: number | null
+  message: string | null
+  durationMs: number | null
+  items: CheckRunItem[] | null
+  logs: string[] | null
+  output: string[] | null
+  files: ExportRunFile[] | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+/** 描述生成状态 */
+export type ScriptDescriptionStatus = 'pending' | 'running' | 'done' | 'error'
+
+/** 脚本库中的一个脚本（列表条目） */
+export interface ScriptLibraryScript {
+  path: string
+  kind: ScriptLibraryKind
+  /** 文件大小（字节） */
+  size: number
+  updatedAt: string
+  /** 登记了该脚本的检查/用例/导出所属项目 id 列表 */
+  projectIds: number[]
+  latestRun: ScriptLibraryRun | null
+  /** 描述（脚本描述机器人生成；未生成为 null） */
+  description: string | null
+  /** 描述生成状态（尚无描述记录为 null） */
+  descriptionStatus: ScriptDescriptionStatus | null
+}
+
+/** 脚本详情（含源码与 main HEAD / GitHub 原文链接） */
+export interface ScriptLibraryScriptDetail extends ScriptLibraryScript {
+  content: string
+  revision: string | null
+  githubUrl: string
+}
+
+export interface ScriptLibraryListResponse {
+  items: ScriptLibraryScript[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+/** 脚本库同步状态（scripts 仓库 main 分支定期同步） */
+export interface ScriptLibrarySyncStatus {
+  repo: string
+  branch: string
+  githubConfigured: boolean
+  currentRevision: string | null
+  remoteRevision: string | null
+  syncing: boolean
+  lastSyncAt: string | null
+  lastSyncOk: boolean | null
+  lastError: string | null
+  lastSource: string | null
+  lastDurationMs: number | null
+  lastOutput: string[]
+  /** 描述队列统计（脚本描述机器人 #3 生成进度） */
+  descriptions?: {
+    pending: number
+    running: number
+    done: number
+    error: number
+  }
+}
+
 /**
  * 导出的一次脚本运行记录（字段与检查运行类似，脚本输出协议一致，另有 [files] 产物清单）。
  * 产物文件经 /export-files/{exportId}/{runId}/{file} 下载。
@@ -1128,6 +1220,8 @@ export interface TaskChatQuestionInfo {
   multiple?: boolean
   /** 是否接受自由输入（false 时只能从选项中选择） */
   custom?: boolean
+  /** form 协议下的字段 key（仅后端答复使用） */
+  fieldKey?: string
 }
 
 /** 提问状态：待回答 / 已回答 / 已跳过 / 已失效 */
@@ -1489,6 +1583,57 @@ export const api = {
     request<ExportRun[]>(`/exports/${exportId}/runs`),
   /** 单次导出运行详情（含实时进度与产物文件清单） */
   getExportRun: (runId: number) => request<ExportRun>(`/exports/runs/${runId}`),
+  /** 脚本库列表：q 匹配路径，kind 过滤类型，按路径排序分页 */
+  listLibraryScripts: (params?: {
+    q?: string
+    kind?: ScriptLibraryKind
+    page?: number
+    pageSize?: number
+  }) => {
+    const search = new URLSearchParams()
+    if (params?.q) search.set('q', params.q)
+    if (params?.kind) search.set('type', params.kind)
+    if (params?.page !== undefined) search.set('page', String(params.page))
+    if (params?.pageSize !== undefined)
+      search.set('pageSize', String(params.pageSize))
+    const qs = search.toString()
+    return request<ScriptLibraryListResponse>(
+      `/script-library/scripts${qs ? `?${qs}` : ''}`,
+    )
+  },
+  /** 脚本库脚本详情（含源码） */
+  getLibraryScript: (path: string) =>
+    request<ScriptLibraryScriptDetail>(
+      `/script-library/script?path=${encodeURIComponent(path)}`,
+    ),
+  /** 脚本库同步状态 */
+  getLibraryStatus: () =>
+    request<ScriptLibrarySyncStatus>('/script-library/status'),
+  /** 手动触发一次脚本库同步（main 分支 ff-only 拉取） */
+  syncLibrary: () =>
+    request<ScriptLibrarySyncStatus>('/script-library/sync', {
+      method: 'POST',
+    }),
+  /** 启动一次脚本库脚本运行（无需登记到项目） */
+  startLibraryRun: (path: string) =>
+    request<ScriptLibraryRun>('/script-library/runs', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+  /** 脚本库某脚本的运行历史（倒序，上限 50） */
+  listLibraryRuns: (path: string) =>
+    request<ScriptLibraryRun[]>(
+      `/script-library/runs?path=${encodeURIComponent(path)}`,
+    ),
+  /** 单次脚本库运行详情 */
+  getLibraryRun: (runId: number) =>
+    request<ScriptLibraryRun>(`/script-library/runs/${runId}`),
+  /** 手动重新生成脚本描述（转回待生成队列，由脚本描述机器人重新分析） */
+  regenerateLibraryDescription: (path: string) =>
+    request<ScriptLibrarySyncStatus>('/script-library/descriptions/regenerate', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
   /** APP 版本列表：传 projectId 按项目过滤，不传返回全部 */
   listAppVersions: (projectId?: number) =>
     request<AppVersion[]>(

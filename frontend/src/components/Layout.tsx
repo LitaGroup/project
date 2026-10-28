@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Outlet, Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   Navigation,
@@ -7,6 +8,7 @@ import {
 import { NavigationLink } from '@appica/ui-react/navigation'
 import { Badge } from '@appica/ui-react/badge'
 import { Button, buttonVariants } from '@appica/ui-react/button'
+import { Kbd, KbdGroup } from '@appica/ui-react/kbd'
 import {
   Avatar,
   AvatarImage,
@@ -31,7 +33,6 @@ import {
   DeviceMobile,
   FileCode,
   FileExport,
-  FileSearch,
   FileText,
   Folder,
   GitCommit,
@@ -42,6 +43,7 @@ import {
   Book,
   Package,
   Robot,
+  Search,
   Settings,
   TimelineEvent,
   Users,
@@ -50,6 +52,7 @@ import type { IconComponent } from '@appica/icons-react'
 import { LayoutGroup, m } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
 import { PageTransition } from './PageTransition'
+import { KnowledgeSearchDialog } from './KnowledgeSearchDialog'
 import { navIndicatorTransition } from '../lib/motion'
 
 /** 左侧导航项 */
@@ -92,7 +95,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/resources', label: '资源', icon: Folder, ready: true },
       { to: '/milestones', label: '节点', icon: TimelineEvent, ready: true },
       { to: '/commits', label: '提交', icon: GitCommit, ready: true },
-      { to: '/scripts', label: '脚本', icon: FileCode, ready: true },
       { to: '/schedules', label: '定时任务', icon: CalendarClock, ready: true },
       { to: '/apps', label: 'APP', icon: DeviceMobile, ready: true },
       { to: '/settings', label: '设置', icon: Settings, ready: true },
@@ -120,7 +122,7 @@ const NAV_SECTIONS: NavSection[] = [
     match: (p) => p.startsWith('/docs'),
     items: [
       { to: '/docs/detail/', label: '知识库', icon: Book, ready: true },
-      { to: '/docs/search', label: '搜索', icon: FileSearch, ready: true },
+      { to: '/docs/scripts', label: '脚本库', icon: FileCode, ready: true },
     ],
   },
   {
@@ -201,8 +203,21 @@ function UserArea() {
 
 export function Layout() {
   const { pathname } = useLocation()
+  const [searchOpen, setSearchOpen] = useState(false)
   const activeSection =
     NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0]
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [])
+
   return (
     <div className="flex min-h-screen flex-col bg-background-muted">
       {/* 顶部导航 */}
@@ -244,8 +259,29 @@ export function Layout() {
             </nav>
           </LayoutGroup>
         </div>
-        <UserArea />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-foreground-muted"
+            onClick={() => setSearchOpen(true)}
+            aria-label="搜索知识库"
+            aria-keyshortcuts="Meta+K"
+          >
+            <Search size={16} />
+            <span>搜索</span>
+            <KbdGroup size="sm" className="ml-1">
+              <Kbd>⌘</Kbd>
+              <Kbd>K</Kbd>
+            </KbdGroup>
+          </Button>
+          <UserArea />
+        </div>
       </header>
+      <KnowledgeSearchDialog
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+      />
 
       <div className="flex flex-1">
         {/* 左侧导航 */}

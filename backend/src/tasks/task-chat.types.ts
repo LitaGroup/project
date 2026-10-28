@@ -37,6 +37,8 @@ export interface TaskChatQuestionInfo {
   multiple?: boolean;
   /** 是否接受自由输入（false 时只能从选项中选择） */
   custom?: boolean;
+  /** form 协议下的字段 key（答复 form 时由后端使用） */
+  fieldKey?: string;
 }
 
 /** 提问状态：待回答 / 已回答 / 已跳过 / 已失效（任务结束等） */
