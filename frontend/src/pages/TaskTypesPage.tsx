@@ -51,7 +51,7 @@ function validateName(value: string): string | null {
   return null
 }
 
-/** 任务类型：平台内维护的分类字典，供任务识别与筛选使用 */
+/** 任务类型：平台内维护的分类字典，供任务匹配与筛选使用 */
 export function TaskTypesPage() {
   const [types, setTypes] = useState<TaskTypeDef[] | null>(null)
   const [error, setError] = useState<string | null>(null)

@@ -95,6 +95,16 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     expect(prompt).toContain('不要删除机器人或其他流程产生的其他文档');
   });
 
+  it('AGENTS.md 注入多机器人协议与待接受拒绝规则', async () => {
+    const prompt = await buildService()['buildPrompt'](worker);
+    expect(prompt).toContain('多机器人任务协同协议（平台固定）');
+    expect(prompt).toContain('task-defines');
+    expect(prompt).toContain('task-create');
+    expect(prompt).toContain('只能在待接受阶段调用 task-refuse');
+    expect(prompt).toContain('task-question-ask');
+    expect(prompt).toContain('task-handoff-apply');
+  });
+
   it('规范清单为空时只清理旧受管文件，不要求清空 docs', async () => {
     const empty: ManagedStandardFiles = {
       branch: 'main',

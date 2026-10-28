@@ -32,6 +32,10 @@ export interface TaskPlanRef {
 @Index(['status'])
 @Index(['subStatus'])
 @Index(['status', 'subStatus'])
+@Index('IDX_tasks_one_running_per_worker', ['agentId'], {
+  unique: true,
+  where: `"status" = '进行中'`,
+})
 export class Task {
   @PrimaryGeneratedColumn()
   id: number;
@@ -95,9 +99,25 @@ export class Task {
   @Column({
     type: 'varchar',
     length: 20,
-    default: TaskSubStatus.PENDING_IDENTIFY,
+    default: TaskSubStatus.PENDING_ASSIGNMENT,
   })
   subStatus: TaskSubStatus;
+
+  /** 需求方类型：user=人类用户 / worker=父任务机器人 */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  requesterType: 'user' | 'worker' | null;
+
+  /** 需求方 id（users.id 或 workers.id；与 requesterType 联合解释） */
+  @Column({ type: 'int', nullable: true })
+  requesterId: number | null;
+
+  /** 待继续时下一次派发需要补充的上下文（答复/返工/子任务事件） */
+  @Column({ type: 'text', nullable: true })
+  resumePrompt: string | null;
+
+  /** 最近一次任务邀约时间（待接受重试节流） */
+  @Column({ type: 'timestamptz', nullable: true })
+  offerAttemptAt: Date | null;
 
   /** 工作计划（Markdown，历史识别或外部 AI 更新，派发时随任务下发给机器人） */
   @Column({ type: 'text', nullable: true })
@@ -146,9 +166,48 @@ export class Task {
   @Column({ type: 'timestamptz', nullable: true })
   deliveredAt: Date | null;
 
+  /** 累计验收不通过次数（申请验收不重置；超过 3 次转任务负责人） */
+  @Column({ type: 'int', default: 0 })
+  acceptRejectCount: number;
+
+  /** 验收不通过超过 3 次后转任务负责人处理的时间 */
+  @Column({ type: 'timestamptz', nullable: true })
+  ownerTakeoverAt: Date | null;
+
+  /** 接管任务的负责人（workers.ownerUserId 快照） */
+  @Column({ type: 'int', nullable: true })
+  ownerTakeoverUserId: number | null;
+
+  /** 接管任务的负责人姓名快照 */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  ownerTakeoverName: string | null;
+
   /** 归档（维护中终态）时间 */
   @Column({ type: 'timestamptz', nullable: true })
   archivedAt: Date | null;
+
+  /** 机器人拒绝承接时间、理由与分发建议 */
+  @Column({ type: 'timestamptz', nullable: true })
+  refusedAt: Date | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  refusedBy: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  refusalReason: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  dispatchSuggestion: string | null;
+
+  /** 需求方判定任务失败的时间、判定人与原因 */
+  @Column({ type: 'timestamptz', nullable: true })
+  failedAt: Date | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  failedBy: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  failureReason: string | null;
 
   /** 取消时间 */
   @Column({ type: 'timestamptz', nullable: true })

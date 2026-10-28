@@ -9,12 +9,23 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../auth/user.entity';
+import { TaskStatus, TaskSubStatus } from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
-import type { Worker } from '../workers/worker.entity';
+import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
 import { TaskDispatchService } from './task-dispatch.service';
 import { TaskHandoffService } from './task-handoff.service';
+import { TaskNotifyService } from './task-notify.service';
 import { TasksService } from './tasks.service';
+import {
+  actorName,
+  assertTaskRequester,
+  type TaskActor,
+} from './task-requester';
+import { TaskWorkerInboxService } from './task-worker-inbox.service';
+
+/** 验收不通过超过该次数后转任务负责人处理（第 4 次触发） */
+export const MAX_ACCEPT_REJECTS = 3;
 
 export interface DeliveryReplyInput {
   /** accept=通过验收；refuse=拒绝并退回执行 */
@@ -42,9 +53,13 @@ export class TaskDeliveryService {
     private readonly tasks: Repository<Task>,
     @InjectRepository(User)
     private readonly users: Repository<User>,
+    @InjectRepository(Worker)
+    private readonly workers: Repository<Worker>,
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
     private readonly taskHandoff: TaskHandoffService,
+    private readonly taskNotify: TaskNotifyService,
+    private readonly workerInbox: TaskWorkerInboxService,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -66,7 +81,17 @@ export class TaskDeliveryService {
     );
     const saved = applied.task;
     const requesterId = await this.requesterUserId(saved);
-    const requester = requesterId ? await this.userName(requesterId) : null;
+    const requester =
+      saved.requesterType === 'worker' && saved.requesterId
+        ? ((
+            await this.workers.findOne({
+              where: { id: saved.requesterId },
+              select: { id: true, name: true },
+            })
+          )?.name ?? null)
+        : requesterId
+          ? await this.userName(requesterId)
+          : null;
     return [
       mdFrontmatter({
         update: saved.updatedAt,
@@ -87,9 +112,11 @@ export class TaskDeliveryService {
       '',
       '## 后续处理',
       '',
-      `需求方通过：POST ${this.apiUrl}/tasks/${saved.id}/deliver/reply.md，body {"action":"accept"}`,
+      `需求方通过：POST ${this.apiUrl}/tasks/${saved.id}/handoff/accept.md`,
       '',
-      `需求方拒绝：POST ${this.apiUrl}/tasks/${saved.id}/deliver/reply.md，body {"action":"refuse","content":"反馈意见"}`,
+      `需求方返工：POST ${this.apiUrl}/tasks/${saved.id}/handoff/refuse.md，body {"content":"反馈意见"}`,
+      '',
+      `需求方判失败：POST ${this.apiUrl}/tasks/${saved.id}/fail.md，body {"reason":"失败原因"}`,
       '',
     ].join('\n');
   }
@@ -111,20 +138,7 @@ export class TaskDeliveryService {
     }
 
     if (action === 'accept') {
-      const saved = await this.tasksService.accept(taskId, actor.name ?? null);
-      // 验收成功后的总结与会话清理均为异步收尾，不阻塞验收结果
-      void this.taskHandoff.request(taskId).catch((error: Error) => {
-        this.logger.warn(
-          `任务 ${saved.code} 验收后启动总结失败：${error.message}`,
-        );
-      });
-      void this.dispatchService
-        .destroyAcceptedSession(taskId)
-        .catch((error: Error) => {
-          this.logger.warn(
-            `任务 ${saved.code} 验收后销毁执行器会话失败：${error.message}`,
-          );
-        });
+      const saved = await this.acceptTask(taskId, actor);
       return [
         mdFrontmatter({
           update: saved.updatedAt,
@@ -146,45 +160,268 @@ export class TaskDeliveryService {
     if (!content) {
       throw new BadRequestException('拒绝验收时必须提供反馈意见 content');
     }
-    const saved = await this.dispatchService.continueConversation(
-      taskId,
+    const saved = await this.refuse(
+      task,
+      { type: 'user', user: actor },
       content,
-      actor.name ?? null,
     );
-    await this.dispatchService.addEvent(
-      taskId,
-      '操作',
-      '需求方拒绝验收，已退回执行机器人重新处理',
-      actor.name ?? null,
-      {
-        intervention: true,
-        deliveryReply: 'refuse',
-        feedback: content,
-      },
-    );
+    const escalated =
+      saved.status === TaskStatus.WAITING &&
+      saved.subStatus === TaskSubStatus.PENDING_FEEDBACK;
     return [
       mdFrontmatter({
         update: saved.updatedAt,
-        title: '任务验收已拒绝',
+        title: escalated ? '任务验收已拒绝并转负责人' : '任务验收已拒绝',
       }),
-      '# 任务验收已拒绝',
+      escalated ? '# 任务验收已拒绝并转负责人' : '# 任务验收已拒绝',
       '',
       `- ID：${saved.id}`,
       `- 编号：${saved.code}`,
       `- 状态：${saved.status}-${saved.subStatus}`,
       `- 验收人：${actor.name ?? '未知'}`,
+      `- 累计验收不通过：${saved.acceptRejectCount} 次`,
       '',
       '## 反馈意见',
       '',
       content,
       '',
-      '任务已退回原执行机器人继续处理，完成后需重新申请验收。',
+      escalated
+        ? `验收不通过已超过 ${MAX_ACCEPT_REJECTS} 次，任务已转交执行机器人负责人处理。负责人补充意见后会重新识别并派发机器人。`
+        : '任务已退回原执行机器人继续处理，完成后需重新申请验收。',
       '',
     ].join('\n');
   }
 
-  /** 需求方：任务创建人优先；子任务回退根任务创建人 */
+  /**
+   * 任务详情页消息入口：待验收时统一按「验收不通过」处理并计数，
+   * 其他状态仍走原有补充需求/继续对话逻辑。
+   */
+  async sendMessage(
+    taskId: number,
+    actor: User,
+    content: string,
+  ): Promise<Task> {
+    const task = await this.mustFind(taskId);
+    if (
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_ACCEPT
+    ) {
+      return this.reject(taskId, actor, content);
+    }
+    return this.tasksService.sendMessage(taskId, content, actor.name ?? null);
+  }
+
+  /** 验收通过（网页 JSON 接口）：仅任务需求方可操作，异步生成复盘并销毁会话 */
+  async acceptTask(taskId: number, actor: User): Promise<Task> {
+    return this.acceptHandoff(taskId, { type: 'user', user: actor });
+  }
+
+  /** 人或机器人需求方验收通过。 */
+  async acceptHandoff(taskId: number, actor: TaskActor): Promise<Task> {
+    const task = await this.mustFind(taskId);
+    await this.assertRequester(task, actor);
+    const saved = await this.tasksService.accept(taskId, actorName(actor));
+    await this.workerInbox.completeForChild(taskId, 'handoff');
+    // 验收成功后的总结与会话清理均为异步收尾，不阻塞验收结果
+    void this.taskHandoff.request(taskId).catch((error: Error) => {
+      this.logger.warn(
+        `任务 ${saved.code} 验收后启动总结失败：${error.message}`,
+      );
+    });
+    void this.dispatchService
+      .destroyAcceptedSession(taskId)
+      .catch((error: Error) => {
+        this.logger.warn(
+          `任务 ${saved.code} 验收后销毁执行器会话失败：${error.message}`,
+        );
+      });
+    return saved;
+  }
+
+  /** 验收不通过（网页 JSON 接口）：返回更新后的任务 */
+  async reject(taskId: number, actor: User, content: string): Promise<Task> {
+    return this.refuseHandoff(taskId, { type: 'user', user: actor }, content);
+  }
+
+  /** 人或机器人需求方拒绝验收；机器人忙碌时进入待继续而不是并行执行。 */
+  async refuseHandoff(
+    taskId: number,
+    actor: TaskActor,
+    content: string,
+  ): Promise<Task> {
+    const task = await this.mustFind(taskId);
+    await this.assertRequester(task, actor);
+    const text = content.trim();
+    if (!text) throw new BadRequestException('验收反馈内容不能为空');
+    return this.refuse(task, actor, text);
+  }
+
+  /**
+   * 记录一次验收不通过：前 3 次退回原机器人，超过 3 次转执行机器人负责人。
+   * 计数使用原子递增，申请验收不会重置，确保同一任务持续累计。
+   */
+  private async refuse(
+    task: Task,
+    actor: TaskActor,
+    content: string,
+  ): Promise<Task> {
+    if (
+      task.status !== TaskStatus.WAITING ||
+      task.subStatus !== TaskSubStatus.PENDING_ACCEPT
+    ) {
+      throw new BadRequestException(
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可拒绝验收`,
+      );
+    }
+    await this.tasks.increment({ id: task.id }, 'acceptRejectCount', 1);
+    const current = await this.mustFind(task.id);
+    const count = current.acceptRejectCount ?? 1;
+    const operator = actorName(actor);
+
+    if (count <= MAX_ACCEPT_REJECTS) {
+      const claimed = await this.dispatchService.claimExecution(
+        task.id,
+        TaskSubStatus.PENDING_ACCEPT,
+      );
+      let saved: Task;
+      if (!claimed) {
+        // 等待验收期间机器人可能已接受其他任务，返工先排队，避免并行执行。
+        const queued = await this.tasks.update(
+          {
+            id: task.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_ACCEPT,
+          },
+          {
+            subStatus: TaskSubStatus.PENDING_RESUME,
+            resumePrompt: `# 验收返工\n\n${content}`,
+            remindCount: 0,
+            firstRemindedAt: null,
+            lastRemindedAt: null,
+          },
+        );
+        if (!queued.affected) {
+          throw new BadRequestException('任务状态已变化，请刷新后重试');
+        }
+        saved = await this.mustFind(task.id);
+      } else {
+        try {
+          saved = await this.dispatchService.continueConversation(
+            task.id,
+            content,
+            operator,
+          );
+        } catch (error) {
+          await this.tasks.update(
+            { id: task.id, status: TaskStatus.RUNNING },
+            {
+              status: TaskStatus.WAITING,
+              subStatus: TaskSubStatus.PENDING_RESUME,
+              resumePrompt: `# 验收返工\n\n${content}`,
+            },
+          );
+          throw error;
+        }
+      }
+      saved.acceptRejectCount = count;
+      await this.workerInbox.completeForChild(task.id, 'handoff');
+      await this.dispatchService.addEvent(
+        task.id,
+        '操作',
+        `需求方拒绝验收（累计 ${count} 次），${
+          claimed
+            ? '已退回执行机器人重新处理'
+            : '机器人忙碌，已转入等待中-待继续'
+        }`,
+        operator,
+        {
+          intervention: true,
+          deliveryReply: 'refuse',
+          feedback: content,
+          acceptRejectCount: count,
+          queued: !claimed,
+        },
+      );
+      return saved;
+    }
+
+    const worker = current.agentId
+      ? await this.workers.findOne({ where: { id: current.agentId } })
+      : null;
+    const ownerUserId = worker?.ownerUserId ?? null;
+    const ownerName = worker?.ownerName ?? null;
+    const now = new Date();
+    const updated = await this.tasks.update(
+      {
+        id: current.id,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPT,
+      },
+      {
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_FEEDBACK,
+        acceptRejectCount: count,
+        ownerTakeoverAt: now,
+        ownerTakeoverUserId: ownerUserId,
+        ownerTakeoverName: ownerName,
+        missingItems: [
+          {
+            item: `验收不通过已达 ${count} 次，等待任务负责人处理`,
+            reason: content,
+          },
+        ],
+        remindCount: 0,
+        firstRemindedAt: null,
+        lastRemindedAt: null,
+      },
+    );
+    if (!updated.affected) {
+      throw new BadRequestException('任务状态已变化，请刷新后重试');
+    }
+    const saved = await this.mustFind(task.id);
+    await this.dispatchService.addEvent(
+      task.id,
+      '状态变更',
+      `状态变更：等待中-待验收 → 等待中-待反馈（验收不通过累计 ${count} 次，转任务负责人${
+        ownerName ? `「${ownerName}」` : '（未配置，回退需求方）'
+      }处理）`,
+      operator,
+      {
+        intervention: true,
+        deliveryReply: 'refuse',
+        feedback: content,
+        acceptRejectCount: count,
+        ownerTakeover: true,
+        ownerTakeoverUserId: ownerUserId,
+        ownerTakeoverName: ownerName,
+      },
+    );
+
+    await this.workerInbox.completeForChild(task.id, 'handoff');
+    const notifyTitle = `任务待负责人处理：${saved.code} ${saved.title}`;
+    const notifyDescription = `验收不通过已达 ${count} 次，请负责人补充处理意见。最近反馈：${content}`;
+    const ownerNotified = await this.taskNotify.notifyTaskAgentOwner(
+      saved,
+      'feedback',
+      notifyTitle,
+      notifyDescription,
+    );
+    if (!ownerNotified.sent) {
+      await this.taskNotify.notifyTaskRequester(
+        saved,
+        'feedback',
+        notifyTitle,
+        notifyDescription,
+      );
+    }
+    return saved;
+  }
+
+  /** 显式需求方优先；历史数据保留创建人/根任务创建人回退。 */
   private async requesterUserId(task: Task): Promise<number | null> {
+    if (task.requesterType) {
+      return task.requesterType === 'user' ? task.requesterId : null;
+    }
     if (task.createdById && task.createdById > 0) return task.createdById;
     if (!task.rootId || task.rootId === task.id) return null;
     const root = await this.tasks.findOne({
@@ -192,6 +429,22 @@ export class TaskDeliveryService {
       select: { id: true, createdById: true },
     });
     return root?.createdById && root.createdById > 0 ? root.createdById : null;
+  }
+
+  private async assertRequester(task: Task, actor: TaskActor): Promise<void> {
+    if (task.requesterType) {
+      assertTaskRequester(task, actor);
+      return;
+    }
+    // 未回填的历史子任务只可能由根任务人类创建人处理，不能误放给执行机器人。
+    const requesterId = await this.requesterUserId(task);
+    if (
+      actor.type !== 'user' ||
+      !requesterId ||
+      actor.user.id !== requesterId
+    ) {
+      throw new ForbiddenException('仅任务需求方可以执行该操作');
+    }
   }
 
   private async userName(userId: number): Promise<string | null> {

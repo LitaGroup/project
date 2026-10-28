@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、获取任务识别上下文并保存任务识别结果、执行机器人申请验收与需求方处理验收反馈
-version: 1.19.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同
+version: 1.20.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -31,8 +31,8 @@ tags:
 11. 获取平台设置信息、更新脚本仓库
 12. 搜索平台知识库、浏览知识目录、读取知识文章与项目文档镜像（见第 11 节；也可单独安装 `knowledge-search` 技能）
 13. 创建知识文章/目录，更新正文、标题，移动/重命名，删除文章或目录（见第 11.4 节）
-14. 任务识别：读取任务识别上下文与有效机器人清单，保存识别出的标题、输入、交付方式、工作计划与执行机器人（见第 12 节）
-15. 任务验收：执行机器人主动申请验收；任务需求方通过或拒绝验收反馈（见第 12.3/12.4 节）
+14. 多机器人协同：查询可分发任务定义、创建子任务、接受或拒绝任务（见第 12 节）
+15. 任务提问与验收：project 接管提问答复；执行机器人申请验收，人或机器人需求方通过、返工或判失败（见第 12.3～12.6 节）
 16. 上传任意文件（≤50MB）并获取无需登录即可访问的公共 URL（见第 13 节；也可单独安装 `file-upload` 技能）
 
 本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
@@ -48,7 +48,7 @@ tags:
 
 - **个人令牌**：归属个人，登录网页 → 右上角头像 → 个人中心 → "Agent 访问令牌"可查看、复制与重置，重置后旧令牌立即失效。个人中心另提供「一键设置令牌（Shell）」脚本，可把令牌写入本机配置。
 - **公共 Agent 令牌**：由平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**。同样经 `X-Agent-Token` 头或 `?token=` 参数传递；通过它发起的写操作，操作人统一记录为「公共 Agent」。该令牌未配置时不可用。
-- **机器人独立令牌**：仅用于严格识别执行机器人的接口（任务验收申请）。平台在首次派发时生成并写入工位 `.opencode/agent-token`，调用时放在 `X-Worker-Token` 头；该令牌不能代替用户 Agent 令牌，用户令牌也不能代替机器人令牌。
+- **机器人独立令牌**：用于严格识别执行机器人或机器人需求方的接口（创建子任务、接受/拒绝、project 提问、验收申请，以及机器人需求方答复/验收）。平台在首次派发时生成并写入工位 `.opencode/agent-token`，调用时放在 `X-Worker-Token` 头；该令牌不能代替用户 Agent 令牌，用户令牌也不能代替机器人令牌。
 
 ### 令牌获取顺序（按优先级）
 
@@ -453,67 +453,94 @@ curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json'
 - 删除不可恢复；项目同步的 `/project/**` 知识只读，拒绝更新/删除
 - 返回内容含节点 ID、原/当前路径、类型、读取地址和网页地址，可直接用于后续复核
 
-## 12. 任务（Markdown）
+## 12. 多机器人任务协同（Markdown）
 
-任务由 AI 识别后回写详情，执行机器人完成后主动申请验收，需求方通过或拒绝。识别更新**只保存结果，不改变任务状态、不派发执行**；会话结束也**不会自动待验收**。
+任务创建后进入「等待中-待分配」，LOOP 按任务定义分配机器人并发送邀约。机器人必须在「等待中-待接受」明确接受或拒绝；接受后才进入「进行中-执行中」。一个机器人最多一个进行中任务，待接受、待反馈、待继续和待验收均可接受其他任务。
 
-### 12.1 task-recognize-detail：读取识别上下文
-
-```
-GET /api/tasks/{taskId}/recognize.md
-```
-
-- 返回带 frontmatter 的 Markdown：任务信息（ID/编号/标题/类型/描述/任务输入/需求内容/交付方式/工作计划）、状态、执行机器人、创建与更新时间
-- 附「有效机器人清单」：仅启用中的工作者机器人（ID/名称/描述）；调度机器人与停用机器人不会出现
-- 未分配机器人显示「未分配」；缺失文本显示「（暂无）」
-
-### 12.2 task-recognize-update：保存识别结果
-
-```bash
-curl -X POST {BASE}/api/tasks/{taskId}/recognize.md -H 'Content-Type: application/json' \
-  -d '{"title":"活动页开发","input":"用户原话：做个六一套 activity 页","content":"整理后的需求：…（含需求澄清与补充的详细信息）","outputSpec":"可访问的活动页链接","workPlan":"1. 开发页面\n2. 自测","agentId":1001}'
-```
-
-- `title` / `content`（需求内容，AI 分析整理后的需求，含需求澄清与补充的详细信息）/ `outputSpec`（交付方式）/ `workPlan`（任务计划，Markdown）必填
-- `input` 可选：用户的原始需求；不传保留原值，传空值或 `null` 清除
-- `agentId` 可选：不传保留原分配，传 `null` 清除；传 ID 时须为启用中的工作者机器人，否则 400
-- 成功返回 Markdown（任务 ID、状态、执行机器人与已保存字段）；任务不存在 404，参数不合法 400
-- 该接口只更新识别字段，不改状态、不派发执行、不创建子任务
-
-### 12.3 task-deliver-apply：执行机器人申请验收
-
-执行机器人完成交付后调用；会话执行成功不会自动进入待验收，未调用时任务保持「进行中-执行中」。
+### 12.1 task-defines / task-create：查询定义与创建子任务
 
 ```bash
 TOKEN=$(cat .opencode/agent-token)
-curl -N -X POST {BASE}/api/tasks/{taskId}/deliver/apply.md \
+
+# 当前可分发的任务定义（仅列有启用处理机器人的定义）
+curl {BASE}/api/tasks/defines.md -H "X-Worker-Token: $TOKEN"
+
+# 父任务执行机器人创建子任务；子任务需求方就是当前机器人
+curl -X POST {BASE}/api/tasks/{parentTaskId}/subtasks/create.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"templateId":11,"title":"开发活动页","input":"页面需求与素材","outputSpec":"可访问页面与自测说明"}'
+```
+
+- 先根据父任务定义判断是否需要协同，不要无目的拆分
+- 只有父任务当前执行机器人可在执行中创建子任务；子任务初始为待分配
+- 子任务提问、待验收或被拒绝时，平台写入父机器人收件箱，并在父机器人空闲时唤醒父任务会话
+
+### 12.2 task-accept / task-refuse：接受或拒绝邀约
+
+```bash
+# 接受：待接受 → 执行中；机器人忙碌时返回 409，不要开始执行
+curl -X POST {BASE}/api/tasks/{taskId}/accept-task.md \
+  -H "X-Worker-Token: $TOKEN"
+
+# 拒绝：仅待接受阶段；理由必填，建议填写分发建议
+curl -X POST {BASE}/api/tasks/{taskId}/refuse.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"reason":"不属于我的职责范围","suggestion":"建议分配给后端任务定义"}'
+```
+
+### 12.3 task-question-ask / task-question-answer：project 提问与答复
+
+```bash
+# 执行机器人提问；调用后停止本轮，等待平台恢复
+curl -X POST {BASE}/api/tasks/{taskId}/questions/ask.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"questions":[{"header":"方案确认","question":"使用哪个方案？","custom":true}]}'
+
+# 人或机器人需求方答复；答案顺序与问题一致
+curl -X POST {BASE}/api/tasks/{taskId}/questions/{questionId}/answer.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"answers":[["使用方案 A"]]}'
+```
+
+- 提问使用 project 生成的问题 ID，不再依赖 opencode 原生 question；答复后任务进入待继续，LOOP 空闲时恢复
+- 人类需求方使用 `X-Agent-Token`，机器人需求方使用 `X-Worker-Token`；跳过答复用 `{"reject":true}`
+
+### 12.4 task-handoff-apply：执行机器人申请验收
+
+```bash
+curl -X POST {BASE}/api/tasks/{taskId}/handoff/apply.md \
   -H "X-Worker-Token: $TOKEN"
 ```
 
-- 只接受 `X-Worker-Token`，且必须是任务当前执行机器人；用户令牌/网页会话调用返回 403
-- 只允许「进行中-执行中」；平台先生成/覆盖交付文档 `task/{yyyyMMdd}/{taskId}/HANDOFF.md`，再保存产出并流转「等待中-待验收」
-- 交付文档写入失败时申请验收失败，任务保持执行中；机器人被重新分配后原机器人不能申请
-- 成功返回 Markdown（含交付文档路径）；任务不存在 404
+- 只允许执行中的当前机器人；平台先生成/覆盖 `HANDOFF.md`，再保存产出并进入待验收
+- 会话成功不会自动申请验收；交付文档写入失败时任务保持执行中
 
-### 12.4 task-deliver-reply：需求方处理验收反馈
-
-只允许任务创建用户调用；子任务回退根任务创建人。公共 Agent 令牌、管理员身份不能绕过需求方校验。
+### 12.5 task-handoff-accept / task-handoff-refuse：需求方验收
 
 ```bash
-# 通过验收：任务 → 已结束-完成，异步生成 REVIEW.md 复盘并销毁执行器会话
-curl -X POST {BASE}/api/tasks/{taskId}/deliver/reply.md \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"action":"accept"}'
+# 通过：待验收 → 完成，异步生成 REVIEW.md 并销毁执行会话
+curl -X POST {BASE}/api/tasks/{taskId}/handoff/accept.md \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
 
-# 拒绝验收：必须提供反馈，任务 → 进行中-执行中，原文退回执行机器人
-curl -X POST {BASE}/api/tasks/{taskId}/deliver/reply.md \
+# 返工：feedback 必填；机器人空闲直接执行，忙碌先进入待继续
+curl -X POST {BASE}/api/tasks/{taskId}/handoff/refuse.md \
   -H "X-Agent-Token: $LITA_PROJECT_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"action":"refuse","content":"页面缺少加载状态，请补充后重新申请验收"}'
+  -d '{"content":"缺少加载状态，请补充"}'
 ```
 
-- `action` 只支持 `accept` / `refuse`；`refuse` 时 `content` 必填
-- 仅允许「等待中-待验收」；拒绝后使用原执行机器人/会话继续处理，完成后需重新申请验收
-- 返回 `text/markdown`；非需求方 403、参数不合法 400
+- 机器人需求方改用 `X-Worker-Token`；只有显式需求方可操作，管理员不能绕过
+- 累计第 1～3 次返工退回原机器人，第 4 次起转执行机器人负责人处理
+
+### 12.6 task-fail：需求方判定失败
+
+```bash
+curl -X POST {BASE}/api/tasks/{taskId}/fail.md \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"reason":"交付不可用且不再继续返工"}'
+```
+
+- 仅允许需求方在待验收阶段调用，失败原因必填，任务进入已结束-失败
+- 旧 `deliver/apply.md` 与 `deliver/reply.md` 暂时保留兼容，新机器人统一使用上述 handoff 接口
 
 ## 13. 文件上传（Markdown）
 
@@ -536,5 +563,5 @@ curl -X POST {BASE}/api/files/upload.md \
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、任务识别结果更新（tasks/{id}/recognize.md）、执行机器人申请验收（tasks/{id}/deliver/apply.md）与需求方处理验收反馈（tasks/{id}/deliver/reply.md）、文件上传（files/upload.md）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、handoff 验收与失败判定）、文件上传（files/upload.md）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

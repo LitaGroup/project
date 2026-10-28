@@ -899,14 +899,17 @@ export interface TaskTypeDef {
 export const TASK_STATUSES = ['等待中', '进行中', '已结束'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
-/** 任务子状态：与主状态严格对应（等待中：待识别/待反馈/待验收；进行中：识别中/执行中；已结束：完成/取消） */
+/** 任务子状态：与主状态严格对应（等待中：待分配/待接受/待反馈/待继续/待验收；进行中：执行中；已结束：完成/已拒绝/失败/取消） */
 export const TASK_SUB_STATUSES = [
-  '待识别',
+  '待分配',
+  '待接受',
   '待反馈',
+  '待继续',
   '待验收',
-  '识别中',
   '执行中',
   '完成',
+  '已拒绝',
+  '失败',
   '取消',
 ] as const
 export type TaskSubStatus = (typeof TASK_SUB_STATUSES)[number]
@@ -1157,8 +1160,16 @@ export interface TaskPackage {
   missingItems: TaskMissingItem[] | null
   /** 主状态：等待中 / 进行中 / 已结束 */
   status: TaskStatus
-  /** 子状态：待识别 / 待反馈 / 待验收 / 识别中 / 执行中 / 完成 / 取消 */
+  /** 子状态：待分配 / 待接受 / 待反馈 / 待继续 / 待验收 / 执行中 / 完成 / 已拒绝 / 失败 / 取消 */
   subStatus: TaskSubStatus
+  /** 需求方类型：user=人类用户 / worker=父任务机器人 */
+  requesterType: 'user' | 'worker' | null
+  /** 需求方 id（users.id 或 workers.id，与 requesterType 联合解释） */
+  requesterId: number | null
+  /** 待继续时下一次派发需要补充的上下文（答复/返工/子任务事件） */
+  resumePrompt: string | null
+  /** 最近一次任务邀约时间（待接受重试节流） */
+  offerAttemptAt: string | null
   /** 工作计划（历史识别或外部 AI 更新，Markdown） */
   workPlan: string | null
   /** 待反馈/待验收提醒次数 */
@@ -1175,7 +1186,23 @@ export interface TaskPackage {
   acceptedAt: string | null
   acceptedBy: string | null
   deliveredAt: string | null
+  /** 累计验收不通过次数（第 4 次起转任务负责人） */
+  acceptRejectCount: number
+  /** 转任务负责人的时间（未升级为 null） */
+  ownerTakeoverAt: string | null
+  ownerTakeoverUserId: number | null
+  ownerTakeoverName: string | null
   archivedAt: string | null
+  /** 机器人拒绝承接时间、操作者与理由 */
+  refusedAt: string | null
+  refusedBy: string | null
+  refusalReason: string | null
+  /** 机器人拒绝承接时给出的分发建议 */
+  dispatchSuggestion: string | null
+  /** 需求方判定任务失败的时间、判定人与原因 */
+  failedAt: string | null
+  failedBy: string | null
+  failureReason: string | null
   canceledAt: string | null
   createdAt: string
   updatedAt: string
@@ -2270,16 +2297,16 @@ export const api = {
     }),
   deleteTaskPackage: (id: number) =>
     request<void>(`/tasks/${id}`, { method: 'DELETE' }),
-  /** 重新识别：等待中-待反馈 → 等待中-待识别（LOOP 下一轮自动处理） */
+  /** 重新提交：等待中-待反馈 → 等待中-待继续（机器人空闲后恢复执行） */
   submitTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/submit`, { method: 'POST' }),
-  /** 提交反馈并重新识别（反馈正文追加到任务描述） */
+  /** 提交反馈并等待继续（反馈正文追加到任务描述） */
   provideTaskFeedback: (id: number, content?: string) =>
     request<TaskPackage>(`/tasks/${id}/feedback`, {
       method: 'POST',
       body: JSON.stringify({ content }),
     }),
-  /** 任务对话发送消息：识别阶段补充需求，执行阶段直接续聊 */
+  /** 任务对话发送消息：等待阶段补充需求，执行阶段直接续聊 */
   sendTaskMessage: (id: number, content: string) =>
     request<TaskPackage>(`/tasks/${id}/messages`, {
       method: 'POST',
@@ -2313,6 +2340,18 @@ export const api = {
   /** 验收通过：等待中-待验收 → 已结束-完成（后台生成任务复盘） */
   acceptTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/accept`, { method: 'POST' }),
+  /** 验收不通过：前 3 次退回机器人，第 4 次起转任务负责人待反馈 */
+  rejectTask: (id: number, content: string) =>
+    request<TaskPackage>(`/tasks/${id}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  /** 判定任务失败：等待中-待验收 → 已结束-失败 */
+  failTask: (id: number, reason: string) =>
+    request<TaskPackage>(`/tasks/${id}/fail`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
   /** 重新生成任务复盘（固定覆盖 REVIEW.md） */
   generateTaskHandoff: (id: number) =>
     request<{ accepted: true }>(`/tasks/${id}/handoff`, {

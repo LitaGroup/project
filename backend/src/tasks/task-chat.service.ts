@@ -280,13 +280,21 @@ export class TaskChatService implements OnModuleDestroy {
     }
 
     entries.sort((a, b) => a.at - b.at || a.seq - b.seq);
-    const requesterId = task.createdById ?? rootTask.createdById;
+    const requesterType =
+      task.requesterType ?? (task.createdById ? 'user' : null);
+    const requesterId =
+      task.requesterId ?? task.createdById ?? rootTask.createdById;
     const [requester, agent] = await Promise.all([
-      requesterId
-        ? this.users.findOne({
-            where: { id: requesterId },
-            select: { id: true, name: true },
-          })
+      requesterId && requesterType
+        ? requesterType === 'worker'
+          ? this.workers.findOne({
+              where: { id: requesterId },
+              select: { id: true, name: true },
+            })
+          : this.users.findOne({
+              where: { id: requesterId },
+              select: { id: true, name: true },
+            })
         : Promise.resolve(null),
       task.agentId
         ? this.workers.findOne({
@@ -395,7 +403,7 @@ export class TaskChatService implements OnModuleDestroy {
     message.status = 'complete';
     this.flushNow(message);
     this.active.delete(taskId);
-    this.persistMessage(message);
+    void this.persistMessage(message);
   }
 
   /** 机器人开始思考：复用当前助手消息，思考内容与文本同气泡展示 */
@@ -420,7 +428,7 @@ export class TaskChatService implements OnModuleDestroy {
     const message = this.activeMessage(taskId);
     if (!message?.reasoning?.trim()) return;
     this.flushNow(message);
-    this.persistMessage(message);
+    void this.persistMessage(message);
   }
 
   /** 当前任务是否有机器人在回复（用于续聊并发保护） */
@@ -446,7 +454,7 @@ export class TaskChatService implements OnModuleDestroy {
       task.updatedAt ??
       new Date()
     ).toISOString();
-    this.persistMessage({
+    void this.persistMessage({
       id: `result:${taskId}:${task.updatedAt.getTime()}`,
       taskId,
       rootTaskId: await this.rootIdOf(taskId),
@@ -553,7 +561,8 @@ export class TaskChatService implements OnModuleDestroy {
     };
     this.store(message);
     this.broadcastMessage(message);
-    this.persistMessage(message);
+    // project 提问创建后可能立即被需求方答复，先确保可从数据库恢复。
+    await this.persistMessage(message);
     return true;
   }
 
@@ -575,7 +584,31 @@ export class TaskChatService implements OnModuleDestroy {
     };
     message.status = 'complete';
     this.broadcastMessage(message);
-    this.persistMessage(message);
+    void this.persistMessage(message);
+  }
+
+  /** 更新提问消息的附加信息（如父机器人自动答复状态），保留原 meta 其他字段 */
+  setQuestionMeta(
+    taskId: number,
+    requestId: string,
+    meta: Record<string, unknown>,
+  ): void {
+    const message = this.live
+      .get(taskId)
+      ?.get(this.questionMessageId(taskId, requestId));
+    if (!message?.question) return;
+    message.meta = { ...message.meta, ...meta };
+    this.broadcastMessage(message);
+    void this.persistMessage(message);
+  }
+
+  /** 提问消息的附加信息（自动答复恢复判断用） */
+  questionMeta(
+    taskId: number,
+    requestId: string,
+  ): Record<string, unknown> | undefined {
+    return this.live.get(taskId)?.get(this.questionMessageId(taskId, requestId))
+      ?.meta;
   }
 
   /** 指定任务的待回答提问（对账/答复校验用） */
@@ -635,7 +668,7 @@ export class TaskChatService implements OnModuleDestroy {
     };
     this.store(message);
     this.broadcastMessage(message);
-    this.persistMessage(message);
+    void this.persistMessage(message);
     return this.toPublic(message);
   }
 
@@ -657,7 +690,7 @@ export class TaskChatService implements OnModuleDestroy {
     };
     this.store(message);
     this.broadcastMessage(message);
-    this.persistMessage(message);
+    void this.persistMessage(message);
   }
 
   /** 会话执行失败：把当前正在输出的助手消息标记为 error，停止「正在执行」状态 */
@@ -667,10 +700,12 @@ export class TaskChatService implements OnModuleDestroy {
     if (messages) {
       for (const message of messages.values()) {
         if (message.question?.state !== 'pending') continue;
+        // project 提问由任务状态机管理，执行器本轮失败不等于问题失效。
+        if (message.question.id.startsWith('project-')) continue;
         message.question = { ...message.question, state: 'cancelled' };
         message.status = 'complete';
         this.flushNow(message);
-        this.persistMessage(message);
+        void this.persistMessage(message);
       }
     }
     const message = this.activeMessage(taskId);
@@ -682,16 +717,25 @@ export class TaskChatService implements OnModuleDestroy {
     message.status = 'error';
     this.flushNow(message);
     this.active.delete(taskId);
-    this.persistMessage(message);
+    void this.persistMessage(message);
   }
 
-  /** 会话结束：收尾当前消息（含未回答的提问）并通知前端刷新快照（拿最终产出） */
-  async finishTask(taskId: number): Promise<void> {
+  /** 会话结束：收尾当前消息并通知前端刷新；project 待反馈提问可按需保留。 */
+  async finishTask(
+    taskId: number,
+    options?: { preserveProjectQuestions?: boolean },
+  ): Promise<void> {
     const messages = this.live.get(taskId);
     if (messages) {
       for (const message of messages.values()) {
         let changed = false;
-        if (message.question?.state === 'pending') {
+        if (
+          message.question?.state === 'pending' &&
+          !(
+            options?.preserveProjectQuestions &&
+            message.question.id.startsWith('project-')
+          )
+        ) {
           message.question = { ...message.question, state: 'cancelled' };
           changed = true;
         }
@@ -701,7 +745,7 @@ export class TaskChatService implements OnModuleDestroy {
         }
         if (changed) {
           this.flushNow(message);
-          this.persistMessage(message);
+          void this.persistMessage(message);
         }
       }
     }
@@ -746,12 +790,24 @@ export class TaskChatService implements OnModuleDestroy {
       };
     }
 
-    // 用户反馈：进入对话流，而非时间线
+    // 需求方反馈：进入对话流，而非时间线；父机器人需求方也保留机器人身份。
     if (event.type === '反馈') {
+      const actorWorkerId =
+        typeof meta.actorWorkerId === 'number' ? meta.actorWorkerId : null;
+      const sender =
+        meta.actorType === 'worker' && actorWorkerId
+          ? {
+              id: `worker:${actorWorkerId}`,
+              name: event.operator ?? '需求方机器人',
+              kind: 'worker' as const,
+              workerId: actorWorkerId,
+              roleLabel: '需求方机器人',
+            }
+          : this.userSender(event.operator);
       return {
         ...base,
         role: 'user',
-        sender: this.userSender(event.operator),
+        sender,
         content: event.content,
         kind: 'message',
         meta,
@@ -1026,8 +1082,8 @@ export class TaskChatService implements OnModuleDestroy {
   }
 
   /** 消息落库（按 taskId + messageKey 幂等 upsert；失败只告警不阻断对话） */
-  private persistMessage(message: InternalChatMessage): void {
-    void this.messages
+  private persistMessage(message: InternalChatMessage): Promise<void> {
+    return this.messages
       .upsert(
         {
           taskId: message.taskId,
@@ -1046,6 +1102,7 @@ export class TaskChatService implements OnModuleDestroy {
         },
         ['taskId', 'messageKey'],
       )
+      .then(() => undefined)
       .catch((error: Error) => {
         this.logger.warn(
           `任务消息落库失败（taskId=${message.taskId}）: ${error.message}`,

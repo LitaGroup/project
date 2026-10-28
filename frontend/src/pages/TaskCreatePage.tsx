@@ -23,7 +23,7 @@ import {
 
 /**
  * 新建任务（独立页面）：填写任务描述（Markdown），右侧可选任务类型与任务定义。
- * 创建后由平台直接按任务定义/类型识别分配处理机器人，不调用机器人；
+ * 创建后进入等待分配，由平台按任务定义/类型匹配处理机器人；
  * 无法匹配时归入「未知任务」，交给系统未知任务定义（ID=6）的处理机器人接管。
  */
 export function TaskCreatePage() {
@@ -115,7 +115,7 @@ export function TaskCreatePage() {
           />
           <h1 className="mt-2 text-2xl font-semibold">新建任务</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            填写任务描述即可；平台会按任务定义和类型直接识别分配处理机器人，无法匹配时自动归入「未知任务」
+            填写任务描述即可；创建后进入等待分配，平台会按任务定义和类型匹配处理机器人，无法匹配时自动归入「未知任务」
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -178,7 +178,7 @@ export function TaskCreatePage() {
                 items={typeItems}
               >
                 <SelectTrigger className="w-full" clearable>
-                  <SelectValue placeholder="不指定，由系统识别" />
+                  <SelectValue placeholder="不指定，由平台自动匹配" />
                 </SelectTrigger>
                 <SelectContent>
                   {taskTypes.map((type) => (

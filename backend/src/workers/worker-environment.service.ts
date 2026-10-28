@@ -32,6 +32,47 @@ const STREAM_PING_MS = 15_000;
 /** 进度行上限（防失控任务撑爆内存） */
 const MAX_LINES = 500;
 
+/** 平台统一注入工位 AGENTS.md 的多机器人协同协议（角色定义之后原样保留）。 */
+const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固定）
+
+### 基本原则
+
+1. 一个任务有且只有一个负责机器人和一个需求方；需求方可以是人类用户，也可以是父任务机器人。
+2. 任务来源包括人类创建和机器人通过 task-create 创建。同一时间只执行一个「进行中」任务；等待中的任务不占用你，可以接受其他任务。
+3. 机器人身份令牌位于 .opencode/agent-token，调用任务接口时使用 X-Worker-Token，不得把令牌写入聊天、交付物或文档。
+
+### 任务状态与动作
+
+- 待分配 → 待接受：平台按任务定义分配机器人并发送邀约。
+- 待接受 → 执行中：确认任务匹配后调用 task-accept。接受失败或提示忙碌时不要执行，保持等待。
+- 待接受 → 已拒绝：任务不匹配自己的职责时，只能在待接受阶段调用 task-refuse，必须填写拒绝理由 reason，并尽量给出发送建议 suggestion（推荐任务定义、任务类型或机器人）。不得接受后再拒绝，也不得把不匹配任务转交他人代替拒绝接口。
+- 执行中 → 待反馈：需要需求方澄清时调用 task-question-ask，由 project 创建和展示提问；不要使用 opencode 原生 question。调用后停止本轮，等待平台恢复。
+- 待反馈 → 待继续 → 执行中：需求方答复后，平台在机器人空闲时恢复原任务会话。
+- 执行中 → 待验收：完成、自检并准备好交付物后调用 task-handoff-apply；会话结束不等于完成，未申请验收会一直保持执行中。
+- 待验收 → 完成/待继续或执行中/失败：只能由任务需求方分别调用 task-handoff-accept、task-handoff-refuse 或 task-fail。机器人不得代替需求方验收或判失败。
+
+### 创建与处理子任务
+
+1. 先阅读当前任务定义，判断是否需要其他类型机器人协同；不要无目的拆分。
+2. 需要拆分时，先调用 task-defines 查询当前支持分发的任务定义，再调用 task-create 创建子任务，明确输入与输出要求。
+3. 你是自己所创建子任务的需求方。子任务提问、申请验收或被拒绝时，平台会把事件持久化到收件箱，并在你空闲时唤醒父任务会话。
+4. 对子任务提问调用 task-question-answer；对交付物调用 task-handoff-accept、task-handoff-refuse 或 task-fail；对被拒绝任务根据拒绝理由和分发建议决定是否重新创建子任务。
+5. 处理完子任务事件后继续父任务。不要代替子任务执行机器人调用 task-accept、task-question-ask 或 task-handoff-apply。
+
+### 可用操作
+
+- task-defines：GET /api/tasks/defines.md
+- task-create：POST /api/tasks/{parentTaskId}/subtasks/create.md
+- task-accept：POST /api/tasks/{taskId}/accept-task.md
+- task-refuse：POST /api/tasks/{taskId}/refuse.md
+- task-question-ask：POST /api/tasks/{taskId}/questions/ask.md
+- task-question-answer：POST /api/tasks/{taskId}/questions/{questionId}/answer.md
+- task-handoff-apply：POST /api/tasks/{taskId}/handoff/apply.md
+- task-handoff-accept：POST /api/tasks/{taskId}/handoff/accept.md
+- task-handoff-refuse：POST /api/tasks/{taskId}/handoff/refuse.md
+- task-fail：POST /api/tasks/{taskId}/fail.md
+`;
+
 /** 初始化状态：idle=无任务（从未初始化或快照已过期清理） */
 export type WorkerInitializeStatus = 'idle' | 'running' | 'success' | 'failed';
 
@@ -445,6 +486,11 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
 ${agents}
 \`\`\`\`
 
+### 平台固定协同协议
+\`\`\`\`markdown
+${TASK_COLLABORATION_AGENTS}
+\`\`\`\`
+
 ### 目录结构
 
 - AGENTS.md    机器人的工作基本原则
@@ -455,7 +501,7 @@ ${agents}
 
 ### 更新要求
 
-1. 把「工作职责定义」中的 Markdown 原文完整写入当前工作目录的 AGENTS.md；不要改写、缩写或额外发挥。
+1. 把「工作职责定义」和「平台固定协同协议」中的 Markdown 原文完整写入当前工作目录的 AGENTS.md；不要改写、缩写或额外发挥。协同协议放在工作职责定义之后。
 2. 确保 AGENTS.md 中包含上面的目录结构说明。
 3. 保留 .opencode/ 下与本次更新无关的配置；.opencode/docs/ 中不属于规范同步清单的文档不要清空或改写。
 4. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。

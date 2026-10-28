@@ -70,13 +70,24 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       taskRealtime as never,
       taskChat as never,
       {} as never,
+      {} as never,
+      {
+        enqueue: jest.fn(),
+        requeueDelivered: jest.fn(),
+      } as never,
+      { transaction: jest.fn() } as never,
       { get: jest.fn() } as never,
     );
     dispatchSpy = jest.spyOn(service, 'dispatch').mockResolvedValue(baseTask());
   });
 
-  it('待验收任务可继续对话：归档结果、记反馈并重新派发', async () => {
-    tasksRepo.findOne.mockResolvedValue(baseTask());
+  it('已占用机器人的执行任务可继续对话：归档结果、记反馈并重新派发', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      }),
+    );
 
     await service.continueConversation(1, '继续修改文案', '张三');
 
@@ -99,7 +110,7 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
     await expect(
       service.continueConversation(1, '补充内容', '张三'),
     ).rejects.toThrow(
-      new BadRequestException('当前任务应先补充需求并重新识别'),
+      new BadRequestException('等待任务必须先由 LOOP 或验收返工占用机器人'),
     );
     expect(dispatchSpy).not.toHaveBeenCalled();
   });
@@ -112,7 +123,7 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
     await expect(
       service.continueConversation(1, '补充内容', '张三'),
     ).rejects.toThrow(
-      new BadRequestException('当前任务应先补充需求并重新识别'),
+      new BadRequestException('等待任务必须先由 LOOP 或验收返工占用机器人'),
     );
     expect(dispatchSpy).not.toHaveBeenCalled();
   });
@@ -166,7 +177,7 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
     await expect(
       service.continueConversation(1, '补充内容', '张三'),
     ).rejects.toThrow(
-      new BadRequestException('当前任务应先补充需求并重新识别'),
+      new BadRequestException('等待任务必须先由 LOOP 或验收返工占用机器人'),
     );
     expect(dispatchSpy).not.toHaveBeenCalled();
   });

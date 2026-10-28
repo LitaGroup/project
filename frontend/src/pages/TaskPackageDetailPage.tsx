@@ -197,7 +197,7 @@ export function TaskPackageDetailPage() {
     [taskId],
   )
 
-  /** 回答/跳过机器人提问：后端转发 opencode question.reply/reject */
+  /** 回答/跳过提问：待反馈走 project 答复，历史会话兼容 opencode reply/reject */
   const replyQuestion = useCallback(
     async (questionId: string, answers: string[][] | null) => {
       setBusy(true)

@@ -165,7 +165,7 @@ export function formToQuestionRequest(
       const options = Array.isArray(field.options)
         ? field.options
             .map((rawOption): OpencodeQuestionOption | null => {
-              const option = rawOption ?? {};
+              const option = (rawOption ?? {}) as Record<string, unknown>;
               const value =
                 typeof option.value === 'string' ? option.value : '';
               const label =

@@ -170,10 +170,7 @@ export class WorkersService {
     return token;
   }
 
-  /**
-   * 实时状态推导：工作者按名下任务 执行中 > 待验收 > 已派发（等待） > 空闲；
-   * 调度机器人按正在识别（schedulerId）的任务显示工作中。
-   */
+  /** 实时状态：只有进行中任务占用机器人；待验收 > 其他等待 > 空闲。 */
   private async liveByWorker(
     workers: Worker[],
   ): Promise<Map<number, { status: WorkerLiveStatus; task: Task | null }>> {
@@ -200,29 +197,20 @@ export class WorkersService {
       );
       const waiting = own.find((t) =>
         [
-          TaskSubStatus.PENDING_IDENTIFY,
+          TaskSubStatus.PENDING_ASSIGNMENT,
+          TaskSubStatus.PENDING_ACCEPTANCE,
           TaskSubStatus.PENDING_FEEDBACK,
-          TaskSubStatus.IDENTIFYING,
+          TaskSubStatus.PENDING_RESUME,
         ].includes(t.subStatus),
       );
-      const identifying =
-        worker.role === WorkerRole.SCHEDULER
-          ? activeTasks.find(
-              (t) =>
-                t.schedulerId === worker.id &&
-                t.subStatus === TaskSubStatus.IDENTIFYING,
-            )
-          : undefined;
-      const current = identifying ?? executing ?? accepting ?? waiting ?? null;
-      const status = identifying
+      const current = executing ?? accepting ?? waiting ?? null;
+      const status = executing
         ? WorkerLiveStatus.WORKING
-        : executing
-          ? WorkerLiveStatus.WORKING
-          : accepting
-            ? WorkerLiveStatus.ACCEPTING
-            : waiting
-              ? WorkerLiveStatus.WAITING
-              : WorkerLiveStatus.IDLE;
+        : accepting
+          ? WorkerLiveStatus.ACCEPTING
+          : waiting
+            ? WorkerLiveStatus.WAITING
+            : WorkerLiveStatus.IDLE;
       map.set(worker.id, { status, task: current });
     }
     return map;

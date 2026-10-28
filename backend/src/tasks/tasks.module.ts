@@ -12,6 +12,9 @@ import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
+import { TaskWorkerInbox } from './task-worker-inbox.entity';
+import { TaskWorkerInboxService } from './task-worker-inbox.service';
+import { TaskCollaborationService } from './task-collaboration.service';
 import { TaskAssignmentService } from './task-assignment.service';
 import { TaskChatService } from './task-chat.service';
 import { TaskDeliveryService } from './task-delivery.service';
@@ -20,6 +23,7 @@ import { TaskDocumentService } from './task-document.service';
 import { TaskHandoffService } from './task-handoff.service';
 import { TaskLoopService } from './task-loop.service';
 import { TaskNotifyService } from './task-notify.service';
+import { TaskQuestionAutoAnswerService } from './task-question-auto-answer.service';
 import { TaskRealtimeService } from './task-realtime.service';
 import { TaskTemplatesController } from './task-templates.controller';
 import { TaskTemplatesService } from './task-templates.service';
@@ -33,6 +37,7 @@ import { TasksService } from './tasks.service';
       TaskEvent,
       TaskMessage,
       TaskTemplate,
+      TaskWorkerInbox,
       Worker,
       User,
       Executor,
@@ -54,6 +59,9 @@ import { TasksService } from './tasks.service';
     TaskHandoffService,
     TaskLoopService,
     TaskNotifyService,
+    TaskQuestionAutoAnswerService,
+    TaskWorkerInboxService,
+    TaskCollaborationService,
     TaskRealtimeService,
     TaskTemplatesService,
   ],

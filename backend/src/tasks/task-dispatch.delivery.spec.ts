@@ -26,7 +26,11 @@ describe('TaskDispatchService 显式申请验收', () => {
 
   const worker = { id: 1001, name: '前端工程师' } as Worker;
 
-  let tasksRepo: { findOne: jest.Mock; save: jest.Mock };
+  let tasksRepo: {
+    findOne: jest.Mock;
+    save: jest.Mock;
+    update: jest.Mock;
+  };
   let eventsRepo: { create: jest.Mock; save: jest.Mock };
   let taskChat: { finishTask: jest.Mock };
   let taskNotify: { notifyTaskRequester: jest.Mock };
@@ -38,6 +42,15 @@ describe('TaskDispatchService 显式申请验收', () => {
     tasksRepo = {
       findOne: jest.fn(),
       save: jest.fn((task: Task) => Promise.resolve(task)),
+      update: jest
+        .fn()
+        .mockImplementation(
+          async (_criteria: unknown, patch: Partial<Task>) => {
+            const task = (await tasksRepo.findOne()) as Task;
+            Object.assign(task, patch);
+            return { affected: 1 };
+          },
+        ),
     };
     eventsRepo = {
       create: jest.fn((value: unknown) => value),
@@ -70,6 +83,12 @@ describe('TaskDispatchService 显式申请验收', () => {
       taskRealtime as never,
       taskChat as never,
       taskDocuments as never,
+      { start: jest.fn() } as never,
+      {
+        enqueue: jest.fn().mockResolvedValue(null),
+        requeueDelivered: jest.fn().mockResolvedValue(undefined),
+      } as never,
+      { transaction: jest.fn() } as never,
       { get: jest.fn() } as never,
     );
   });
@@ -137,6 +156,25 @@ describe('TaskDispatchService 显式申请验收', () => {
     expect(task.subStatus).toBe(TaskSubStatus.EXECUTING);
     expect(tasksRepo.save).not.toHaveBeenCalled();
     expect(taskNotify.notifyTaskRequester).not.toHaveBeenCalled();
+  });
+
+  it('project 提问后会话结束：关闭运行态但保留待答问题', async () => {
+    const task = baseTask({
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_FEEDBACK,
+    });
+    tasksRepo.findOne.mockResolvedValue(task);
+
+    await (
+      service as unknown as {
+        finalizeSuccess(taskId: number): Promise<void>;
+      }
+    ).finalizeSuccess(1);
+
+    expect(taskChat.finishTask).toHaveBeenCalledWith(1, {
+      preserveProjectQuestions: true,
+    });
+    expect(task.subStatus).toBe(TaskSubStatus.PENDING_FEEDBACK);
   });
 
   it('会话成功只补齐产出，不自动进入待验收', async () => {

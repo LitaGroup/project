@@ -36,6 +36,7 @@ describe('TasksService 任务详情与对话', () => {
     findOne: jest.Mock;
     save: jest.Mock;
     create: jest.Mock;
+    update: jest.Mock;
   };
   let taskTemplatesRepo: { findOne: jest.Mock };
   let usersRepo: { findOne: jest.Mock };
@@ -51,6 +52,15 @@ describe('TasksService 任务详情与对话', () => {
       findOne: jest.fn(),
       save: jest.fn((task: Task) => Promise.resolve(task)),
       create: jest.fn((task: Partial<Task>) => task),
+      update: jest
+        .fn()
+        .mockImplementation(
+          async (_criteria: unknown, patch: Partial<Task>) => {
+            const current = (await tasksRepo.findOne()) as Task;
+            Object.assign(current, patch);
+            return { affected: 1 };
+          },
+        ),
     };
     taskTemplatesRepo = { findOne: jest.fn() };
     usersRepo = { findOne: jest.fn() };
@@ -69,18 +79,23 @@ describe('TasksService 任务详情与对话', () => {
       { findAll: jest.fn().mockResolvedValue([]) } as never,
       { assertExists: jest.fn().mockResolvedValue('其它') } as never,
       dispatchService as never,
+      {
+        deleteForTasks: jest.fn(),
+        completeForChild: jest.fn(),
+        enqueue: jest.fn(),
+      } as never,
       { taskChanged: jest.fn() } as never,
     );
   });
 
-  it('补充需求后回到待识别，并记录一次人工介入', async () => {
+  it('补充需求后进入待继续，并记录一次人工介入', async () => {
     tasksRepo.findOne.mockResolvedValue(baseTask());
 
     const saved = await service.supplement(1, '  补充材料  ', '张三');
 
     expect(saved.description).toBe('原始需求\n\n补充材料');
     expect(saved.status).toBe(TaskStatus.WAITING);
-    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_IDENTIFY);
+    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
     expect(saved.missingItems).toBeNull();
     expect(saved.remindCount).toBe(0);
     expect(saved.firstRemindedAt).toBeNull();
@@ -96,11 +111,20 @@ describe('TasksService 任务详情与对话', () => {
       2,
       1,
       '状态变更',
-      '状态变更：等待中-待反馈 → 等待中-待识别（补充需求后重新识别）',
+      '状态变更：等待中-待反馈 → 等待中-待继续（补充需求）',
       '张三',
       undefined,
     );
     expect(dispatchService.addEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('未分配机器人的待反馈任务补充后回到待分配', async () => {
+    tasksRepo.findOne.mockResolvedValue(baseTask({ agentId: null }));
+
+    const saved = await service.supplement(1, '补充任务定义', '张三');
+
+    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_ASSIGNMENT);
+    expect(saved.resumePrompt).toBeNull();
   });
 
   it('已结束任务不能继续发送消息', async () => {

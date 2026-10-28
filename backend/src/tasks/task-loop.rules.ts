@@ -49,13 +49,23 @@ export interface MappedTaskStatus {
  */
 export function mapLegacyTaskStatus(
   legacyStatus: string,
+  legacySubStatus?: string,
 ): MappedTaskStatus | null {
+  if (
+    legacySubStatus === TaskSubStatus.PENDING_IDENTIFY ||
+    legacySubStatus === TaskSubStatus.IDENTIFYING
+  ) {
+    return {
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
+    };
+  }
   switch (legacyStatus) {
     case '草稿':
     case '待调度':
       return {
         status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_IDENTIFY,
+        subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
       };
     case '待补材料':
     case '待确认':

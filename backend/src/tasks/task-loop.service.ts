@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, LessThan, Repository } from 'typeorm';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
 import { Task, TaskMissingItem } from './task.entity';
 import {
@@ -9,38 +9,37 @@ import {
   type TaskAssignmentResult,
 } from './task-assignment.service';
 import { TaskDispatchService } from './task-dispatch.service';
-import { TaskNotifyService } from './task-notify.service';
+import {
+  TaskNotifyService,
+  type TaskNotifyResult,
+} from './task-notify.service';
 import {
   mapLegacyTaskStatus,
   nextReminderAction,
   TASK_REMIND_TIMEOUT_DAYS,
 } from './task-loop.rules';
 import { TasksService } from './tasks.service';
+import {
+  taskInboxPrompt,
+  TaskWorkerInboxService,
+} from './task-worker-inbox.service';
 
-/** 提醒收件查询上限（防止极端堆积时单轮过重） */
 const REMIND_BATCH_SIZE = 100;
+const OFFER_RETRY_MS = 30_000;
 
 /**
- * 任务 LOOP（每秒一次）：按「主状态 + 子状态」推进任务。
- *
- * 等待中-待识别 → 置「进行中-识别中」，平台按任务定义/类型直接识别分配处理机器人；
- * 无法匹配时归入「未知任务」并交给系统未知任务定义（ID=6）的处理机器人；
- * 等待中-待反馈 → 每 30 分钟提醒负责人一次，首次提醒满 7 天未处理标记失败（已结束-取消）；
- * 等待中-待验收 → 每 30 分钟提醒需求方一次，首次提醒满 7 天未处理按成功完成（已结束-完成）；
- * 进行中 / 已结束 → 本轮不处理。
+ * 多机器人任务 LOOP（每秒）：
+ * 待分配→分配；待接受→任务邀约；待继续→机器人空闲后恢复；
+ * 机器人需求方收件箱→父任务待继续；待反馈/待验收仅提醒，不占用机器人。
  */
 @Injectable()
 export class TaskLoopService implements OnApplicationBootstrap {
   private readonly logger = new Logger(TaskLoopService.name);
-
-  /** 启动迁移完成后才开始循环 */
   private ready = false;
-
-  /** 单轮互斥：通知/识别启动串行执行，避免重叠 */
   private running = false;
-
-  /** 进程内正在发送提醒的任务 */
   private readonly reminding = new Set<number>();
+  private readonly offering = new Set<number>();
+  private readonly resuming = new Set<number>();
 
   constructor(
     @InjectRepository(Task)
@@ -49,12 +48,12 @@ export class TaskLoopService implements OnApplicationBootstrap {
     private readonly assignmentService: TaskAssignmentService,
     private readonly dispatchService: TaskDispatchService,
     private readonly taskNotify: TaskNotifyService,
+    private readonly workerInbox: TaskWorkerInboxService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     try {
       await this.migrateLegacyStatuses();
-      await this.recoverInterruptedIdentifying();
     } catch (e) {
       this.logger.error(`任务 LOOP 启动迁移失败: ${(e as Error).message}`);
     } finally {
@@ -67,7 +66,10 @@ export class TaskLoopService implements OnApplicationBootstrap {
     if (!this.ready || this.running) return;
     this.running = true;
     try {
+      await this.queueWorkerInbox();
       await this.assignPending();
+      await this.offerPending();
+      await this.resumePending();
       await this.processReminders('feedback');
       await this.processReminders('accept');
     } catch (e) {
@@ -77,188 +79,95 @@ export class TaskLoopService implements OnApplicationBootstrap {
     }
   }
 
-  // ===== 待识别分配 =====
+  // ===== 待分配 → 待接受 =====
 
-  /** 领取待识别任务 → 进行中-识别中 → 平台直接识别分配 */
   private async assignPending(): Promise<void> {
     const pending = await this.tasks.find({
       where: {
         status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_IDENTIFY,
+        subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
       },
       order: { id: 'ASC' },
       take: 20,
     });
     for (const task of pending) {
-      // 原子领取：仅当仍是「等待中-待识别」时推进，避免并发重复处理
-      const claimed = await this.tasks.update(
+      let result: TaskAssignmentResult;
+      try {
+        result = await this.assignmentService.assign(task);
+      } catch (e) {
+        await this.toFeedback(task.id, [
+          {
+            item: '任务分配失败，请检查任务定义或任务类型',
+            reason: (e as Error).message,
+          },
+        ]);
+        continue;
+      }
+      if (!result.agentId) {
+        await this.toFeedback(task.id, [
+          {
+            item: '未找到可承接任务的机器人，请配置任务定义或系统未知任务定义（ID=6）',
+            reason: '任务定义没有启用中的处理机器人',
+          },
+        ]);
+        continue;
+      }
+      // 忙碌机器人继续等待；待接受邀约也只在空闲后发送。
+      if (await this.dispatchService.isWorkerBusy(result.agentId)) continue;
+      const updated = await this.tasks.update(
         {
           id: task.id,
           status: TaskStatus.WAITING,
-          subStatus: TaskSubStatus.PENDING_IDENTIFY,
+          subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
         },
         {
-          status: TaskStatus.RUNNING,
-          subStatus: TaskSubStatus.IDENTIFYING,
+          subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+          type: result.type,
+          templateId: result.templateId,
+          templateName: result.templateName,
+          agentId: result.agentId,
+          offerAttemptAt: null,
           missingItems: null,
           remindCount: 0,
           firstRemindedAt: null,
           lastRemindedAt: null,
         },
       );
-      if (!claimed.affected) continue;
-      await this.tasksService
-        .addEvent(
-          task.id,
-          '系统',
-          '开始识别分配（平台按任务定义/类型直接匹配，不调用机器人）',
-          null,
-        )
-        .catch((e: Error) =>
-          this.logger.warn(
-            `任务 #${task.id} 记录识别分配开始事件失败: ${e.message}`,
-          ),
-        );
-      void this.assignTask(task.id).catch((e: Error) => {
-        this.logger.warn(`任务 #${task.id} 识别分配异常: ${e.message}`);
-      });
-    }
-  }
-
-  /** 平台本地识别并分配处理机器人，成功后进入任务处理 */
-  private async assignTask(taskId: number): Promise<void> {
-    const task = await this.tasks.findOne({ where: { id: taskId } });
-    if (
-      !task ||
-      task.status !== TaskStatus.RUNNING ||
-      task.subStatus !== TaskSubStatus.IDENTIFYING
-    ) {
-      return;
-    }
-
-    let result: TaskAssignmentResult;
-    try {
-      result = await this.assignmentService.assign(task);
-    } catch (e) {
-      await this.toFeedback(
-        task.id,
-        [
-          {
-            item: '任务识别分配失败，请补充任务定义或任务类型后重试',
-            reason: (e as Error).message,
-          },
-        ],
-        '识别分配失败',
-      );
-      return;
-    }
-
-    const updated = await this.tasks.update(
-      {
-        id: task.id,
-        status: TaskStatus.RUNNING,
-        subStatus: TaskSubStatus.IDENTIFYING,
-      },
-      {
-        type: result.type,
-        templateId: result.templateId,
-        templateName: result.templateName,
-        agentId: result.agentId,
-        missingItems: null,
-        remindCount: 0,
-        firstRemindedAt: null,
-        lastRemindedAt: null,
-      },
-    );
-    if (!updated.affected) return;
-
-    if (result.agentId && result.agentId !== task.agentId) {
+      if (!updated.affected) continue;
+      const sourceLabel = {
+        manual: '人工预分配',
+        definition: '任务定义',
+        'type-definition': '同类型任务定义',
+        'type-worker': '机器人任务定义',
+        unknown: '系统未知任务定义（ID=6）',
+      }[result.source];
       await this.tasksService.addEvent(
         task.id,
-        '分配',
-        `自动分配：${task.agentId ? `#${task.agentId}` : '未分配'} → ${
-          result.agentName ?? `#${result.agentId}`
-        }`,
+        '状态变更',
+        `状态变更：等待中-待分配 → 等待中-待接受（${sourceLabel}，机器人：${result.agentName ?? result.agentId}）`,
         null,
         {
-          fromAgentId: task.agentId,
-          toAgentId: result.agentId,
-          automatic: true,
           source: result.source,
+          templateId: result.templateId,
+          templateName: result.templateName,
+          agentId: result.agentId,
+          agentName: result.agentName,
         },
       );
     }
-
-    const sourceLabel = {
-      manual: '人工预分配',
-      definition: '任务定义',
-      'type-definition': '同类型任务定义',
-      'type-worker': '机器人任务定义',
-      unknown: '系统未知任务定义（ID=6）',
-    }[result.source];
-    await this.tasksService.addEvent(
-      task.id,
-      '系统',
-      `识别分配完成：${result.type}${
-        result.agentName ? `，分配给「${result.agentName}」` : ''
-      }（${sourceLabel}）`,
-      null,
-      {
-        source: result.source,
-        originalType: result.originalType ?? null,
-        templateId: result.templateId,
-        templateName: result.templateName,
-        agentId: result.agentId,
-        agentName: result.agentName,
-      },
-    );
-
-    if (!result.agentId) {
-      await this.toFeedback(
-        task.id,
-        [
-          {
-            item: '未找到可承接任务的机器人，请联系管理员配置系统未知任务定义（ID=6）的处理机器人',
-            reason:
-              '平台未匹配到任务定义/类型对应机器人，且系统未知任务定义（ID=6）未配置启用中的处理机器人',
-          },
-        ],
-        '无可用处理机器人',
-      );
-      return;
-    }
-
-    // 分配完成 → 机器人接管任务（派发失败转待反馈，由负责人处理）
-    try {
-      await this.dispatchService.dispatch(task.id, null);
-    } catch (e) {
-      await this.toFeedback(
-        task.id,
-        [
-          {
-            item: '任务已识别分配，但派发失败，请确认处理机器人/执行器配置',
-            reason: (e as Error).message,
-          },
-        ],
-        '派发失败',
-      );
-    }
   }
 
-  /** 识别失败 → 等待中-待反馈（条件更新，避免覆盖用户取消等并发状态） */
   private async toFeedback(
     taskId: number,
     items: TaskMissingItem[],
-    reason: string,
   ): Promise<void> {
     const updated = await this.tasks.update(
       {
         id: taskId,
-        status: TaskStatus.RUNNING,
-        subStatus: TaskSubStatus.IDENTIFYING,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
       },
       {
-        status: TaskStatus.WAITING,
         subStatus: TaskSubStatus.PENDING_FEEDBACK,
         missingItems: items,
         remindCount: 0,
@@ -270,11 +179,225 @@ export class TaskLoopService implements OnApplicationBootstrap {
     await this.tasksService.addEvent(
       taskId,
       '状态变更',
-      `状态变更：进行中-识别中 → 等待中-待反馈（${reason}：${items
-        .map((i) => i.item)
+      `状态变更：等待中-待分配 → 等待中-待反馈（${items
+        .map((item) => item.item)
         .join('、')}）`,
       null,
     );
+  }
+
+  // ===== 待接受：两阶段邀约 =====
+
+  private async offerPending(): Promise<void> {
+    const pending = await this.tasks.find({
+      where: {
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+      },
+      order: { id: 'ASC' },
+      take: 20,
+    });
+    const now = Date.now();
+    for (const task of pending) {
+      if (this.offering.has(task.id) || !task.agentId) continue;
+      if (task.offerAttemptAt) {
+        const attemptedAt = new Date(task.offerAttemptAt).getTime();
+        if (now - attemptedAt < OFFER_RETRY_MS) continue;
+      }
+      if (this.dispatchService.taskChatRunning(task.id)) continue;
+      if (await this.dispatchService.isWorkerBusy(task.agentId)) continue;
+      // 多实例下用 offerAttemptAt 原子抢占，只允许一个实例发送任务邀约。
+      const cutoff = new Date(now - OFFER_RETRY_MS);
+      const claimed = await this.tasks.update(
+        [
+          {
+            id: task.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+            offerAttemptAt: IsNull(),
+          },
+          {
+            id: task.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+            offerAttemptAt: LessThan(cutoff),
+          },
+        ],
+        { offerAttemptAt: new Date(now) },
+      );
+      if (!claimed.affected) continue;
+      this.offering.add(task.id);
+      try {
+        await this.dispatchService.offer(task.id);
+      } catch (e) {
+        this.logger.warn(`任务 #${task.id} 邀约失败: ${(e as Error).message}`);
+        await this.tasks.update(
+          { id: task.id, subStatus: TaskSubStatus.PENDING_ACCEPTANCE },
+          { offerAttemptAt: new Date() },
+        );
+        await this.tasksService.addEvent(
+          task.id,
+          '系统',
+          `任务邀约失败，将稍后重试：${(e as Error).message}`,
+          null,
+        );
+      } finally {
+        this.offering.delete(task.id);
+      }
+    }
+  }
+
+  // ===== 待继续：统一恢复队列 =====
+
+  private async resumePending(): Promise<void> {
+    const pending = await this.tasks.find({
+      where: {
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_RESUME,
+      },
+      order: { id: 'ASC' },
+      take: 20,
+    });
+    for (const task of pending) {
+      if (this.resuming.has(task.id) || !task.agentId) continue;
+      if (this.dispatchService.taskChatRunning(task.id)) continue;
+      if (await this.dispatchService.isWorkerBusy(task.agentId)) continue;
+      this.resuming.add(task.id);
+      const resumePrompt = task.resumePrompt?.trim() || '请继续处理当前任务。';
+      try {
+        const claimed = await this.dispatchService.claimExecution(
+          task.id,
+          TaskSubStatus.PENDING_RESUME,
+          { nullIfStateChanged: true },
+        );
+        if (!claimed) continue;
+        await this.tasksService.addEvent(
+          task.id,
+          '状态变更',
+          '状态变更：等待中-待继续 → 进行中-执行中（LOOP 恢复执行）',
+          null,
+        );
+        await this.dispatchService.dispatch(task.id, null, resumePrompt);
+        await this.workerInbox.markDelivered(task.id);
+      } catch (e) {
+        this.logger.warn(`任务 #${task.id} 恢复失败: ${(e as Error).message}`);
+        await this.tasks.update(
+          {
+            id: task.id,
+            status: TaskStatus.RUNNING,
+            subStatus: TaskSubStatus.EXECUTING,
+          },
+          {
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_RESUME,
+            resumePrompt,
+          },
+        );
+        await this.tasksService.addEvent(
+          task.id,
+          '系统',
+          `恢复执行失败，任务回到等待中-待继续：${(e as Error).message}`,
+          null,
+        );
+      } finally {
+        this.resuming.delete(task.id);
+      }
+    }
+  }
+
+  // ===== 父机器人收件箱 =====
+
+  private async queueWorkerInbox(): Promise<void> {
+    const entries = await this.workerInbox.listPending();
+    for (const entry of entries) {
+      const [parent, child] = await Promise.all([
+        this.tasks.findOne({ where: { id: entry.parentTaskId } }),
+        this.tasks.findOne({ where: { id: entry.childTaskId } }),
+      ]);
+      if (!child) {
+        await this.workerInbox.markDead(entry.id);
+        continue;
+      }
+      if (
+        !parent ||
+        parent.status === TaskStatus.FINISHED ||
+        parent.agentId !== entry.workerId
+      ) {
+        await this.workerInbox.markDead(entry.id);
+        // 父机器人不可用时把需求方回退给根任务创建人，避免子任务永久卡住。
+        const root =
+          child.rootId && child.rootId !== child.id
+            ? await this.tasks.findOne({ where: { id: child.rootId } })
+            : null;
+        if (root?.createdById) {
+          await this.tasks.update(
+            { id: child.id },
+            { requesterType: 'user', requesterId: root.createdById },
+          );
+          child.requesterType = 'user';
+          child.requesterId = root.createdById;
+          await this.tasksService.addEvent(
+            child.id,
+            '系统',
+            '父任务已结束或无法唤醒，需求方自动回退为根任务创建人',
+            null,
+            { parentTaskId: parent?.id ?? entry.parentTaskId },
+          );
+        }
+        const notified = await this.taskNotify.notifyTaskRequester(
+          child,
+          'notice',
+          `子任务需要人工介入：${child.code} ${child.title}`,
+          '父任务已结束或需求方机器人已变化，请到任务详情处理提问或验收。',
+        );
+        if (!notified.sent) {
+          await this.taskNotify.notifyTaskAgentOwner(
+            child,
+            'notice',
+            `子任务需要人工介入：${child.code} ${child.title}`,
+            '父任务已结束或需求方机器人已变化，请人工处理子任务。',
+          );
+        }
+        continue;
+      }
+      if (parent.status !== TaskStatus.WAITING) continue;
+      const prompt = taskInboxPrompt(entry, child);
+      if (parent.subStatus === TaskSubStatus.PENDING_RESUME) {
+        if (parent.resumePrompt?.includes(`事件收件箱 ID：${entry.id}`)) {
+          await this.workerInbox.markQueued(entry.id);
+          continue;
+        }
+        await this.tasks.update(
+          { id: parent.id, status: TaskStatus.WAITING },
+          {
+            resumePrompt: [parent.resumePrompt?.trim(), prompt]
+              .filter(Boolean)
+              .join('\n\n---\n\n'),
+          },
+        );
+        await this.workerInbox.markQueued(entry.id);
+        continue;
+      }
+      const updated = await this.tasks.update(
+        { id: parent.id, status: TaskStatus.WAITING },
+        {
+          subStatus: TaskSubStatus.PENDING_RESUME,
+          resumePrompt: prompt,
+          remindCount: 0,
+          firstRemindedAt: null,
+          lastRemindedAt: null,
+        },
+      );
+      if (!updated.affected) continue;
+      await this.workerInbox.markQueued(entry.id);
+      await this.tasksService.addEvent(
+        parent.id,
+        '系统',
+        `子任务 ${child.code} 的 ${entry.kind} 事件已入队，父任务转入等待中-待继续`,
+        null,
+        { childTaskId: child.id, inboxId: entry.id, kind: entry.kind },
+      );
+    }
   }
 
   // ===== 待反馈 / 待验收提醒 =====
@@ -299,13 +422,17 @@ export class TaskLoopService implements OnApplicationBootstrap {
         agentId: true,
         schedulerId: true,
         createdById: true,
+        requesterType: true,
+        requesterId: true,
         parentId: true,
         rootId: true,
+        ownerTakeoverAt: true,
+        ownerTakeoverUserId: true,
+        ownerTakeoverName: true,
       },
       order: { id: 'ASC' },
       take: REMIND_BATCH_SIZE,
     });
-    if (list.length === 0) return;
     const now = Date.now();
     for (const task of list) {
       if (this.reminding.has(task.id)) continue;
@@ -341,56 +468,57 @@ export class TaskLoopService implements OnApplicationBootstrap {
         .join('、');
       const description =
         kind === 'feedback'
-          ? `请补充资料或确认信息后重新提交识别。待反馈事项：${feedbackText || '见任务详情'}`
-          : '机器人已完成执行，请到平台验收产出。';
-      const result =
-        kind === 'accept'
-          ? await this.taskNotify.notifyTaskRequester(
-              task,
-              kind,
-              title,
-              description,
-            )
-          : await this.taskNotify.notifyTaskOwner(
-              task,
-              kind,
-              title,
-              description,
-            );
-      const subStatus =
-        kind === 'feedback'
-          ? TaskSubStatus.PENDING_FEEDBACK
-          : TaskSubStatus.PENDING_ACCEPT;
+          ? task.ownerTakeoverAt
+            ? `验收不通过已达阈值，请任务负责人「${task.ownerTakeoverName ?? '未配置'}」补充处理意见。待处理事项：${feedbackText || '见任务详情'}`
+            : `请答复任务提问或补充资料。待反馈事项：${feedbackText || '见任务详情'}`
+          : '机器人已完成执行，请需求方验收产出。';
+      let result: TaskNotifyResult;
+      if (kind === 'accept') {
+        result = await this.taskNotify.notifyTaskRequester(
+          task,
+          kind,
+          title,
+          description,
+        );
+      } else if (task.ownerTakeoverAt) {
+        result = await this.taskNotify.notifyTaskAgentOwner(
+          task,
+          kind,
+          title,
+          description,
+        );
+        if (!result.sent) {
+          result = await this.taskNotify.notifyTaskRequester(
+            task,
+            kind,
+            title,
+            description,
+          );
+        }
+      } else {
+        result = await this.taskNotify.notifyTaskRequester(
+          task,
+          kind,
+          title,
+          description,
+        );
+      }
       await this.tasks.update(
-        { id: task.id, status: TaskStatus.WAITING, subStatus },
+        { id: task.id, status: TaskStatus.WAITING, subStatus: task.subStatus },
         { remindCount: count, firstRemindedAt, lastRemindedAt: now },
       );
       await this.tasksService.addEvent(
         task.id,
         '系统',
-        `第 ${count} 次提醒${
-          result.sent
-            ? `已发送给${kind === 'accept' ? '需求方' : '负责人'}${
-                result.ownerName ? `「${result.ownerName}」` : ''
-              }`
-            : `未发送（未找到${kind === 'accept' ? '需求方' : '负责人'}）`
-        }；首次提醒满 ${TASK_REMIND_TIMEOUT_DAYS} 天未处理将自动${
-          kind === 'feedback'
-            ? '标记为失败（已结束-取消）'
-            : '按成功完成（已结束-完成）'
-        }`,
+        `第 ${count} 次提醒${result.sent ? `已发送${result.ownerName ? `给「${result.ownerName}」` : ''}` : '未发送（机器人需求方由收件箱驱动或未找到接收人）'}；首次提醒满 ${TASK_REMIND_TIMEOUT_DAYS} 天未处理将自动${kind === 'feedback' ? '标记为失败（已结束-取消）' : '按成功完成（已结束-完成）'}`,
         null,
-        {
-          remindCount: count,
-          firstRemindedAt: firstRemindedAt.toISOString(),
-        },
+        { remindCount: count, firstRemindedAt: firstRemindedAt.toISOString() },
       );
     } finally {
       this.reminding.delete(task.id);
     }
   }
 
-  /** 首次提醒满 7 天仍未处理：待反馈→失败取消；待验收→成功完成 */
   private async terminateByTimeout(
     taskId: number,
     kind: 'feedback' | 'accept',
@@ -423,79 +551,58 @@ export class TaskLoopService implements OnApplicationBootstrap {
       taskId,
       '状态变更',
       kind === 'feedback'
-        ? `状态变更：等待中-待反馈 → 已结束-取消（首次提醒已超过 ${TASK_REMIND_TIMEOUT_DAYS} 天未处理，任务标记为失败）`
-        : `状态变更：等待中-待验收 → 已结束-完成（首次提醒已超过 ${TASK_REMIND_TIMEOUT_DAYS} 天未处理，超时按成功完成）`,
+        ? `状态变更：等待中-待反馈 → 已结束-取消（首次提醒已超过 ${TASK_REMIND_TIMEOUT_DAYS} 天未处理）`
+        : `状态变更：等待中-待验收 → 已结束-完成（首次提醒已超过 ${TASK_REMIND_TIMEOUT_DAYS} 天未处理）`,
       null,
     );
+    await this.workerInbox.completeForChild(taskId);
+    if (kind === 'feedback') {
+      // 提问超时取消后，父机器人不能继续保留失效问题。
+      const child = await this.tasks.findOne({ where: { id: taskId } });
+      if (child) {
+        await this.workerInbox.enqueue(child, 'cancelled', {
+          payload: { reason: '提问等待超时，任务自动取消' },
+        });
+      }
+    }
   }
 
-  // ===== 启动迁移 / 恢复 =====
+  // ===== 启动迁移 =====
 
-  /** 历史状态值 → 新「主状态 + 子状态」（幂等） */
   private async migrateLegacyStatuses(): Promise<void> {
     const rows = await this.tasks.find();
+    const byId = new Map(rows.map((row) => [row.id, row]));
     let migrated = 0;
     for (const row of rows) {
-      const mapped = mapLegacyTaskStatus(row.status);
-      if (!mapped) continue;
-      const patch: Partial<Task> = {
-        status: mapped.status,
-        subStatus: mapped.subStatus,
-        remindCount: 0,
-        firstRemindedAt: null,
-        lastRemindedAt: null,
-      };
-      if (
-        mapped.subStatus === TaskSubStatus.PENDING_FEEDBACK &&
-        !row.missingItems?.length
-      ) {
-        patch.missingItems = [
-          {
-            item: '任务信息待补充/确认',
-            reason: '历史待补材料任务迁移，请补充资料后重新识别',
-          },
-        ];
+      const patch: Partial<Task> = {};
+      const mapped = mapLegacyTaskStatus(row.status, row.subStatus);
+      if (mapped) {
+        patch.status = mapped.status;
+        patch.subStatus = mapped.subStatus;
+        patch.remindCount = 0;
+        patch.firstRemindedAt = null;
+        patch.lastRemindedAt = null;
       }
+      if (!row.requesterType) {
+        const parent = row.parentId ? byId.get(row.parentId) : null;
+        const root = row.rootId ? byId.get(row.rootId) : null;
+        if (parent?.agentId) {
+          patch.requesterType = 'worker';
+          patch.requesterId = parent.agentId;
+        } else if (row.createdById) {
+          patch.requesterType = 'user';
+          patch.requesterId = row.createdById;
+        } else if (root?.createdById) {
+          patch.requesterType = 'user';
+          patch.requesterId = root.createdById;
+        }
+      }
+      if (Object.keys(patch).length === 0) continue;
       await this.tasks.update(row.id, patch);
-      migrated++;
+      migrated += 1;
     }
     if (migrated > 0) {
-      this.logger.log(
-        `任务状态迁移完成：${migrated} 条历史任务转为「主状态 + 子状态」`,
-      );
-    }
-  }
-
-  /** 服务重启后，进程内的识别任务已中断：识别中 → 待识别，重新排队 */
-  private async recoverInterruptedIdentifying(): Promise<void> {
-    const interrupted = await this.tasks.find({
-      where: {
-        status: TaskStatus.RUNNING,
-        subStatus: TaskSubStatus.IDENTIFYING,
-      },
-      select: { id: true },
-    });
-    for (const task of interrupted) {
-      await this.tasks.update(
-        {
-          id: task.id,
-          status: TaskStatus.RUNNING,
-          subStatus: TaskSubStatus.IDENTIFYING,
-        },
-        {
-          status: TaskStatus.WAITING,
-          subStatus: TaskSubStatus.PENDING_IDENTIFY,
-        },
-      );
-      await this.tasksService.addEvent(
-        task.id,
-        '系统',
-        '服务重启导致识别中断，已重新排队识别',
-        null,
-      );
-    }
-    if (interrupted.length > 0) {
-      this.logger.log(`重新排队识别任务 ${interrupted.length} 个`);
+      this.logger.log(`任务协同状态/需求方迁移完成：${migrated} 条`);
     }
   }
 }

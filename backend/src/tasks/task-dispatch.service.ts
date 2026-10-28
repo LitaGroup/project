@@ -13,7 +13,7 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import {
   TaskStatus,
   TaskSubStatus,
@@ -41,7 +41,9 @@ import { TaskChatService } from './task-chat.service';
 import { TaskDocumentService } from './task-document.service';
 import type { TaskDocumentResult } from './task-document.service';
 import { TaskNotifyService } from './task-notify.service';
+import { TaskQuestionAutoAnswerService } from './task-question-auto-answer.service';
 import { TaskRealtimeService } from './task-realtime.service';
+import { TaskWorkerInboxService } from './task-worker-inbox.service';
 
 export interface TaskAcceptanceApplication {
   task: Task;
@@ -89,6 +91,9 @@ export class TaskDispatchService
     private readonly taskRealtime: TaskRealtimeService,
     private readonly taskChat: TaskChatService,
     private readonly taskDocuments: TaskDocumentService,
+    private readonly questionAutoAnswer: TaskQuestionAutoAnswerService,
+    private readonly workerInbox: TaskWorkerInboxService,
+    private readonly dataSource: DataSource,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -141,30 +146,83 @@ export class TaskDispatchService
   }
 
   /**
-   * 派发：平台识别分配完成的「进行中-识别中」任务，或执行中的重新派发。
-   * 链路：建工位 → 复用/建会话（一个任务固定一个会话）→ 发 prompt；
-   * 成功后任务进入「进行中-执行中」。
+   * 原子占用机器人并把指定等待任务推进到执行中。
+   * 所有接受、答复恢复、验收返工和 LOOP 恢复都经过同一机器人行锁；
+   * 返回 null 表示机器人已有其他进行中任务，调用方应保持/转为待继续。
    */
+  async claimExecution(
+    taskId: number,
+    expectedSubStatus: TaskSubStatus,
+    options?: { nullIfStateChanged?: boolean },
+  ): Promise<Task | null> {
+    return this.dataSource.transaction(async (manager) => {
+      const initial = await manager.findOne(Task, { where: { id: taskId } });
+      if (!initial) throw new NotFoundException(`Task ${taskId} not found`);
+      if (!initial.agentId) {
+        throw new BadRequestException(`任务 ${initial.code} 尚未分配机器人`);
+      }
+      // 同一机器人的所有执行占用都按 workers 行串行化。
+      await manager.query('SELECT id FROM workers WHERE id = $1 FOR UPDATE', [
+        initial.agentId,
+      ]);
+      const task = await manager.findOne(Task, { where: { id: taskId } });
+      if (!task) throw new NotFoundException(`Task ${taskId} not found`);
+      if (
+        task.status !== TaskStatus.WAITING ||
+        task.subStatus !== expectedSubStatus
+      ) {
+        if (options?.nullIfStateChanged) return null;
+        throw new BadRequestException(
+          `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可进入执行中`,
+        );
+      }
+      const running = await manager.findOne(Task, {
+        where: { agentId: task.agentId!, status: TaskStatus.RUNNING },
+      });
+      if (running) return null;
+      task.status = TaskStatus.RUNNING;
+      task.subStatus = TaskSubStatus.EXECUTING;
+      task.resumePrompt = null;
+      task.remindCount = 0;
+      task.firstRemindedAt = null;
+      task.lastRemindedAt = null;
+      return manager.save(task);
+    });
+  }
+
+  /** 机器人是否已有执行中任务（LOOP 快速筛选；最终占用仍以 claimExecution 为准）。 */
+  async isWorkerBusy(workerId: number): Promise<boolean> {
+    return this.tasks.exists({
+      where: { agentId: workerId, status: TaskStatus.RUNNING },
+    });
+  }
+
+  /**
+   * 派发执行中的任务，或在已有会话中继续对话。
+   * 等待任务必须先由 claimExecution 原子占用机器人。
+   */
+  /** 待接受任务邀约：只让机器人决定接受/拒绝，不自动进入执行中。 */
+  async offer(taskId: number): Promise<Task> {
+    return this.dispatch(taskId, null, undefined, 'offer');
+  }
+
   async dispatch(
     taskId: number,
     operator: string | null,
     userMessage?: string,
+    mode: 'execute' | 'offer' = 'execute',
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
-    const continuing = Boolean(userMessage?.trim());
-    const canContinue =
-      continuing &&
-      task.status === TaskStatus.WAITING &&
-      task.subStatus === TaskSubStatus.PENDING_ACCEPT;
-    if (
-      !canContinue &&
-      (task.status !== TaskStatus.RUNNING ||
-        ![TaskSubStatus.IDENTIFYING, TaskSubStatus.EXECUTING].includes(
-          task.subStatus,
-        ))
-    ) {
+    const offering = mode === 'offer';
+    const continuing = !offering && Boolean(userMessage?.trim());
+    const valid = offering
+      ? task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_ACCEPTANCE
+      : task.status === TaskStatus.RUNNING &&
+        task.subStatus === TaskSubStatus.EXECUTING;
+    if (!valid) {
       throw new NotFoundException(
-        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可派发`,
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可${offering ? '邀约' : '派发'}`,
       );
     }
     const fromLabel = `${task.status}-${task.subStatus}`;
@@ -286,41 +344,69 @@ export class TaskDispatchService
       await this.addEvent(
         task.id,
         '操作',
-        continuing
-          ? `继续对话（机器人：${worker.name}，${bindLabel}：${sessionId}）`
-          : `派发给「${worker.name}」（执行器：${executor.name}，${bindLabel}：${sessionId}）`,
+        offering
+          ? `发送任务邀约给「${worker.name}」（执行器：${executor.name}，${bindLabel}：${sessionId}）`
+          : continuing
+            ? `继续对话（机器人：${worker.name}，${bindLabel}：${sessionId}）`
+            : `派发给「${worker.name}」（执行器：${executor.name}，${bindLabel}：${sessionId}）`,
         operator,
-        { executorId: executor.id, sessionId, reused, continued: continuing },
+        {
+          executorId: executor.id,
+          sessionId,
+          reused,
+          continued: continuing,
+          offer: offering,
+        },
       );
       this.sessionRoutes.set(`${executor.id}:${sessionId}`, task.id);
       this.pushLine(
         task.id,
-        continuing
-          ? `▶ 已继续对话（${bindLabel} ${sessionId}）`
-          : `▶ 已派发给 ${worker.name}（${bindLabel} ${sessionId}）`,
+        offering
+          ? `▶ 已向 ${worker.name} 发送任务邀约（${bindLabel} ${sessionId}）`
+          : continuing
+            ? `▶ 已继续对话（${bindLabel} ${sessionId}）`
+            : `▶ 已派发给 ${worker.name}（${bindLabel} ${sessionId}）`,
       );
 
       // 5. 发任务指令（角色定义与技能已由工位文件提供；历史上下文由会话自身维持）
-      const prompt = await this.buildPrompt(task);
+      const prompt = offering
+        ? await this.buildOfferPrompt(task)
+        : await this.buildPrompt(task);
       const text = continuing
         ? reused
           ? userMessage!.trim()
           : `${prompt}\n\n# 用户消息\n\n${userMessage!.trim()}`
         : prompt;
+      task.offerAttemptAt = offering ? new Date() : task.offerAttemptAt;
       await client.prompt(sessionId, { text });
-      this.pushLine(task.id, '▶ 任务指令已下发');
+      this.pushLine(
+        task.id,
+        offering ? '▶ 任务邀约已下发，等待接受或拒绝' : '▶ 任务指令已下发',
+      );
 
-      // 6. 执行中
+      if (offering) {
+        // 邀约本身不占用机器人；只条件更新时间，避免快速 task-accept 被旧快照覆盖。
+        await this.tasks.update(
+          {
+            id: task.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+          },
+          { offerAttemptAt: task.offerAttemptAt },
+        );
+        return this.mustFind(task.id);
+      }
+
+      // 6. 执行中（等待任务已在 claimExecution 中占用，这里保持状态）
       task.status = TaskStatus.RUNNING;
       task.subStatus = TaskSubStatus.EXECUTING;
-      const saved = await this.tasks.save(task);
+      // 不保存 prompt 前的整行快照，避免覆盖机器人刚调用的提问/验收状态。
+      const saved = await this.mustFind(task.id);
       if (!wasExecuting) {
         await this.addEvent(
           task.id,
           '状态变更',
-          continuing
-            ? `状态变更：${fromLabel} → 进行中-执行中（继续对话）`
-            : '状态变更：进行中-识别中 → 进行中-执行中',
+          `状态变更：${fromLabel} → 进行中-执行中${continuing ? '（继续对话）' : ''}`,
           null,
         );
       }
@@ -346,14 +432,13 @@ export class TaskDispatchService
     if (task.status === TaskStatus.FINISHED) {
       throw new BadRequestException(`任务 ${task.code} 已结束，不能继续对话`);
     }
-    // 识别阶段的消息走补充需求重新识别；待验收任务允许继续对话并重新派发
-    const needsIdentify =
-      (task.status === TaskStatus.WAITING &&
-        task.subStatus !== TaskSubStatus.PENDING_ACCEPT) ||
-      (task.status === TaskStatus.RUNNING &&
-        task.subStatus === TaskSubStatus.IDENTIFYING);
-    if (needsIdentify) {
-      throw new BadRequestException('当前任务应先补充需求并重新识别');
+    if (
+      task.status !== TaskStatus.RUNNING ||
+      task.subStatus !== TaskSubStatus.EXECUTING
+    ) {
+      throw new BadRequestException(
+        '等待任务必须先由 LOOP 或验收返工占用机器人',
+      );
     }
     if (this.taskChat.isRunning(taskId)) {
       throw new BadRequestException('机器人正在回复，请稍后再发送');
@@ -420,15 +505,17 @@ export class TaskDispatchService
       this.releaseTask(taskId);
       task.executorId = null;
       task.opencodeSessionId = null;
-      task.status = TaskStatus.RUNNING;
-      task.subStatus = TaskSubStatus.EXECUTING;
     }
     task.agentId = agentId;
+    task.status = TaskStatus.WAITING;
+    task.subStatus = TaskSubStatus.PENDING_ACCEPTANCE;
+    task.offerAttemptAt = null;
+    task.resumePrompt = null;
     const saved = await this.tasks.save(task);
     await this.addEvent(
       taskId,
-      '分配',
-      `分配：${oldAgent?.name ?? '未分配'} → ${worker.name}${shouldRerun ? '（重新执行）' : ''}`,
+      '状态变更',
+      `状态变更：等待新机器人接受（分配：${oldAgent?.name ?? '未分配'} → ${worker.name}）`,
       operator,
       {
         intervention: true,
@@ -437,7 +524,6 @@ export class TaskDispatchService
         rerun: shouldRerun,
       },
     );
-    if (shouldRerun) return this.dispatch(taskId, operator);
     return saved;
   }
 
@@ -708,6 +794,11 @@ export class TaskDispatchService
           created = true;
           await this.recordQuestionAskedEvent(task.id, request);
         }
+        const autoAnswering = await this.questionAutoAnswer.start(
+          task.id,
+          request,
+        );
+        if (!autoAnswering) await this.notifyQuestion(task.id, request);
       }
       for (const pending of this.taskChat.pendingQuestions(task.id)) {
         if (!remote.has(pending.id)) {
@@ -721,6 +812,11 @@ export class TaskDispatchService
         `任务 #${taskId} 提问对账失败: ${(e as Error).message}`,
       );
     }
+  }
+
+  /** LOOP 恢复/邀约前判断上一轮会话是否仍在输出，避免同会话重入。 */
+  taskChatRunning(taskId: number): boolean {
+    return this.taskChat.isRunning(taskId) || this.dispatching.has(taskId);
   }
 
   /** 任务详情附带的实时输出行（历史页/详情兜底） */
@@ -945,7 +1041,8 @@ export class TaskDispatchService
     );
     const created = await this.taskChat.questionAsked(taskId, request);
     if (created) await this.recordQuestionAskedEvent(taskId, request);
-    await this.notifyQuestion(taskId, request);
+    const autoAnswering = await this.questionAutoAnswer.start(taskId, request);
+    if (!autoAnswering) await this.notifyQuestion(taskId, request);
   }
 
   /** 机器人提问写入任务事件时间线（同一 questionId 仅记录一次） */
@@ -1006,7 +1103,7 @@ export class TaskDispatchService
     };
   }
 
-  /** 提问提醒：同一 request 只通知一次 */
+  /** 提问提醒：同一 request 只通知一次；根任务/无父机器人时通知任务需求方 */
   private async notifyQuestion(
     taskId: number,
     request: OpencodeQuestionRequest,
@@ -1017,7 +1114,7 @@ export class TaskDispatchService
     try {
       const task = await this.mustFind(taskId);
       const first = request.questions[0];
-      await this.taskNotify.notifyTaskOwner(
+      await this.taskNotify.notifyTaskRequester(
         task,
         'notice',
         `任务等待回答：${task.code} ${task.title}`,
@@ -1090,13 +1187,25 @@ export class TaskDispatchService
       worker,
       appliedAt: now,
     });
-    task.status = TaskStatus.WAITING;
-    task.subStatus = TaskSubStatus.PENDING_ACCEPT;
-    task.result = resultText ?? task.result;
-    task.remindCount = 1;
-    task.firstRemindedAt = now;
-    task.lastRemindedAt = now;
-    const saved = await this.tasks.save(task);
+    const updated = await this.tasks.update(
+      {
+        id: taskId,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      {
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPT,
+        result: resultText ?? task.result,
+        remindCount: 1,
+        firstRemindedAt: now,
+        lastRemindedAt: now,
+      },
+    );
+    if (!updated.affected) {
+      throw new BadRequestException('任务状态已变化，请刷新后重试');
+    }
+    const saved = await this.mustFind(taskId);
     this.finishedAwaitingApply.add(taskId);
     this.pushLine(taskId, `✔ 机器人已申请验收，交付文档：${handoff.path}`);
     await this.addEvent(
@@ -1113,6 +1222,9 @@ export class TaskDispatchService
     );
     await this.taskChat.finishTask(taskId);
     this.releaseTask(taskId);
+    await this.workerInbox.enqueue(saved, 'handoff', {
+      payload: { handoffPath: handoff.path, handoffUrl: handoff.url },
+    });
     await this.taskNotify.notifyTaskRequester(
       saved,
       'accept',
@@ -1129,6 +1241,31 @@ export class TaskDispatchService
   private async finalizeSuccess(taskId: number): Promise<void> {
     const task = await this.mustFind(taskId);
     this.releaseTask(taskId);
+    // 父机器人未通过动作接口处理的子任务事件，在会话结束后重新排队。
+    await this.workerInbox.requeueDelivered(taskId);
+    if (
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_FEEDBACK
+    ) {
+      // 结束执行器运行态，但保留 project 提问，答复后 LOOP 才能继续会话。
+      await this.taskChat.finishTask(taskId, {
+        preserveProjectQuestions: true,
+      });
+      return;
+    }
+    if (
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_ACCEPTANCE
+    ) {
+      await this.addEvent(
+        taskId,
+        '系统',
+        '任务邀约会话已结束，机器人尚未接受或拒绝；任务保持等待中-待接受',
+        null,
+      );
+      await this.taskChat.finishTask(taskId);
+      return;
+    }
     if (
       task.status !== TaskStatus.RUNNING ||
       task.subStatus !== TaskSubStatus.EXECUTING
@@ -1136,14 +1273,21 @@ export class TaskDispatchService
       return;
     if (this.finishedAwaitingApply.has(taskId)) return;
     const resultText = await this.collectResult(task);
-    task.result = resultText ?? task.result;
-    await this.tasks.save(task);
+    const updated = await this.tasks.update(
+      {
+        id: taskId,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      { result: resultText ?? task.result },
+    );
+    if (!updated.affected) return;
     this.finishedAwaitingApply.add(taskId);
     this.pushLine(taskId, '✔ 会话执行完成，等待机器人申请验收');
     await this.addEvent(
       taskId,
       '系统',
-      `执行器会话已完成，任务保持进行中-执行中；等待执行机器人调用 POST ${this.apiUrl}/tasks/${taskId}/deliver/apply.md 申请验收`,
+      `执行器会话已完成，任务保持进行中-执行中；等待执行机器人调用 POST ${this.apiUrl}/tasks/${taskId}/handoff/apply.md 申请验收`,
       null,
       { waitingDeliveryApply: true },
     );
@@ -1268,6 +1412,39 @@ export class TaskDispatchService
     }
   }
 
+  /** 待接受邀约：机器人必须先明确接受或拒绝，接受前的会话终态不会自动执行任务。 */
+  private async buildOfferPrompt(task: Task): Promise<string> {
+    return [
+      '# 任务邀约（等待中-待接受）',
+      '',
+      '先阅读任务内容与任务定义，判断它是否属于你的职责范围。此时不要开始实际执行。',
+      '',
+      '匹配时调用 task-accept，接受成功后继续在当前会话执行：',
+      '',
+      '```bash',
+      'TOKEN=$(cat .opencode/agent-token)',
+      `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/accept-task.md' \\`,
+      '  -H "X-Worker-Token: $TOKEN"',
+      '```',
+      '',
+      '不匹配时调用 task-refuse，必须给出拒绝理由与分发建议：',
+      '',
+      '```bash',
+      'TOKEN=$(cat .opencode/agent-token)',
+      `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/refuse.md' \\`,
+      '  -H "X-Worker-Token: $TOKEN" \\',
+      '  -H "Content-Type: application/json" \\',
+      '  -d \'{"reason":"不属于我的职责范围","suggestion":"建议的任务定义或机器人"}\'',
+      '```',
+      '',
+      '接受或拒绝只能二选一。若接受接口提示机器人忙碌，不要执行本任务，保持待接受并结束本轮。',
+      '',
+      '---',
+      '',
+      await this.buildPrompt(task),
+    ].join('\n');
+  }
+
   /** prompt 组装：任务编号/标题/类型/任务定义/输入/需求内容/输出要求；角色与技能由工位文件提供 */
   private async buildPrompt(task: Task): Promise<string> {
     const template = task.templateId
@@ -1303,6 +1480,35 @@ export class TaskDispatchService
     );
     sections.push(
       [
+        '# 多机器人协同',
+        '',
+        '根据上方任务定义判断是否需要其他类型机器人协同。需要时先调用 GET ' +
+          `${this.apiUrl}/tasks/defines.md` +
+          ' 查询可分发的任务定义，再按需创建子任务；不要无目的拆分。',
+        '',
+        '```bash',
+        'TOKEN=$(cat .opencode/agent-token)',
+        `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/subtasks/create.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN" \\',
+        '  -H "Content-Type: application/json" \\',
+        '  -d \'{"templateId":1,"title":"子任务标题","input":"输入","outputSpec":"交付要求"}\'',
+        '```',
+        '',
+        '你是子任务的需求方。子任务提问、待验收或被拒绝时，平台会把事件送入当前父任务；请使用对应的需求方接口处理。',
+        '',
+        '执行中需要需求方澄清时，必须调用 project 提问接口，不使用 opencode 原生提问；调用后停止本轮，等待平台恢复：',
+        '',
+        '```bash',
+        'TOKEN=$(cat .opencode/agent-token)',
+        `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/questions/ask.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN" \\',
+        '  -H "Content-Type: application/json" \\',
+        '  -d \'{"questions":[{"header":"请确认","question":"需要确认什么？","custom":true}]}\'',
+        '```',
+      ].join('\n'),
+    );
+    sections.push(
+      [
         '# 完成与验收',
         '',
         '完成并自检后，必须主动申请验收；会话结束不会自动进入待验收，未调用申请接口时任务会一直保持「进行中-执行中」。',
@@ -1312,11 +1518,11 @@ export class TaskDispatchService
         '',
         '```bash',
         'TOKEN=$(cat .opencode/agent-token)',
-        `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/deliver/apply.md' \\`,
+        `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/handoff/apply.md' \\`,
         '  -H "X-Worker-Token: $TOKEN"',
         '```',
         '',
-        '3. 申请成功后任务进入「等待中-待验收」，由任务需求方决定通过或拒绝。',
+        '3. 申请成功后任务进入「等待中-待验收」，由任务需求方决定通过、返工或失败。',
         '4. 需求方拒绝后，平台会把反馈意见发回当前会话，按反馈修改后再次申请验收。',
       ].join('\n'),
     );

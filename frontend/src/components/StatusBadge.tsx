@@ -121,17 +121,20 @@ export function CodeBranchCategoryBadge({ category }: { category: string }) {
   )
 }
 
-/** 任务子状态 → Badge variant（待识别蓝/待反馈黄/待验收黄/识别中·执行中主色/完成绿/取消淡） */
+/** 任务子状态 → Badge variant（分配/接受蓝，反馈/继续/验收黄，执行主色，完成绿，拒绝/失败红，取消淡） */
 const taskSubStatusVariant: Record<
   string,
   'info' | 'success' | 'warning' | 'error' | 'soft' | 'primary' | 'secondary'
 > = {
-  待识别: 'info',
+  待分配: 'info',
+  待接受: 'info',
   待反馈: 'warning',
+  待继续: 'warning',
   待验收: 'warning',
-  识别中: 'primary',
   执行中: 'primary',
   完成: 'success',
+  已拒绝: 'error',
+  失败: 'error',
   取消: 'soft',
 }
 

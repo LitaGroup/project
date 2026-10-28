@@ -16,6 +16,8 @@ export interface RunOpencodePromptInput {
   timeoutMs: number;
   /** 轮询会话状态的间隔，默认 2s */
   pollMs?: number;
+  /** 会话创建后回调（便于调用方记录并在结束后清理一次性会话） */
+  onSessionCreated?: (sessionId: string) => void;
 }
 
 /** 建会话 → 发提示词 → 轮询到终态 → 取最后一条 assistant 文本 */
@@ -32,6 +34,7 @@ export async function runOpencodePrompt(
     model: input.model,
     location: input.location,
   });
+  input.onSessionCreated?.(session.id);
   // prompt 为异步接口；outcome 具有粘性，须以本轮用户消息时间作为新鲜度基准
   const promptResult = await client.prompt(session.id, { text: input.prompt });
   const afterMs = promptResult?.time?.created ?? 0;

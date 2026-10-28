@@ -39,9 +39,17 @@ const STAGE_GROUPS: {
   status: string
   subStatuses: TaskSubStatus[]
 }[] = [
-  { label: '等待中', status: '等待中', subStatuses: ['待识别', '待反馈', '待验收'] },
-  { label: '进行中', status: '进行中', subStatuses: ['识别中', '执行中'] },
-  { label: '已结束', status: '已结束', subStatuses: ['完成', '取消'] },
+  {
+    label: '等待中',
+    status: '等待中',
+    subStatuses: ['待分配', '待接受', '待反馈', '待继续', '待验收'],
+  },
+  { label: '进行中', status: '进行中', subStatuses: ['执行中'] },
+  {
+    label: '已结束',
+    status: '已结束',
+    subStatuses: ['完成', '已拒绝', '失败', '取消'],
+  },
 ]
 
 /** 任务概览：阶段统计 + 任务树列表 + 新建（任务处理中心首页） */
@@ -97,7 +105,7 @@ export function TaskCenterPage() {
         <div>
           <h1 className="text-2xl font-semibold">任务概览</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            任务由平台按任务定义/类型直接识别分配，机器人负责处理，责任人验收
+            新任务先等待分配，机器人接受后负责处理，需求方负责验收
           </p>
         </div>
         <Link

@@ -36,7 +36,7 @@ export function WorkersLivePage() {
       <div>
         <h1 className="text-2xl font-semibold">工作概览</h1>
         <p className="mt-1 text-sm text-foreground-muted">
-          全部机器人（含系统调度机器人）实时状态（每 5 秒刷新）：空闲中 / 工作中 / 等待中 / 验收中
+          全部机器人（含系统调度机器人）实时状态（每 5 秒刷新）：空闲中 / 工作中 / 等待中（待分配、待接受、待反馈、待继续）/ 验收中
         </p>
       </div>
       {error && <p className="text-sm">加载失败:{error}</p>}
@@ -103,7 +103,7 @@ function WorkerCard({ worker }: { worker: Worker }) {
               </Link>
             </p>
           ) : (
-            <p className="text-sm text-foreground-muted">暂无进行中的任务</p>
+            <p className="text-sm text-foreground-muted">暂无待处理或进行中的任务</p>
           )}
         </div>
       </div>

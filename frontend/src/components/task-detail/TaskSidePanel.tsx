@@ -45,6 +45,20 @@ export function TaskSidePanel({
           <InfoItem label="负责人" value={agentOwnerName ?? '—'} />
           <InfoItem label="持续时间" value={formatDuration(durationMs)} />
           <InfoItem label="介入次数" value={`${interventionCount} 次`} />
+          <InfoItem
+            label="验收不通过"
+            value={`${task.acceptRejectCount ?? 0} 次`}
+          />
+          {task.ownerTakeoverAt && (
+            <div className="col-span-2">
+              <InfoItem
+                label="负责人接管"
+                value={`${task.ownerTakeoverName ?? '未配置负责人'} · ${new Date(
+                  task.ownerTakeoverAt,
+                ).toLocaleString()}`}
+              />
+            </div>
+          )}
         </dl>
       </section>
 

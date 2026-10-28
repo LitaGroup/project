@@ -21,6 +21,7 @@ import { TaskEvent } from './task-event.entity';
 import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskDispatchService } from './task-dispatch.service';
+import { TaskWorkerInboxService } from './task-worker-inbox.service';
 import {
   TaskRealtimeEvent,
   TaskRealtimeService,
@@ -38,9 +39,14 @@ export interface CreateTaskInput {
   schedulerId?: number | null;
   parentId?: number | null;
   createdById?: number | null;
+  /** 需求方；缺省时人类创建任务为 createdById，机器人子任务为父任务机器人 */
+  requesterType?: 'user' | 'worker' | null;
+  requesterId?: number | null;
+  /** 操作人快照（机器人创建子任务时使用） */
+  operatorName?: string;
   /** 任务定义（task_templates.id，可空） */
   templateId?: number | null;
-  /** 兼容旧客户端字段：新流程创建后始终进入「等待中-待识别」 */
+  /** 兼容旧客户端字段：新流程创建后始终进入「等待中-待分配」 */
   submitForScheduling?: boolean;
 }
 
@@ -130,6 +136,7 @@ export class TasksService {
     private readonly workersService: WorkersService,
     private readonly taskTypes: TaskTypesService,
     private readonly dispatchService: TaskDispatchService,
+    private readonly workerInbox: TaskWorkerInboxService,
     private readonly taskRealtime: TaskRealtimeService,
   ) {}
 
@@ -388,6 +395,19 @@ export class TasksService {
         : null;
     // 父任务先校验，避免插入后才因父任务不存在留下孤儿记录
     const parent = input.parentId ? await this.mustFind(input.parentId) : null;
+    const requesterType =
+      input.requesterType ??
+      (input.createdById ? 'user' : parent?.agentId ? 'worker' : null);
+    const requesterId =
+      input.requesterId ??
+      (requesterType === 'user'
+        ? (input.createdById ?? null)
+        : requesterType === 'worker'
+          ? (parent?.agentId ?? null)
+          : null);
+    if (!requesterType || requesterId === null) {
+      throw new BadRequestException('任务需求方不能为空');
+    }
     // code 按自增 id 生成、根任务 rootId 指向自身，都必须插入后才知道；
     // 但两列 NOT NULL 且无默认值，先用唯一临时值占位，拿到 id 后再回填正式值。
     const task = await this.tasks.save(
@@ -405,18 +425,22 @@ export class TasksService {
         schedulerId: input.schedulerId ?? null,
         parentId: input.parentId ?? null,
         createdById: input.createdById ?? null,
+        requesterType,
+        requesterId,
         status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_IDENTIFY,
+        subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
       }),
     );
     task.code = `TK-${String(task.id).padStart(4, '0')}`;
     task.rootId = parent ? parent.rootId : task.id;
-    const operator = await this.operatorName(input.createdById ?? null);
+    const operator =
+      input.operatorName ??
+      (await this.operatorName(input.createdById ?? null));
     const saved = await this.tasks.save(task);
     await this.addEvent(
       saved.id,
       '操作',
-      `创建任务「${saved.title}」，进入等待中-待识别`,
+      `创建任务「${saved.title}」，进入等待中-待分配`,
       operator,
       {
         title: saved.title,
@@ -650,6 +674,7 @@ export class TasksService {
     }
     const children = await this.tasks.find({ where: { rootId: id } });
     const ids = children.map((c) => c.id);
+    await this.workerInbox.deleteForTasks([...new Set([id, ...ids])]);
     if (ids.length > 0) {
       await this.events.delete({ taskId: In(ids) });
       await this.taskMessages.delete({ taskId: In(ids) });
@@ -666,7 +691,7 @@ export class TasksService {
 
   // ===== 等待中状态的人工动作 =====
 
-  /** 重新识别：等待中-待反馈 → 等待中-待识别（LOOP 下一轮自动处理） */
+  /** 兼容旧提交入口：待反馈 → 待继续（LOOP 空闲后恢复执行） */
   async requeueForIdentify(id: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(id);
     if (
@@ -674,10 +699,15 @@ export class TasksService {
       task.subStatus !== TaskSubStatus.PENDING_FEEDBACK
     ) {
       throw new BadRequestException(
-        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可重新识别`,
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可重新提交`,
       );
     }
-    task.subStatus = TaskSubStatus.PENDING_IDENTIFY;
+    task.subStatus = task.agentId
+      ? TaskSubStatus.PENDING_RESUME
+      : TaskSubStatus.PENDING_ASSIGNMENT;
+    task.resumePrompt = task.agentId
+      ? '# 需求方补充\n\n请根据最新反馈继续处理任务。'
+      : null;
     task.missingItems = null;
     task.remindCount = 0;
     task.firstRemindedAt = null;
@@ -686,7 +716,7 @@ export class TasksService {
     await this.addEvent(
       id,
       '操作',
-      '状态变更：等待中-待反馈 → 等待中-待识别（重新识别）',
+      `状态变更：等待中-待反馈 → ${saved.status}-${saved.subStatus}（重新提交）`,
       operator,
       { intervention: true },
     );
@@ -694,8 +724,8 @@ export class TasksService {
   }
 
   /**
-   * 提交用户反馈并重新识别：反馈正文追加到任务描述（下次识别的输入），
-   * 清空待反馈清单并回到待识别。
+   * 提交用户反馈：反馈正文追加到任务描述；有执行机器人时进入待继续，
+   * 尚未分配时回到待分配重新匹配。
    */
   async provideFeedback(
     id: number,
@@ -717,7 +747,14 @@ export class TasksService {
         .filter(Boolean)
         .join('\n\n');
     }
-    task.subStatus = TaskSubStatus.PENDING_IDENTIFY;
+    task.subStatus = task.agentId
+      ? TaskSubStatus.PENDING_RESUME
+      : TaskSubStatus.PENDING_ASSIGNMENT;
+    task.resumePrompt = task.agentId
+      ? text
+        ? `# 需求方补充反馈\n\n${text}`
+        : '请继续处理当前任务。'
+      : null;
     task.missingItems = null;
     task.remindCount = 0;
     task.firstRemindedAt = null;
@@ -729,7 +766,7 @@ export class TasksService {
     await this.addEvent(
       id,
       '操作',
-      text ? '提交反馈并重新识别' : '重新提交识别',
+      text ? '提交反馈并等待继续' : '重新提交执行',
       operator,
       { intervention: true },
     );
@@ -751,20 +788,19 @@ export class TasksService {
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
     const usesIdentify =
-      (task.status === TaskStatus.WAITING &&
-        [
-          TaskSubStatus.PENDING_IDENTIFY,
-          TaskSubStatus.PENDING_FEEDBACK,
-        ].includes(task.subStatus)) ||
-      (task.status === TaskStatus.RUNNING &&
-        task.subStatus === TaskSubStatus.IDENTIFYING);
+      task.status === TaskStatus.WAITING &&
+      [
+        TaskSubStatus.PENDING_ASSIGNMENT,
+        TaskSubStatus.PENDING_ACCEPTANCE,
+        TaskSubStatus.PENDING_FEEDBACK,
+      ].includes(task.subStatus);
     if (usesIdentify) return this.supplement(id, text, operator);
     return this.dispatchService.continueConversation(id, text, operator);
   }
 
   /**
-   * 任务尚未进入执行会话时发送补充消息：追加到任务描述并重新识别。
-   * 识别中发送会把任务退回待识别，旧识别结果因状态已变化而自动失效。
+   * 任务尚未进入执行会话时发送补充消息：追加到任务描述；
+   * 待反馈按是否已有执行机器人转入待继续或待分配。
    */
   async supplement(
     id: number,
@@ -773,13 +809,12 @@ export class TasksService {
   ): Promise<Task> {
     const task = await this.mustFind(id);
     const allowed =
-      (task.status === TaskStatus.WAITING &&
-        [
-          TaskSubStatus.PENDING_IDENTIFY,
-          TaskSubStatus.PENDING_FEEDBACK,
-        ].includes(task.subStatus)) ||
-      (task.status === TaskStatus.RUNNING &&
-        task.subStatus === TaskSubStatus.IDENTIFYING);
+      task.status === TaskStatus.WAITING &&
+      [
+        TaskSubStatus.PENDING_ASSIGNMENT,
+        TaskSubStatus.PENDING_ACCEPTANCE,
+        TaskSubStatus.PENDING_FEEDBACK,
+      ].includes(task.subStatus);
     if (!allowed) {
       throw new BadRequestException(
         `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可补充需求`,
@@ -792,7 +827,12 @@ export class TasksService {
       .filter(Boolean)
       .join('\n\n');
     task.status = TaskStatus.WAITING;
-    task.subStatus = TaskSubStatus.PENDING_IDENTIFY;
+    if (task.subStatus === TaskSubStatus.PENDING_FEEDBACK) {
+      task.subStatus = task.agentId
+        ? TaskSubStatus.PENDING_RESUME
+        : TaskSubStatus.PENDING_ASSIGNMENT;
+      task.resumePrompt = task.agentId ? `# 需求方补充反馈\n\n${text}` : null;
+    }
     task.missingItems = null;
     task.remindCount = 0;
     task.firstRemindedAt = null;
@@ -805,7 +845,7 @@ export class TasksService {
     await this.addEvent(
       id,
       '状态变更',
-      `状态变更：${from} → 等待中-待识别（补充需求后重新识别）`,
+      `状态变更：${from} → ${saved.status}-${saved.subStatus}（补充需求）`,
       operator,
     );
     return saved;
@@ -834,7 +874,7 @@ export class TasksService {
     await this.addEvent(
       id,
       '状态变更',
-      `状态变更：等待中-待识别 → 等待中-待反馈（需反馈 ${items.length} 项：${items.map((i) => i.item).join('、')}）`,
+      `状态变更：等待中-待反馈（需反馈 ${items.length} 项：${items.map((i) => i.item).join('、')}）`,
       operator,
       { schedulerId, ...(operator ? { intervention: true } : {}) },
     );
@@ -853,12 +893,24 @@ export class TasksService {
       );
     }
     const now = new Date();
-    task.status = TaskStatus.FINISHED;
-    task.subStatus = TaskSubStatus.COMPLETED;
-    task.acceptedAt = now;
-    task.acceptedBy = operator;
-    task.deliveredAt = now;
-    const saved = await this.tasks.save(task);
+    const updated = await this.tasks.update(
+      {
+        id: task.id,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPT,
+      },
+      {
+        status: TaskStatus.FINISHED,
+        subStatus: TaskSubStatus.COMPLETED,
+        acceptedAt: now,
+        acceptedBy: operator,
+        deliveredAt: now,
+      },
+    );
+    if (!updated.affected) {
+      throw new BadRequestException('任务状态已变化，请刷新后重试');
+    }
+    const saved = await this.mustFind(task.id);
     await this.addEvent(
       id,
       '状态变更',
@@ -891,6 +943,10 @@ export class TasksService {
     task.subStatus = TaskSubStatus.CANCELED;
     task.canceledAt = new Date();
     const saved = await this.tasks.save(task);
+    await this.workerInbox.completeForChild(id);
+    await this.workerInbox.enqueue(saved, 'cancelled', {
+      payload: { reason: '任务已取消' },
+    });
     await this.addEvent(
       id,
       '状态变更',

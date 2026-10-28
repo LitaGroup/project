@@ -29,6 +29,10 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       parentId: null,
       rootId: 1,
       createdById: 8,
+      acceptRejectCount: 0,
+      ownerTakeoverAt: null,
+      ownerTakeoverUserId: null,
+      ownerTakeoverName: null,
       createdAt: new Date('2026-10-27T10:00:00+08:00'),
       updatedAt: new Date('2026-10-27T11:00:00+08:00'),
       ...over,
@@ -39,12 +43,22 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
   const user = (over: Partial<User> = {}): User =>
     ({ id: 8, name: '张三', ...over }) as User;
 
-  let tasksRepo: { findOne: jest.Mock };
+  let tasksRepo: {
+    findOne: jest.Mock;
+    increment: jest.Mock;
+    update: jest.Mock;
+  };
   let usersRepo: { findOne: jest.Mock };
+  let workersRepo: { findOne: jest.Mock };
+  let taskNotify: {
+    notifyTaskAgentOwner: jest.Mock;
+    notifyTaskRequester: jest.Mock;
+  };
   let tasksService: { accept: jest.Mock };
   let dispatchService: {
     applyForAcceptance: jest.Mock;
     continueConversation: jest.Mock;
+    claimExecution: jest.Mock;
     addEvent: jest.Mock;
     destroyAcceptedSession: jest.Mock;
   };
@@ -52,8 +66,39 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
   let service: TaskDeliveryService;
 
   beforeEach(() => {
-    tasksRepo = { findOne: jest.fn() };
+    tasksRepo = {
+      findOne: jest.fn(),
+      increment: jest.fn().mockResolvedValue({ affected: 1 }),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    tasksRepo.increment.mockImplementation(async () => {
+      const task = (await tasksRepo.findOne()) as Task;
+      task.acceptRejectCount = (task.acceptRejectCount ?? 0) + 1;
+      return { affected: 1 };
+    });
+    tasksRepo.update.mockImplementation(
+      async (_criteria: unknown, patch: Partial<Task>) => {
+        const task = (await tasksRepo.findOne()) as Task;
+        Object.assign(task, patch);
+        return { affected: 1 };
+      },
+    );
     usersRepo = { findOne: jest.fn().mockResolvedValue({ name: '张三' }) };
+    workersRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 1001,
+        name: '前端工程师',
+        ownerUserId: 9,
+        ownerName: '王五',
+      }),
+    };
+    taskNotify = {
+      notifyTaskAgentOwner: jest.fn().mockResolvedValue({
+        sent: true,
+        ownerName: '王五',
+      }),
+      notifyTaskRequester: jest.fn().mockResolvedValue({ sent: true }),
+    };
     tasksService = {
       accept: jest.fn((_id: number, operator: string | null) =>
         Promise.resolve(
@@ -80,6 +125,12 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
           subStatus: TaskSubStatus.EXECUTING,
         }),
       ),
+      claimExecution: jest.fn().mockResolvedValue(
+        baseTask({
+          status: TaskStatus.RUNNING,
+          subStatus: TaskSubStatus.EXECUTING,
+        }),
+      ),
       addEvent: jest.fn().mockResolvedValue(undefined),
       destroyAcceptedSession: jest.fn().mockResolvedValue(undefined),
     };
@@ -87,9 +138,14 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     service = new TaskDeliveryService(
       tasksRepo as never,
       usersRepo as never,
+      workersRepo as never,
       tasksService as never,
       dispatchService as never,
       handoffService as never,
+      taskNotify as never,
+      {
+        completeForChild: jest.fn().mockResolvedValue(undefined),
+      } as never,
       { get: jest.fn() } as never,
     );
   });
@@ -170,12 +226,93 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     expect(dispatchService.addEvent).toHaveBeenCalledWith(
       1,
       '操作',
-      '需求方拒绝验收，已退回执行机器人重新处理',
+      '需求方拒绝验收（累计 1 次），已退回执行机器人重新处理',
       '张三',
-      expect.objectContaining({ deliveryReply: 'refuse' }),
+      expect.objectContaining({
+        deliveryReply: 'refuse',
+        acceptRejectCount: 1,
+      }),
     );
     expect(md).toContain('# 任务验收已拒绝');
     expect(md).toContain('- 状态：进行中-执行中');
+    expect(md).toContain('- 累计验收不通过：1 次');
+  });
+
+  it('机器人忙碌时验收返工进入待继续，不并行执行', async () => {
+    tasksRepo.findOne.mockResolvedValue(baseTask());
+    dispatchService.claimExecution.mockResolvedValue(null);
+
+    const saved = await service.reject(1, user(), '请返工');
+
+    expect(dispatchService.continueConversation).not.toHaveBeenCalled();
+    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
+    expect(saved.resumePrompt).toContain('请返工');
+    expect(dispatchService.addEvent).toHaveBeenCalledWith(
+      1,
+      '操作',
+      '需求方拒绝验收（累计 1 次），机器人忙碌，已转入等待中-待继续',
+      '张三',
+      expect.objectContaining({ queued: true }),
+    );
+  });
+
+  it('第 4 次拒绝验收转负责人待反馈，不再自动派发机器人', async () => {
+    tasksRepo.findOne.mockResolvedValue(baseTask({ acceptRejectCount: 3 }));
+    const md = await service.reply(1, user(), {
+      action: 'refuse',
+      content: '仍然缺少错误提示',
+    });
+
+    expect(dispatchService.continueConversation).not.toHaveBeenCalled();
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 1,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPT,
+      }),
+      expect.objectContaining({
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_FEEDBACK,
+        ownerTakeoverUserId: 9,
+        ownerTakeoverName: '王五',
+        acceptRejectCount: 4,
+      }),
+    );
+    expect(taskNotify.notifyTaskAgentOwner).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1, acceptRejectCount: 4 }),
+      'feedback',
+      expect.stringContaining('任务待负责人处理'),
+      expect.stringContaining('仍然缺少错误提示'),
+    );
+    expect(dispatchService.addEvent).toHaveBeenCalledWith(
+      1,
+      '状态变更',
+      expect.stringContaining('转任务负责人「王五」处理'),
+      '张三',
+      expect.objectContaining({
+        acceptRejectCount: 4,
+        ownerTakeover: true,
+      }),
+    );
+    expect(md).toContain('# 任务验收已拒绝并转负责人');
+    expect(md).toContain('- 状态：等待中-待反馈');
+    expect(md).toContain('- 累计验收不通过：4 次');
+  });
+
+  it('待验收期间发送消息也按验收不通过计数', async () => {
+    tasksRepo.findOne.mockResolvedValue(baseTask());
+    await service.sendMessage(1, user(), '请补充测试数据');
+
+    expect(dispatchService.continueConversation).toHaveBeenCalledWith(
+      1,
+      '请补充测试数据',
+      '张三',
+    );
+    expect(tasksRepo.increment).toHaveBeenCalledWith(
+      { id: 1 },
+      'acceptRejectCount',
+      1,
+    );
   });
 
   it('非法 action 返回 400', async () => {

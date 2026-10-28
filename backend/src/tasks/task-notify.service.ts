@@ -70,6 +70,10 @@ export class TaskNotifyService {
     title: string,
     description: string,
   ): Promise<TaskNotifyResult> {
+    // 机器人需求方由持久化收件箱和 LOOP 唤醒，不误发给根任务人类创建人。
+    if (task.requesterType === 'worker') {
+      return { sent: false };
+    }
     const requesterId = await this.resolveRequesterUserId(task);
     if (requesterId) {
       const user = await this.users.findOne({
@@ -90,8 +94,36 @@ export class TaskNotifyService {
     return this.notifyTaskOwner(task, kind, title, description);
   }
 
+  /**
+   * 通知当前执行机器人配置的负责人（不按调度机器人优先）。
+   * 用于验收不通过超过阈值后的负责人接管提醒。
+   */
+  async notifyTaskAgentOwner(
+    task: Task,
+    kind: TaskNotifyKind,
+    title: string,
+    description: string,
+  ): Promise<TaskNotifyResult> {
+    if (!task.agentId) return { sent: false };
+    const worker = await this.workers.findOne({ where: { id: task.agentId } });
+    if (!worker) return { sent: false };
+    const openId = await this.workersService.ownerOpenId(worker);
+    if (!openId) return { sent: false };
+    return this.sendCard(
+      task,
+      { openId, ownerName: worker.ownerName ?? worker.name },
+      kind,
+      title,
+      description,
+      '负责人',
+    );
+  }
+
   /** 需求方用户 id：当前任务创建人优先，子任务回退根任务创建人 */
   async resolveRequesterUserId(task: Task): Promise<number | null> {
+    if (task.requesterType) {
+      return task.requesterType === 'user' ? task.requesterId : null;
+    }
     if (task.createdById && task.createdById > 0) return task.createdById;
     if (!task.rootId || task.rootId === task.id) return null;
     const root = await this.tasks.findOne({

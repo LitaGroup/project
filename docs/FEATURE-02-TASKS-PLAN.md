@@ -86,7 +86,7 @@ type: docs
 - `workdir` 不落库：`{WORKER_BASE_DIR}/worker/{id}/` 实时计算返回（见「六」）
 
 ### 4.3 `tasks` 任务包（自引用树）
-`code`（编号 TK-xxx 自动）、`title`、`type`（TaskType：需求分析/技术设计/前端开发/后端开发/客户端开发/UI设计/测试/发布/其它）、`parentId`/`rootId`/`sortOrder`、`input`（输入 longtext）、`outputSpec`（明确输出 longtext）、`missingItems`（simple-json：`[{item, reason}]` 缺失清单）、`status`（见「五」）、`agentId`（分配的机器人）、`schedulerId`、`executorId` + `opencodeSessionId`（执行绑定）、`result`（交付物/最终产出 longtext）、`acceptedAt/acceptedBy`、`deliveredAt`、`archivedAt`、`canceledAt`、`createdById`
+`code`（编号 TK-xxx 自动）、`title`、`type`（TaskType：需求分析/技术设计/前端开发/后端开发/客户端开发/UI设计/测试/发布/其它）、`parentId`/`rootId`/`sortOrder`、`input`（输入 longtext）、`outputSpec`（明确输出 longtext）、`missingItems`（simple-json：`[{item, reason}]` 缺失清单）、`status`（见「五」）、`agentId`（分配的机器人）、`schedulerId`、`executorId` + `opencodeSessionId`（执行绑定）、`result`（交付物/最终产出 longtext）、`acceptedAt/acceptedBy`、`deliveredAt`、`acceptRejectCount`（累计验收不通过）、`ownerTakeoverAt/ownerTakeoverUserId/ownerTakeoverName`（第 4 次不通过后的负责人接管快照）、`archivedAt`、`canceledAt`、`createdById`
 - 无物理外键（RDS 无 REFERENCES 权限）；删根任务应用层级联删子任务/事件/方案
 
 ### 4.4 `task_events` 流转事件（append-only）
@@ -109,7 +109,7 @@ type: docs
 | 已结束 | 完成 | 验收通过或待验收超时自动完成 |
 | 已结束 | 取消 | 人工取消或待反馈超时自动判失败 |
 
-每次流转写 `task_events`；待反馈飞书卡片经 `TaskNotifyService` 发送给机器人/调度器负责人，待验收卡片优先发送给任务需求方（无有效需求方时回退机器人负责人）。执行会话成功只补齐产出，不自动进入待验收；机器人必须用 `X-Worker-Token` 调用 `POST /api/tasks/:id/deliver/apply.md`。详细实现见 `docs/FETURE-02-TASKS.md` 末尾「LOOP 实现说明」。
+每次流转写 `task_events`；待反馈飞书卡片经 `TaskNotifyService` 发送给机器人/调度器负责人，待验收卡片优先发送给任务需求方（无有效需求方时回退机器人负责人）。执行会话成功只补齐产出，不自动进入待验收；机器人必须用 `X-Worker-Token` 调用 `POST /api/tasks/:id/deliver/apply.md`。验收不通过累计第 1～3 次退回原机器人，第 4 次起转「等待中-待反馈」并通知实际执行机器人负责人，后续提醒也优先该负责人；只有任务需求方可以验收通过或不通过。子任务机器人提问优先由直接父任务机器人使用独立咨询会话自动答复，根任务或自动答复失败时回退通知需求方。详细实现见 `docs/FETURE-02-TASKS.md` 末尾「LOOP 实现说明」。
 
 ---
 

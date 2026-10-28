@@ -6,7 +6,6 @@ import {
   Get,
   Header,
   HttpCode,
-  Logger,
   MessageEvent,
   Param,
   ParseIntPipe,
@@ -34,6 +33,13 @@ import {
 } from './task-delivery.service';
 import { TaskDispatchService } from './task-dispatch.service';
 import { TaskHandoffService } from './task-handoff.service';
+import {
+  AnswerQuestionInput,
+  AskQuestionInput,
+  CreateSubtaskInput,
+  TaskCollaborationService,
+} from './task-collaboration.service';
+import type { TaskActor } from './task-requester';
 
 class CreateTaskDto implements CreateTaskInput {
   title?: string;
@@ -72,6 +78,11 @@ class MessageDto {
   content?: string;
 }
 
+/** 验收不通过：反馈原因与返工要求（必填） */
+class RejectTaskDto {
+  content?: string;
+}
+
 class AssignTaskDto {
   agentId: number;
 }
@@ -92,6 +103,32 @@ class DeliveryReplyDto implements DeliveryReplyInput {
 }
 
 /** AI 任务识别更新入参（task-recognize-update；只保存，不改状态、不派发） */
+class CreateSubtaskDto implements CreateSubtaskInput {
+  templateId: number;
+  title: string;
+  description?: string | null;
+  input?: string | null;
+  outputSpec?: string | null;
+}
+
+class RefuseTaskDto {
+  reason?: string;
+  suggestion?: string;
+}
+
+class FailTaskDto {
+  reason?: string;
+}
+
+class AskTaskQuestionDto implements AskQuestionInput {
+  questions: AskQuestionInput['questions'];
+}
+
+class AnswerTaskQuestionDto implements AnswerQuestionInput {
+  answers?: string[][];
+  reject?: boolean;
+}
+
 class RecognizeTaskDto implements RecognizeTaskInput {
   /** 任务标题（必填） */
   title: string;
@@ -109,14 +146,13 @@ class RecognizeTaskDto implements RecognizeTaskInput {
 
 @Controller('tasks')
 export class TasksController {
-  private readonly logger = new Logger(TasksController.name);
-
   constructor(
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
     private readonly taskChat: TaskChatService,
     private readonly taskHandoff: TaskHandoffService,
     private readonly deliveryService: TaskDeliveryService,
+    private readonly collaboration: TaskCollaborationService,
   ) {}
 
   /** 概览统计（任务概览页顶部卡片） */
@@ -163,6 +199,13 @@ export class TasksController {
     return this.taskChat.stream(id);
   }
 
+  /** task-defines：当前系统支持分发的任务定义（机器人或人类 Agent 均可读）。 */
+  @Get('defines.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  taskDefines(): Promise<string> {
+    return this.collaboration.definesMarkdown();
+  }
+
   /** 详情：任务 + 子任务 + 事件时间线 + 实时输出行 */
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
@@ -174,6 +217,8 @@ export class TasksController {
     return this.tasksService.create({
       ...dto,
       createdById: req.user?.id ?? null,
+      requesterType: req.user ? 'user' : null,
+      requesterId: req.user?.id ?? null,
     });
   }
 
@@ -212,6 +257,151 @@ export class TasksController {
       dto,
       req.user?.name ?? null,
     );
+  }
+
+  /** task-create：父任务执行机器人创建子任务。 */
+  @Post(':id/subtasks/create.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async createSubtask(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateSubtaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.collaboration.createSubtask(
+      id,
+      this.requireWorker(req),
+      dto,
+    );
+    return this.collaboration.actionMarkdown('子任务已创建', task, [
+      `- 父任务：${id}`,
+      `- 需求方机器人：${req.worker!.name}（${req.worker!.id}）`,
+    ]);
+  }
+
+  /** task-accept：负责机器人接受待接受任务。 */
+  @Post(':id/accept-task.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async acceptAssignedTask(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.collaboration.accept(id, this.requireWorker(req));
+    return this.collaboration.actionMarkdown('任务已接受', task);
+  }
+
+  /** task-refuse：负责机器人在待接受阶段拒绝任务。 */
+  @Post(':id/refuse.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async refuseAssignedTask(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RefuseTaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.collaboration.refuse(
+      id,
+      this.requireWorker(req),
+      dto.reason ?? '',
+      dto.suggestion,
+    );
+    return this.collaboration.actionMarkdown('任务已拒绝承接', task, [
+      `- 拒绝理由：${task.refusalReason ?? '-'}`,
+      `- 分发建议：${task.dispatchSuggestion ?? '-'}`,
+    ]);
+  }
+
+  /** task-question-ask：project 接管提问与 UI 状态。 */
+  @Post(':id/questions/ask.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async askTaskQuestion(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AskTaskQuestionDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const result = await this.collaboration.ask(
+      id,
+      this.requireWorker(req),
+      dto,
+    );
+    return this.collaboration.actionMarkdown('任务提问已提交', result.task, [
+      `- 提问 ID：${result.questionId}`,
+      '- 后续：请停止本轮执行，等待需求方答复后由平台恢复会话。',
+    ]);
+  }
+
+  /** task-question-answer：人或机器人需求方答复 project 提问。 */
+  @Post(':id/questions/:questionId/answer.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async answerTaskQuestion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('questionId') questionId: string,
+    @Body() dto: AnswerTaskQuestionDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.collaboration.answer(
+      id,
+      questionId,
+      this.requireActor(req),
+      dto,
+    );
+    return this.collaboration.actionMarkdown('提问已答复', task);
+  }
+
+  /** task-handoff-apply：新验收申请地址，复用交付文档与产出逻辑。 */
+  @Post(':id/handoff/apply.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  handoffApply(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    return this.deliveryService.apply(id, this.requireWorker(req));
+  }
+
+  /** task-handoff-accept：人或机器人需求方验收通过。 */
+  @Post(':id/handoff/accept.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async handoffAccept(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.collaboration.acceptHandoff(
+      id,
+      this.requireActor(req),
+    );
+    return this.collaboration.actionMarkdown('任务验收已通过', task);
+  }
+
+  /** task-handoff-refuse：人或机器人需求方拒绝验收并返工。 */
+  @Post(':id/handoff/refuse.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async handoffRefuse(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RejectTaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.collaboration.refuseHandoff(
+      id,
+      this.requireActor(req),
+      dto.content ?? '',
+    );
+    return this.collaboration.actionMarkdown('任务验收已拒绝', task);
+  }
+
+  /** task-fail：仅需求方在待验收阶段判定任务失败。 */
+  @Post(':id/fail.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async failTask(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: FailTaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.collaboration.fail(
+      id,
+      this.requireActor(req),
+      dto.reason ?? '',
+    );
+    return this.collaboration.actionMarkdown('任务已判定失败', task, [
+      `- 失败原因：${task.failureReason ?? '-'}`,
+    ]);
   }
 
   /**
@@ -259,7 +449,7 @@ export class TasksController {
 
   // ===== 等待中状态动作 =====
 
-  /** 重新识别：待反馈 → 待识别（LOOP 自动处理） */
+  /** 兼容旧提交入口：待反馈 → 待继续；未分配机器人时回到待分配 */
   @Post(':id/submit')
   submit(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
     return this.tasksService.requeueForIdentify(id, req.user?.name ?? null);
@@ -289,10 +479,36 @@ export class TasksController {
     @Body() dto: MessageDto,
     @Req() req: AuthedRequest,
   ): Promise<Task> {
-    return this.tasksService.sendMessage(
+    if (!req.user) throw new ForbiddenException('发送消息需要用户身份');
+    return this.deliveryService.sendMessage(id, req.user, dto.content ?? '');
+  }
+
+  /**
+   * 验收不通过：累计计数；前 3 次退回原机器人，
+   * 第 4 次起转等待中-待反馈，由执行机器人负责人处理。
+   */
+  @Post(':id/reject')
+  reject(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RejectTaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<Task> {
+    if (!req.user) throw new ForbiddenException('拒绝验收需要用户身份');
+    return this.deliveryService.reject(id, req.user, dto.content ?? '');
+  }
+
+  /** 网页任务失败：仅需求方在待验收阶段操作。 */
+  @Post(':id/fail')
+  failTaskJson(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: FailTaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<Task> {
+    if (!req.user) throw new ForbiddenException('判定任务失败需要用户身份');
+    return this.collaboration.fail(
       id,
-      dto.content ?? '',
-      req.user?.name ?? null,
+      { type: 'user', user: req.user },
+      dto.reason ?? '',
     );
   }
 
@@ -329,40 +545,39 @@ export class TasksController {
 
   /** 回答机器人提问（answers 与问题顺序一致；reject=true 表示跳过） */
   @Post(':id/questions/:questionId/reply')
-  replyQuestion(
+  async replyQuestion(
     @Param('id', ParseIntPipe) id: number,
     @Param('questionId') questionId: string,
     @Body() dto: ReplyQuestionDto,
     @Req() req: AuthedRequest,
   ) {
+    const task = await this.tasksService.findOneForList(id);
+    if (!req.user) throw new ForbiddenException('答复提问需要用户身份');
+    if (task?.subStatus === TaskSubStatus.PENDING_FEEDBACK) {
+      return this.collaboration.answer(
+        id,
+        questionId,
+        { type: 'user', user: req.user },
+        { answers: dto.answers, reject: dto.reject === true },
+      );
+    }
+    // 兼容尚未迁移的 opencode 原生提问。
     return this.dispatchService.replyQuestion(
       id,
       questionId,
       { answers: dto.answers, reject: dto.reject === true },
-      req.user?.name ?? null,
+      req.user.name ?? null,
     );
   }
 
-  /** 验收通过：等待中-待验收 → 已结束-完成，并异步生成 REVIEW.md 复盘 */
+  /** 验收通过：仅任务需求方操作；异步生成 REVIEW.md 复盘并销毁执行会话 */
   @Post(':id/accept')
-  async accept(
+  accept(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthedRequest,
-  ) {
-    const task = await this.tasksService.accept(id, req.user?.name ?? null);
-    void this.taskHandoff.request(id).catch((error: Error) => {
-      this.logger.warn(
-        `任务 ${task.code} 验收后启动总结失败：${error.message}`,
-      );
-    });
-    void this.dispatchService
-      .destroyAcceptedSession(id)
-      .catch((error: Error) => {
-        this.logger.warn(
-          `任务 ${task.code} 验收后销毁执行器会话失败：${error.message}`,
-        );
-      });
-    return task;
+  ): Promise<Task> {
+    if (!req.user) throw new ForbiddenException('验收需要用户身份');
+    return this.deliveryService.acceptTask(id, req.user);
   }
 
   /** 重新生成任务复盘（已结束-完成；固定覆盖 REVIEW.md） */
@@ -382,5 +597,18 @@ export class TasksController {
   @Sse(':id/stream')
   stream(@Param('id', ParseIntPipe) id: number): Observable<MessageEvent> {
     return this.dispatchService.stream(id);
+  }
+
+  private requireWorker(req: AuthedRequest) {
+    if (!req.worker) {
+      throw new ForbiddenException('该操作仅接受机器人身份（X-Worker-Token）');
+    }
+    return req.worker;
+  }
+
+  private requireActor(req: AuthedRequest): TaskActor {
+    if (req.worker) return { type: 'worker', worker: req.worker };
+    if (req.user) return { type: 'user', user: req.user };
+    throw new ForbiddenException('缺少任务需求方身份');
   }
 }

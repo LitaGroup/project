@@ -73,21 +73,16 @@ flowchart TD
 
 
 
-根据 `任务定义` 来判断是否需要创建子任务
-
-
-
-提供一组给 AI AGENT 的接口：
-
-
+任务创建原则：根据 `任务定义` 来判断是否需要创建子任务
 
 任务的状态图更新：
 
 ```mermaid
 flowchart TD
-    NONE[无] -->|创建| READY(待识别分配)
-    READY -->|分配| RUNNING(进行中)
-    RUNNING -->|拒绝| FINISH_REFUSED(结束-已拒绝)
+    NONE[无] -->|创建| READY(等待中-待分配)
+    READY -->|分配| WAITING_ACCEPT(等待中-待接受)
+    WAITING_ACCEPT -->|接受| RUNNING(进行中)
+    WAITING_ACCEPT -->|拒绝| FINISH_REFUSED(结束-已拒绝)
     RUNNING -->|询问| WAITING_REPLY(等待中-待反馈)
     RUNNING -->|验收申请| WAITING_HANDOFF(等待中-待验收)
     WAITING_HANDOFF -->|验收拒绝| RUNNING
@@ -98,7 +93,31 @@ flowchart TD
 ```
 
 1. task-defines   当前系统支持分发的任务类型
-2. task-refuse  任务拒绝，表示这个任务不是我能处理的范围，并给出拒绝理由和分发建议
-3. task-accept
-4. task-question-ask  代替opencode的询问，由 project 接管，并展示和判断UI
-5. task-question-answer  答复消息，并更改任务状态为
+2. task-create 创建子任务
+3. task-refuse  任务拒绝，表示这个任务不是我能处理的范围，并给出拒绝理由和分发建议
+4. task-fail  任务失败，仅由任务的需求方可以完成
+5. task-accept 接受任务
+6. task-question-ask  代替opencode的询问，由 project 接管，并展示和判断UI
+7. task-question-answer  答复消息，并更改任务状态为
+8. task-handoff-apply 任务验收申请
+9. task-handoff-accept 任务验收通过
+10. task-handoff-refuse 任务验收失败
+
+
+
+由LOOP来接手等待中的任务，并驱动进行下一步，需要判断当前机器人的状态，如果是等待，则可以安排，否则继续等待
+
+
+
+在写入 AGENTS.md 的时候，需要加上 以上子任务的使用的逻辑，并告诉AGENTS.md 如果有不匹配自己的任务可以在`等待中-待接受`阶段拒绝任务。
+
+---
+
+## 当前已实现说明（2026-10-28）
+
+1. 任务执行成功不会自动进入待验收，执行机器人必须调用 `POST /api/tasks/:id/deliver/apply.md`（`X-Worker-Token`）申请验收，同时生成/覆盖交付文档 `/task/{yyyyMMdd}/{task.code}/HANDOFF.md`。
+2. 需求方通过网页「完成」或 `POST /api/tasks/:id/deliver/reply.md` 的 `accept` 验收，通过后异步生成 `REVIEW.md`；只有任务需求方可以操作。
+3. 验收不通过通过网页「验收不通过」或 `POST /api/tasks/:id/reject` 提交反馈，计入 `tasks.acceptRejectCount`。第 1～3 次退回原机器人，第 4 次起转「等待中-待反馈」并记录/通知执行机器人负责人。
+4. 任务负责人提交反馈后重新识别并派发机器人；验收计数与接管快照保留。
+5. 子任务机器人提问优先由直接父任务机器人自动答复：平台使用父机器人执行器、模型和工位创建一次性独立咨询会话，不干扰父任务执行状态；无可用父机器人或自动答复失败时，通知任务需求方人工回答。
+6. 任务详情展示验收不通过次数、负责人接管信息，以及父任务机器人自动答复中/失败状态。

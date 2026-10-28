@@ -75,10 +75,17 @@ describe('nextReminderAction', () => {
 });
 
 describe('mapLegacyTaskStatus', () => {
-  it('旧创建态 → 等待中-待识别', () => {
+  it('旧创建态 → 等待中-待分配', () => {
     expect(mapLegacyTaskStatus('待调度')).toEqual({
       status: TaskStatus.WAITING,
-      subStatus: TaskSubStatus.PENDING_IDENTIFY,
+      subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
+    });
+  });
+
+  it('旧识别子状态 → 等待中-待分配', () => {
+    expect(mapLegacyTaskStatus('进行中', TaskSubStatus.IDENTIFYING)).toEqual({
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
     });
   });
 

@@ -135,6 +135,42 @@ describe('TaskChatService 提问卡片', () => {
     expect(service.pendingQuestions(7)).toHaveLength(1);
   });
 
+  it('提问消息可记录父机器人自动答复元数据并持久化', async () => {
+    await service.questionAsked(7, {
+      id: 'q1',
+      sessionID: 's1',
+      questions: [question],
+    });
+
+    service.setQuestionMeta(7, 'q1', {
+      autoAnswer: {
+        status: 'running',
+        parentTaskId: 1,
+        parentAgentName: '父机器人',
+      },
+    });
+
+    expect(service.questionMeta(7, 'q1')).toEqual({
+      autoAnswer: {
+        status: 'running',
+        parentTaskId: 1,
+        parentAgentName: '父机器人',
+      },
+    });
+    expect(messagesRepo.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        meta: {
+          autoAnswer: {
+            status: 'running',
+            parentTaskId: 1,
+            parentAgentName: '父机器人',
+          },
+        },
+      }),
+      ['taskId', 'messageKey'],
+    );
+  });
+
   it('questionSettled 记录答案并转为回执', async () => {
     await service.questionAsked(7, {
       id: 'q1',
@@ -158,6 +194,18 @@ describe('TaskChatService 提问卡片', () => {
     await service.finishTask(7);
 
     expect(service.findQuestion(7, 'q1')?.state).toBe('cancelled');
+  });
+
+  it('finishTask 可按需保留 project 待反馈提问', async () => {
+    await service.questionAsked(7, {
+      id: 'project-q1',
+      sessionID: 's1',
+      questions: [question],
+    });
+    await service.finishTask(7, { preserveProjectQuestions: true });
+
+    expect(service.findQuestion(7, 'project-q1')?.state).toBe('pending');
+    expect(service.isRunning(7)).toBe(false);
   });
 });
 

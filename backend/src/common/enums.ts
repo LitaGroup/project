@@ -227,18 +227,27 @@ export enum TaskStatus {
 
 /**
  * 任务子状态（与主状态严格对应）：
- * - 等待中：待识别 / 待反馈 / 待验收
- * - 进行中：识别中 / 执行中
- * - 已结束：完成 / 取消
+ * - 等待中：待分配 / 待接受 / 待反馈 / 待继续 / 待验收
+ * - 进行中：执行中
+ * - 已结束：完成 / 已拒绝 / 失败 / 取消
+ *
+ * 待识别/识别中仅保留给历史数据迁移与旧客户端兼容，新流程不再使用。
  */
 export enum TaskSubStatus {
-  PENDING_IDENTIFY = '待识别',
+  PENDING_ASSIGNMENT = '待分配',
+  PENDING_ACCEPTANCE = '待接受',
   PENDING_FEEDBACK = '待反馈',
+  PENDING_RESUME = '待继续',
   PENDING_ACCEPT = '待验收',
-  IDENTIFYING = '识别中',
   EXECUTING = '执行中',
   COMPLETED = '完成',
+  REFUSED = '已拒绝',
+  FAILED = '失败',
   CANCELED = '取消',
+  /** @deprecated 新流程创建后直接待分配 */
+  PENDING_IDENTIFY = '待识别',
+  /** @deprecated 新流程不再有识别阶段 */
+  IDENTIFYING = '识别中',
 }
 
 /** 调度方案状态：PI 产出 → 管理员确认/驳回 */

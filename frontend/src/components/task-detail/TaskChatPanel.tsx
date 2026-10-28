@@ -61,10 +61,18 @@ const FALLBACK_SENDER: TaskChatSender = {
   roleLabel: '系统',
 }
 
+interface TaskQuestionAutoAnswer {
+  status?: 'running' | 'answered' | 'failed'
+  parentAgentName?: string
+  error?: string
+}
+
 interface ChatCustom {
+  taskId?: number
   sender?: TaskChatSender
   tools?: TaskChatTool[]
   question?: TaskChatQuestion
+  autoAnswer?: TaskQuestionAutoAnswer
 }
 
 interface TaskChatPanelProps {
@@ -164,14 +172,19 @@ export function TaskChatPanel({
             )}
             <ThreadPrimitive.Messages>
               {({ message }) => {
-                const question = customOf(message).question
+                const custom = customOf(message)
+                const question = custom.question
                 if (question) {
                   return (
                     <QuestionBubble
                       message={message}
                       question={question}
                       busy={busy}
-                      disabled={task.subStatus !== '执行中'}
+                      disabled={
+                        task.subStatus !== '待反馈' ||
+                        (custom.taskId !== undefined &&
+                          custom.taskId !== task.id)
+                      }
                       onReply={onReplyQuestion}
                     />
                   )
@@ -230,9 +243,11 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
     status,
     metadata: {
       custom: {
+        taskId: message.taskId,
         sender: message.sender,
         tools: message.tools ?? [],
         question: message.question,
+        autoAnswer: readAutoAnswer(message.meta),
       } satisfies ChatCustom,
     },
   }
@@ -240,6 +255,29 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
 
 function customOf(message: MessageState): ChatCustom {
   return (message.metadata.custom ?? {}) as ChatCustom
+}
+
+/** 从消息 meta.autoAnswer 读取父机器人自动答复状态 */
+function readAutoAnswer(
+  meta: Record<string, unknown> | undefined,
+): TaskQuestionAutoAnswer | undefined {
+  const value = meta?.autoAnswer
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  const status =
+    raw.status === 'running' ||
+    raw.status === 'answered' ||
+    raw.status === 'failed'
+      ? raw.status
+      : undefined
+  return {
+    status,
+    parentAgentName:
+      typeof raw.parentAgentName === 'string'
+        ? raw.parentAgentName
+        : undefined,
+    error: typeof raw.error === 'string' ? raw.error : undefined,
+  }
 }
 
 function UserBubble({ message }: { message: MessageState }) {
@@ -324,7 +362,7 @@ interface QuestionBubbleProps {
   message: MessageState
   question: TaskChatQuestion
   busy: boolean
-  /** 任务已离开执行中（提问不可再答） */
+  /** 仅等待中-待反馈可答，其余状态均禁用 */
   disabled: boolean
   onReply: (questionId: string, answers: string[][] | null) => Promise<void>
 }
@@ -337,7 +375,9 @@ function QuestionBubble({
   disabled,
   onReply,
 }: QuestionBubbleProps) {
-  const sender = customOf(message).sender ?? FALLBACK_SENDER
+  const custom = customOf(message)
+  const sender = custom.sender ?? FALLBACK_SENDER
+  const autoAnswer = custom.autoAnswer
   return (
     <MessagePrimitive.Root className="flex gap-3 px-1">
       <WorkerAvatar sender={sender} size={32} className="mt-0.5" />
@@ -348,6 +388,25 @@ function QuestionBubble({
             <MessageCircleQuestion className="size-3.5" />
             {questionStatusLabel(question)}
           </span>
+          {question.state === 'pending' &&
+            autoAnswer?.status === 'running' && (
+              <span className="text-[11px] text-foreground-muted">
+                父任务机器人
+                {autoAnswer.parentAgentName
+                  ? `「${autoAnswer.parentAgentName}」`
+                  : ''}
+                回答中…
+              </span>
+            )}
+          {question.state === 'pending' &&
+            autoAnswer?.status === 'failed' && (
+              <span
+                className="text-[11px] text-warning-foreground"
+                title={autoAnswer.error}
+              >
+                父任务机器人答复失败，等待需求方回答
+              </span>
+            )}
         </div>
 
         <QuestionCard
@@ -432,36 +491,50 @@ function ChatFooter({
   robotRunning: boolean
   onAction: (fn: (id: number) => Promise<unknown>) => void
 }) {
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejectError, setRejectError] = useState<string | null>(null)
+  const [failOpen, setFailOpen] = useState(false)
+  const [failReason, setFailReason] = useState('')
+  const [failError, setFailError] = useState<string | null>(null)
   const finished = task.status === '已结束'
-  const needsSupplement =
-    task.subStatus === '待反馈' ||
-    task.subStatus === '待识别' ||
-    task.subStatus === '识别中'
   const placeholder = finished
     ? '任务已结束，不能继续对话'
     : robotRunning
       ? '机器人正在回复…'
       : task.subStatus === '待反馈'
-      ? '补充资料或确认信息，发送后将重新识别任务…'
-      : needsSupplement
-        ? '补充任务需求，发送后将重新识别…'
-        : task.subStatus === '待验收'
-          ? '继续与机器人对话，发送后将重新进入执行…'
-          : '继续与机器人对话，Enter 发送，Shift+Enter 换行…'
+        ? '补充资料或确认信息，发送后将排队等待机器人继续执行…'
+        : task.subStatus === '待分配' || task.subStatus === '待接受'
+          ? '补充任务需求，内容会随任务一起提供…'
+          : task.subStatus === '待验收'
+            ? '输入返工意见，发送后将按验收不通过退回机器人…'
+            : task.subStatus === '待继续'
+              ? '任务正在排队，可继续补充说明…'
+              : '继续与机器人对话，Enter 发送，Shift+Enter 换行…'
   const hint =
     task.subStatus === '执行中'
       ? '机器人正在执行，实时输出会同步到对话中'
-      : task.subStatus === '识别中'
-        ? '调度机器人正在识别任务，补充消息会重新排队识别'
-        : task.subStatus === '待识别'
-          ? '任务已进入队列，等待调度机器人识别'
-          : task.subStatus === '待验收'
-            ? '机器人已完成执行，可继续对话或完成验收'
-            : task.subStatus === '完成'
-              ? '任务已完成并验收'
-              : task.subStatus === '取消'
-                ? '任务已取消'
-                : '等待用户补充任务信息'
+      : task.subStatus === '待分配'
+        ? '任务已创建，等待平台分配机器人'
+        : task.subStatus === '待接受'
+          ? '任务邀约已下发，等待机器人接受或拒绝'
+          : task.subStatus === '待继续'
+            ? '反馈已收到，正在排队等待机器人空闲后继续执行'
+            : task.subStatus === '待验收'
+              ? `机器人已申请验收，验收不通过累计 ${task.acceptRejectCount ?? 0} 次；第 4 次起转任务负责人处理`
+              : task.subStatus === '待反馈' && task.ownerTakeoverAt
+                ? `验收不通过已转任务负责人${task.ownerTakeoverName ? `「${task.ownerTakeoverName}」` : ''}处理，补充意见后等待机器人继续执行`
+                : task.subStatus === '待反馈'
+                  ? '等待需求方补充资料或回答机器人提问'
+                  : task.subStatus === '完成'
+                    ? '任务已完成并验收'
+                    : task.subStatus === '已拒绝'
+                      ? '机器人已拒绝承接，请查看拒绝理由与分发建议'
+                      : task.subStatus === '失败'
+                        ? '任务已判定失败，请查看失败原因'
+                        : task.subStatus === '取消'
+                          ? '任务已取消'
+                          : '等待任务状态更新'
 
   return (
     <div className="rounded-[var(--radius-lg)] border border-border bg-background p-3 shadow-sm">
@@ -479,6 +552,36 @@ function ChatFooter({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {(task.subStatus === '已拒绝' || task.subStatus === '失败') && (
+        <div
+          className={`mb-2 rounded-[var(--radius-md)] px-3 py-2 text-xs ${
+            task.subStatus === '失败'
+              ? 'bg-error-soft text-error-foreground'
+              : 'bg-warning-soft text-warning-foreground'
+          }`}
+        >
+          <p className="font-medium">
+            {task.subStatus === '已拒绝' ? '拒绝理由' : '失败原因'}
+            {task.subStatus === '已拒绝' && task.refusedBy
+              ? ` · ${task.refusedBy}`
+              : task.subStatus === '失败' && task.failedBy
+                ? ` · ${task.failedBy}`
+                : ''}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed">
+            {(task.subStatus === '已拒绝'
+              ? task.refusalReason
+              : task.failureReason) ?? '未填写理由'}
+          </p>
+          {task.subStatus === '已拒绝' && task.dispatchSuggestion && (
+            <p className="mt-2 whitespace-pre-wrap break-words leading-relaxed">
+              <span className="font-medium">分发建议：</span>
+              {task.dispatchSuggestion}
+            </p>
+          )}
         </div>
       )}
 
@@ -541,6 +644,30 @@ function ChatFooter({
           />
           <Button
             size="sm"
+            variant="outline"
+            disabled={busy || task.subStatus !== '待验收'}
+            onClick={() => {
+              setFailReason('')
+              setFailError(null)
+              setFailOpen(true)
+            }}
+          >
+            任务失败
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || task.subStatus !== '待验收'}
+            onClick={() => {
+              setRejectReason('')
+              setRejectError(null)
+              setRejectOpen(true)
+            }}
+          >
+            验收不通过
+          </Button>
+          <Button
+            size="sm"
             variant="primary"
             disabled={busy || task.subStatus !== '待验收'}
             onClick={() => onAction((id) => api.acceptTask(id))}
@@ -549,6 +676,117 @@ function ChatFooter({
           </Button>
         </div>
       </div>
+
+      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>验收不通过</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 px-6 pb-2 text-sm">
+            <p className="text-foreground-muted">
+              当前已累计不通过 {task.acceptRejectCount ?? 0} 次。前 3
+              次会退回原机器人修改，第 4 次起转交执行机器人负责人处理。
+            </p>
+            <label className="flex flex-col gap-1">
+              <span>返工要求</span>
+              <textarea
+                value={rejectReason}
+                onChange={(event) => {
+                  setRejectReason(event.target.value)
+                  setRejectError(null)
+                }}
+                rows={5}
+                autoFocus
+                placeholder="说明未通过验收的原因和需要修改的内容…"
+                className="min-h-28 resize-y rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-foreground-subtle focus:border-border-strong"
+              />
+            </label>
+            {rejectError && (
+              <p className="text-xs text-error-foreground">{rejectError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setRejectOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={busy}
+              onClick={() => {
+                const content = rejectReason.trim()
+                if (!content) {
+                  setRejectError('请填写返工要求')
+                  return
+                }
+                setRejectOpen(false)
+                onAction((id) => api.rejectTask(id, content))
+              }}
+            >
+              确认不通过
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={failOpen} onOpenChange={setFailOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>判定任务失败</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 px-6 pb-2 text-sm">
+            <p className="text-foreground-muted">
+              任务将直接结束并标记为失败，不会再退回机器人返工。请填写明确的失败原因。
+            </p>
+            <label className="flex flex-col gap-1">
+              <span>失败原因</span>
+              <textarea
+                value={failReason}
+                onChange={(event) => {
+                  setFailReason(event.target.value)
+                  setFailError(null)
+                }}
+                rows={5}
+                autoFocus
+                placeholder="说明任务无法继续或交付不可接受的原因…"
+                className="min-h-28 resize-y rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-foreground-subtle focus:border-border-strong"
+              />
+            </label>
+            {failError && (
+              <p className="text-xs text-error-foreground">{failError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setFailOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={busy}
+              onClick={() => {
+                const reason = failReason.trim()
+                if (!reason) {
+                  setFailError('请填写失败原因')
+                  return
+                }
+                setFailOpen(false)
+                onAction((id) => api.failTask(id, reason))
+              }}
+            >
+              确认失败
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
