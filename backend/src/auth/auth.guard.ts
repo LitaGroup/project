@@ -73,7 +73,7 @@ export class AuthGuard implements CanActivate {
       const worker = await this.workersService.findByAgentToken(workerToken);
       if (!worker) {
         throw new UnauthorizedException(
-          '无效的机器人访问令牌（由平台在首次派发时生成到工位 .opencode/agent-token）',
+          '无效的机器人访问令牌（由平台在初始化或首次派发时生成到工位 .opencode/agent-token）',
         );
       }
       (req as AuthedRequest).worker = worker;

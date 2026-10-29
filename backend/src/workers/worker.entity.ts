@@ -132,8 +132,8 @@ export class Worker {
   ownerName: string | null;
 
   /**
-   * 机器人独立访问令牌：仅用于需要严格识别执行机器人的 Agent 接口（如任务验收申请）。
-   * 禁止出现在机器人列表/详情响应中；首次派发时自动生成并写入工位。
+   * 机器人独立访问令牌：可访问所有 .md 接口，并可让任务接口严格识别执行机器人。
+   * 禁止出现在机器人列表/详情响应中；初始化或首次派发时自动生成并写入工位。
    */
   @Index('IDX_workers_agentToken', { unique: true })
   @Column({ type: 'varchar', length: 64, nullable: true, select: false })

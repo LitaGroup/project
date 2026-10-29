@@ -249,7 +249,7 @@ export class TaskDispatchService
     if (!workdir) {
       throw new NotFoundException('未配置 WORKER_BASE_DIR，无法确定工位目录');
     }
-    // 机器人独立令牌只在工位文件与数据库中出现，不进入任务 Prompt/聊天/日志
+    // 机器人独立令牌只在工位文件与数据库中出现（初始化/派发时幂等写入），不进入任务 Prompt/聊天/日志
     const workerToken = await this.workersService.ensureAgentToken(worker.id);
     const client = new OpencodeClient(executor);
     this.dispatching.add(task.id);

@@ -105,6 +105,15 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     expect(prompt).toContain('task-handoff-apply');
   });
 
+  it('AGENTS.md 说明机器人令牌用于所有 .md 接口且不得外泄', async () => {
+    const prompt = await buildService()['buildPrompt'](worker);
+    expect(prompt).toContain('调用平台所有 .md 接口');
+    expect(prompt).toContain('X-Worker-Token: $TOKEN');
+    expect(prompt).toContain('.opencode/agent-token');
+    expect(prompt).toContain('不得读取展示、改写或删除');
+    expect(prompt).toContain('不得把令牌写入聊天、交付物或文档');
+  });
+
   it('规范清单为空时只清理旧受管文件，不要求清空 docs', async () => {
     const empty: ManagedStandardFiles = {
       branch: 'main',
@@ -136,7 +145,10 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
     new WorkerEnvironmentService(
       { findOne: workersFindOne } as never,
       { findOne: executorsFindOne } as never,
-      { workdirOf: () => '/tmp/runtime/worker/1001' } as never,
+      {
+        workdirOf: () => '/tmp/runtime/worker/1001',
+        ensureAgentToken: () => Promise.resolve('test-worker-token'),
+      } as never,
       {
         resolveManagedFiles: () =>
           Promise.resolve({
@@ -165,6 +177,29 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
     expect(second.startedAt).toBe(first.startedAt);
     // 终态兜底：后台任务失败后快照转 failed 且带错误（执行器 mock 地址不可达）
     expect(['running', 'failed']).toContain(service.snapshotOf(1001).status);
+  });
+
+  it('初始化时把机器人独立令牌写入工位并限制为 600 权限', async () => {
+    const ensureAgentToken = jest.fn().mockResolvedValue('worker-token-123');
+    const shell = jest.fn().mockResolvedValue(undefined);
+    const service = new WorkerEnvironmentService(
+      {} as never,
+      {} as never,
+      { ensureAgentToken } as never,
+      {} as never,
+      {} as never,
+    );
+    await service['writeAgentToken'](
+      { shell } as never,
+      1001,
+      '/tmp/runtime/worker/1001',
+    );
+    expect(ensureAgentToken).toHaveBeenCalledWith(1001);
+    expect(shell).toHaveBeenCalledTimes(1);
+    expect(shell).toHaveBeenCalledWith(
+      "printf '%s' 'worker-token-123' > '/tmp/runtime/worker/1001/.opencode/agent-token' && " +
+        "chmod 600 '/tmp/runtime/worker/1001/.opencode/agent-token'",
+    );
   });
 
   it('配置不完整时 start 同步抛 400，不创建任务', async () => {

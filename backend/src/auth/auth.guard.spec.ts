@@ -66,16 +66,12 @@ describe('AuthGuard（网页接口强制登录）', () => {
     expect(getUserByAgentToken).toHaveBeenCalledWith('valid-agent-token');
   });
 
-  it('.md 端点凭有效机器人 token 放行并挂载 req.worker', async () => {
+  it('任意 .md 端点均可凭有效机器人 token 放行并挂载 req.worker', async () => {
     const worker = { id: 1001, name: '前端工程师', enabled: true };
     findByAgentToken.mockResolvedValue(worker);
-    const { context, req } = createContext(
-      '/api/tasks/1/deliver/apply.md',
-      undefined,
-      {
-        'x-worker-token': 'valid-worker-token',
-      },
-    );
+    const { context, req } = createContext('/api/projects/1.md', undefined, {
+      'x-worker-token': 'valid-worker-token',
+    });
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect((req as AuthedRequest).worker).toBe(worker);
     expect((req as AuthedRequest).user).toBeUndefined();
@@ -83,15 +79,11 @@ describe('AuthGuard（网页接口强制登录）', () => {
     expect(getUserByAgentToken).not.toHaveBeenCalled();
   });
 
-  it('.md 端点机器人 token 无效 401（不回退用户令牌/会话）', async () => {
+  it('任意 .md 端点机器人 token 无效 401（不回退用户令牌/会话）', async () => {
     findByAgentToken.mockResolvedValue(null);
-    const { context } = createContext(
-      '/api/tasks/1/deliver/apply.md',
-      undefined,
-      {
-        'x-worker-token': 'stale-worker-token',
-      },
-    );
+    const { context } = createContext('/api/projects/1.md', undefined, {
+      'x-worker-token': 'stale-worker-token',
+    });
     await expect(guard.canActivate(context)).rejects.toThrow(
       UnauthorizedException,
     );
