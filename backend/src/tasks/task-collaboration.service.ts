@@ -447,6 +447,7 @@ export class TaskCollaborationService {
       { reason: text },
     );
     await this.workerInbox.completeForChild(taskId, 'handoff');
+    await this.dispatchService.discardQueuedConversations(taskId);
     void this.dispatchService
       .destroyAcceptedSession(taskId)
       .catch(() => undefined);

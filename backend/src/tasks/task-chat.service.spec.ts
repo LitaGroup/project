@@ -475,3 +475,79 @@ describe('TaskChatService snapshot 最终产出去重', () => {
     );
   });
 });
+
+describe('TaskChatService 发送队列', () => {
+  const task = {
+    id: 7,
+    rootId: null,
+    agentId: null,
+    schedulerId: null,
+    createdById: null,
+    result: null,
+    description: '任务需求',
+    title: '任务标题',
+    createdAt: new Date('2026-10-27T10:00:00Z'),
+    updatedAt: new Date('2026-10-27T10:00:00Z'),
+  } as Task;
+
+  let service: TaskChatService;
+
+  beforeEach(() => {
+    service = new TaskChatService(
+      {
+        findOne: jest.fn().mockResolvedValue(task),
+        find: jest.fn().mockResolvedValue([]),
+      } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      { findOne: jest.fn().mockResolvedValue(null) } as never,
+      { findOne: jest.fn().mockResolvedValue(null) } as never,
+      {} as never,
+    );
+  });
+
+  it('按 FIFO 保存待发送消息，并支持发送中、失败恢复与移除', async () => {
+    const first = await service.enqueueUserMessage(7, '第一条', '张三');
+    const second = await service.enqueueUserMessage(7, '第二条', '张三');
+
+    expect(service.queuedUserMessages(7).map((item) => item.content)).toEqual([
+      '第一条',
+      '第二条',
+    ]);
+
+    await service.markQueuedUserMessageSending(7, first.id);
+    expect(service.queuedUserMessages(7)[0]).toMatchObject({
+      id: first.id,
+      status: 'sending',
+    });
+
+    await service.restoreQueuedUserMessage(7, first.id, '执行器离线');
+    expect(service.queuedUserMessages(7)[0]).toMatchObject({
+      id: first.id,
+      status: 'queued',
+      error: '执行器离线',
+    });
+
+    await service.removeQueuedUserMessage(7, first.id);
+    expect(service.queuedUserMessages(7)).toEqual([
+      expect.objectContaining({ id: second.id, content: '第二条' }),
+    ]);
+
+    await service.discardQueuedUserMessages(7);
+    expect(service.queuedUserMessages(7)).toEqual([]);
+  });
+
+  it('聊天快照包含当前任务的待发送队列', async () => {
+    await service.enqueueUserMessage(7, '刷新后仍要看到', '张三');
+
+    const snapshot = await service.snapshot(7);
+
+    expect(snapshot.queuedMessages).toEqual([
+      expect.objectContaining({
+        taskId: 7,
+        content: '刷新后仍要看到',
+        status: 'queued',
+      }),
+    ]);
+  });
+});

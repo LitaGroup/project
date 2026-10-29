@@ -136,6 +136,12 @@ export class TaskDispatchService
   /** 派发中的任务（对账时避免释放刚占用的连接） */
   private readonly dispatching = new Set<number>();
 
+  /** 正在从待发送队列取消息的任务（避免并发投递） */
+  private readonly queueDraining = new Set<number>();
+
+  /** prompt 已接受但执行器尚未发出首个事件（期间继续输入必须入队，不能再次 prompt） */
+  private readonly awaitingTurnStart = new Set<number>();
+
   /** 会话已完成但机器人尚未调用验收申请的任务（对账只补一次产出） */
   private readonly finishedAwaitingApply = new Set<number>();
 
@@ -393,6 +399,7 @@ export class TaskDispatchService
         : prompt;
       task.offerAttemptAt = offering ? new Date() : task.offerAttemptAt;
       await client.prompt(sessionId, { text });
+      if (!offering) this.awaitingTurnStart.add(task.id);
       this.pushLine(
         task.id,
         offering ? '▶ 任务邀约已下发，等待接受或拒绝' : '▶ 任务指令已下发',
@@ -454,20 +461,100 @@ export class TaskDispatchService
         '等待任务必须先由 LOOP 或验收返工占用机器人',
       );
     }
-    if (this.taskChat.isRunning(taskId)) {
-      throw new BadRequestException('机器人正在回复，请稍后再发送');
-    }
     if (!task.agentId) {
       throw new BadRequestException('任务尚未分配机器人，请先分配');
     }
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
+    // 机器人本轮仍在执行（或平台正在派发）时先入队；当前轮结束后再逐条投递。
+    if (
+      this.taskChat.isRunning(taskId) ||
+      this.dispatching.has(taskId) ||
+      this.queueDraining.has(taskId) ||
+      this.awaitingTurnStart.has(taskId)
+    ) {
+      await this.taskChat.enqueueUserMessage(taskId, text, operator);
+      return task;
+    }
+    // 上一次投递失败/暂停后仍有积压：新消息排到队尾，并触发队首继续发送。
+    if (this.taskChat.hasQueuedUserMessages(taskId)) {
+      await this.taskChat.enqueueUserMessage(taskId, text, operator);
+      this.scheduleQueueDrain(taskId);
+      return task;
+    }
+    return this.sendConversationTurn(taskId, text, operator);
+  }
+
+  /**
+   * 投递一轮用户消息。只有 opencode 接受 prompt 后才记录反馈事件，
+   * 避免投递失败时对话里出现一条实际未发送的用户气泡。
+   */
+  private async sendConversationTurn(
+    taskId: number,
+    content: string,
+    operator: string | null,
+  ): Promise<Task> {
     await this.taskChat.archiveResult(taskId);
-    await this.addEvent(taskId, '反馈', text, operator, {
+    const saved = await this.dispatch(taskId, operator, content);
+    await this.addEvent(taskId, '反馈', content, operator, {
       intervention: true,
       chat: true,
     });
-    return this.dispatch(taskId, operator, text);
+    return saved;
+  }
+
+  /** 当前轮结束后投递队首消息；一次只发一条，下一轮完成后再发下一条 */
+  private scheduleQueueDrain(taskId: number): void {
+    void this.drainQueuedConversation(taskId).catch((error: Error) => {
+      this.logger.warn(`任务 #${taskId} 发送队列投递失败: ${error.message}`);
+    });
+  }
+
+  private async drainQueuedConversation(taskId: number): Promise<void> {
+    if (this.queueDraining.has(taskId)) return;
+    this.queueDraining.add(taskId);
+    try {
+      const task = await this.mustFind(taskId);
+      if (
+        task.status !== TaskStatus.RUNNING ||
+        task.subStatus !== TaskSubStatus.EXECUTING ||
+        this.taskChat.isRunning(taskId) ||
+        this.dispatching.has(taskId) ||
+        this.awaitingTurnStart.has(taskId)
+      ) {
+        return;
+      }
+      const [next] = this.taskChat.queuedUserMessages(taskId);
+      if (!next) return;
+      const sending = await this.taskChat.markQueuedUserMessageSending(
+        taskId,
+        next.id,
+      );
+      if (!sending) return;
+      try {
+        const operator =
+          sending.sender.name && sending.sender.name !== '用户'
+            ? sending.sender.name
+            : null;
+        await this.sendConversationTurn(taskId, sending.content, operator);
+        await this.taskChat.removeQueuedUserMessage(taskId, sending.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.taskChat.restoreQueuedUserMessage(
+          taskId,
+          sending.id,
+          message,
+        );
+        throw error;
+      }
+    } finally {
+      this.queueDraining.delete(taskId);
+    }
+  }
+
+  /** 取消/删除/改派时清理待发送队列；人工暂停不清理。 */
+  async discardQueuedConversations(taskId: number): Promise<void> {
+    await this.taskChat.discardQueuedUserMessages(taskId);
   }
 
   /**
@@ -578,6 +665,9 @@ export class TaskDispatchService
       toolStatus: 'error',
       toolDetail: '会话已中断，未收到工具终态事件',
     });
+    this.awaitingTurnStart.delete(taskId);
+    // 人工「暂停」保留队列；取消、改派等内部中断直接丢弃不再发送的消息。
+    if (!intervention) await this.taskChat.discardQueuedUserMessages(taskId);
     this.releaseTask(taskId);
     return this.mustFind(taskId);
   }
@@ -920,6 +1010,16 @@ export class TaskDispatchService
     const formEvent = formEventToQuestionEvent(event.type, data);
     const eventType = formEvent?.type ?? legacyQuestionType;
     const questionData = formEvent?.data ?? data;
+    // 执行器已开始本轮（文本/思考/工具/终态或提问），后续消息重新走并发判断。
+    if (
+      event.type.startsWith('session.execution.') ||
+      event.type.startsWith('session.text.') ||
+      event.type.startsWith('session.reasoning.') ||
+      event.type.startsWith('session.tool.') ||
+      eventType === 'question.asked'
+    ) {
+      this.awaitingTurnStart.delete(taskId);
+    }
 
     switch (true) {
       case event.type === 'session.execution.started': {
@@ -1278,6 +1378,16 @@ export class TaskDispatchService
    * 必须由执行机器人显式调用验收申请接口后才进入「等待中-待验收」。
    */
   private async finalizeSuccess(taskId: number): Promise<void> {
+    this.awaitingTurnStart.delete(taskId);
+    try {
+      await this.finalizeSuccessTurn(taskId);
+    } finally {
+      // 仅当任务仍处于执行中时才会真正发送；待验收/待反馈等状态保持队列不动。
+      this.scheduleQueueDrain(taskId);
+    }
+  }
+
+  private async finalizeSuccessTurn(taskId: number): Promise<void> {
     const task = await this.mustFind(taskId);
     this.releaseTask(taskId);
     // 父机器人未通过动作接口处理的子任务事件，在会话结束后重新排队。

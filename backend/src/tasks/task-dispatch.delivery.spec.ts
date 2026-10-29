@@ -32,7 +32,12 @@ describe('TaskDispatchService 显式申请验收', () => {
     update: jest.Mock;
   };
   let eventsRepo: { create: jest.Mock; save: jest.Mock };
-  let taskChat: { finishTask: jest.Mock };
+  let taskChat: {
+    finishTask: jest.Mock;
+    isRunning: jest.Mock;
+    hasQueuedUserMessages: jest.Mock;
+    queuedUserMessages: jest.Mock;
+  };
   let taskNotify: { notifyTaskRequester: jest.Mock };
   let taskRealtime: { lineAppended: jest.Mock; taskChanged: jest.Mock };
   let taskDocuments: { upsertHandoff: jest.Mock };
@@ -56,7 +61,12 @@ describe('TaskDispatchService 显式申请验收', () => {
       create: jest.fn((value: unknown) => value),
       save: jest.fn().mockResolvedValue(undefined),
     };
-    taskChat = { finishTask: jest.fn().mockResolvedValue(undefined) };
+    taskChat = {
+      finishTask: jest.fn().mockResolvedValue(undefined),
+      isRunning: jest.fn().mockReturnValue(false),
+      hasQueuedUserMessages: jest.fn().mockReturnValue(false),
+      queuedUserMessages: jest.fn().mockReturnValue([]),
+    };
     taskNotify = {
       notifyTaskRequester: jest.fn().mockResolvedValue({ sent: true }),
     };

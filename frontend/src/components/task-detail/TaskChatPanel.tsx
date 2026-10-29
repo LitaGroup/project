@@ -42,6 +42,7 @@ import {
   type TaskChatSender,
   type TaskPackage,
   type TaskPipelineStage,
+  type TaskQueuedUserMessage,
   type Worker,
 } from '../../lib/api'
 import { questionStatusLabel } from '../../lib/question'
@@ -77,6 +78,7 @@ interface TaskChatPanelProps {
   task: TaskPackage
   pipeline: TaskPipelineStage[]
   messages: TaskChatMessage[]
+  queuedMessages: TaskQueuedUserMessage[]
   connection: 'connecting' | 'live' | 'reconnecting'
   busy: boolean
   onSendMessage: (content: string) => Promise<void>
@@ -93,6 +95,7 @@ export function TaskChatPanel({
   task,
   pipeline,
   messages,
+  queuedMessages,
   connection,
   busy,
   onSendMessage,
@@ -116,15 +119,12 @@ export function TaskChatPanel({
   const robotRunning = messages.some(
     (message) => message.role === 'assistant' && message.status === 'running',
   )
-  // 待验收时机器人可能仍在输出最终回复，但需求方此时应能发送返工意见
-  // （后端按验收不通过排队处理），不因运行态锁住输入框。
-  const awaitingAcceptance = task.subStatus === '待验收'
-  const sendBlocked = finished || (robotRunning && !awaitingAcceptance)
+  // 执行中仍可输入：消息进入平台发送队列，待当前轮结束后自动投递。
   const runtime = useExternalStoreRuntime<TaskChatMessage>({
     messages,
     convertMessage: toThreadMessage,
     onNew,
-    isSendDisabled: busy || sendBlocked,
+    isSendDisabled: busy || finished,
   })
 
   const robotCount = useMemo(
@@ -205,6 +205,7 @@ export function TaskChatPanel({
                 agentName={currentAgentName}
                 busy={busy}
                 robotRunning={robotRunning}
+                queuedMessages={queuedMessages}
                 onAction={onAction}
               />
             </ThreadPrimitive.ViewportFooter>
@@ -458,29 +459,24 @@ function ChatFooter({
   agentName,
   busy,
   robotRunning,
+  queuedMessages,
   onAction,
 }: {
   task: TaskPackage
   agentName?: string
   busy: boolean
   robotRunning: boolean
+  queuedMessages: TaskQueuedUserMessage[]
   onAction: (fn: (id: number) => Promise<unknown>) => void
 }) {
-  const [rejectOpen, setRejectOpen] = useState(false)
-  const [rejectReason, setRejectReason] = useState('')
-  const [rejectError, setRejectError] = useState<string | null>(null)
-  const [failOpen, setFailOpen] = useState(false)
-  const [failReason, setFailReason] = useState('')
-  const [failError, setFailError] = useState<string | null>(null)
   const finished = task.status === '已结束'
   const awaitingAcceptance = task.subStatus === '待验收'
-  const sendBlocked = finished || (robotRunning && !awaitingAcceptance)
   const placeholder = finished
     ? '任务已结束，不能继续对话'
     : awaitingAcceptance
       ? '输入返工意见，发送后将按验收不通过退回机器人…'
       : robotRunning
-        ? '机器人正在回复…'
+        ? '输入消息加入发送队列，当前回复结束后自动发送…'
         : task.subStatus === '待反馈'
           ? '补充资料或确认信息，发送后将排队等待机器人继续执行…'
           : task.subStatus === '待分配' || task.subStatus === '待接受'
@@ -490,7 +486,11 @@ function ChatFooter({
               : '继续与机器人对话，Enter 发送，Shift+Enter 换行…'
   const hint =
     task.subStatus === '执行中'
-      ? '机器人正在执行，实时输出会同步到对话中'
+      ? robotRunning
+        ? '机器人正在执行，新消息会加入下方发送队列，按顺序发送'
+        : queuedMessages.length > 0
+          ? '发送队列将在机器人当前轮结束后继续投递'
+          : '机器人正在执行，实时输出会同步到对话中'
       : task.subStatus === '待分配'
         ? '任务已创建，等待平台分配机器人'
         : task.subStatus === '待接受'
@@ -562,17 +562,62 @@ function ChatFooter({
         </div>
       )}
 
+      {queuedMessages.length > 0 && (
+        <div className="mb-2 rounded-[var(--radius-md)] border border-border bg-background-subtle">
+          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-[11px]">
+            <span className="font-medium text-foreground-emphasis">
+              发送队列
+            </span>
+            <span className="text-foreground-muted">
+              {queuedMessages.length} 条待发送
+            </span>
+          </div>
+          <ol className="max-h-36 overflow-y-auto px-3 py-2">
+            {queuedMessages.map((message, index) => (
+              <li
+                key={message.id}
+                className="flex gap-2 border-b border-border py-1.5 text-xs last:border-b-0 last:pb-0 first:pt-0"
+              >
+                <span className="mt-0.5 shrink-0 font-mono text-[10px] text-foreground-subtle">
+                  {index + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="whitespace-pre-wrap break-words leading-relaxed text-foreground-emphasis">
+                    {message.content}
+                  </p>
+                  <p
+                    className={`mt-1 text-[10px] ${
+                      message.error
+                        ? 'text-error-foreground'
+                        : message.status === 'sending'
+                          ? 'text-info-foreground'
+                          : 'text-foreground-muted'
+                    }`}
+                  >
+                    {message.error
+                      ? `发送失败：${message.error}（保留在队列，下一次发送时重试）`
+                      : message.status === 'sending'
+                        ? '正在发送…'
+                        : '等待发送'}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
       <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
         <ComposerPrimitive.Input
           rows={2}
-          disabled={sendBlocked}
+          disabled={finished}
           placeholder={placeholder}
           className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed disabled:opacity-60"
         />
         <ComposerPrimitive.Send
           className={buttonVariants({ variant: 'primary', size: 'icon-sm' })}
           aria-label="发送消息"
-          disabled={sendBlocked}
+          disabled={busy || finished}
         >
           <Send className="size-4" />
         </ComposerPrimitive.Send>
@@ -590,7 +635,7 @@ function ChatFooter({
               disabled={busy}
               onClick={() => onAction((id) => api.interruptTask(id))}
             >
-              中断
+              暂停
             </Button>
           )}
           <Button
@@ -621,149 +666,14 @@ function ChatFooter({
           />
           <Button
             size="sm"
-            variant="outline"
-            disabled={busy || task.subStatus !== '待验收'}
-            onClick={() => {
-              setFailReason('')
-              setFailError(null)
-              setFailOpen(true)
-            }}
-          >
-            任务失败
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy || task.subStatus !== '待验收'}
-            onClick={() => {
-              setRejectReason('')
-              setRejectError(null)
-              setRejectOpen(true)
-            }}
-          >
-            验收不通过
-          </Button>
-          <Button
-            size="sm"
             variant="primary"
             disabled={busy || task.subStatus !== '待验收'}
             onClick={() => onAction((id) => api.acceptTask(id))}
           >
-            完成
+            验收完成
           </Button>
         </div>
       </div>
-
-      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>验收不通过</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-3 px-6 pb-2 text-sm">
-            <p className="text-foreground-muted">
-              当前已累计不通过 {task.acceptRejectCount ?? 0} 次。前 3
-              次会退回原机器人修改，第 4 次起转交执行机器人负责人处理。
-            </p>
-            <label className="flex flex-col gap-1">
-              <span>返工要求</span>
-              <textarea
-                value={rejectReason}
-                onChange={(event) => {
-                  setRejectReason(event.target.value)
-                  setRejectError(null)
-                }}
-                rows={5}
-                autoFocus
-                placeholder="说明未通过验收的原因和需要修改的内容…"
-                className="min-h-28 resize-y rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-foreground-subtle focus:border-border-strong"
-              />
-            </label>
-            {rejectError && (
-              <p className="text-xs text-error-foreground">{rejectError}</p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setRejectOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={busy}
-              onClick={() => {
-                const content = rejectReason.trim()
-                if (!content) {
-                  setRejectError('请填写返工要求')
-                  return
-                }
-                setRejectOpen(false)
-                onAction((id) => api.rejectTask(id, content))
-              }}
-            >
-              确认不通过
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={failOpen} onOpenChange={setFailOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>判定任务失败</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-3 px-6 pb-2 text-sm">
-            <p className="text-foreground-muted">
-              任务将直接结束并标记为失败，不会再退回机器人返工。请填写明确的失败原因。
-            </p>
-            <label className="flex flex-col gap-1">
-              <span>失败原因</span>
-              <textarea
-                value={failReason}
-                onChange={(event) => {
-                  setFailReason(event.target.value)
-                  setFailError(null)
-                }}
-                rows={5}
-                autoFocus
-                placeholder="说明任务无法继续或交付不可接受的原因…"
-                className="min-h-28 resize-y rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-foreground-subtle focus:border-border-strong"
-              />
-            </label>
-            {failError && (
-              <p className="text-xs text-error-foreground">{failError}</p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setFailOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={busy}
-              onClick={() => {
-                const reason = failReason.trim()
-                if (!reason) {
-                  setFailError('请填写失败原因')
-                  return
-                }
-                setFailOpen(false)
-                onAction((id) => api.failTask(id, reason))
-              }}
-            >
-              确认失败
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

@@ -61,6 +61,7 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     claimExecution: jest.Mock;
     addEvent: jest.Mock;
     destroyAcceptedSession: jest.Mock;
+    discardQueuedConversations: jest.Mock;
   };
   let handoffService: { request: jest.Mock };
   let service: TaskDeliveryService;
@@ -133,6 +134,7 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       ),
       addEvent: jest.fn().mockResolvedValue(undefined),
       destroyAcceptedSession: jest.fn().mockResolvedValue(undefined),
+      discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
     };
     handoffService = { request: jest.fn().mockResolvedValue({}) };
     service = new TaskDeliveryService(

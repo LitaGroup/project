@@ -44,6 +44,7 @@ describe('TasksService 任务详情与对话', () => {
     addEvent: jest.Mock;
     continueConversation: jest.Mock;
     interrupt: jest.Mock;
+    discardQueuedConversations: jest.Mock;
   };
   let service: TasksService;
 
@@ -68,6 +69,7 @@ describe('TasksService 任务详情与对话', () => {
       addEvent: jest.fn().mockResolvedValue(undefined),
       continueConversation: jest.fn().mockResolvedValue(baseTask()),
       interrupt: jest.fn().mockResolvedValue(baseTask()),
+      discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
     };
     service = new TasksService(
       tasksRepo as never,

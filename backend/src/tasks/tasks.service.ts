@@ -685,6 +685,11 @@ export class TasksService {
     }
     const children = await this.tasks.find({ where: { rootId: id } });
     const ids = children.map((c) => c.id);
+    await Promise.all(
+      [...new Set([id, ...ids])].map((taskId) =>
+        this.dispatchService.discardQueuedConversations(taskId),
+      ),
+    );
     await this.workerInbox.deleteForTasks([...new Set([id, ...ids])]);
     if (ids.length > 0) {
       await this.events.delete({ taskId: In(ids) });
@@ -954,6 +959,7 @@ export class TasksService {
     task.subStatus = TaskSubStatus.CANCELED;
     task.canceledAt = new Date();
     const saved = await this.tasks.save(task);
+    await this.dispatchService.discardQueuedConversations(id);
     await this.workerInbox.completeForChild(id);
     await this.workerInbox.enqueue(saved, 'cancelled', {
       payload: { reason: '任务已取消' },

@@ -85,6 +85,18 @@ export interface TaskChatMessage {
   meta?: Record<string, unknown>;
 }
 
+/** 等待投递给执行器的用户消息（机器人本轮结束后按顺序发送） */
+export interface TaskQueuedUserMessage {
+  id: string;
+  taskId: number;
+  sender: TaskChatSender;
+  content: string;
+  createdAt: string;
+  status: 'queued' | 'sending';
+  /** 上一次投递失败原因（保留在队列中，等待下次恢复） */
+  error?: string;
+}
+
 /** PIPELINE 阶段：主任务或子任务 + 分配的机器人与调度机器人 */
 export interface TaskPipelineStage {
   task: Task;
@@ -100,6 +112,8 @@ export interface TaskChatSnapshot {
   rootTask: Task;
   pipeline: TaskPipelineStage[];
   messages: TaskChatMessage[];
+  /** 当前任务等待投递给机器人的用户消息（FIFO） */
+  queuedMessages: TaskQueuedUserMessage[];
   /** 当前任务的需求人姓名（任务创建人） */
   requesterName: string | null;
   /** 当前执行机器人的负责人姓名 */
@@ -114,6 +128,8 @@ export interface TaskChatSnapshot {
 export type TaskChatStreamMessage =
   | { type: 'ready'; at: number }
   | { type: 'message.upsert'; message: TaskChatMessage; at: number }
+  | { type: 'queue.upsert'; message: TaskQueuedUserMessage; at: number }
+  | { type: 'queue.delete'; ids: string[]; at: number }
   | { type: 'stage.upsert'; stage: TaskPipelineStage; at: number }
   | { type: 'stage.delete'; ids: number[]; at: number }
   | { type: 'refresh'; at: number }

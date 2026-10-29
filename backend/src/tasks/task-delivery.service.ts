@@ -216,6 +216,7 @@ export class TaskDeliveryService {
     const task = await this.mustFind(taskId);
     await this.assertRequester(task, actor);
     const saved = await this.tasksService.accept(taskId, actorName(actor));
+    await this.dispatchService.discardQueuedConversations(taskId);
     await this.workerInbox.completeForChild(taskId, 'handoff');
     // 验收成功后的总结与会话清理均为异步收尾，不阻塞验收结果
     void this.taskHandoff.request(taskId).catch((error: Error) => {

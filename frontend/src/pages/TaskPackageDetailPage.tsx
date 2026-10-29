@@ -10,12 +10,12 @@ import {
   type TaskChatStreamMessage,
   type TaskPackage,
   type TaskPipelineStage,
+  type TaskQueuedUserMessage,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { TaskChatPanel } from '../components/task-detail/TaskChatPanel'
 import { TaskSidePanel } from '../components/task-detail/TaskSidePanel'
-import { useAuth } from '../context/AuthContext'
 import { formatDuration, taskDurationMs } from '../lib/duration'
 
 type ConnectionState = 'connecting' | 'live' | 'reconnecting'
@@ -27,10 +27,12 @@ type ConnectionState = 'connecting' | 'live' | 'reconnecting'
 export function TaskPackageDetailPage() {
   const { id } = useParams<{ id: string }>()
   const taskId = Number(id)
-  const { user } = useAuth()
   const [task, setTask] = useState<TaskPackage | null>(null)
   const [pipeline, setPipeline] = useState<TaskPipelineStage[]>([])
   const [messages, setMessages] = useState<TaskChatMessage[]>([])
+  const [queuedMessages, setQueuedMessages] = useState<TaskQueuedUserMessage[]>(
+    [],
+  )
   const [requesterName, setRequesterName] = useState<string | null>(null)
   const [agentOwnerName, setAgentOwnerName] = useState<string | null>(null)
   const [interventionCount, setInterventionCount] = useState(0)
@@ -53,6 +55,7 @@ export function TaskPackageDetailPage() {
       setTask(data.task)
       setPipeline(data.pipeline)
       setMessages(data.messages)
+      setQueuedMessages(data.queuedMessages ?? [])
       setRequesterName(data.requesterName)
       setAgentOwnerName(data.agentOwnerName)
       setInterventionCount(data.interventionCount)
@@ -113,6 +116,18 @@ export function TaskPackageDetailPage() {
         case 'message.upsert':
           setMessages((current) => upsertMessage(current, data.message))
           break
+        case 'queue.upsert':
+          if (data.message.taskId === taskId) {
+            setQueuedMessages((current) =>
+              upsertQueuedMessage(current, data.message),
+            )
+          }
+          break
+        case 'queue.delete':
+          setQueuedMessages((current) =>
+            current.filter((message) => !data.ids.includes(message.id)),
+          )
+          break
         case 'stage.upsert':
           setPipeline((current) => upsertStage(current, data.stage))
           setTask((current) =>
@@ -151,38 +166,19 @@ export function TaskPackageDetailPage() {
     async (content: string) => {
       const text = content.trim()
       if (!text) return
-      const optimistic: TaskChatMessage = {
-        id: `local:${Date.now()}`,
-        taskId,
-        role: 'user',
-        sender: {
-          id: `user:${user?.name ?? 'me'}`,
-          name: user?.name ?? '我',
-          kind: 'user',
-          roleLabel: '用户',
-        },
-        content: text,
-        createdAt: new Date().toISOString(),
-        status: 'complete',
-        kind: 'message',
-      }
-      setMessages((current) => [...current, optimistic])
       setBusy(true)
       setError(null)
       try {
         await api.sendTaskMessage(taskId, text)
         await loadRef.current()
       } catch (e) {
-        setMessages((current) =>
-          current.filter((message) => message.id !== optimistic.id),
-        )
         setError((e as Error).message)
         throw e
       } finally {
         setBusy(false)
       }
     },
-    [taskId, user?.name],
+    [taskId],
   )
 
   const act = useCallback(
@@ -317,6 +313,7 @@ export function TaskPackageDetailPage() {
           task={currentTask}
           pipeline={pipeline}
           messages={messages}
+          queuedMessages={queuedMessages}
           connection={connection}
           busy={busy}
           onSendMessage={sendMessage}
@@ -352,6 +349,17 @@ function upsertMessage(
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
     )
   }
+  const next = current.slice()
+  next[index] = message
+  return next
+}
+
+function upsertQueuedMessage(
+  current: TaskQueuedUserMessage[],
+  message: TaskQueuedUserMessage,
+): TaskQueuedUserMessage[] {
+  const index = current.findIndex((item) => item.id === message.id)
+  if (index < 0) return [...current, message]
   const next = current.slice()
   next[index] = message
   return next
