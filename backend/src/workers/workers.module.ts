@@ -10,6 +10,7 @@ import { WorkerDebugSession } from './worker-debug-session.entity';
 import { SystemWorkersService } from './system-workers.service';
 import { WorkerAiService } from './worker-ai.service';
 import { WorkerEnvironmentService } from './worker-environment.service';
+import { WorkerOptimizeService } from './worker-optimize.service';
 import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
 import { WorkerStandardCatalogService } from './worker-standard-catalog.service';
 import { WorkerDebugController } from './worker-debug.controller';
@@ -35,6 +36,7 @@ import { WorkersService } from './workers.service';
     WorkersService,
     SystemWorkersService,
     WorkerAiService,
+    WorkerOptimizeService,
     WorkerEnvironmentService,
     WorkerSkillCatalogService,
     WorkerStandardCatalogService,

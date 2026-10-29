@@ -36,6 +36,7 @@ import {
   type Worker,
   type WorkerInitializeSnapshot,
   type WorkerInitializeStatus,
+  type WorkerOptimizeSnapshot,
   type WorkerRole,
   type WorkerSkill,
   type WorkerSkillCatalogItem,
@@ -111,6 +112,9 @@ export function WorkerEditPage() {
   const [optimizePhase, setOptimizePhase] = useState<OptimizePhase>('idle')
   const [optimizeSnapshot, setOptimizeSnapshot] = useState<string | null>(null)
   const [optimizeError, setOptimizeError] = useState<string | null>(null)
+  /** 非 null 时订阅该优化任务的 SSE 进度流 */
+  const [optimizeRunId, setOptimizeRunId] = useState<string | null>(null)
+  const [optimizeLines, setOptimizeLines] = useState<string[]>([])
   const [editorEpoch, setEditorEpoch] = useState(0)
   const promptRef = useRef<MarkdownEditorHandle>(null)
   const editorEpochRef = useRef(0)
@@ -332,17 +336,33 @@ export function WorkerEditPage() {
   const busy = saving || initializing
 
   /** 替换编辑器内容：换 key 重新挂载（MarkdownEditor 为非受控组件） */
-  const replacePrompt = (next: string) => {
+  const replacePrompt = useCallback((next: string) => {
     editorEpochRef.current += 1
     setEditorEpoch(editorEpochRef.current)
     setPrompt(next)
-  }
+  }, [])
 
   /** 只接收当前编辑器实例的变更，避免替换时旧实例的防抖回调覆盖新内容 */
   const handlePromptChange = (markdown: string, epoch: number) => {
     if (epoch !== editorEpochRef.current) return
     setPrompt(markdown)
   }
+
+  /** 优化成功：以返回时刻编辑器里的最新内容作为撤销快照，避免优化期间的手动编辑丢失 */
+  const acceptOptimized = useCallback(
+    (optimized: string) => {
+      const text = optimized.trim()
+      if (!text) {
+        setOptimizeError('执行器返回内容为空')
+        setOptimizePhase('idle')
+        return
+      }
+      setOptimizeSnapshot(promptRef.current?.getMarkdown() ?? text)
+      replacePrompt(text)
+      setOptimizePhase('review')
+    },
+    [replacePrompt],
+  )
 
   const optimizePrompt = async () => {
     if (optimizePhase === 'loading') return
@@ -352,25 +372,72 @@ export function WorkerEditPage() {
       return
     }
     setOptimizeError(null)
+    setOptimizeLines([])
     setOptimizePhase('loading')
     try {
-      const optimized = await api.optimizeWorkerPrompt({
+      // 异步任务：先拿到运行快照，再经 SSE 订阅进度与最终结果（同步长请求会被网关 504 掐断）
+      const snapshot = await api.startWorkerPromptOptimize({
         prompt: current,
         workerId: worker?.id ?? null,
         executorId: executorId ? Number(executorId) : null,
         providerId: providerId || null,
         modelId: modelId || null,
       })
-      if (!optimized.trim()) throw new Error('执行器返回内容为空')
-      // 以返回时刻编辑器里的最新内容作为撤销快照，避免优化期间的手动编辑丢失
-      setOptimizeSnapshot(promptRef.current?.getMarkdown() ?? current)
-      replacePrompt(optimized)
-      setOptimizePhase('review')
+      setOptimizeLines(snapshot.lines)
+      if (snapshot.status === 'running') {
+        setOptimizeRunId(snapshot.runId)
+        return
+      }
+      setOptimizeRunId(null)
+      if (snapshot.status === 'failed') {
+        throw new Error(snapshot.error ?? '优化失败')
+      }
+      acceptOptimized(snapshot.prompt ?? '')
     } catch (e) {
       setOptimizeError(e instanceof Error ? e.message : '优化失败')
       setOptimizePhase('idle')
     }
   }
+
+  // 优化进度 SSE：snapshot 校准全量状态，line 增量推送；终态后由服务端完成流
+  useEffect(() => {
+    if (!optimizeRunId) return
+    const source = new EventSource(
+      `/api/workers/optimize-prompt/${encodeURIComponent(optimizeRunId)}/stream`,
+    )
+    source.onmessage = (event: MessageEvent<string>) => {
+      let payload:
+        | { type: 'snapshot'; snapshot: WorkerOptimizeSnapshot }
+        | { type: 'line'; line: string }
+        | { type: 'ping' }
+        | { type?: string }
+      try {
+        payload = JSON.parse(event.data) as typeof payload
+      } catch {
+        return
+      }
+      if (payload.type === 'line' && 'line' in payload && payload.line) {
+        setOptimizeLines((prev) => [...prev.slice(-49), payload.line])
+        return
+      }
+      if (payload.type !== 'snapshot' || !('snapshot' in payload)) return
+      const snapshot = payload.snapshot
+      if (snapshot.status === 'running') {
+        // 断线重连后以服务端快照校准（防止漏收增量行）
+        if (snapshot.lines.length) setOptimizeLines(snapshot.lines)
+        return
+      }
+      source.close()
+      setOptimizeRunId(null)
+      if (snapshot.status === 'failed') {
+        setOptimizeError(snapshot.error ?? '未知错误')
+        setOptimizePhase('idle')
+        return
+      }
+      acceptOptimized(snapshot.prompt ?? '')
+    }
+    return () => source.close()
+  }, [optimizeRunId, acceptOptimized])
 
   const undoOptimize = () => {
     if (optimizeSnapshot === null) return
@@ -417,7 +484,7 @@ export function WorkerEditPage() {
           <p className="mt-1 text-sm text-foreground-muted">
             {isScheduler
               ? '系统调度机器人：保留历史调度能力，新任务由平台自动匹配分配'
-              : '机器人的负责人对机器人的产出结果负责'}
+              : '机器人的上级对机器人的产出结果负责'}
           </p>
           {initStatus !== 'idle' && (
             <InitTicker status={initStatus} lines={initLines} />
@@ -464,6 +531,11 @@ export function WorkerEditPage() {
               />
             </div>
             <div className="absolute right-3 bottom-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-col items-end gap-2">
+              {optimizePhase === 'loading' && optimizeLines.length > 0 && (
+                <p className="max-w-full truncate rounded-[var(--radius-md)] border border-border-strong bg-background px-3 py-2 text-xs text-foreground-muted shadow-md">
+                  {optimizeLines[optimizeLines.length - 1]}
+                </p>
+              )}
               {optimizeError && (
                 <p className="rounded-[var(--radius-md)] border border-border-strong bg-background px-3 py-2 text-xs text-foreground-muted shadow-md">
                   优化失败：{optimizeError}
@@ -570,7 +642,7 @@ export function WorkerEditPage() {
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              责任人（验收产出）
+              上级
               <Select
                 value={ownerUserId || 'none'}
                 onValueChange={(v) => setOwnerUserId(v === 'none' ? '' : (v as string))}
@@ -580,7 +652,7 @@ export function WorkerEditPage() {
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择责任人" />
+                  <SelectValue placeholder="选择上级" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">未指定</SelectItem>

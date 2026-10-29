@@ -1098,6 +1098,22 @@ export interface WorkerInitializeSnapshot {
   finishedAt: string | null
 }
 
+/** 机器人 AGENTS.md 优化状态 */
+export type WorkerOptimizeStatus = 'running' | 'success' | 'failed'
+
+/** 优化快照：POST 响应、GET 查询与 SSE snapshot 事件共用 */
+export interface WorkerOptimizeSnapshot {
+  runId: string
+  status: WorkerOptimizeStatus
+  /** 进度行（时间正序，最新在末尾） */
+  lines: string[]
+  /** 优化后的 Markdown（status=success 时非空） */
+  prompt: string | null
+  error: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
 /** 任务待反馈事项（需要用户补充/确认什么） */
 export interface TaskMissingItem {
   item: string
@@ -2120,18 +2136,23 @@ export const api = {
     }),
   deleteWorker: (id: number) =>
     request<void>(`/workers/${id}`, { method: 'DELETE' }),
-  /** AI 优化机器人 AGENTS.md：结构补全 + 清晰化（统一走 opencode 等执行器） */
-  optimizeWorkerPrompt: (input: {
+  /** 启动 AGENTS.md 优化：异步执行立即返回运行快照，进度与结果经 SSE 推送 */
+  startWorkerPromptOptimize: (input: {
     prompt: string
     workerId?: number | null
     executorId?: number | null
     providerId?: string | null
     modelId?: string | null
   }) =>
-    request<{ prompt: string }>('/workers/optimize-prompt', {
+    request<WorkerOptimizeSnapshot>('/workers/optimize-prompt', {
       method: 'POST',
       body: JSON.stringify(input),
-    }).then((r) => r.prompt),
+    }),
+  /** 优化任务快照（刷新页面/晚订阅时恢复进度与结果） */
+  getWorkerPromptOptimize: (runId: string) =>
+    request<WorkerOptimizeSnapshot>(
+      `/workers/optimize-prompt/${encodeURIComponent(runId)}`,
+    ),
   /** 技能库目录：从 Gitea docs/skills 发现可选 SKILL.md */
   listWorkerSkillCatalog: (q?: string) => {
     const qs = new URLSearchParams()

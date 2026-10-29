@@ -15,9 +15,11 @@ import type { MessageEvent } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { WorkerLiveStatus, WorkerRole, WorkerRuntime } from '../common/enums';
 import { Worker } from './worker.entity';
-import { OptimizePromptInput, WorkerAiService } from './worker-ai.service';
+import type { OptimizePromptInput } from './worker-ai.service';
 import { WorkerEnvironmentService } from './worker-environment.service';
 import type { WorkerInitializeSnapshot } from './worker-environment.service';
+import { WorkerOptimizeService } from './worker-optimize.service';
+import type { WorkerOptimizeSnapshot } from './worker-optimize.service';
 import {
   SkillCatalogItem,
   WorkerSkillCatalogService,
@@ -98,18 +100,36 @@ export interface WorkerLiveCard {
 export class WorkersController {
   constructor(
     private readonly workersService: WorkersService,
-    private readonly workerAi: WorkerAiService,
+    private readonly workerOptimize: WorkerOptimizeService,
     private readonly workerEnvironment: WorkerEnvironmentService,
     private readonly skillCatalog: WorkerSkillCatalogService,
     private readonly standardCatalog: WorkerStandardCatalogService,
   ) {}
 
-  /** AI 优化机器人 AGENTS.md：结构补全 + 清晰化，返回 Markdown 正文（走执行器） */
+  /**
+   * AI 优化机器人 AGENTS.md：异步执行并立即返回运行快照（配置类错误同步 400），
+   * 进度与结果经 SSE GET /workers/optimize-prompt/:runId/stream 推送——同步长请求
+   * 会被网关（如 ALB 60s）以 504 掐断而后端继续跑完，故刻意异步化。
+   */
   @Post('optimize-prompt')
-  async optimizePrompt(
+  optimizePrompt(
     @Body() dto: OptimizePromptDto,
-  ): Promise<{ prompt: string }> {
-    return { prompt: await this.workerAi.optimizePrompt(dto) };
+  ): Promise<WorkerOptimizeSnapshot> {
+    return this.workerOptimize.start(dto);
+  }
+
+  /** 优化任务快照（刷新页面/晚订阅时恢复进度与结果） */
+  @Get('optimize-prompt/:runId')
+  optimizeSnapshot(@Param('runId') runId: string): WorkerOptimizeSnapshot {
+    return this.workerOptimize.snapshotOf(runId);
+  }
+
+  /** 优化进度实时流（SSE）：订阅即收快照，进度行/终态实时推送，心跳保活 */
+  @Sse('optimize-prompt/:runId/stream')
+  streamOptimizePrompt(
+    @Param('runId') runId: string,
+  ): Observable<MessageEvent> {
+    return this.workerOptimize.stream(runId);
   }
 
   /** 工作概览：全部机器人的实时状态卡片（含系统调度机器人） */

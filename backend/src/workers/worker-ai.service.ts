@@ -19,6 +19,19 @@ export interface OptimizePromptInput {
   modelId?: string | null;
 }
 
+/** 优化请求解析出的执行端点 */
+export interface OptimizeEndpoint {
+  executor: Executor;
+  providerId: string;
+  modelId: string;
+  location?: { directory: string };
+}
+
+export interface OptimizeRunHooks {
+  /** 会话创建后回调（调用方用于订阅执行器事件展示进度） */
+  onSessionCreated?: (sessionId: string) => void;
+}
+
 /** AGENTS.md 优化器：把机器人/调度机器人的角色定义整理为结构完整、无歧义的 Markdown */
 const PROMPT_OPTIMIZE_SYSTEM = `你是资深 AI Agent 角色设计专家，负责优化机器人/调度机器人角色的 PROMPT（Markdown）。
 
@@ -54,30 +67,26 @@ export class WorkerAiService {
     private readonly workersService: WorkersService,
   ) {}
 
-  async optimizePrompt(input: OptimizePromptInput): Promise<string> {
-    const content = input.prompt?.trim();
-    if (!content) {
-      throw new BadRequestException('PROMPT 内容不能为空');
-    }
-    const { executor, providerId, modelId, location } =
-      await this.resolveEndpoint(input);
+  /** 执行优化：建会话 → 下发 → 轮询到终态，返回去掉围栏的 Markdown */
+  async runOptimize(
+    content: string,
+    endpoint: OptimizeEndpoint,
+    hooks?: OptimizeRunHooks,
+  ): Promise<string> {
+    const { executor, providerId, modelId, location } = endpoint;
     const text = await runOpencodePrompt(new OpencodeClient(executor), {
       title: '优化机器人 AGENTS.md',
       model: { id: modelId, providerID: providerId },
       location,
       prompt: `${PROMPT_OPTIMIZE_SYSTEM}\n\n---\n\n请优化以下机器人 AGENTS.md：\n\n${content}`,
       timeoutMs: 5 * 60_000,
+      onSessionCreated: hooks?.onSessionCreated,
     });
     return this.stripFence(text);
   }
 
   /** 执行器/模型解析：表单选择 → 当前机器人 → 系统调度机器人 → 首个在线执行器 */
-  private async resolveEndpoint(input: OptimizePromptInput): Promise<{
-    executor: Executor;
-    providerId: string;
-    modelId: string;
-    location?: { directory: string };
-  }> {
+  async resolveEndpoint(input: OptimizePromptInput): Promise<OptimizeEndpoint> {
     const worker = input.workerId
       ? await this.workers.findOne({ where: { id: input.workerId } })
       : null;
