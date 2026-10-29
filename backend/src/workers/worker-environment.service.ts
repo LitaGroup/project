@@ -135,7 +135,8 @@ const TOOL_LABELS: Record<string, string> = {
  * 工位目录结构：
  * - AGENTS.md
  * - .opencode/skills/
- * - .opencode/docs/（选中规范的目录镜像，另有 .standards-manifest.json 受管清单）
+ * - .opencode/rules/（选中规范的目录镜像，另有 .standards-manifest.json 受管清单）
+ * - .opencode/docs/（机器人自行维护的知识文档）
  *
  * 执行模型：POST 启动后台任务并立即返回运行快照，进度经 SSE 实时推送。
  * 同步长请求会被网关（ALB 60s）以 504 掐断而后端继续跑完，故刻意异步化。
@@ -297,7 +298,7 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       // 幂等建立工位骨架，初始化会话内仍会按需补齐
       this.pushLine(job, '· 创建工位目录…');
       await client.shell(
-        `mkdir -p '${workdir}' '${workdir}/.opencode/skills' '${workdir}/.opencode/docs'`,
+        `mkdir -p '${workdir}' '${workdir}/.opencode/skills' '${workdir}/.opencode/rules' '${workdir}/.opencode/docs'`,
       );
       this.pushLine(job, '· 写入机器人身份令牌…');
       await this.writeAgentToken(client, worker.id, workdir);
@@ -517,19 +518,33 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
           )
           .join('\n')
       : '（本次清单为空：不保留任何技能目录）';
+    const standardsByDirectory = new Map(
+      (worker.standards ?? []).map((item) => [item.directory, item]),
+    );
+    // 文件按最具体的选中目录分组，避免嵌套选择时重复列出
+    const ruleFiles = new Map<string, string[]>(
+      standards.directories.map((directory) => [directory, []]),
+    );
+    for (const file of standards.files) {
+      const owner = standards.directories
+        .filter(
+          (directory) => file === directory || file.startsWith(`${directory}/`),
+        )
+        .sort((a, b) => b.length - a.length)[0];
+      if (owner) ruleFiles.get(owner)?.push(file);
+    }
     const standardLines = standards.directories.length
       ? standards.directories
           .map((directory) => {
-            const standard = (worker.standards ?? []).find(
-              (item) => item.directory === directory,
-            );
+            const standard = standardsByDirectory.get(directory);
             const sourceUrl = standard?.sourceUrl || standard?.url || directory;
-            return `- [${standard?.name || directory}](${sourceUrl})（目录：${directory}${
-              standard?.version ? `，版本：${standard.version}` : ''
-            }）`;
+            const description = standard?.description?.trim();
+            return `- [${standard?.name || directory}](${sourceUrl})（源目录：${directory}；工位目录：.opencode/rules/${directory}${
+              standard?.version ? `；版本：${standard.version}` : ''
+            }${description ? `；说明：${description}` : ''}）`;
           })
           .join('\n')
-      : '（本次规范清单为空：只移除下方清单中记录的旧规范文件，不处理其他文档）';
+      : '（本次规范清单为空：只移除 .opencode/rules/.standards-manifest.json 中记录的旧规范文件，不处理其他文档）';
     const requiredFileLines = standards.files.length
       ? standards.files
           .map(
@@ -541,6 +556,39 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
           )
           .join('\n')
       : '（无）';
+    // 写入 AGENTS.md 的规范清单：名称、说明、工位目录与全部规则文档
+    const rulesSection = standards.directories.length
+      ? [
+          '## 规范与规则',
+          '',
+          '以下规范由平台同步到 `.opencode/rules/`，执行任务前按需阅读对应文档。',
+          '',
+          ...standards.directories.flatMap((directory) => {
+            const standard = standardsByDirectory.get(directory);
+            const name = standard?.name || directory;
+            const description =
+              standard?.description?.trim() || '（未提供说明）';
+            const version = standard?.version?.trim();
+            const sourceUrl = standard?.sourceUrl || standard?.url;
+            const files = (ruleFiles.get(directory) ?? []).map((file) =>
+              file === directory
+                ? (file.split('/').pop() ?? file)
+                : file.slice(directory.length + 1),
+            );
+            return [
+              `### ${name}`,
+              '',
+              `- 说明：${description}`,
+              ...(version ? [`- 版本：${version}`] : []),
+              ...(sourceUrl ? [`- 原文：${sourceUrl}`] : []),
+              `- 工位目录：\`.opencode/rules/${directory}\``,
+              '- 文档：',
+              ...files.map((file) => `  - \`${file}\``),
+              '',
+            ];
+          }),
+        ].join('\n')
+      : '## 规范与规则\n\n本次未选择规范。';
 
     return `接下来，更新当前的工作环境：
 
@@ -556,6 +604,14 @@ ${agents}
 ${TASK_COLLABORATION_AGENTS}
 \`\`\`\`
 
+### 规范与规则（必须写入 AGENTS.md）
+
+把以下内容原样写入 AGENTS.md 的「## 规范与规则」小节，规范名称、说明、工位目录与文档清单不得删减：
+
+\`\`\`\`markdown
+${rulesSection}
+\`\`\`\`
+
 ### 目录结构
 
 - AGENTS.md    机器人的工作基本原则
@@ -563,32 +619,35 @@ ${TASK_COLLABORATION_AGENTS}
 - .opencode/agent-token   平台注入的机器人身份令牌（权限 600，不得读取展示、改写或删除）
 - .opencode/.env   平台注入的 Lita 用户令牌（LITA_USER_TOKEN，权限 600，不得读取展示、改写或删除）
 - .opencode/skills/   当前机器人的技能
-- .opencode/docs/     当前机器人需要的知识文档等信息内容，opencode可以根据自己完成任务的情况，自行更新总结文档到这里；其中 .standards-manifest.json 是平台维护的规范同步清单
-- .opencode/docs/.standards-manifest.json   本次同步的规范文件清单（JSON：{"version":1,"files":[...]}）
+- .opencode/rules/   平台同步的规范与规则文档（保持规范库原始目录结构；.standards-manifest.json 是受管清单）
+- .opencode/rules/.standards-manifest.json   本次同步的规范文件清单（JSON：{"version":1,"files":[...]}）
+- .opencode/docs/     机器人自行维护的知识文档（opencode 可以根据完成任务的情况更新总结）
 
 ### 更新要求
 
 1. 把「工作职责定义」和「平台固定协同协议」中的 Markdown 原文完整写入当前工作目录的 AGENTS.md；不要改写、缩写或额外发挥。协同协议放在工作职责定义之后。
-2. 确保 AGENTS.md 中包含上面的目录结构说明。
-3. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；.opencode/docs/ 中不属于规范同步清单的文档不要清空或改写。
-4. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
-5. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
-6. .opencode/docs/ 中的规范文档以本次规范清单为准：
-   - 如果 .opencode/docs/.standards-manifest.json 存在，先读取其中 files 数组作为旧受管文件清单；不存在或内容非法时旧受管清单视为空。
-   - 按下方「需存在的规范文件」下载并写入同名相对路径；保持文件内容与链接内容一致，不要改写或摘要。
-   - 只删除「旧受管文件清单中存在、但本次需存在清单中没有」的文件；不要删除机器人或其他流程产生的其他文档。
-   - 同步完成后把本次需存在的全部相对路径写入 .opencode/docs/.standards-manifest.json，格式为 {"version":1,"files":[...]}，路径按字典序排序；manifest 自身不要写入 files。
-7. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
+2. 把「规范与规则（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 规范与规则」小节；规范名称、说明、工位目录与文档清单不得删减。
+3. 确保 AGENTS.md 中包含上面的目录结构说明。
+4. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
+5. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
+6. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
+7. .opencode/rules/ 中的规范文档以本次规范清单为准：
+   - 如果 .opencode/rules/.standards-manifest.json 存在，先读取其中 files 数组作为旧受管文件清单；不存在或内容非法时旧受管清单视为空。
+   - 如果旧的 .opencode/docs/.standards-manifest.json 存在：先按其 files 清单删除 .opencode/docs/ 下对应的旧受管文件，再删除该旧清单；这是目录从 docs 迁移到 rules 的一次性清理，其他 docs 文档不要动。
+   - 按下方「需存在的规范文件」下载并写入 .opencode/rules/ 下同名相对路径；保持文件内容与链接内容一致，不要改写或摘要。
+   - 只删除「旧受管文件清单中存在、但本次需存在清单中没有」的文件；不要删除 .opencode/docs/ 或其他流程产生的文档。
+   - 同步完成后把本次需存在的全部相对路径写入 .opencode/rules/.standards-manifest.json，格式为 {"version":1,"files":[...]}，路径按字典序排序；manifest 自身不要写入 files。
+8. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
 
 ## 从以下链接中，安装或更新技能
 
 ${skillLines}
 
-## 规范清单
+## 规范目录
 
 ${standardLines}
 
-## 需存在的规范文件（左侧为相对 .opencode/docs/ 的路径，右侧为原始文件地址）
+## 需存在的规范文件（左侧为相对 .opencode/rules/ 的路径，右侧为原始文件地址）
 
 ${requiredFileLines}
 

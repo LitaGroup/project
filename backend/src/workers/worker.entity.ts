@@ -45,13 +45,13 @@ export interface WorkerSkill {
   sourceUrl?: string | null;
 }
 
-/** 规范清单条目：规范库 README.md 的引用（选中即同步其目录到工位 .opencode/docs） */
+/** 规范清单条目：规范库 README.md 的引用（选中即同步其目录到工位 .opencode/rules） */
 export interface WorkerStandard {
   /** 展示名（README frontmatter name/title，缺失时取目录名） */
   name: string;
   /** 仓库内 README.md 相对路径，如 fe/h5/README.md */
   path: string;
-  /** README 所在目录（同步到 .opencode/docs 的源目录），如 fe/h5 */
+  /** README 所在目录（同步到 .opencode/rules 的源目录），如 fe/h5 */
   directory: string;
   /** 原始文件下载地址（raw） */
   url: string;
@@ -115,7 +115,7 @@ export class Worker {
   @Column({ type: 'simple-json', nullable: true })
   skills: WorkerSkill[] | null;
 
-  /** 规范清单（规范库 README.md 引用，初始化时按目录同步到工位 .opencode/docs） */
+  /** 规范清单（规范库 README.md 引用，初始化时按目录同步到工位 .opencode/rules） */
   @Column({ type: 'simple-json', nullable: true })
   standards: WorkerStandard[] | null;
 

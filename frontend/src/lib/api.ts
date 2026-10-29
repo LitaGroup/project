@@ -978,7 +978,7 @@ export interface WorkerSkill {
   sourceUrl?: string | null
 }
 
-/** 机器人规范引用（保存后初始化时同步其目录到工位 .opencode/docs） */
+/** 机器人规范引用（保存后初始化时同步其目录到工位 .opencode/rules） */
 export interface WorkerStandard {
   name: string
   path: string

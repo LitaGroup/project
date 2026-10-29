@@ -48,7 +48,7 @@ const CACHE_TTL_MS = 5 * 60_000;
 
 /**
  * 规范库目录服务：读取 Gitea docs/standard 仓库中各目录的 README.md（不含根目录）。
- * 机器人保存时只保存规范引用；选中目录下的全部文档由初始化任务同步到工位 .opencode/docs。
+ * 机器人保存时只保存规范引用；选中目录下的全部文档由初始化任务同步到工位 .opencode/rules。
  */
 @Injectable()
 export class WorkerStandardCatalogService {

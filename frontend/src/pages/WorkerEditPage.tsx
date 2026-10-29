@@ -1010,7 +1010,7 @@ function WorkerSkillPickerDialog({
   )
 }
 
-/** 规范选择/清单展示：保存时仅保存规范库 README 引用，初始化任务负责整目录同步到工位 docs */
+/** 规范选择/清单展示：保存时仅保存规范库 README 引用，初始化任务负责整目录同步到工位 .opencode/rules */
 function WorkerStandardSection({
   standards,
   onChange,
@@ -1043,7 +1043,7 @@ function WorkerStandardSection({
       </div>
       {standards.length === 0 ? (
         <p className="text-xs text-foreground-muted">
-          未选择规范；保存初始化后会按选中目录同步到工位 docs
+          未选择规范；保存初始化后会按选中目录同步到工位 .opencode/rules
         </p>
       ) : (
         <div className="flex flex-col gap-2">
@@ -1158,7 +1158,7 @@ function WorkerStandardPickerDialog({
         <DialogHeader>
           <DialogTitle>添加规范</DialogTitle>
           <DialogDescription>
-            从规范库选择目录 README.md；保存初始化后会同步该目录下的全部文档到机器人工作目录
+            从规范库选择目录 README.md；保存初始化后会同步该目录下的全部文档到机器人 .opencode/rules
           </DialogDescription>
         </DialogHeader>
         <DialogBody>

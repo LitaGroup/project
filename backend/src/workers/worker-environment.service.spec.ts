@@ -78,6 +78,7 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     standards: [
       {
         name: 'H5 场景开发规范',
+        description: 'H5 场景开发与交付规范',
         path: 'fe/h5/README.md',
         directory: 'fe/h5',
         url: 'http://gitea.cinta.team/docs/standard/raw/branch/main/fe/h5/README.md',
@@ -93,8 +94,23 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     expect(prompt).toContain(
       'http://gitea.cinta.team/docs/standard/raw/branch/main/fe/h5/DEVELOP.md',
     );
-    expect(prompt).toContain('.opencode/docs/.standards-manifest.json');
-    expect(prompt).toContain('不要删除机器人或其他流程产生的其他文档');
+    expect(prompt).toContain('.opencode/rules/.standards-manifest.json');
+    expect(prompt).toContain(
+      '需存在的规范文件（左侧为相对 .opencode/rules/ 的路径',
+    );
+    expect(prompt).toContain('目录从 docs 迁移到 rules');
+    expect(prompt).toContain('不要删除 .opencode/docs/ 或其他流程产生的文档');
+  });
+
+  it('把规范名称、说明、工位目录与文档清单写入 AGENTS.md 的规范小节', async () => {
+    const prompt = await buildService()['buildPrompt'](worker);
+    expect(prompt).toContain('## 规范与规则');
+    expect(prompt).toContain('### H5 场景开发规范');
+    expect(prompt).toContain('说明：H5 场景开发与交付规范');
+    expect(prompt).toContain('工位目录：`.opencode/rules/fe/h5`');
+    expect(prompt).toContain('`README.md`');
+    expect(prompt).toContain('`DEVELOP.md`');
+    expect(prompt).toContain('把以下内容原样写入 AGENTS.md');
   });
 
   it('AGENTS.md 注入多机器人协议与待接受拒绝规则', async () => {
