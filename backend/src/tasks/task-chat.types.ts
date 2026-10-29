@@ -20,7 +20,14 @@ export interface TaskChatTool {
   id: string;
   name: string;
   status: 'running' | 'success' | 'error';
+  /** 历史错误/补充说明 */
   detail?: string;
+  /** 工具参数（JSON 文本，assistant-ui tool-call 使用） */
+  argsText?: string;
+  /** 工具结果或错误（超长由后端截断） */
+  result?: string;
+  startedAt?: string;
+  finishedAt?: string;
 }
 
 /** 提问选项（opencode question） */

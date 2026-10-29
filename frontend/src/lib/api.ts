@@ -1050,6 +1050,18 @@ export interface WorkerDebugQuestion {
   toolCallId?: string
 }
 
+export interface WorkerDebugTool {
+  id: string
+  name: string
+  status: 'running' | 'success' | 'error'
+  /** 工具参数（JSON 文本） */
+  argsText?: string
+  /** 工具结果或错误 */
+  result?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
 export interface WorkerDebugMessage {
   id: string
   role: 'user' | 'assistant'
@@ -1062,6 +1074,8 @@ export interface WorkerDebugMessage {
   kind?: 'message' | 'question'
   /** kind=question 时的问答卡片数据 */
   question?: WorkerDebugQuestion
+  /** 本轮工具调用（session.tool.* 事件实时累积） */
+  tools?: WorkerDebugTool[]
 }
 
 /** opencode 待办（todowrite 工具产出，随调试快照返回） */
@@ -1253,7 +1267,14 @@ export interface TaskChatTool {
   id: string
   name: string
   status: 'running' | 'success' | 'error'
+  /** 历史错误/补充说明 */
   detail?: string
+  /** 工具参数（JSON 文本） */
+  argsText?: string
+  /** 工具结果或错误 */
+  result?: string
+  startedAt?: string
+  finishedAt?: string
 }
 
 /** 提问选项（opencode question） */

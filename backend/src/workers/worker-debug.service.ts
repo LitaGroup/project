@@ -24,6 +24,7 @@ import {
   isTodoToolEvent,
   type OpencodeTodo,
 } from '../executors/opencode-todos';
+import { parseOpencodeToolEvent } from '../executors/opencode-tools';
 import {
   OpencodeClient,
   OpencodeClientError,
@@ -40,6 +41,7 @@ import type {
   WorkerDebugQuestion,
   WorkerDebugQuestionState,
   WorkerDebugSnapshot,
+  WorkerDebugTool,
 } from './worker-debug.types';
 import { WorkersService } from './workers.service';
 
@@ -50,6 +52,7 @@ export type {
   WorkerDebugQuestion,
   WorkerDebugQuestionState,
   WorkerDebugSnapshot,
+  WorkerDebugTool,
 } from './worker-debug.types';
 
 /**
@@ -61,6 +64,56 @@ export function applyDebugStreamEvent(
   type: string,
   data: Record<string, unknown>,
 ): boolean {
+  const toolEvent = parseOpencodeToolEvent(type, data);
+  if (toolEvent) {
+    const now = new Date().toISOString();
+    const tools = (message.tools ??= []);
+    const running = [...tools]
+      .reverse()
+      .find((tool) => tool.status === 'running');
+    const target = toolEvent.toolCallId
+      ? tools.find((tool) => tool.id === toolEvent.toolCallId)
+      : running;
+    if (toolEvent.phase === 'started') {
+      if (target) {
+        if (toolEvent.name) target.name = toolEvent.name;
+        if (toolEvent.argsText) target.argsText = toolEvent.argsText;
+        return Boolean(toolEvent.name || toolEvent.argsText);
+      }
+      const tool: WorkerDebugTool = {
+        id:
+          toolEvent.toolCallId ??
+          `${message.id}:tool:${new Date(now).getTime()}:${tools.length + 1}`,
+        name: toolEvent.name || '工具',
+        status: 'running',
+        ...(toolEvent.argsText ? { argsText: toolEvent.argsText } : {}),
+        startedAt: now,
+      };
+      tools.push(tool);
+      return true;
+    }
+    if (toolEvent.phase === 'updated') {
+      if (!target) return false;
+      if (toolEvent.name) target.name = toolEvent.name;
+      if (toolEvent.argsText) target.argsText = toolEvent.argsText;
+      return Boolean(toolEvent.name || toolEvent.argsText);
+    }
+    const finished = target ?? {
+      id:
+        toolEvent.toolCallId ??
+        `${message.id}:tool:${new Date(now).getTime()}:${tools.length + 1}`,
+      name: toolEvent.name || '工具',
+      status: 'running' as const,
+      startedAt: now,
+    };
+    if (!target) tools.push(finished);
+    finished.status = toolEvent.ok ? 'success' : 'error';
+    if (toolEvent.argsText) finished.argsText = toolEvent.argsText;
+    if (toolEvent.resultText) finished.result = toolEvent.resultText;
+    finished.finishedAt = now;
+    return true;
+  }
+
   const delta = typeof data.delta === 'string' ? data.delta : '';
   switch (type) {
     case 'session.text.delta': {
@@ -103,15 +156,31 @@ export function recoverDebugMessages(
           }
         : { ...message };
     }
-    return message.role === 'assistant' && message.status === 'running'
-      ? {
-          ...message,
-          status: 'error' as const,
-          content:
-            message.content ||
-            '本轮回复已中断（平台重启或会话已断开），可继续发送新消息。',
-        }
-      : { ...message };
+    if (message.role === 'assistant' && message.status === 'running') {
+      return {
+        ...message,
+        status: 'error' as const,
+        content:
+          message.content ||
+          '本轮回复已中断（平台重启或会话已断开），可继续发送新消息。',
+        tools: message.tools?.map((tool) =>
+          tool.status === 'running'
+            ? {
+                ...tool,
+                status: 'error' as const,
+                result: tool.result ?? '工具执行已中断',
+                finishedAt: tool.finishedAt ?? new Date().toISOString(),
+              }
+            : { ...tool },
+        ),
+      };
+    }
+    return {
+      ...message,
+      ...(message.tools
+        ? { tools: message.tools.map((tool) => ({ ...tool })) }
+        : {}),
+    };
   });
 }
 

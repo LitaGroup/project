@@ -13,6 +13,7 @@ import {
 import type {
   ReasoningMessagePart,
   TextMessagePart,
+  ToolCallMessagePart,
 } from '@assistant-ui/react'
 import { Button } from '@appica/ui-react/button'
 import {
@@ -45,8 +46,9 @@ import { QuestionCard } from '../components/QuestionCard'
 import { questionStatusLabel } from '../lib/question'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 import {
-  CHAT_MARKDOWN_PARTS,
+  ChatAssistantParts,
   CHAT_PLAIN_PARTS,
+  toChatToolPart,
 } from '../components/agent-chat/ChatParts'
 
 /**
@@ -439,7 +441,9 @@ function toThreadMessage(message: WorkerDebugMessage): ThreadMessageLike {
           ? ({ type: 'incomplete', reason: 'error' } as const)
           : ({ type: 'complete', reason: 'stop' } as const)
       : undefined
-  const parts: Array<ReasoningMessagePart | TextMessagePart> = []
+  const parts: Array<
+    ReasoningMessagePart | TextMessagePart | ToolCallMessagePart
+  > = []
   if (message.reasoning?.trim()) {
     parts.push({
       type: 'reasoning',
@@ -448,6 +452,10 @@ function toThreadMessage(message: WorkerDebugMessage): ThreadMessageLike {
         ? { status: { type: 'running' } as const }
         : {}),
     })
+  }
+  for (const tool of message.tools ?? []) {
+    if (tool.name === 'question') continue
+    parts.push(toChatToolPart(tool))
   }
   if (message.content) {
     parts.push({ type: 'text', text: message.content })
@@ -492,7 +500,7 @@ function AssistantMessage({
         className="mt-1"
       />
       <div className="min-w-0 max-w-[88%] pt-1 text-sm leading-relaxed">
-        <MessagePrimitive.Parts components={CHAT_MARKDOWN_PARTS} />
+        <ChatAssistantParts />
         {running && (
           <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
         )}

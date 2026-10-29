@@ -33,6 +33,17 @@ export interface WorkerDebugQuestion {
   toolCallId?: string;
 }
 
+/** 机器人调试过程中的工具调用（与任务对话的工具结构保持一致） */
+export interface WorkerDebugTool {
+  id: string;
+  name: string;
+  status: 'running' | 'success' | 'error';
+  argsText?: string;
+  result?: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
 export interface WorkerDebugMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -45,6 +56,8 @@ export interface WorkerDebugMessage {
   kind?: 'message' | 'question';
   /** kind=question 时的问答卡片数据（独立消息，不打断助手文本流） */
   question?: WorkerDebugQuestion;
+  /** 本轮工具调用（session.tool.* 事件实时累积） */
+  tools?: WorkerDebugTool[];
 }
 
 /** 调试 SSE 单条消息：snapshot=全量快照推送，ping=保活 */

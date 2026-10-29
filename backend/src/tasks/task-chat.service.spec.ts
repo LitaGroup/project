@@ -72,6 +72,68 @@ describe('TaskChatService 提问卡片', () => {
     );
   });
 
+  it('工具调用按调用 ID 更新参数与结果并随消息持久化', async () => {
+    await service.toolStarted(7, {
+      name: 'shell',
+      toolCallId: 'call-1',
+      argsText: '{"command":"ls"}',
+    });
+    service.toolUpdated(7, {
+      toolCallId: 'call-1',
+      argsText: '{"command":"ls -la"}',
+    });
+    service.toolFinished(7, true, {
+      toolCallId: 'call-1',
+      result: 'a.ts',
+    });
+    service.endText(7);
+
+    expect(messagesRepo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 7,
+        tools: [
+          expect.objectContaining({
+            id: 'call-1',
+            name: 'shell',
+            status: 'success',
+            argsText: '{"command":"ls -la"}',
+            result: 'a.ts',
+          }),
+        ],
+      }),
+      ['taskId', 'messageKey'],
+    );
+  });
+
+  it('并行工具按调用 ID 结算，缺少 ID 时回退最近运行中的工具', async () => {
+    await service.toolStarted(7, { name: 'read', toolCallId: 'call-1' });
+    await service.toolStarted(7, { name: 'shell', toolCallId: 'call-2' });
+    service.toolFinished(7, false, {
+      toolCallId: 'call-1',
+      result: 'missing',
+    });
+    service.toolFinished(7, true, { result: 'done' });
+    service.endText(7);
+
+    expect(messagesRepo.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tools: [
+          expect.objectContaining({
+            id: 'call-1',
+            status: 'error',
+            result: 'missing',
+          }),
+          expect.objectContaining({
+            id: 'call-2',
+            status: 'success',
+            result: 'done',
+          }),
+        ],
+      }),
+      ['taskId', 'messageKey'],
+    );
+  });
+
   it('平台生成的任务复盘按固定 messageId 写入并持久化', async () => {
     const posted = await service.postAssistantMessage(
       7,

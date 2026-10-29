@@ -61,6 +61,61 @@ describe('applyDebugStreamEvent', () => {
     expect(message.reasoning).toBe('想法\n\n');
   });
 
+  it('工具事件累积参数并按调用 ID 结算结果', () => {
+    const message = base();
+    expect(
+      applyDebugStreamEvent(message, 'session.tool.input.started', {
+        name: 'shell',
+        toolCallID: 'call-1',
+        input: { command: 'ls' },
+      }),
+    ).toBe(true);
+    expect(
+      applyDebugStreamEvent(message, 'session.tool.input.updated', {
+        name: 'shell',
+        toolCallID: 'call-1',
+        input: { command: 'ls -la' },
+      }),
+    ).toBe(true);
+    expect(
+      applyDebugStreamEvent(message, 'session.tool.success', {
+        toolCallID: 'call-1',
+        output: 'a.ts',
+      }),
+    ).toBe(true);
+    expect(message.tools).toHaveLength(1);
+    expect(message.tools?.[0]).toMatchObject({
+      id: 'call-1',
+      name: 'shell',
+      status: 'success',
+      result: 'a.ts',
+    });
+    expect(message.tools?.[0].argsText).toContain('ls -la');
+    expect(typeof message.tools?.[0].startedAt).toBe('string');
+    expect(typeof message.tools?.[0].finishedAt).toBe('string');
+  });
+
+  it('并行工具按调用 ID 匹配，缺少 ID 时回退最近运行中的工具', () => {
+    const message = base();
+    applyDebugStreamEvent(message, 'session.tool.input.started', {
+      name: 'read',
+      toolCallID: 'call-1',
+    });
+    applyDebugStreamEvent(message, 'session.tool.input.started', {
+      name: 'shell',
+      toolCallID: 'call-2',
+    });
+    applyDebugStreamEvent(message, 'session.tool.failed', {
+      toolCallID: 'call-1',
+      error: 'missing',
+    });
+    applyDebugStreamEvent(message, 'session.tool.success', { name: 'shell' });
+    expect(message.tools).toMatchObject([
+      { id: 'call-1', status: 'error', result: 'missing' },
+      { id: 'call-2', status: 'success' },
+    ]);
+  });
+
   it('无关事件与非法 delta 不产生变更', () => {
     const message = base();
     expect(applyDebugStreamEvent(message, 'session.tool.success', {})).toBe(
@@ -146,6 +201,26 @@ describe('recoverDebugMessages', () => {
     expect(answered.question?.state).toBe('answered');
     expect(answered.question?.answers).toEqual([['A']]);
     expect(plain.status).toBe('error');
+  });
+
+  it('中断时仍在运行的工具标记失败并保留已有结果', () => {
+    const [recovered] = recoverDebugMessages([
+      message({
+        status: 'running',
+        tools: [
+          { id: 't1', name: 'shell', status: 'running' },
+          { id: 't2', name: 'read', status: 'success', result: 'ok' },
+        ],
+      }),
+    ]);
+    expect(recovered.tools).toEqual([
+      expect.objectContaining({
+        id: 't1',
+        status: 'error',
+        result: '工具执行已中断',
+      }),
+      { id: 't2', name: 'read', status: 'success', result: 'ok' },
+    ]);
   });
 
   it('空值返回空数组，且不修改原数组元素', () => {

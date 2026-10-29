@@ -23,6 +23,7 @@ import type {
   TaskChatSender,
   TaskChatSnapshot,
   TaskChatStreamMessage,
+  TaskChatTool,
   TaskPipelineStage,
 } from './task-chat.types';
 import type { TaskRealtimeEvent } from './task-realtime.service';
@@ -468,30 +469,93 @@ export class TaskChatService implements OnModuleDestroy {
   }
 
   /** 工具开始：记到当前助手消息（没有则新建「工具调用」气泡） */
-  async toolStarted(taskId: number, toolName: string): Promise<void> {
+  async toolStarted(
+    taskId: number,
+    tool: { name: string; toolCallId?: string; argsText?: string },
+  ): Promise<void> {
     const message = await this.ensureActiveMessage(taskId);
     const seq = (this.toolSeq.get(taskId) ?? 0) + 1;
     this.toolSeq.set(taskId, seq);
     if (!message.tools) message.tools = [];
+    const id = tool.toolCallId || `${message.id}:tool:${seq}`;
+    const existing = message.tools.find((item) => item.id === id);
+    if (existing) {
+      existing.name = tool.name || existing.name;
+      if (tool.argsText) existing.argsText = tool.argsText;
+      this.broadcastMessage(message);
+      return;
+    }
     message.tools.push({
-      id: `${message.id}:tool:${seq}`,
-      name: toolName || '工具',
+      id,
+      name: tool.name || '工具',
       status: 'running',
+      ...(tool.argsText ? { argsText: tool.argsText } : {}),
+      startedAt: new Date().toISOString(),
     });
     this.broadcastMessage(message);
   }
 
-  /** 工具结束：标记最近一个运行中的工具 */
-  toolFinished(taskId: number, ok: boolean, detail?: string): void {
+  /** 工具输入更新（流式参数可能在 started 之后才完整） */
+  toolUpdated(
+    taskId: number,
+    update: { name?: string; toolCallId?: string; argsText?: string },
+  ): void {
     const message = this.activeMessage(taskId);
     if (!message?.tools?.length) return;
-    const tool = [...message.tools]
-      .reverse()
-      .find((item) => item.status === 'running');
+    const tool = this.toolOf(message, update.toolCallId);
+    if (!tool) return;
+    if (update.name) tool.name = update.name;
+    if (update.argsText) tool.argsText = update.argsText;
+    this.broadcastMessage(message);
+  }
+
+  /** 工具结束：优先按调用 ID 匹配，旧协议回退最近一个运行中的工具 */
+  toolFinished(
+    taskId: number,
+    ok: boolean,
+    update: {
+      toolCallId?: string;
+      name?: string;
+      result?: string;
+      detail?: string;
+    } = {},
+  ): void {
+    const message = this.activeMessage(taskId);
+    if (!message) return;
+    const tools = (message.tools ??= []);
+    let tool = this.toolOf(message, update.toolCallId);
+    if (
+      !tool &&
+      update.name &&
+      !tools.some((item) => item.id === update.toolCallId)
+    ) {
+      tool = {
+        id:
+          update.toolCallId ??
+          `${message.id}:tool:${(this.toolSeq.get(taskId) ?? 0) + 1}`,
+        name: update.name,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      };
+      tools.push(tool);
+    }
     if (!tool) return;
     tool.status = ok ? 'success' : 'error';
-    if (detail) tool.detail = detail;
+    if (update.result) tool.result = update.result;
+    if (update.detail) tool.detail = update.detail;
+    tool.finishedAt = new Date().toISOString();
     this.broadcastMessage(message);
+  }
+
+  private toolOf(
+    message: InternalChatMessage,
+    toolCallId?: string,
+  ): TaskChatTool | undefined {
+    if (toolCallId)
+      return message.tools?.find((item) => item.id === toolCallId);
+    return [...(message.tools ?? [])]
+      .reverse()
+      .find((item) => item.status === 'running');
   }
 
   /**

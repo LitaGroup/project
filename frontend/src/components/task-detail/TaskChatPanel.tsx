@@ -10,6 +10,7 @@ import {
   type ReasoningMessagePart,
   type TextMessagePart,
   type ThreadMessageLike,
+  type ToolCallMessagePart,
 } from '@assistant-ui/react'
 import { Badge } from '@appica/ui-react/badge'
 import { Button, buttonVariants } from '@appica/ui-react/button'
@@ -30,18 +31,15 @@ import {
 } from '@appica/ui-react/select'
 import {
   AlertCircle,
-  Check,
   MessageCircleQuestion,
   Send,
   Wrench,
-  X,
 } from '@appica/icons-react'
 import {
   api,
   type TaskChatMessage,
   type TaskChatQuestion,
   type TaskChatSender,
-  type TaskChatTool,
   type TaskPackage,
   type TaskPipelineStage,
   type Worker,
@@ -50,8 +48,9 @@ import { questionStatusLabel } from '../../lib/question'
 import { QuestionCard } from '../QuestionCard'
 import { SenderLine, WorkerAvatar } from './WorkerAvatar'
 import {
-  CHAT_MARKDOWN_PARTS,
+  ChatAssistantParts,
   CHAT_PLAIN_PARTS,
+  toChatToolPart,
 } from '../agent-chat/ChatParts'
 
 const FALLBACK_SENDER: TaskChatSender = {
@@ -70,7 +69,6 @@ interface TaskQuestionAutoAnswer {
 interface ChatCustom {
   taskId?: number
   sender?: TaskChatSender
-  tools?: TaskChatTool[]
   question?: TaskChatQuestion
   autoAnswer?: TaskQuestionAutoAnswer
 }
@@ -224,7 +222,9 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
           : ({ type: 'complete', reason: 'stop' } as const)
       : undefined
   const content = message.content
-  const parts: Array<ReasoningMessagePart | TextMessagePart> = []
+  const parts: Array<
+    ReasoningMessagePart | TextMessagePart | ToolCallMessagePart
+  > = []
   if (message.reasoning?.trim()) {
     parts.push({
       type: 'reasoning',
@@ -233,6 +233,11 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
         ? { status: { type: 'running' as const } }
         : {}),
     })
+  }
+  for (const tool of message.tools ?? []) {
+    // question 工具由独立问答卡片展示，不在工具链里重复出现
+    if (tool.name === 'question') continue
+    parts.push(toChatToolPart(tool))
   }
   if (content) parts.push({ type: 'text', text: content })
   return {
@@ -245,7 +250,6 @@ function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
       custom: {
         taskId: message.taskId,
         sender: message.sender,
-        tools: message.tools ?? [],
         question: message.question,
         autoAnswer: readAutoAnswer(message.meta),
       } satisfies ChatCustom,
@@ -307,14 +311,13 @@ function UserBubble({ message }: { message: MessageState }) {
 function AssistantBubble({ message }: { message: MessageState }) {
   const custom = customOf(message)
   const sender = custom.sender ?? FALLBACK_SENDER
-  // question 工具由独立问答卡片展示，不在工具链里重复出现
-  const tools = (custom.tools ?? []).filter((tool) => tool.name !== 'question')
   const hasText = message.content.some(
     (part) => part.type === 'text' && part.text?.trim(),
   )
   const hasReasoning = message.content.some(
     (part) => part.type === 'reasoning' && part.text?.trim(),
   )
+  const hasTools = message.content.some((part) => part.type === 'tool-call')
   const running = message.status?.type === 'running'
 
   return (
@@ -334,11 +337,9 @@ function AssistantBubble({ message }: { message: MessageState }) {
           )}
         </div>
 
-        {tools.length > 0 && <ToolList tools={tools} />}
-
-        {hasText || hasReasoning ? (
+        {hasText || hasReasoning || hasTools ? (
           <div className="rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-4 py-3 text-sm leading-relaxed shadow-sm">
-            <MessagePrimitive.Parts components={CHAT_MARKDOWN_PARTS} />
+            <ChatAssistantParts />
             {running && hasText && <StreamingCaret />}
           </div>
         ) : (
@@ -417,36 +418,6 @@ function QuestionBubble({
         />
       </div>
     </MessagePrimitive.Root>
-  )
-}
-
-function ToolList({ tools }: { tools: TaskChatTool[] }) {
-  return (
-    <div className="mb-2 flex flex-wrap gap-1.5">
-      {tools.map((tool) => (
-        <span
-          key={tool.id}
-          className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${
-            tool.status === 'error'
-              ? 'border-error-emphasis bg-error-soft text-error-foreground'
-              : tool.status === 'success'
-                ? 'border-border bg-background-subtle text-foreground-muted'
-                : 'border-info-emphasis bg-info-soft text-info-foreground'
-          }`}
-          title={tool.detail}
-        >
-          <Wrench className="size-3 shrink-0" />
-          <span className="max-w-48 truncate font-mono">{tool.name}</span>
-          {tool.status === 'running' && (
-            <span className="shrink-0 animate-pulse">运行中</span>
-          )}
-          {tool.status === 'success' && (
-            <Check className="size-3 shrink-0" />
-          )}
-          {tool.status === 'error' && <X className="size-3 shrink-0" />}
-        </span>
-      ))}
-    </div>
   )
 }
 

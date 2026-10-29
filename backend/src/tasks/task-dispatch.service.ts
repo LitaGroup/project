@@ -32,6 +32,7 @@ import {
   OpencodeEvent,
   OpencodeEventHub,
 } from '../executors/opencode-event-hub.service';
+import { parseOpencodeToolEvent } from '../executors/opencode-tools';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
@@ -918,19 +919,35 @@ export class TaskDispatchService
         );
         break;
       }
-      case event.type === 'session.tool.input.started': {
-        this.pushLine(taskId, `🔧 调用工具 ${str('name') || '?'}`);
-        await this.taskChat.toolStarted(taskId, str('name') || '工具');
-        break;
-      }
-      case event.type === 'session.tool.success': {
-        this.pushLine(taskId, '✓ 工具执行成功');
-        this.taskChat.toolFinished(taskId, true);
-        break;
-      }
-      case event.type === 'session.tool.failed': {
-        this.pushLine(taskId, '✗ 工具执行失败');
-        this.taskChat.toolFinished(taskId, false);
+      case event.type.startsWith('session.tool.'): {
+        const tool = parseOpencodeToolEvent(event.type, data);
+        if (!tool) break;
+        if (tool.phase === 'started') {
+          this.pushLine(taskId, `🔧 调用工具 ${tool.name || '?'}`);
+          await this.taskChat.toolStarted(taskId, {
+            name: tool.name,
+            toolCallId: tool.toolCallId,
+            argsText: tool.argsText,
+          });
+        } else if (tool.phase === 'updated') {
+          this.taskChat.toolUpdated(taskId, {
+            name: tool.name,
+            toolCallId: tool.toolCallId,
+            argsText: tool.argsText,
+          });
+        } else {
+          this.pushLine(
+            taskId,
+            tool.ok
+              ? `✓ 工具执行成功${tool.name ? `：${tool.name}` : ''}`
+              : `✗ 工具执行失败${tool.name ? `：${tool.name}` : ''}`,
+          );
+          this.taskChat.toolFinished(taskId, tool.ok ?? false, {
+            toolCallId: tool.toolCallId,
+            name: tool.name,
+            result: tool.resultText,
+          });
+        }
         break;
       }
       case event.type === 'session.reasoning.started': {
