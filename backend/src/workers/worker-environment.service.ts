@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
@@ -40,6 +41,12 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 1. 一个任务有且只有一个负责机器人和一个需求方；需求方可以是人类用户，也可以是父任务机器人。
 2. 任务来源包括人类创建和机器人通过 task-create 创建。同一时间只执行一个「进行中」任务；等待中的任务不占用你，可以接受其他任务。
 3. 机器人身份令牌位于 .opencode/agent-token。调用平台所有 .md 接口时先执行 \`TOKEN=$(cat .opencode/agent-token)\`，再使用 \`X-Worker-Token: $TOKEN\`；不得把令牌写入聊天、交付物或文档。
+
+### Lita 用户令牌
+
+- Lita 用户令牌位于 .opencode/.env（键名 LITA_USER_TOKEN，权限 600）；执行器宿主 ~/.env 也有同名配置。
+- 使用 lita-api 等需要 LITA_USER_TOKEN 的技能或命令前，先执行：\`set -a; . .opencode/.env; set +a\`（或 \`set -a; . ~/.env; set +a\`）。
+- 不得把令牌写入聊天、交付物、文档或代码仓库。
 
 ### 任务状态与动作
 
@@ -147,6 +154,7 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
     private readonly workersService: WorkersService,
     private readonly standardCatalog: WorkerStandardCatalogService,
     private readonly eventHub: OpencodeEventHub,
+    private readonly config: ConfigService,
   ) {}
 
   /**
@@ -293,6 +301,8 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       );
       this.pushLine(job, '· 写入机器人身份令牌…');
       await this.writeAgentToken(client, worker.id, workdir);
+      this.pushLine(job, '· 注入 Lita 用户令牌…');
+      await this.writeLitaUserToken(client, workdir);
       this.pushLine(job, '· 生成初始化指令（AGENTS.md + 技能 + 规范）…');
       const prompt = await this.buildPrompt(worker);
       this.pushLine(
@@ -369,6 +379,43 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       `printf '%s' '${token}' > '${workdir}/.opencode/agent-token' && ` +
         `chmod 600 '${workdir}/.opencode/agent-token'`,
     );
+  }
+
+  /**
+   * 把 Lita 用户令牌写入工位 .opencode/.env（权限 600），供 lita-api 等技能使用；
+   * 同时同步到执行器宿主 ~/.env（保留其他变量），兼容按 ~/.env 读取令牌的技能。
+   * 优先 WORKER_LITA_USER_TOKEN，未配置时回退平台自身的 LITA_USER_TOKEN。
+   * 令牌只经服务端落盘，不进入初始化 Prompt、SSE 进度或日志。
+   */
+  private async writeLitaUserToken(
+    client: OpencodeClient,
+    workdir: string,
+  ): Promise<void> {
+    const token =
+      this.config.get<string>('WORKER_LITA_USER_TOKEN')?.trim() ||
+      this.config.get<string>('LITA_USER_TOKEN')?.trim();
+    if (!token) {
+      this.logger.warn(
+        '未配置 WORKER_LITA_USER_TOKEN/LITA_USER_TOKEN，跳过工位 Lita 用户令牌注入',
+      );
+      return;
+    }
+    await client.shell(
+      `printf '%s\\n' 'LITA_USER_TOKEN=${token}' > '${workdir}/.opencode/.env' && ` +
+        `chmod 600 '${workdir}/.opencode/.env'`,
+    );
+    // 兼容按 ~/.env 读取令牌的技能（如 lita-api）：同步到执行器宿主，保留其他变量
+    try {
+      await client.shell(
+        `if [ -n "$HOME" ]; then { grep -v '^LITA_USER_TOKEN=' "$HOME/.env" 2>/dev/null; ` +
+          `printf '%s\\n' 'LITA_USER_TOKEN=${token}'; } > "$HOME/.env.tmp" && ` +
+          `chmod 600 "$HOME/.env.tmp" && mv "$HOME/.env.tmp" "$HOME/.env"; fi`,
+      );
+    } catch (e) {
+      this.logger.warn(
+        `同步 Lita 用户令牌到执行器 ~/.env 失败：${(e as Error).message}`,
+      );
+    }
   }
 
   /** 执行器事件 → 进度行：仅取初始化会话的工具调用（与任务详情的终端行同风格） */
@@ -514,6 +561,7 @@ ${TASK_COLLABORATION_AGENTS}
 - AGENTS.md    机器人的工作基本原则
 - .opencode/   opencode自身的目录
 - .opencode/agent-token   平台注入的机器人身份令牌（权限 600，不得读取展示、改写或删除）
+- .opencode/.env   平台注入的 Lita 用户令牌（LITA_USER_TOKEN，权限 600，不得读取展示、改写或删除）
 - .opencode/skills/   当前机器人的技能
 - .opencode/docs/     当前机器人需要的知识文档等信息内容，opencode可以根据自己完成任务的情况，自行更新总结文档到这里；其中 .standards-manifest.json 是平台维护的规范同步清单
 - .opencode/docs/.standards-manifest.json   本次同步的规范文件清单（JSON：{"version":1,"files":[...]}）
@@ -522,7 +570,7 @@ ${TASK_COLLABORATION_AGENTS}
 
 1. 把「工作职责定义」和「平台固定协同协议」中的 Markdown 原文完整写入当前工作目录的 AGENTS.md；不要改写、缩写或额外发挥。协同协议放在工作职责定义之后。
 2. 确保 AGENTS.md 中包含上面的目录结构说明。
-3. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token；.opencode/docs/ 中不属于规范同步清单的文档不要清空或改写。
+3. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；.opencode/docs/ 中不属于规范同步清单的文档不要清空或改写。
 4. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
 5. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
 6. .opencode/docs/ 中的规范文档以本次规范清单为准：

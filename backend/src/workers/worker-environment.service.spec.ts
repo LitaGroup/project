@@ -14,6 +14,7 @@ describe('WorkerEnvironmentService.assertDone', () => {
       {} as never,
       {} as never,
       {} as never,
+      { get: () => undefined } as never,
     );
 
   it('接受整段 DONE', () => {
@@ -66,6 +67,7 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
         resolveManagedFiles: () => Promise.resolve(managedFiles),
       } as never,
       {} as never,
+      { get: () => undefined } as never,
     );
 
   const worker = {
@@ -112,6 +114,13 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     expect(prompt).toContain('.opencode/agent-token');
     expect(prompt).toContain('不得读取展示、改写或删除');
     expect(prompt).toContain('不得把令牌写入聊天、交付物或文档');
+  });
+
+  it('AGENTS.md 说明 Lita 用户令牌的位置与加载方式', async () => {
+    const prompt = await buildService()['buildPrompt'](worker);
+    expect(prompt).toContain('.opencode/.env');
+    expect(prompt).toContain('LITA_USER_TOKEN');
+    expect(prompt).toContain('set -a; . .opencode/.env; set +a');
   });
 
   it('规范清单为空时只清理旧受管文件，不要求清空 docs', async () => {
@@ -164,6 +173,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
         release: () => undefined,
         onEvent: () => () => undefined,
       } as never,
+      { get: () => 'test-lita-token' } as never,
     );
 
   it('start 返回运行快照，进行中重复启动幂等返回同一任务', async () => {
@@ -188,6 +198,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       { ensureAgentToken } as never,
       {} as never,
       {} as never,
+      { get: () => 'test-lita-token' } as never,
     );
     await service['writeAgentToken'](
       { shell } as never,
@@ -200,6 +211,76 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       "printf '%s' 'worker-token-123' > '/tmp/runtime/worker/1001/.opencode/agent-token' && " +
         "chmod 600 '/tmp/runtime/worker/1001/.opencode/agent-token'",
     );
+  });
+
+  it('初始化时把 Lita 用户令牌写入工位 .env 并限制为 600 权限', async () => {
+    const shell = jest.fn().mockResolvedValue(undefined);
+    const config = {
+      get: jest.fn((key: string) =>
+        key === 'WORKER_LITA_USER_TOKEN' ? 'lita-user-token-123' : undefined,
+      ),
+    };
+    const service = new WorkerEnvironmentService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      config as never,
+    );
+    await service['writeLitaUserToken'](
+      { shell } as never,
+      '/tmp/runtime/worker/1001',
+    );
+    expect(shell).toHaveBeenCalledTimes(2);
+    expect(shell).toHaveBeenNthCalledWith(
+      1,
+      "printf '%s\\n' 'LITA_USER_TOKEN=lita-user-token-123' > '/tmp/runtime/worker/1001/.opencode/.env' && " +
+        "chmod 600 '/tmp/runtime/worker/1001/.opencode/.env'",
+    );
+    expect(shell).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('$HOME/.env'),
+    );
+  });
+
+  it('未配置专用令牌时回退 LITA_USER_TOKEN，都未配置则跳过', async () => {
+    const shell = jest.fn().mockResolvedValue(undefined);
+    const fallback = new WorkerEnvironmentService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        get: jest.fn((key: string) =>
+          key === 'LITA_USER_TOKEN' ? 'fallback-token' : undefined,
+        ),
+      } as never,
+    );
+    await fallback['writeLitaUserToken'](
+      { shell } as never,
+      '/tmp/runtime/worker/1001',
+    );
+    expect(shell).toHaveBeenCalledWith(
+      "printf '%s\\n' 'LITA_USER_TOKEN=fallback-token' > '/tmp/runtime/worker/1001/.opencode/.env' && " +
+        "chmod 600 '/tmp/runtime/worker/1001/.opencode/.env'",
+    );
+
+    const emptyShell = jest.fn();
+    const empty = new WorkerEnvironmentService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { get: () => undefined } as never,
+    );
+    await empty['writeLitaUserToken'](
+      { shell: emptyShell } as never,
+      '/tmp/runtime/worker/1001',
+    );
+    expect(emptyShell).not.toHaveBeenCalled();
   });
 
   it('配置不完整时 start 同步抛 400，不创建任务', async () => {
