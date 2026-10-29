@@ -129,6 +129,7 @@ const NAV_SECTIONS: NavSection[] = [
     to: '/tickets/tech',
     match: (p) => p.startsWith('/tickets'),
     items: [
+      { to: '/tickets/tech', label: '技术工单', icon: Settings, ready: true },
       {
         to: '/tickets/solution',
         label: '方案工单',
@@ -136,7 +137,6 @@ const NAV_SECTIONS: NavSection[] = [
         ready: false,
         badge: '已关闭',
       },
-      { to: '/tickets/tech', label: '技术工单', icon: Settings, ready: true },
       { to: '/tickets/data', label: '数据工单', icon: ChartPie, ready: false },
       { to: '/tickets/ops', label: '运维工单', icon: Cpu, ready: false },
       { to: '/tickets/requirement', label: '需求工单', icon: ClipboardList, ready: false },
