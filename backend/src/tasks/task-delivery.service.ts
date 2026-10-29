@@ -13,6 +13,7 @@ import { TaskStatus, TaskSubStatus } from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
 import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
+import type { TaskDeliveryReportInput } from './task-delivery-report';
 import { TaskDispatchService } from './task-dispatch.service';
 import { TaskHandoffService } from './task-handoff.service';
 import { TaskNotifyService } from './task-notify.service';
@@ -68,30 +69,24 @@ export class TaskDeliveryService {
   }
 
   /** 执行机器人申请验收：只保存产出并进入等待中-待验收 */
-  async apply(taskId: number, worker: Worker): Promise<string> {
+  async apply(
+    taskId: number,
+    worker: Worker,
+    report: TaskDeliveryReportInput = {},
+  ): Promise<string> {
     const task = await this.mustFind(taskId);
     if (task.agentId !== worker.id) {
       throw new ForbiddenException(
         `任务 ${task.code} 的执行机器人不是「${worker.name}」`,
       );
     }
+    const requester = await this.requesterNameOf(task);
     const applied = await this.dispatchService.applyForAcceptance(
       taskId,
       worker,
+      { requesterName: requester, report },
     );
     const saved = applied.task;
-    const requesterId = await this.requesterUserId(saved);
-    const requester =
-      saved.requesterType === 'worker' && saved.requesterId
-        ? ((
-            await this.workers.findOne({
-              where: { id: saved.requesterId },
-              select: { id: true, name: true },
-            })
-          )?.name ?? null)
-        : requesterId
-          ? await this.userName(requesterId)
-          : null;
     return [
       mdFrontmatter({
         update: saved.updatedAt,
@@ -151,7 +146,7 @@ export class TaskDeliveryService {
         `- 状态：${saved.status}-${saved.subStatus}`,
         `- 验收人：${actor.name ?? '未知'}`,
         '',
-        '任务已完成，平台正在异步生成 REVIEW.md 复盘文档。',
+        '任务已完成，平台正在异步生成 REVIEW 复盘文档。',
         '',
       ].join('\n');
     }
@@ -415,6 +410,19 @@ export class TaskDeliveryService {
       );
     }
     return saved;
+  }
+
+  /** 需求方展示名：机器人需求方取机器人名，人类需求方取用户姓名。 */
+  private async requesterNameOf(task: Task): Promise<string | null> {
+    if (task.requesterType === 'worker' && task.requesterId) {
+      const worker = await this.workers.findOne({
+        where: { id: task.requesterId },
+        select: { id: true, name: true },
+      });
+      return worker?.name ?? null;
+    }
+    const userId = await this.requesterUserId(task);
+    return userId ? this.userName(userId) : null;
   }
 
   /** 显式需求方优先；历史数据保留创建人/根任务创建人回退。 */

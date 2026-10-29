@@ -136,6 +136,7 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     const prompt = await buildService()['buildPrompt'](worker);
     expect(prompt).toContain('.opencode/.env');
     expect(prompt).toContain('LITA_USER_TOKEN');
+    expect(prompt).toContain('LITA_PROJECT_TOKEN');
     expect(prompt).toContain('set -a; . .opencode/.env; set +a');
   });
 
@@ -162,6 +163,10 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
   } as Worker as never;
   // 端口 1 不可达：后台任务会快速失败转为 failed，测试不产生真实网络副作用
   const executor = { id: 8, ip: '127.0.0.1', port: 1, online: true } as never;
+
+  /** 取第 n 次 shell 调用的命令文本（jest.mock.calls 为 any，集中此处断言） */
+  const shellCommand = (shell: jest.Mock, index = 0): string =>
+    (shell.mock.calls as unknown as [string][])[index][0];
 
   const buildService = (
     workersFindOne: jest.Mock = jest.fn().mockResolvedValue(worker),
@@ -205,7 +210,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
     expect(['running', 'failed']).toContain(service.snapshotOf(1001).status);
   });
 
-  it('初始化时把机器人独立令牌写入工位并限制为 600 权限', async () => {
+  it('初始化时把机器人独立令牌写入工位 agent-token 与 .env，并限制为 600 权限', async () => {
     const ensureAgentToken = jest.fn().mockResolvedValue('worker-token-123');
     const shell = jest.fn().mockResolvedValue(undefined);
     const service = new WorkerEnvironmentService(
@@ -223,9 +228,22 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
     );
     expect(ensureAgentToken).toHaveBeenCalledWith(1001);
     expect(shell).toHaveBeenCalledTimes(1);
-    expect(shell).toHaveBeenCalledWith(
+    const command = shellCommand(shell);
+    // 机器人身份令牌文件（兼容旧协议）
+    expect(command).toContain(
       "printf '%s' 'worker-token-123' > '/tmp/runtime/worker/1001/.opencode/agent-token' && " +
         "chmod 600 '/tmp/runtime/worker/1001/.opencode/agent-token'",
+    );
+    // .opencode/.env 同步注入 LITA_PROJECT_TOKEN，供 SKILL 统一读取
+    expect(command).toContain(
+      "grep -v '^LITA_PROJECT_TOKEN=' '/tmp/runtime/worker/1001/.opencode/.env' 2>/dev/null",
+    );
+    expect(command).toContain(
+      "printf '%s\\n' 'LITA_PROJECT_TOKEN=worker-token-123'",
+    );
+    expect(command).toContain(
+      "chmod 600 '/tmp/runtime/worker/1001/.opencode/.env.tmp' && " +
+        "mv '/tmp/runtime/worker/1001/.opencode/.env.tmp' '/tmp/runtime/worker/1001/.opencode/.env'",
     );
   });
 
@@ -249,10 +267,17 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       '/tmp/runtime/worker/1001',
     );
     expect(shell).toHaveBeenCalledTimes(2);
-    expect(shell).toHaveBeenNthCalledWith(
-      1,
-      "printf '%s\\n' 'LITA_USER_TOKEN=lita-user-token-123' > '/tmp/runtime/worker/1001/.opencode/.env' && " +
-        "chmod 600 '/tmp/runtime/worker/1001/.opencode/.env'",
+    const command = shellCommand(shell);
+    // 合并写入：保留 LITA_PROJECT_TOKEN 等其他键
+    expect(command).toContain(
+      "grep -v '^LITA_USER_TOKEN=' '/tmp/runtime/worker/1001/.opencode/.env' 2>/dev/null",
+    );
+    expect(command).toContain(
+      "printf '%s\\n' 'LITA_USER_TOKEN=lita-user-token-123'",
+    );
+    expect(command).toContain(
+      "chmod 600 '/tmp/runtime/worker/1001/.opencode/.env.tmp' && " +
+        "mv '/tmp/runtime/worker/1001/.opencode/.env.tmp' '/tmp/runtime/worker/1001/.opencode/.env'",
     );
     expect(shell).toHaveBeenNthCalledWith(
       2,
@@ -278,9 +303,8 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       { shell } as never,
       '/tmp/runtime/worker/1001',
     );
-    expect(shell).toHaveBeenCalledWith(
-      "printf '%s\\n' 'LITA_USER_TOKEN=fallback-token' > '/tmp/runtime/worker/1001/.opencode/.env' && " +
-        "chmod 600 '/tmp/runtime/worker/1001/.opencode/.env'",
+    expect(shellCommand(shell)).toContain(
+      "printf '%s\\n' 'LITA_USER_TOKEN=fallback-token'",
     );
 
     const emptyShell = jest.fn();

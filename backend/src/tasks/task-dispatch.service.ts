@@ -34,6 +34,7 @@ import {
 } from '../executors/opencode-event-hub.service';
 import { parseOpencodeToolEvent } from '../executors/opencode-tools';
 import { Worker } from '../workers/worker.entity';
+import { agentTokenShell, workerEnvShell } from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
@@ -41,6 +42,10 @@ import { TaskTemplate } from './task-template.entity';
 import { TaskChatService } from './task-chat.service';
 import { TaskDocumentService } from './task-document.service';
 import type { TaskDocumentResult } from './task-document.service';
+import {
+  normalizeTaskDeliveryReport,
+  type TaskDeliveryReportInput,
+} from './task-delivery-report';
 import { TaskNotifyService } from './task-notify.service';
 import { TaskQuestionAutoAnswerService } from './task-question-auto-answer.service';
 import { TaskRealtimeService } from './task-realtime.service';
@@ -49,6 +54,14 @@ import { TaskWorkerInboxService } from './task-worker-inbox.service';
 export interface TaskAcceptanceApplication {
   task: Task;
   handoff: TaskDocumentResult;
+}
+
+/** 申请验收的附加信息（均可选，兼容旧版无 body 调用） */
+export interface AcceptanceApplicationInput {
+  /** 需求方名称，写入交付文档的责任信息 */
+  requesterName?: string | null;
+  /** 执行机器人提交的结构化交付说明 */
+  report?: TaskDeliveryReportInput | null;
 }
 
 /** 终态快照预留：实时输出缓冲在进程内保留（P1 不做 TTL 清理，重启后由任务历史承担） */
@@ -258,8 +271,8 @@ export class TaskDispatchService
       // 1. 工位目录与机器人令牌（幂等；路径单引号包裹防注入）
       await client.shell(
         `mkdir -p '${workdir}' '${workdir}/.opencode' && ` +
-          `printf '%s' '${workerToken}' > '${workdir}/.opencode/agent-token' && ` +
-          `chmod 600 '${workdir}/.opencode/agent-token'`,
+          `${agentTokenShell(workdir, workerToken)} && ` +
+          workerEnvShell(workdir, { LITA_PROJECT_TOKEN: workerToken }),
       );
 
       // 2. 固定绑定：一个任务只对应一个 opencode 会话。
@@ -561,7 +574,10 @@ export class TaskDispatchService
     await this.addEvent(taskId, '操作', '人工中断执行', operator, {
       intervention,
     });
-    await this.taskChat.finishTask(taskId);
+    await this.taskChat.finishTask(taskId, {
+      toolStatus: 'error',
+      toolDetail: '会话已中断，未收到工具终态事件',
+    });
     this.releaseTask(taskId);
     return this.mustFind(taskId);
   }
@@ -1180,6 +1196,7 @@ export class TaskDispatchService
   async applyForAcceptance(
     taskId: number,
     worker: Worker,
+    input: AcceptanceApplicationInput = {},
   ): Promise<TaskAcceptanceApplication> {
     const task = await this.mustFind(taskId);
     if (task.agentId !== worker.id) {
@@ -1197,12 +1214,15 @@ export class TaskDispatchService
     }
     const resultText = await this.collectResult(task);
     const now = new Date();
+    const report = normalizeTaskDeliveryReport(input.report);
     // 交付文档是验收申请的前置条件：写入失败时任务保持执行中，可修复后重试
     const handoff = await this.taskDocuments.upsertHandoff({
       task,
       result: resultText ?? task.result,
       worker,
       appliedAt: now,
+      report,
+      requesterName: input.requesterName ?? null,
     });
     const updated = await this.tasks.update(
       {
@@ -1235,6 +1255,8 @@ export class TaskDispatchService
         deliveryApply: true,
         handoffPath: handoff.path,
         handoffUrl: handoff.url,
+        handoffRequester: input.requesterName ?? null,
+        handoffReport: report,
       },
     );
     await this.taskChat.finishTask(taskId);
@@ -1286,8 +1308,13 @@ export class TaskDispatchService
     if (
       task.status !== TaskStatus.RUNNING ||
       task.subStatus !== TaskSubStatus.EXECUTING
-    )
+    ) {
+      // 机器人申请验收（或在最终回复前被返工/中断）后会话仍可能继续输出：
+      // 任务已离开执行中时也要收尾本轮消息，否则会一直停留在运行中，
+      // 前端据此禁用输入框，待验收任务将无法发送返工意见。
+      await this.taskChat.finishTask(taskId);
       return;
+    }
     if (this.finishedAwaitingApply.has(taskId)) return;
     const resultText = await this.collectResult(task);
     const updated = await this.tasks.update(
@@ -1531,16 +1558,29 @@ export class TaskDispatchService
         '完成并自检后，必须主动申请验收；会话结束不会自动进入待验收，未调用申请接口时任务会一直保持「进行中-执行中」。',
         '',
         '1. 先完成交付物和交付说明，确保最终产出已经写入回复或项目文档。',
-        '2. 在工位目录执行以下命令申请验收（机器人令牌不要写入聊天或文档）：',
+        '2. 整理结构化交付说明，字段均按 Markdown 填写；没有的内容明确写“无”，不得编造：',
+        '   - delivery：最终交付结果；代码交付必须写仓库和分支，文档交付必须写名称及知识库路径/链接；',
+        '   - problems：实现中遇到的问题、解决方式和验证结果；',
+        '   - detours：走过的弯路、返工或失败尝试，没有则写“无”；',
+        '   - lessons：可复用的经验、检查清单和下次改进项；',
+        '   - followUps：遗留问题、使用限制、优化建议和后续待办；',
+        '   - other：其它需要保留的信息。',
+        '3. 在工位目录执行以下命令申请验收（机器人令牌不要写入聊天或文档）：',
         '',
         '```bash',
         'TOKEN=$(cat .opencode/agent-token)',
         `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/handoff/apply.md' \\`,
-        '  -H "X-Worker-Token: $TOKEN"',
+        '  -H "X-Worker-Token: $TOKEN" \\',
+        '  -H "Content-Type: application/json" \\',
+        '  -d \'{"delivery":"交付结果、代码仓库/分支、文档清单","problems":"问题与解决","detours":"弯路或验证过程","lessons":"经验总结","followUps":"遗留建议与待办","other":"其它信息"}\'',
         '```',
         '',
-        '3. 申请成功后任务进入「等待中-待验收」，由任务需求方决定通过、返工或失败。',
-        '4. 需求方拒绝后，平台会把反馈意见发回当前会话，按反馈修改后再次申请验收。',
+        '4. 申请成功后任务进入「等待中-待验收」，由任务需求方决定通过、返工或失败。',
+        '5. 申请成功后必须在最终回复中向需求方告知以下内容：',
+        '   - 交付内容：完成了什么、具体交付物是什么；',
+        '   - 交付文档链接：使用申请验收接口返回的交付文档链接（原样使用返回的 url，不要自行拼接 .md）；',
+        '   - 其它需要告知的事项：遗留问题、使用限制、后续建议等，没有则写“无”。',
+        '6. 需求方拒绝后，平台会把反馈意见发回当前会话，按反馈修改后再次申请验收。',
       ].join('\n'),
     );
     return sections.join('\n\n---\n\n');

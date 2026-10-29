@@ -38,6 +38,8 @@ export interface WorkerDebugTool {
   id: string;
   name: string;
   status: 'running' | 'success' | 'error';
+  /** 历史错误/补充说明 */
+  detail?: string;
   argsText?: string;
   result?: string;
   startedAt?: string;

@@ -65,6 +65,12 @@ function parseLocation(pathname: string): KnowledgeLocation {
     }
     return decoded
   })
+  // 知识路径本身不带 `.md`：兼容历史任务文档（HANDOFF.md / REVIEW.md）等旧链接
+  const lastIndex = segments.length - 1
+  const last = segments[lastIndex]
+  if (!directory && last.length > 3 && last.endsWith('.md')) {
+    segments[lastIndex] = last.slice(0, -3)
+  }
   return { path: `/${segments.join('/')}`, directory }
 }
 

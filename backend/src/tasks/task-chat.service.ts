@@ -179,19 +179,20 @@ export class TaskChatService implements OnModuleDestroy {
       const persisted = persistedByTask.get(item.id) ?? [];
       const persistedKeys = new Set(persisted.map((row) => row.messageKey));
       for (const row of persisted) {
+        const message = this.persistedMessage(row);
         entries.push({
-          message: this.persistedToPublic(row),
-          at: row.createdAt.getTime(),
+          message,
+          at: new Date(message.createdAt).getTime(),
           seq: seq++,
         });
         if (
-          row.role === 'assistant' &&
-          row.kind === 'message' &&
-          row.content.trim()
+          message.role === 'assistant' &&
+          message.kind === 'message' &&
+          message.content.trim()
         ) {
           assistantTexts.push({
-            id: row.messageKey,
-            content: row.content.trim(),
+            id: message.id,
+            content: message.content.trim(),
           });
         }
       }
@@ -547,6 +548,26 @@ export class TaskChatService implements OnModuleDestroy {
     this.broadcastMessage(message);
   }
 
+  /**
+   * 会话终止兜底：工具终态事件可能缺失或晚于会话终态，遗留的 running
+   * 会让前端一直显示运行中。仅结算仍为 running 的工具，不覆盖已收到的结果。
+   */
+  private settleRunningTools(
+    message: InternalChatMessage,
+    status: 'success' | 'error',
+    detail: string,
+  ): boolean {
+    let changed = false;
+    for (const tool of message.tools ?? []) {
+      if (tool.status !== 'running') continue;
+      tool.status = status;
+      tool.detail ??= detail;
+      tool.finishedAt = new Date().toISOString();
+      changed = true;
+    }
+    return changed;
+  }
+
   private toolOf(
     message: InternalChatMessage,
     toolCallId?: string,
@@ -772,6 +793,14 @@ export class TaskChatService implements OnModuleDestroy {
         void this.persistMessage(message);
       }
     }
+    for (const item of this.live.get(taskId)?.values() ?? []) {
+      if (
+        this.settleRunningTools(item, 'error', '会话失败，未收到工具终态事件')
+      ) {
+        this.flushNow(item);
+        void this.persistMessage(item);
+      }
+    }
     const message = this.activeMessage(taskId);
     if (!message) {
       await this.note(taskId, content);
@@ -787,12 +816,20 @@ export class TaskChatService implements OnModuleDestroy {
   /** 会话结束：收尾当前消息并通知前端刷新；project 待反馈提问可按需保留。 */
   async finishTask(
     taskId: number,
-    options?: { preserveProjectQuestions?: boolean },
+    options?: {
+      preserveProjectQuestions?: boolean;
+      toolStatus?: 'success' | 'error';
+      toolDetail?: string;
+    },
   ): Promise<void> {
     const messages = this.live.get(taskId);
     if (messages) {
       for (const message of messages.values()) {
-        let changed = false;
+        let changed = this.settleRunningTools(
+          message,
+          options?.toolStatus ?? 'success',
+          options?.toolDetail ?? '会话已结束，未收到工具终态事件',
+        );
         if (
           message.question?.state === 'pending' &&
           !(
@@ -1125,6 +1162,42 @@ export class TaskChatService implements OnModuleDestroy {
         : undefined,
       meta: message.meta,
     };
+  }
+
+  /**
+   * 快照内的数据库消息：优先取进程内实时副本（内容与状态最新）。
+   * 数据库里遗留的 running 说明会话早已结束或服务重启过，
+   * 按完成展示并回写，避免任务详情一直显示「正在执行」。
+   */
+  private persistedMessage(row: TaskMessage): TaskChatMessage {
+    const live = this.live.get(row.taskId)?.get(row.messageKey);
+    if (live) return this.toPublic(live);
+
+    let changed = false;
+    if (row.status === 'running') {
+      row.status = 'complete';
+      changed = true;
+    }
+    for (const tool of row.tools ?? []) {
+      if (tool.status !== 'running') continue;
+      tool.status = 'success';
+      tool.detail ??= '会话已结束，未收到工具终态事件';
+      tool.finishedAt = new Date().toISOString();
+      changed = true;
+    }
+    if (changed) {
+      void this.messages
+        .update(
+          { taskId: row.taskId, messageKey: row.messageKey },
+          { status: row.status, tools: row.tools },
+        )
+        .catch((error: Error) =>
+          this.logger.warn(
+            `修正任务消息 ${row.messageKey} 状态失败：${error.message}`,
+          ),
+        );
+    }
+    return this.persistedToPublic(row);
   }
 
   /** 数据库消息还原为前端消息结构（id 使用 messageKey，与实时消息一致） */

@@ -7,6 +7,7 @@ import {
   recoverDebugMessages,
   runningAssistantOf,
   settleDebugQuestion,
+  settleDebugRunningTools,
   upsertDebugQuestion,
   WorkerDebugMessage,
 } from './worker-debug.service';
@@ -114,6 +115,39 @@ describe('applyDebugStreamEvent', () => {
       { id: 'call-1', status: 'error', result: 'missing' },
       { id: 'call-2', status: 'success' },
     ]);
+  });
+
+  it('会话收尾把未收到终态事件的工具结算为完成', () => {
+    const message = base();
+    applyDebugStreamEvent(message, 'session.tool.input.started', {
+      name: 'shell',
+      toolCallID: 'call-1',
+    });
+    applyDebugStreamEvent(message, 'session.tool.success', {
+      name: 'read',
+      toolCallID: 'call-2',
+      output: 'ok',
+    });
+
+    expect(
+      settleDebugRunningTools(
+        message,
+        'success',
+        '会话已结束，未收到工具终态事件',
+      ),
+    ).toBe(true);
+    expect(message.tools).toMatchObject([
+      {
+        id: 'call-1',
+        status: 'success',
+        detail: '会话已结束，未收到工具终态事件',
+      },
+      { id: 'call-2', status: 'success', result: 'ok' },
+    ]);
+    expect(message.tools?.[0].finishedAt).toEqual(expect.any(String));
+    expect(
+      settleDebugRunningTools(message, 'error', '不应覆盖已结算工具'),
+    ).toBe(false);
   });
 
   it('无关事件与非法 delta 不产生变更', () => {

@@ -32,6 +32,7 @@ import {
   TaskDeliveryService,
 } from './task-delivery.service';
 import { TaskDispatchService } from './task-dispatch.service';
+import type { TaskDeliveryReportInput } from './task-delivery-report';
 import { TaskHandoffService } from './task-handoff.service';
 import {
   AnswerQuestionInput,
@@ -92,6 +93,22 @@ class ReplyQuestionDto {
   answers?: string[][];
   /** 跳过本次提问 */
   reject?: boolean;
+}
+
+/** AI 技能 task-handoff-apply：执行机器人提交结构化交付说明（可选，兼容旧调用） */
+class HandoffApplyDto implements TaskDeliveryReportInput {
+  /** 交付结果、代码仓库/分支、文档清单 */
+  delivery?: string | null;
+  /** 实现问题与解决过程 */
+  problems?: string | null;
+  /** 走过的弯路 */
+  detours?: string | null;
+  /** 经验总结 */
+  lessons?: string | null;
+  /** 遗留建议与后续待办 */
+  followUps?: string | null;
+  /** 其它需要保留的信息 */
+  other?: string | null;
 }
 
 /** AI 技能 task-deliver-reply：需求方通过或拒绝验收 */
@@ -351,9 +368,10 @@ export class TasksController {
   @Header('Content-Type', 'text/markdown; charset=utf-8')
   handoffApply(
     @Param('id', ParseIntPipe) id: number,
+    @Body() dto: HandoffApplyDto,
     @Req() req: AuthedRequest,
   ): Promise<string> {
-    return this.deliveryService.apply(id, this.requireWorker(req));
+    return this.deliveryService.apply(id, this.requireWorker(req), dto);
   }
 
   /** task-handoff-accept：人或机器人需求方验收通过。 */
@@ -412,6 +430,7 @@ export class TasksController {
   @Header('Content-Type', 'text/markdown; charset=utf-8')
   deliverApply(
     @Param('id', ParseIntPipe) id: number,
+    @Body() dto: HandoffApplyDto,
     @Req() req: AuthedRequest,
   ): Promise<string> {
     if (!req.worker) {
@@ -419,7 +438,7 @@ export class TasksController {
         '申请验收仅接受机器人身份（X-Worker-Token）',
       );
     }
-    return this.deliveryService.apply(id, req.worker);
+    return this.deliveryService.apply(id, req.worker, dto);
   }
 
   /**
@@ -570,7 +589,7 @@ export class TasksController {
     );
   }
 
-  /** 验收通过：仅任务需求方操作；异步生成 REVIEW.md 复盘并销毁执行会话 */
+  /** 验收通过：仅任务需求方操作；异步生成 REVIEW 复盘并销毁执行会话 */
   @Post(':id/accept')
   accept(
     @Param('id', ParseIntPipe) id: number,
@@ -580,7 +599,7 @@ export class TasksController {
     return this.deliveryService.acceptTask(id, req.user);
   }
 
-  /** 重新生成任务复盘（已结束-完成；固定覆盖 REVIEW.md） */
+  /** 重新生成任务复盘（已结束-完成；固定覆盖 REVIEW） */
   @Post(':id/handoff')
   @HttpCode(202)
   regenerateHandoff(@Param('id', ParseIntPipe) id: number) {

@@ -16,6 +16,7 @@ import { OpencodeEventHub } from '../executors/opencode-event-hub.service';
 import type { OpencodeEvent } from '../executors/opencode-event-hub.service';
 import { isFreshOutcome, OpencodeClient } from '../executors/opencode-client';
 import { Worker } from './worker.entity';
+import { agentTokenShell, workerEnvShell } from './worker-env';
 import { WorkersService } from './workers.service';
 import {
   ManagedStandardFiles,
@@ -40,12 +41,14 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 
 1. 一个任务有且只有一个负责机器人和一个需求方；需求方可以是人类用户，也可以是父任务机器人。
 2. 任务来源包括人类创建和机器人通过 task-create 创建。同一时间只执行一个「进行中」任务；等待中的任务不占用你，可以接受其他任务。
-3. 机器人身份令牌位于 .opencode/agent-token。调用平台所有 .md 接口时先执行 \`TOKEN=$(cat .opencode/agent-token)\`，再使用 \`X-Worker-Token: $TOKEN\`；不得把令牌写入聊天、交付物或文档。
+3. 机器人身份令牌位于 .opencode/agent-token，同时写入 .opencode/.env 的 LITA_PROJECT_TOKEN。调用平台所有 .md 接口时先执行 \`set -a; . .opencode/.env; set +a\`，再使用 \`X-Agent-Token: $LITA_PROJECT_TOKEN\`（或 \`TOKEN=$(cat .opencode/agent-token)\` + \`X-Worker-Token: $TOKEN\`）；不得把令牌写入聊天、交付物或文档。
 
-### Lita 用户令牌
+### 工位环境变量（.opencode/.env）
 
-- Lita 用户令牌位于 .opencode/.env（键名 LITA_USER_TOKEN，权限 600）；执行器宿主 ~/.env 也有同名配置。
-- 使用 lita-api 等需要 LITA_USER_TOKEN 的技能或命令前，先执行：\`set -a; . .opencode/.env; set +a\`（或 \`set -a; . ~/.env; set +a\`）。
+- .opencode/.env 由平台注入并维护（权限 600，不得读取展示、改写或删除）：
+  - \`LITA_PROJECT_TOKEN\`：访问项目平台 .md 接口的令牌，与 .opencode/agent-token 是同一个机器人身份令牌，放在 \`X-Agent-Token\` 或 \`X-Worker-Token\` 均可。
+  - \`LITA_USER_TOKEN\`：访问 Lita 平台的用户令牌，供 lita-api 等技能使用；执行器宿主 ~/.env 也有同名配置。
+- 调用平台接口或使用上述技能前，先执行：\`set -a; . .opencode/.env; set +a\`（或 \`set -a; . ~/.env; set +a\`）。
 - 不得把令牌写入聊天、交付物、文档或代码仓库。
 
 ### 任务状态与动作
@@ -300,7 +303,7 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       await client.shell(
         `mkdir -p '${workdir}' '${workdir}/.opencode/skills' '${workdir}/.opencode/rules' '${workdir}/.opencode/docs'`,
       );
-      this.pushLine(job, '· 写入机器人身份令牌…');
+      this.pushLine(job, '· 写入机器人身份令牌（agent-token / .env）…');
       await this.writeAgentToken(client, worker.id, workdir);
       this.pushLine(job, '· 注入 Lita 用户令牌…');
       await this.writeLitaUserToken(client, workdir);
@@ -367,7 +370,8 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
   }
 
   /**
-   * 把机器人独立令牌写入工位 .opencode/agent-token（权限 600）。
+   * 把机器人独立令牌写入工位 .opencode/agent-token，并同步到 .opencode/.env 的
+   * LITA_PROJECT_TOKEN（技能统一从 .env 读取访问项目平台的令牌）。
    * 令牌只经服务端落盘，不进入初始化 Prompt、SSE 进度或日志。
    */
   private async writeAgentToken(
@@ -377,14 +381,15 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
   ): Promise<void> {
     const token = await this.workersService.ensureAgentToken(workerId);
     await client.shell(
-      `printf '%s' '${token}' > '${workdir}/.opencode/agent-token' && ` +
-        `chmod 600 '${workdir}/.opencode/agent-token'`,
+      `${agentTokenShell(workdir, token)} && ` +
+        workerEnvShell(workdir, { LITA_PROJECT_TOKEN: token }),
     );
   }
 
   /**
-   * 把 Lita 用户令牌写入工位 .opencode/.env（权限 600），供 lita-api 等技能使用；
-   * 同时同步到执行器宿主 ~/.env（保留其他变量），兼容按 ~/.env 读取令牌的技能。
+   * 把 Lita 用户令牌写入工位 .opencode/.env 的 LITA_USER_TOKEN（权限 600，保留其他键），
+   * 供 lita-api 等技能使用；同时同步到执行器宿主 ~/.env（保留其他变量），
+   * 兼容按 ~/.env 读取令牌的技能。
    * 优先 WORKER_LITA_USER_TOKEN，未配置时回退平台自身的 LITA_USER_TOKEN。
    * 令牌只经服务端落盘，不进入初始化 Prompt、SSE 进度或日志。
    */
@@ -401,10 +406,7 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       );
       return;
     }
-    await client.shell(
-      `printf '%s\\n' 'LITA_USER_TOKEN=${token}' > '${workdir}/.opencode/.env' && ` +
-        `chmod 600 '${workdir}/.opencode/.env'`,
-    );
+    await client.shell(workerEnvShell(workdir, { LITA_USER_TOKEN: token }));
     // 兼容按 ~/.env 读取令牌的技能（如 lita-api）：同步到执行器宿主，保留其他变量
     try {
       await client.shell(
@@ -617,7 +619,7 @@ ${rulesSection}
 - AGENTS.md    机器人的工作基本原则
 - .opencode/   opencode自身的目录
 - .opencode/agent-token   平台注入的机器人身份令牌（权限 600，不得读取展示、改写或删除）
-- .opencode/.env   平台注入的 Lita 用户令牌（LITA_USER_TOKEN，权限 600，不得读取展示、改写或删除）
+- .opencode/.env   平台注入的工位环境变量（权限 600，不得读取展示、改写或删除）：LITA_PROJECT_TOKEN 访问项目平台 .md 接口（与 agent-token 同值）、LITA_USER_TOKEN 访问 Lita 平台技能
 - .opencode/skills/   当前机器人的技能
 - .opencode/rules/   平台同步的规范与规则文档（保持规范库原始目录结构；.standards-manifest.json 是受管清单）
 - .opencode/rules/.standards-manifest.json   本次同步的规范文件清单（JSON：{"version":1,"files":[...]}）

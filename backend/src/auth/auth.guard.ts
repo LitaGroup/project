@@ -24,7 +24,8 @@ export interface AuthedRequest extends Request {
  * - 标记 @Public() 的路由：登录流程本身（/api/auth/*）、自带 X-Agent-Token 鉴权的脚本接口（/api/scripts）
  * - `.md` 后缀端点：面向 AI/agent 的 Markdown 视图/流式接口，凭 agent 访问令牌
  *   （X-Agent-Token 头或 ?token= 参数；个人令牌在个人中心查看/重置，公共 Agent 共用令牌由
- *   PUBLIC_AGENT_TOKEN 配置）、机器人独立令牌（X-Worker-Token）或网页会话放行
+ *   PUBLIC_AGENT_TOKEN 配置）、机器人独立令牌（X-Worker-Token，或工位 .opencode/.env 的
+ *   LITA_PROJECT_TOKEN 放在 X-Agent-Token/?token= 传入）或网页会话放行
  * - WebSocket /api/ws：agent 直连，不走 Nest 路由（自有 token 校验）
  * - /images、/export-files、/files 静态资源：挂载在 main.ts，不经 Guard
  */
@@ -89,13 +90,20 @@ export class AuthGuard implements CanActivate {
     const provided = headerToken || queryToken;
     if (provided) {
       const user = await this.authService.getUserByAgentToken(provided);
-      if (!user) {
-        throw new UnauthorizedException(
-          '无效的 agent 访问令牌（可在平台个人中心重置后更新 agent 配置）',
-        );
+      if (user) {
+        (req as AuthedRequest).user = user;
+        return true;
       }
-      (req as AuthedRequest).user = user;
-      return true;
+      // 工位 .opencode/.env 的 LITA_PROJECT_TOKEN 是机器人独立令牌，
+      // 统一按 X-Agent-Token（项目 SKILL 约定）传入时也能识别为机器人身份
+      const worker = await this.workersService.findByAgentToken(provided);
+      if (worker) {
+        (req as AuthedRequest).worker = worker;
+        return true;
+      }
+      throw new UnauthorizedException(
+        '无效的 agent 访问令牌（可在平台个人中心重置后更新 agent 配置）',
+      );
     }
     const token = readCookie(req, AUTH_COOKIE);
     const user = token ? await this.authService.getUserByToken(token) : null;

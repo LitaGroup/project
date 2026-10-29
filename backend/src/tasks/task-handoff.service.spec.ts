@@ -22,17 +22,29 @@ const runPrompt = runOpencodePrompt as jest.MockedFunction<
   typeof runOpencodePrompt
 >;
 
-const SUMMARY = `## 交付物与结论
+const SUMMARY = `## 交付内容
 
-已完成活动页，交付测试通过。
+已完成活动页；代码仓库 LitaGroup/activity，分支 test；文档 /project/8/document/9，交付测试通过。
 
-## 任务记录与过程复盘
+## 实现问题与解决
+
+接口字段缺失；补充 v2 字段后回归通过。
+
+## 走过的弯路
 
 中途补充过一次接口字段，未出现明确返工。
 
 ## 经验总结
 
-先确认接口字段再开发页面。`;
+先确认接口字段再开发页面。
+
+## 遗留建议与后续待办
+
+补充埋点，由前端机器人跟进。
+
+## 其它需要保留的信息
+
+无。`;
 
 function baseTask(over: Partial<Task> = {}): Task {
   return {
@@ -117,6 +129,7 @@ describe('TaskHandoffService', () => {
   let taskDocuments: {
     reviewPath: jest.Mock;
     upsertReview: jest.Mock;
+    taskDefinitionOf: jest.Mock;
   };
   let taskChat: { postAssistantMessage: jest.Mock };
   let service: TaskHandoffService;
@@ -172,10 +185,14 @@ describe('TaskHandoffService', () => {
       workdirOf: jest.fn().mockReturnValue('/tmp/worker/1001'),
     };
     taskDocuments = {
-      reviewPath: jest.fn().mockReturnValue('/task/20261028/TK-0001/REVIEW.md'),
+      reviewPath: jest.fn().mockReturnValue('/task/20261028/TK-0001/REVIEW'),
+      taskDefinitionOf: jest.fn().mockResolvedValue({
+        name: '前端任务定义',
+        description: '负责 H5 页面开发与自测',
+      }),
       upsertReview: jest.fn().mockResolvedValue({
-        path: '/task/20261028/TK-0001/REVIEW.md',
-        url: '/docs/detail/task/20261028/TK-0001/REVIEW.md',
+        path: '/task/20261028/TK-0001/REVIEW',
+        url: '/docs/detail/task/20261028/TK-0001/REVIEW',
         title: 'TK-0001 活动页开发 · 任务复盘',
       }),
     };
@@ -200,10 +217,10 @@ describe('TaskHandoffService', () => {
     );
   });
 
-  it('生成任务复盘，统计确认/补充/时长并写入 REVIEW.md', async () => {
+  it('生成任务复盘，统计确认/补充/时长并写入 REVIEW', async () => {
     const result = await service.generateNow(1);
 
-    expect(result.path).toBe('/task/20261028/TK-0001/REVIEW.md');
+    expect(result.path).toBe('/task/20261028/TK-0001/REVIEW');
     expect(result.url).toContain('/docs/detail/task/20261028/TK-0001/');
     // 只读取当前任务自身记录，子任务由各自验收时独立复盘
     expect(events.find).toHaveBeenCalledWith({
@@ -223,17 +240,27 @@ describe('TaskHandoffService', () => {
       { content: string },
     ];
     const content = created[0].content;
-    expect(content).toContain('## 一、任务输入');
+    expect(content).toContain('## 0、任务与责任');
+    expect(content).toContain('| 任务定义 | 前端任务定义 |');
+    expect(content).toContain('负责 H5 页面开发与自测');
+    expect(content).toContain('| 需求方 | 需求人 |');
+    expect(content).toContain('## 1、需求说明');
     expect(content).toContain('开发一个活动页');
     expect(content).toContain('支持移动端');
-    expect(content).toContain('## 二、交付物与结论');
+    expect(content).toContain('## 2、交付内容');
     expect(content).toContain('活动页已上线测试环境');
+    expect(content).toContain('LitaGroup/activity，分支 test');
+    expect(content).toContain('## 3、实现问题与解决');
+    expect(content).toContain('接口字段缺失');
+    expect(content).toContain('## 4、弯路与经验复盘');
+    expect(content).toContain('中途补充过一次接口字段');
+    expect(content).toContain('## 5、遗留建议与后续待办');
+    expect(content).toContain('补充埋点');
+    expect(content).toContain('## 6、其它需要保留的信息');
+    expect(content).toContain('## 附录：任务统计');
     expect(content).toContain('| 用户确认次数 | 1 次 |');
     expect(content).toContain('| 补充信息次数 | 2 次 |');
     expect(content).toContain('| 持续时长 | 3 小时 |');
-    expect(content).toContain('## 四、任务记录与过程复盘');
-    expect(content).toContain('中途补充过一次接口字段');
-    expect(content).toContain('## 五、经验总结');
     expect(content).toContain('· 任务复盘');
     expect(content).not.toContain('报告版本');
 
@@ -269,6 +296,48 @@ describe('TaskHandoffService', () => {
     expect(tasks.update).not.toHaveBeenCalled();
   });
 
+  it('REVIEW 复用申请验收时提交的交付说明与需求方快照', async () => {
+    events.find.mockResolvedValue([
+      event(),
+      event({
+        id: 9,
+        type: '状态变更',
+        content: '申请验收',
+        operator: '前端机器人',
+        meta: {
+          deliveryApply: true,
+          handoffRequester: '张三',
+          handoffReport: {
+            delivery:
+              '代码 LitaGroup/activity 分支 test；文档 /project/8/document/9',
+            problems: '接口字段缺失，补充后回归通过',
+            detours: '先使用旧接口，切换 v2',
+            lessons: '开发前确认接口版本',
+            followUps: '补充埋点',
+            other: '无',
+          },
+        },
+      }),
+    ]);
+
+    await service.generateNow(1);
+
+    expect(runPrompt).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'LitaGroup/activity 分支 test',
+        ) as unknown,
+      }),
+    );
+    const created = taskDocuments.upsertReview.mock.calls[0] as [
+      { content: string },
+    ];
+    expect(created[0].content).toContain('| 需求方 | 张三 |');
+    expect(created[0].content).toContain('LitaGroup/activity，分支 test');
+    expect(created[0].content).toContain('中途补充过一次接口字段');
+  });
+
   it('重新生成复盘覆盖同一路径和同一条聊天消息', async () => {
     await service.generateNow(1);
     await service.generateNow(1);
@@ -295,17 +364,22 @@ describe('TaskHandoffService', () => {
 });
 
 describe('splitHandoffSummary', () => {
-  it('按固定三节解析并去掉代码围栏', () => {
+  it('按固定六节解析并去掉代码围栏', () => {
     const sections = splitHandoffSummary(`\`\`\`markdown\n${SUMMARY}\n\`\`\``);
     expect(sections.delivery).toContain('已完成活动页');
-    expect(sections.process).toContain('补充过一次接口字段');
+    expect(sections.problems).toContain('接口字段缺失');
+    expect(sections.detours).toContain('补充过一次接口字段');
     expect(sections.lessons).toContain('先确认接口字段');
+    expect(sections.followUps).toContain('补充埋点');
+    expect(sections.other).toContain('无');
   });
 
-  it('结构缺失时保留机器人原始输出且不编造', () => {
+  it('结构缺失时保留机器人原始输出且不编造其它小节', () => {
     const sections = splitHandoffSummary('机器人自由总结');
     expect(sections.delivery).toBe('机器人自由总结');
-    expect(sections.process).toContain('未按约定结构');
+    expect(sections.problems).toContain('未按约定结构');
+    expect(sections.detours).toContain('未按约定结构');
     expect(sections.lessons).toContain('未按约定结构');
+    expect(sections.followUps).toContain('未按约定结构');
   });
 });

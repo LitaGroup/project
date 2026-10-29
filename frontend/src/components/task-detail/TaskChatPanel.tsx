@@ -116,11 +116,15 @@ export function TaskChatPanel({
   const robotRunning = messages.some(
     (message) => message.role === 'assistant' && message.status === 'running',
   )
+  // 待验收时机器人可能仍在输出最终回复，但需求方此时应能发送返工意见
+  // （后端按验收不通过排队处理），不因运行态锁住输入框。
+  const awaitingAcceptance = task.subStatus === '待验收'
+  const sendBlocked = finished || (robotRunning && !awaitingAcceptance)
   const runtime = useExternalStoreRuntime<TaskChatMessage>({
     messages,
     convertMessage: toThreadMessage,
     onNew,
-    isSendDisabled: finished || busy || robotRunning,
+    isSendDisabled: busy || sendBlocked,
   })
 
   const robotCount = useMemo(
@@ -469,16 +473,18 @@ function ChatFooter({
   const [failReason, setFailReason] = useState('')
   const [failError, setFailError] = useState<string | null>(null)
   const finished = task.status === '已结束'
+  const awaitingAcceptance = task.subStatus === '待验收'
+  const sendBlocked = finished || (robotRunning && !awaitingAcceptance)
   const placeholder = finished
     ? '任务已结束，不能继续对话'
-    : robotRunning
-      ? '机器人正在回复…'
-      : task.subStatus === '待反馈'
-        ? '补充资料或确认信息，发送后将排队等待机器人继续执行…'
-        : task.subStatus === '待分配' || task.subStatus === '待接受'
-          ? '补充任务需求，内容会随任务一起提供…'
-          : task.subStatus === '待验收'
-            ? '输入返工意见，发送后将按验收不通过退回机器人…'
+    : awaitingAcceptance
+      ? '输入返工意见，发送后将按验收不通过退回机器人…'
+      : robotRunning
+        ? '机器人正在回复…'
+        : task.subStatus === '待反馈'
+          ? '补充资料或确认信息，发送后将排队等待机器人继续执行…'
+          : task.subStatus === '待分配' || task.subStatus === '待接受'
+            ? '补充任务需求，内容会随任务一起提供…'
             : task.subStatus === '待继续'
               ? '任务正在排队，可继续补充说明…'
               : '继续与机器人对话，Enter 发送，Shift+Enter 换行…'
@@ -559,14 +565,14 @@ function ChatFooter({
       <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
         <ComposerPrimitive.Input
           rows={2}
-          disabled={finished || robotRunning}
+          disabled={sendBlocked}
           placeholder={placeholder}
           className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed disabled:opacity-60"
         />
         <ComposerPrimitive.Send
           className={buttonVariants({ variant: 'primary', size: 'icon-sm' })}
           aria-label="发送消息"
-          disabled={finished || robotRunning}
+          disabled={sendBlocked}
         >
           <Send className="size-4" />
         </ComposerPrimitive.Send>

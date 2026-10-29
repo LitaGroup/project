@@ -2394,7 +2394,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason }),
     }),
-  /** 重新生成任务复盘（固定覆盖 REVIEW.md） */
+  /** 重新生成任务复盘（固定覆盖 REVIEW） */
   generateTaskHandoff: (id: number) =>
     request<{ accepted: true }>(`/tasks/${id}/handoff`, {
       method: 'POST',

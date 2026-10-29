@@ -59,6 +59,27 @@ export type {
  * 把 opencode 流式事件落到调试 assistant 消息上（纯函数，便于单测）。
  * 文本/思考增量分别追加，ended 追加段落分隔符；返回是否发生了变更。
  */
+/**
+ * 会话终止兜底：工具终态事件可能缺失或晚于会话终态，遗留的 running
+ * 会让前端一直显示运行中。仅结算仍为 running 的工具，不覆盖已有结果。
+ */
+export function settleDebugRunningTools(
+  message: WorkerDebugMessage,
+  status: 'success' | 'error',
+  detail: string,
+): boolean {
+  let changed = false;
+  const now = new Date().toISOString();
+  for (const tool of message.tools ?? []) {
+    if (tool.status !== 'running') continue;
+    tool.status = status;
+    tool.detail ??= detail;
+    tool.finishedAt = now;
+    changed = true;
+  }
+  return changed;
+}
+
 export function applyDebugStreamEvent(
   message: WorkerDebugMessage,
   type: string,
@@ -978,6 +999,11 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     this.cancelPendingQuestions(session);
     const message = session.messages.find((item) => item.id === assistantId);
     if (message) {
+      settleDebugRunningTools(
+        message,
+        'success',
+        '会话已结束，未收到工具终态事件',
+      );
       message.content = output;
       message.status = 'complete';
     }
@@ -997,6 +1023,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     this.cancelPendingQuestions(session);
     const message = session.messages.find((item) => item.id === assistantId);
     if (message) {
+      settleDebugRunningTools(message, 'error', '会话失败，未收到工具终态事件');
       message.content = `执行失败：${reason}`;
       message.status = 'error';
     }
@@ -1014,6 +1041,11 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       .reverse()
       .find((item) => item.role === 'assistant' && item.status === 'running');
     if (running) {
+      settleDebugRunningTools(
+        running,
+        'error',
+        '会话已中断，未收到工具终态事件',
+      );
       running.content = '本轮回复已中断。你可以继续发送消息，仍使用当前会话。';
       running.status = 'error';
     }

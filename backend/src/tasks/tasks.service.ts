@@ -11,6 +11,10 @@ import { Observable } from 'rxjs';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
 import { TaskStatus, TaskSubStatus, WorkerRole } from '../common/enums';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
+import {
+  unescapeMarkdown,
+  unescapeMarkdownUrlColons,
+} from '../common/markdown-escape';
 import { TaskTypesService } from '../task-types/task-types.service';
 import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 import { WorkerView, WorkersService } from '../workers/workers.service';
@@ -20,6 +24,7 @@ import { Task, TaskMissingItem } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
+import { deriveTaskTitle } from './task-title';
 import { TaskDispatchService } from './task-dispatch.service';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
 import {
@@ -48,25 +53,6 @@ export interface CreateTaskInput {
   templateId?: number | null;
   /** 兼容旧客户端字段：新流程创建后始终进入「等待中-待分配」 */
   submitForScheduling?: boolean;
-}
-
-/** 无标题新建时，从任务描述首个有效行推导临时标题（去掉常见 Markdown 标记，最长 200 字） */
-function deriveTaskTitle(description: string): string {
-  for (const raw of description.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || /^[-*_=]{3,}$/.test(line)) continue;
-    const plain = line
-      .replace(/^#{1,6}\s*/, '')
-      .replace(/^>\s*/, '')
-      .replace(/^[-*+]\s+/, '')
-      .replace(/^\d+[.)]\s+/, '')
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/[*_`~]/g, '')
-      .trim();
-    if (plain && !/^[-*_=]+$/.test(plain)) return plain.slice(0, 200);
-  }
-  return '';
 }
 
 export interface UpdateTaskInput {
@@ -374,10 +360,13 @@ export class TasksService {
   }
 
   async create(input: CreateTaskInput): Promise<Task> {
-    const description = input.description?.trim() || null;
+    // AI 生成的 Markdown 常把 URL 写成 `http\://`，冒号转义没有语义，入库前还原
+    const description = input.description?.trim()
+      ? unescapeMarkdownUrlColons(input.description.trim())
+      : null;
     // 未填标题时取描述首行作为临时标题；直接识别分配不会改写标题
     const title =
-      input.title?.trim() ||
+      (input.title?.trim() ? unescapeMarkdown(input.title.trim()) : '') ||
       (description ? deriveTaskTitle(description) : '') ||
       (description ? '新任务' : '');
     if (!title) throw new BadRequestException('标题或任务描述不能为空');
@@ -419,8 +408,12 @@ export class TasksService {
         templateId: template?.id ?? null,
         templateName: template?.name ?? null,
         description,
-        input: input.input?.trim() || null,
-        outputSpec: input.outputSpec?.trim() || null,
+        input: input.input?.trim()
+          ? unescapeMarkdownUrlColons(input.input.trim())
+          : null,
+        outputSpec: input.outputSpec?.trim()
+          ? unescapeMarkdownUrlColons(input.outputSpec.trim())
+          : null,
         agentId: input.agentId ?? null,
         schedulerId: input.schedulerId ?? null,
         parentId: input.parentId ?? null,
@@ -460,7 +453,7 @@ export class TasksService {
   ): Promise<Task> {
     const task = await this.mustFind(id);
     if (input.title !== undefined) {
-      const title = input.title.trim();
+      const title = unescapeMarkdown(input.title.trim());
       if (!title) throw new BadRequestException('标题不能为空');
       task.title = title;
     }
@@ -470,14 +463,24 @@ export class TasksService {
       task.type = typeName;
     }
     if (input.description !== undefined) {
-      task.description = input.description?.trim() || null;
+      task.description = input.description?.trim()
+        ? unescapeMarkdownUrlColons(input.description.trim())
+        : null;
     }
-    if (input.input !== undefined) task.input = input.input?.trim() || null;
+    if (input.input !== undefined) {
+      task.input = input.input?.trim()
+        ? unescapeMarkdownUrlColons(input.input.trim())
+        : null;
+    }
     if (input.outputSpec !== undefined) {
-      task.outputSpec = input.outputSpec?.trim() || null;
+      task.outputSpec = input.outputSpec?.trim()
+        ? unescapeMarkdownUrlColons(input.outputSpec.trim())
+        : null;
     }
     if (input.workPlan !== undefined) {
-      task.workPlan = input.workPlan?.trim() || null;
+      task.workPlan = input.workPlan?.trim()
+        ? unescapeMarkdownUrlColons(input.workPlan.trim())
+        : null;
     }
     if (input.agentId !== undefined) {
       if (input.agentId) await this.assertWorker(input.agentId);
@@ -579,15 +582,21 @@ export class TasksService {
     input: RecognizeTaskInput,
     operator: string | null,
   ): Promise<Task> {
-    const title = input.title?.trim();
+    const title = input.title ? unescapeMarkdown(input.title.trim()) : '';
     if (!title) throw new BadRequestException('任务标题不能为空');
     if (title.length > 200)
       throw new BadRequestException('任务标题不能超过 200 字');
-    const content = input.content?.trim();
+    const content = input.content?.trim()
+      ? unescapeMarkdownUrlColons(input.content.trim())
+      : '';
     if (!content) throw new BadRequestException('需求内容不能为空');
-    const outputSpec = input.outputSpec?.trim();
+    const outputSpec = input.outputSpec?.trim()
+      ? unescapeMarkdownUrlColons(input.outputSpec.trim())
+      : '';
     if (!outputSpec) throw new BadRequestException('交付方式不能为空');
-    const workPlan = input.workPlan?.trim();
+    const workPlan = input.workPlan?.trim()
+      ? unescapeMarkdownUrlColons(input.workPlan.trim())
+      : '';
     if (!workPlan) throw new BadRequestException('工作计划不能为空');
 
     const task = await this.mustFind(id);
@@ -600,7 +609,9 @@ export class TasksService {
     task.title = title;
     task.content = content;
     if (input.input !== undefined) {
-      task.input = input.input?.trim() || null;
+      task.input = input.input?.trim()
+        ? unescapeMarkdownUrlColons(input.input.trim())
+        : null;
     }
     task.outputSpec = outputSpec;
     task.workPlan = workPlan;

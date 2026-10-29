@@ -62,6 +62,13 @@ TOKEN=$(cat .opencode/agent-token)
 curl -H "X-Worker-Token: $TOKEN" {BASE}/api/projects/1.md
 ```
 
+机器人工位由平台注入 `.opencode/.env`（权限 600），内含 `LITA_PROJECT_TOKEN`（机器人独立令牌，访问项目平台）与 `LITA_USER_TOKEN`（Lita 用户令牌，供 lita-api 等技能使用）。机器人在工位内调用平台接口前先加载环境变量，之后可直接按通用方式携带令牌（`LITA_PROJECT_TOKEN` 放在 `X-Agent-Token` 时同样识别为机器人身份）：
+
+```bash
+set -a; . .opencode/.env; set +a
+curl -H "X-Agent-Token: $LITA_PROJECT_TOKEN" {BASE}/api/projects/1.md
+```
+
 ### 令牌获取顺序（按优先级）
 
 发起请求前，按下述顺序取令牌，取到即用，不要向用户重复索要已存在的令牌：
@@ -521,16 +528,21 @@ curl -X POST {BASE}/api/tasks/{taskId}/questions/{questionId}/answer.md \
 
 ```bash
 curl -X POST {BASE}/api/tasks/{taskId}/handoff/apply.md \
-  -H "X-Worker-Token: $TOKEN"
+  -H "X-Worker-Token: $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"delivery":"交付结果、代码仓库/分支、文档清单","problems":"问题与解决","detours":"走过的弯路","lessons":"经验总结","followUps":"遗留建议与待办","other":"其它信息"}'
 ```
 
-- 只允许执行中的当前机器人；平台先生成/覆盖 `HANDOFF.md`，再保存产出并进入待验收
+- 只允许执行中的当前机器人；平台先生成/覆盖 `HANDOFF` 交付文档，再保存产出并进入待验收
+- 交付说明六个字段均可选（旧版无 body 调用兼容），但没有的内容应明确写“无”，不得编造；代码交付必须写仓库和分支，文档交付必须写名称及路径/链接
 - 会话成功不会自动申请验收；交付文档写入失败时任务保持执行中
+- 交付文档统一按「任务与责任 / 需求说明 / 交付内容 / 实现问题与解决 / 弯路与经验复盘 / 遗留建议与待办 / 其它」组织；申请验收时的交付说明会随事件留存，验收通过后用于生成 `REVIEW` 复盘
+- 申请成功后必须在最终回复中告知需求方：交付内容、申请接口返回的交付文档链接（原样使用，不要自行拼接 `.md`）、其它需要告知的事项（没有则写“无”）
 
 ### 12.5 task-handoff-accept / task-handoff-refuse：需求方验收
 
 ```bash
-# 通过：待验收 → 完成，异步生成 REVIEW.md 并销毁执行会话
+# 通过：待验收 → 完成，异步生成 REVIEW 复盘文档并销毁执行会话
 curl -X POST {BASE}/api/tasks/{taskId}/handoff/accept.md \
   -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
 

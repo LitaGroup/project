@@ -247,6 +247,52 @@ describe('TaskChatService 提问卡片', () => {
     expect(service.pendingQuestions(7)).toHaveLength(0);
   });
 
+  it('finishTask 将未收到终态事件的工具结算为完成', async () => {
+    await service.toolStarted(7, {
+      name: 'shell',
+      toolCallId: 'call-1',
+    });
+
+    await service.finishTask(7);
+
+    expect(messagesRepo.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tools: [
+          expect.objectContaining({
+            id: 'call-1',
+            status: 'success',
+            detail: '会话已结束，未收到工具终态事件',
+            finishedAt: expect.any(String) as string,
+          }),
+        ],
+      }),
+      ['taskId', 'messageKey'],
+    );
+  });
+
+  it('failTask 将未收到终态事件的工具结算为失败', async () => {
+    await service.toolStarted(7, {
+      name: 'shell',
+      toolCallId: 'call-1',
+    });
+
+    await service.failTask(7, '执行失败');
+
+    expect(messagesRepo.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tools: [
+          expect.objectContaining({
+            id: 'call-1',
+            status: 'error',
+            detail: '会话失败，未收到工具终态事件',
+            finishedAt: expect.any(String) as string,
+          }),
+        ],
+      }),
+      ['taskId', 'messageKey'],
+    );
+  });
+
   it('finishTask 把未回答提问标记为已失效', async () => {
     await service.questionAsked(7, {
       id: 'q1',
@@ -309,6 +355,7 @@ describe('TaskChatService snapshot 最终产出去重', () => {
     findOne: jest.Mock;
     upsert: jest.Mock;
     find: jest.Mock;
+    update: jest.Mock;
   };
   let service: TaskChatService;
 
@@ -322,6 +369,7 @@ describe('TaskChatService snapshot 最终产出去重', () => {
       findOne: jest.fn().mockResolvedValue(null),
       upsert: jest.fn().mockResolvedValue(undefined),
       find: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     service = new TaskChatService(
       tasks as unknown as Repository<Task>,
@@ -396,5 +444,34 @@ describe('TaskChatService snapshot 最终产出去重', () => {
     expect(messages[0].id).toBe('chat:34:m1');
     expect(messages[1].id.startsWith('result:')).toBe(true);
     expect(messages[1].content).toBe('完全不同的最终结论');
+  });
+
+  it('数据库遗留的 running 消息按完成展示并回写', async () => {
+    const row = {
+      ...persistedRow('chat:34:m1', '最终回复', 0),
+      status: 'running',
+      tools: [
+        {
+          id: 'call-1',
+          name: 'shell',
+          status: 'running',
+          startedAt: new Date().toISOString(),
+        },
+      ],
+    };
+    messagesRepo.find.mockResolvedValue([row]);
+
+    const messages = (await service.snapshot(34)).messages;
+    const message = messages.find((item) => item.id === 'chat:34:m1');
+
+    expect(message?.status).toBe('complete');
+    expect(message?.tools?.[0].status).toBe('success');
+    expect(messagesRepo.update).toHaveBeenCalledWith(
+      { taskId: 34, messageKey: 'chat:34:m1' },
+      expect.objectContaining({
+        status: 'complete',
+        tools: [expect.objectContaining({ status: 'success' })],
+      }),
+    );
   });
 });

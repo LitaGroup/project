@@ -90,6 +90,19 @@ describe('AuthGuard（网页接口强制登录）', () => {
     expect(getUserByToken).not.toHaveBeenCalled();
   });
 
+  it('工位 LITA_PROJECT_TOKEN 放在 X-Agent-Token 时识别为机器人身份', async () => {
+    const worker = { id: 1001, name: '前端工程师', enabled: true };
+    getUserByAgentToken.mockResolvedValue(null);
+    findByAgentToken.mockResolvedValue(worker);
+    const { context, req } = createContext('/api/projects/1.md', undefined, {
+      'x-agent-token': 'worker-token-in-env',
+    });
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect((req as AuthedRequest).worker).toBe(worker);
+    expect((req as AuthedRequest).user).toBeUndefined();
+    expect(findByAgentToken).toHaveBeenCalledWith('worker-token-in-env');
+  });
+
   it('.md 端点凭 ?token= 参数放行（query 不影响 .md 判定）', async () => {
     const user = { id: 2, name: '李四', enabled: true };
     getUserByAgentToken.mockResolvedValue(user);

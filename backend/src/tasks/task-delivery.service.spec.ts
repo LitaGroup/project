@@ -114,8 +114,8 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       applyForAcceptance: jest.fn().mockResolvedValue({
         task: baseTask(),
         handoff: {
-          path: '/task/20261028/TK-0001/HANDOFF.md',
-          url: '/docs/detail/task/20261028/TK-0001/HANDOFF.md',
+          path: '/task/20261028/TK-0001/HANDOFF',
+          url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
           title: 'TK-0001 活动页开发 · 任务交付',
         },
       }),
@@ -157,11 +157,32 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     expect(dispatchService.applyForAcceptance).toHaveBeenCalledWith(
       1,
       expect.objectContaining({ id: 1001 }),
+      {
+        requesterName: '张三',
+        report: {},
+      },
     );
     expect(md).toContain('# 任务验收申请已提交');
     expect(md).toContain('- 状态：等待中-待验收');
     expect(md).toContain('- 执行机器人：前端工程师（1001）');
-    expect(md).toContain('- 交付文档：[/task/20261028/TK-0001/HANDOFF.md]');
+    expect(md).toContain('- 交付文档：[/task/20261028/TK-0001/HANDOFF]');
+  });
+
+  it('申请验收将结构化交付说明透传给交付文档', async () => {
+    tasksRepo.findOne.mockResolvedValue(baseTask());
+    await service.apply(1, worker(), {
+      delivery: '分支 test',
+      followUps: '补充埋点',
+    });
+
+    expect(dispatchService.applyForAcceptance).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ id: 1001 }),
+      {
+        requesterName: '张三',
+        report: { delivery: '分支 test', followUps: '补充埋点' },
+      },
+    );
   });
 
   it('非当前执行机器人不能申请验收', async () => {

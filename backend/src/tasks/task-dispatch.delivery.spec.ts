@@ -66,8 +66,8 @@ describe('TaskDispatchService 显式申请验收', () => {
     };
     taskDocuments = {
       upsertHandoff: jest.fn().mockResolvedValue({
-        path: '/task/20261028/TK-0001/HANDOFF.md',
-        url: '/docs/detail/task/20261028/TK-0001/HANDOFF.md',
+        path: '/task/20261028/TK-0001/HANDOFF',
+        url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
         title: 'TK-0001 活动页开发 · 任务交付',
       }),
     };
@@ -93,6 +93,20 @@ describe('TaskDispatchService 显式申请验收', () => {
     );
   });
 
+  it('派发指令要求完成后告知交付内容、文档链接和其它事项', async () => {
+    const prompt = await (
+      service as unknown as { buildPrompt(task: Task): Promise<string> }
+    ).buildPrompt(baseTask());
+
+    expect(prompt).toContain('交付内容');
+    expect(prompt).toContain('交付文档链接');
+    expect(prompt).toContain('其它需要告知的事项');
+    expect(prompt).toContain('结构化交付说明');
+    expect(prompt).toContain('代码交付必须写仓库和分支');
+    expect(prompt).toContain('followUps');
+    expect(prompt).toContain('Content-Type: application/json');
+  });
+
   it('申请验收保存本轮产出并推进到等待中-待验收', async () => {
     const task = baseTask();
     tasksRepo.findOne.mockResolvedValue(task);
@@ -109,7 +123,7 @@ describe('TaskDispatchService 显式申请验收', () => {
     expect(saved.subStatus).toBe(TaskSubStatus.PENDING_ACCEPT);
     expect(saved.result).toBe('活动页已完成');
     expect(saved.remindCount).toBe(1);
-    expect(applied.handoff.path).toBe('/task/20261028/TK-0001/HANDOFF.md');
+    expect(applied.handoff.path).toBe('/task/20261028/TK-0001/HANDOFF');
     expect(taskDocuments.upsertHandoff).toHaveBeenCalledWith(
       expect.objectContaining({
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -129,9 +143,47 @@ describe('TaskDispatchService 显式申请验收', () => {
       saved,
       'accept',
       expect.stringContaining('任务待验收'),
-      expect.stringContaining('HANDOFF.md'),
+      expect.stringContaining('HANDOFF'),
     );
     expect(taskChat.finishTask).toHaveBeenCalledWith(1);
+  });
+
+  it('申请验收把结构化交付说明与需求方写入交付文档和事件快照', async () => {
+    tasksRepo.findOne.mockResolvedValue(baseTask());
+
+    await service.applyForAcceptance(1, worker, {
+      requesterName: '张三',
+      report: {
+        delivery: '代码 LitaGroup/activity#test，文档 /project/8/document/9',
+        problems: '接口字段缺失，补充后通过',
+        detours: '无',
+        lessons: '先确认接口版本',
+        followUps: '补充埋点',
+        other: '无',
+      },
+    });
+
+    expect(taskDocuments.upsertHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterName: '张三',
+        report: expect.objectContaining({
+          delivery: '代码 LitaGroup/activity#test，文档 /project/8/document/9',
+          problems: '接口字段缺失，补充后通过',
+          followUps: '补充埋点',
+        }) as unknown,
+      }),
+    );
+    const savedEvent = (
+      eventsRepo.save.mock.calls as Array<[{ meta: Record<string, unknown> }]>
+    )[0][0];
+    expect(savedEvent.meta).toMatchObject({
+      deliveryApply: true,
+      handoffRequester: '张三',
+      handoffReport: {
+        delivery: '代码 LitaGroup/activity#test，文档 /project/8/document/9',
+        lessons: '先确认接口版本',
+      },
+    });
   });
 
   it('非当前执行机器人申请验收返回 403', async () => {
@@ -175,6 +227,24 @@ describe('TaskDispatchService 显式申请验收', () => {
       preserveProjectQuestions: true,
     });
     expect(task.subStatus).toBe(TaskSubStatus.PENDING_FEEDBACK);
+  });
+
+  it('申请验收后最终回复结束：收尾会话消息，避免输入框一直被禁用', async () => {
+    const task = baseTask({
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ACCEPT,
+    });
+    tasksRepo.findOne.mockResolvedValue(task);
+
+    await (
+      service as unknown as {
+        finalizeSuccess(taskId: number): Promise<void>;
+      }
+    ).finalizeSuccess(1);
+
+    expect(taskChat.finishTask).toHaveBeenCalledWith(1);
+    expect(task.subStatus).toBe(TaskSubStatus.PENDING_ACCEPT);
+    expect(eventsRepo.save).not.toHaveBeenCalled();
   });
 
   it('会话成功只补齐产出，不自动进入待验收', async () => {
