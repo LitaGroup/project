@@ -72,7 +72,7 @@ export function WorkersPage() {
             <TableHead className="w-24">状态</TableHead>
             <TableHead className="w-32">执行器</TableHead>
             <TableHead className="w-48">模型</TableHead>
-            <TableHead className="w-24">负责人</TableHead>
+            <TableHead className="w-24">上级</TableHead>
             <TableHead className="w-24">启用</TableHead>
             <TableHead className="w-48 text-center">操作</TableHead>
           </TableRow>

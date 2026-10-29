@@ -90,7 +90,7 @@ function WorkerCard({ worker }: { worker: Worker }) {
           )}
           <p className="text-xs text-foreground-muted">
             {worker.runtime} · {worker.providerId ?? '-'}/{worker.modelId ?? '-'}
-            {worker.ownerName ? ` · 负责人 ${worker.ownerName}` : ''}
+            {worker.ownerName ? ` · 上级 ${worker.ownerName}` : ''}
           </p>
           {worker.activeTask ? (
             <p className="text-sm">
