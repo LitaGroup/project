@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import { In, Repository } from 'typeorm';
-import { User } from '../auth/user.entity';
+import type { User } from '../auth/user.entity';
 import { TaskStatus, TaskSubStatus, WorkerRole } from '../common/enums';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { unescapeMarkdown } from '../common/markdown-escape';
@@ -26,14 +26,12 @@ import { TasksService } from '../tasks/tasks.service';
 import { Worker } from '../workers/worker.entity';
 import { findTicketCategory, TICKET_CATEGORIES } from './ticket-categories';
 import { TicketConfig } from './ticket-config.entity';
-import { Ticket, type TicketAssigneeType } from './ticket.entity';
+import { Ticket } from './ticket.entity';
 
 export interface CreateTicketInput {
   category: string;
   title?: string;
   description?: string;
-  assigneeType: TicketAssigneeType;
-  assigneeId: number;
 }
 
 export interface RouteTicketInput {
@@ -104,8 +102,6 @@ export class TicketsService implements OnModuleInit {
     private readonly templates: Repository<TaskTemplate>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
-    @InjectRepository(User)
-    private readonly users: Repository<User>,
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
     config: ConfigService,
@@ -130,6 +126,11 @@ export class TicketsService implements OnModuleInit {
         })
         .orIgnore()
         .execute();
+      // 存量配置按当前开放清单对齐（当前无管理端关闭入口，启停由代码常量控制）
+      await this.configs.update(
+        { category: item.category },
+        { enabled: item.enabled },
+      );
     }
   }
 
@@ -220,16 +221,6 @@ export class TicketsService implements OnModuleInit {
     }
     const description = input.description?.trim();
     if (!description) throw new BadRequestException('工单描述不能为空');
-    if (!['user', 'worker'].includes(input.assigneeType)) {
-      throw new BadRequestException('责任方类型只支持 user 或 worker');
-    }
-    if (!Number.isInteger(input.assigneeId) || input.assigneeId < 1) {
-      throw new BadRequestException('责任方 ID 必须为正整数');
-    }
-    const assignee = await this.resolveAssignee(
-      input.assigneeType,
-      input.assigneeId,
-    );
 
     const template = await this.templates.findOne({
       where: { id: config.defaultTemplateId },
@@ -306,9 +297,10 @@ export class TicketsService implements OnModuleInit {
           description,
           createdById: user.id,
           createdByName: user.name,
-          assigneeType: input.assigneeType,
-          assigneeId: assignee.id,
-          assigneeName: assignee.name,
+          // 责任方由工单绑定的默认调度机器人自动担任，创建时无需用户选择
+          assigneeType: 'worker',
+          assigneeId: agent.id,
+          assigneeName: agent.name,
           taskId: task.id,
         }),
       );
@@ -328,7 +320,7 @@ export class TicketsService implements OnModuleInit {
       .addEvent(
         task.id,
         '操作',
-        `创建${category.category} ${saved.code}，责任方：${assignee.name}`,
+        `创建${category.category} ${saved.code}，处理机器人：${agent.name}`,
         user.name,
         {
           ticketId: saved.id,
@@ -423,25 +415,6 @@ export class TicketsService implements OnModuleInit {
       }
     }
     return unique;
-  }
-
-  private async resolveAssignee(
-    type: TicketAssigneeType,
-    id: number,
-  ): Promise<{ id: number; name: string }> {
-    if (type === 'user') {
-      const user = await this.users.findOne({ where: { id } });
-      if (!user || !user.enabled)
-        throw new BadRequestException('负责人不存在或已停用');
-      return { id: user.id, name: user.name };
-    }
-    const worker = await this.workers.findOne({ where: { id } });
-    if (!worker) throw new BadRequestException('责任机器人不存在');
-    if (!worker.enabled) throw new BadRequestException('责任机器人已停用');
-    if (worker.role === WorkerRole.SCHEDULER) {
-      throw new BadRequestException('调度机器人不能作为工单责任方');
-    }
-    return { id: worker.id, name: worker.name };
   }
 
   private async pickEnabledAgent(ids: number[]): Promise<Worker | null> {
@@ -571,7 +544,7 @@ export class TicketsService implements OnModuleInit {
       '',
       `- 编号：${ticket.code}`,
       `- 类型：${ticket.category}`,
-      `- 责任方：${ticket.assigneeName}（${ticket.assigneeType}）`,
+      `- 处理机器人：${ticket.assigneeName}（由工单绑定任务定义自动分配）`,
       `- 创建人：${ticket.createdByName}`,
       `- 创建时间：${beijingTime(ticket.createdAt)}`,
       `- 关联任务：${task.code}（${task.status}-${task.subStatus}）`,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card,
@@ -8,19 +8,9 @@ import {
 } from '@appica/ui-react/card'
 import { Button } from '@appica/ui-react/button'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@appica/ui-react/select'
-import {
   api,
   TICKET_CATEGORY_DEFINITIONS,
-  type PlatformUser,
-  type TicketAssigneeType,
   type TicketCategory,
-  type Worker,
 } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import {
@@ -37,7 +27,7 @@ const CATEGORY_PATH: Record<string, string> = {
   BUG反馈: '/tickets/bug',
 }
 
-/** 新建工单：描述 + 责任方；实际派发严格按该类型的默认调度任务定义执行 */
+/** 新建工单：只需填写描述；处理机器人由该类型绑定的默认调度任务定义自动分配 */
 export function TicketCreatePage({ category }: { category: TicketCategory }) {
   const navigate = useNavigate()
   const meta =
@@ -45,47 +35,9 @@ export function TicketCreatePage({ category }: { category: TicketCategory }) {
     TICKET_CATEGORY_DEFINITIONS[0]
   const listPath = CATEGORY_PATH[category] ?? '/tickets/solution'
   const [description, setDescription] = useState('')
-  const [assigneeType, setAssigneeType] =
-    useState<TicketAssigneeType>('user')
-  const [assigneeId, setAssigneeId] = useState('')
-  const [users, setUsers] = useState<PlatformUser[]>([])
-  const [workers, setWorkers] = useState<Worker[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const descriptionRef = useRef<MarkdownEditorHandle>(null)
-
-  useEffect(() => {
-    api
-      .listUsers()
-      .then((rows) => {
-        setUsers(rows)
-        if (rows[0]) setAssigneeId(String(rows[0].id))
-      })
-      .catch(() => undefined)
-    api
-      .listWorkers({ role: '工作者' })
-      .then((rows) => setWorkers(rows.filter((worker) => worker.enabled)))
-      .catch(() => undefined)
-  }, [])
-
-  const assigneeItems = useMemo(
-    () =>
-      assigneeType === 'user'
-        ? Object.fromEntries(
-            users.map((user) => [String(user.id), user.name]),
-          )
-        : Object.fromEntries(
-            workers.map((worker) => [String(worker.id), worker.name]),
-          ),
-    [assigneeType, users, workers],
-  )
-
-  const changeAssigneeType = (value: unknown) => {
-    const next = value === 'worker' ? 'worker' : 'user'
-    setAssigneeType(next)
-    const first = next === 'user' ? users[0]?.id : workers[0]?.id
-    setAssigneeId(first ? String(first) : '')
-  }
 
   const submit = () => {
     setError(null)
@@ -94,17 +46,11 @@ export function TicketCreatePage({ category }: { category: TicketCategory }) {
       setError('请填写工单描述')
       return
     }
-    if (!assigneeId) {
-      setError(assigneeType === 'user' ? '请选择负责人' : '请选择责任机器人')
-      return
-    }
     setSaving(true)
     api
       .createTicket({
         category,
         description: markdown,
-        assigneeType,
-        assigneeId: Number(assigneeId),
       })
       .then((ticket) => navigate(`/tickets/${ticket.id}`))
       .catch((e: Error) => setError(`创建失败：${e.message}`))
@@ -120,7 +66,7 @@ export function TicketCreatePage({ category }: { category: TicketCategory }) {
           />
           <h1 className="mt-2 text-2xl font-semibold">新建{category}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            创建后进入「{meta.defaultTemplateName}」调度，由任务定义绑定的机器人澄清并转交后续任务定义
+            创建后由「{meta.defaultTemplateName}」绑定的机器人自动受理、澄清并分配后续任务定义
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -162,71 +108,27 @@ export function TicketCreatePage({ category }: { category: TicketCategory }) {
 
         <Card className="w-full shrink-0 lg:min-h-0 lg:w-[24rem]">
           <CardHeader className="flex-none">
-            <CardTitle>工单信息</CardTitle>
+            <CardTitle>处理方式</CardTitle>
             <CardDescription>
-              责任方仅记录跟进归属；首次派发固定使用类型绑定的默认任务定义
+              无需选择负责人或机器人，平台按工单类型绑定的任务定义自动分配
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">
             <div className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm">
               <p className="text-xs text-foreground-muted">工单类型</p>
               <p className="mt-1 font-medium">{category}</p>
-              <p className="mt-2 text-xs text-foreground-muted">默认调度任务定义</p>
+              <p className="mt-2 text-xs text-foreground-muted">
+                默认调度任务定义
+              </p>
               <p className="mt-1 font-medium">{meta.defaultTemplateName}</p>
+              <p className="mt-2 text-xs text-foreground-muted">
+                处理机器人
+              </p>
+              <p className="mt-1 font-medium">由任务定义绑定的机器人自动处理</p>
             </div>
-
-            <label className="flex flex-col gap-1 text-sm">
-              责任方类型
-              <Select
-                value={assigneeType}
-                onValueChange={changeAssigneeType}
-                items={{ user: '负责人', worker: '机器人' }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">负责人</SelectItem>
-                  <SelectItem value="worker">机器人</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              {assigneeType === 'user' ? '负责人' : '责任机器人'}
-              <Select
-                value={assigneeId || null}
-                onValueChange={(value) => setAssigneeId((value as string) ?? '')}
-                items={assigneeItems}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue
-                    placeholder={
-                      assigneeType === 'user' ? '选择用户' : '选择机器人'
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {assigneeType === 'user'
-                    ? users.map((user) => (
-                        <SelectItem key={user.id} value={String(user.id)}>
-                          {user.name}
-                          {user.department ? ` · ${user.department}` : ''}
-                        </SelectItem>
-                      ))
-                    : workers.map((worker) => (
-                        <SelectItem key={worker.id} value={String(worker.id)}>
-                          {worker.name}
-                        </SelectItem>
-                      ))}
-                </SelectContent>
-              </Select>
-              <span className="text-xs text-foreground-muted">
-                {assigneeType === 'user'
-                  ? '用户不存在或停用会导致创建失败'
-                  : '调度机器人不能作为责任方'}
-              </span>
-            </label>
+            <p className="text-xs text-foreground-muted">
+              信息不明确时，调度机器人会在工单对话中向需求方提问；明确后会转交给管理端为该工单配置的后续任务定义。
+            </p>
           </div>
         </Card>
       </div>

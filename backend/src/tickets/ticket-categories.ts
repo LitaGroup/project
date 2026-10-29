@@ -7,7 +7,7 @@ export { TICKET_TASK_TYPE };
 
 /** 当前已开放创建的工单类型；其余类型只保留配置入口与内置任务定义 */
 export const ENABLED_TICKET_CATEGORIES: ReadonlySet<string> = new Set([
-  '方案工单',
+  '技术工单',
 ]);
 
 export interface TicketCategoryDefinition {
@@ -19,8 +19,9 @@ export interface TicketCategoryDefinition {
 }
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
-  方案工单: '针对方案设计的工单，由调度机器人澄清后转交方案设计任务定义',
-  技术工单: '业务同学向技术同学申请完成某个任务（暂未开放）',
+  方案工单: '针对方案设计的工单（已关闭创建，历史工单保留查看）',
+  技术工单:
+    '业务同学向技术同学申请完成某个任务，由调度机器人澄清后转交技术任务定义',
   数据工单: '数据查询、数据导出、报表设计等申请（暂未开放）',
   运维工单: '线上数据库、NACOS 等操作申请（暂未开放）',
   需求工单: '业务同学向产品同学提出需求申请（暂未开放）',

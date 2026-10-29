@@ -123,8 +123,9 @@ function App() {
           <Route path="/resources" element={<ResourcesPage />} />
           <Route path="/milestones" element={<MilestonesPage />} />
           <Route path="/commits" element={<CommitsPage />} />
-          <Route path="/code" element={<Navigate to="/code/repos" replace />} />
-          <Route path="/code/repos" element={<ReposPage />} />
+          {/* 仓库已并入管理模块：旧代码分区链接兼容 */}
+          <Route path="/code" element={<Navigate to="/admin/repos" replace />} />
+          <Route path="/code/repos" element={<Navigate to="/admin/repos" replace />} />
           <Route path="/scripts" element={<Navigate to="/docs/scripts" replace />} />
           <Route path="/schedules" element={<SchedulesPage />} />
           <Route path="/tasks" element={<TaskCenterPage />} />
@@ -163,16 +164,25 @@ function App() {
             element={<TicketsPage category="方案工单" />}
           />
           <Route
-            path="/tickets/solution/new"
-            element={<TicketCreatePage category="方案工单" />}
+            path="/tickets/solution"
+            element={<TicketsPage category="方案工单" />}
+          />
+          <Route
+            path="/tickets/tech"
+            element={<TicketsPage category="技术工单" />}
+          />
+          <Route
+            path="/tickets/tech/new"
+            element={<TicketCreatePage category="技术工单" />}
           />
           <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
-          <Route path="/tickets" element={<Navigate to="/tickets/solution" replace />} />
+          <Route path="/tickets" element={<Navigate to="/tickets/tech" replace />} />
           <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/admin/users" element={<UserListPage />} />
           <Route path="/admin/ticket-config" element={<TicketConfigPage />} />
+          <Route path="/admin/repos" element={<ReposPage />} />
           </Route>
         </Route>
       </Routes>

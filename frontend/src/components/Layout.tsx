@@ -67,6 +67,8 @@ interface NavItem {
   label: string
   icon: IconComponent
   ready: boolean
+  /** 未启用项展示的徽标文案（缺省「待补充」） */
+  badge?: string
 }
 
 /** 顶级导航分区：顶部 Tab 切换，各分区有独立的左侧导航 */
@@ -87,7 +89,6 @@ const NAV_SECTIONS: NavSection[] = [
     to: '/',
     match: (p) =>
       !p.startsWith('/admin') &&
-      !p.startsWith('/code') &&
       !p.startsWith('/tasks') &&
       !p.startsWith('/tickets') &&
       !p.startsWith('/docs'),
@@ -125,11 +126,17 @@ const NAV_SECTIONS: NavSection[] = [
   {
     key: 'tickets',
     label: '工单',
-    to: '/tickets/solution',
+    to: '/tickets/tech',
     match: (p) => p.startsWith('/tickets'),
     items: [
-      { to: '/tickets/solution', label: '方案工单', icon: FileText, ready: true },
-      { to: '/tickets/tech', label: '技术工单', icon: Settings, ready: false },
+      {
+        to: '/tickets/solution',
+        label: '方案工单',
+        icon: FileText,
+        ready: false,
+        badge: '已关闭',
+      },
+      { to: '/tickets/tech', label: '技术工单', icon: Settings, ready: true },
       { to: '/tickets/data', label: '数据工单', icon: ChartPie, ready: false },
       { to: '/tickets/ops', label: '运维工单', icon: Cpu, ready: false },
       { to: '/tickets/requirement', label: '需求工单', icon: ClipboardList, ready: false },
@@ -147,13 +154,6 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    key: 'code',
-    label: '代码',
-    to: '/code/repos',
-    match: (p) => p.startsWith('/code'),
-    items: [{ to: '/code/repos', label: '仓库', icon: GitFork, ready: true }],
-  },
-  {
     key: 'admin',
     label: '管理',
     to: '/admin/users',
@@ -161,6 +161,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
       { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
+      { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
     ],
   },
 ]
@@ -333,7 +334,9 @@ export function Layout() {
                         <item.icon size={18} className="shrink-0" />
                         <span className="truncate">{item.label}</span>
                       </span>
-                      {!item.ready && <Badge variant="soft">待补充</Badge>}
+                      {!item.ready && (
+                        <Badge variant="soft">{item.badge ?? '待补充'}</Badge>
+                      )}
                     </span>
                   </NavigationLink>
                 </NavigationItem>

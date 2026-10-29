@@ -94,12 +94,16 @@ export function TicketsPage({ category }: { category: TicketCategory }) {
           <h1 className="mt-2 text-2xl font-semibold">{category}</h1>
           <p className="mt-1 text-sm text-foreground-muted">{meta.description}</p>
         </div>
-        <Link
-          to={`${basePath}/new`}
-          className={buttonVariants({ variant: 'outline', size: 'sm' })}
-        >
-          新建{category}
-        </Link>
+        {meta.enabled ? (
+          <Link
+            to={`${basePath}/new`}
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            新建{category}
+          </Link>
+        ) : (
+          <Badge variant="soft">已关闭创建</Badge>
+        )}
       </div>
 
       {error && <p className="text-sm text-error-foreground">加载失败：{error}</p>}
@@ -142,7 +146,7 @@ export function TicketsPage({ category }: { category: TicketCategory }) {
           <TableRow>
             <TableHead className="w-28">编号</TableHead>
             <TableHead>标题</TableHead>
-            <TableHead className="w-40">责任方</TableHead>
+            <TableHead className="w-40">处理机器人</TableHead>
             <TableHead className="w-44">当前任务定义</TableHead>
             <TableHead className="w-32">关联任务</TableHead>
             <TableHead className="w-28">状态</TableHead>
@@ -169,7 +173,7 @@ export function TicketsPage({ category }: { category: TicketCategory }) {
               <TableCell>
                 <span className="flex items-center gap-1.5">
                   <Badge variant="soft" size="sm">
-                    {ticket.assigneeType === 'worker' ? '机器人' : '负责人'}
+                    机器人
                   </Badge>
                   <span className="truncate">{ticket.assigneeName}</span>
                 </span>
@@ -201,7 +205,9 @@ export function TicketsPage({ category }: { category: TicketCategory }) {
           {tickets !== null && tickets.length === 0 && (
             <TableRow>
               <TableCell colSpan={8} className="text-foreground-muted">
-                暂无工单，点右上角「新建{category}」创建
+                {meta.enabled
+                  ? `暂无工单，点右上角「新建${category}」创建`
+                  : '暂无历史工单'}
               </TableCell>
             </TableRow>
           )}

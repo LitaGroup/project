@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { User } from '../auth/user.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Task } from '../tasks/task.entity';
 import { TasksModule } from '../tasks/tasks.module';
@@ -22,7 +21,6 @@ import { TicketsService } from './tickets.service';
       Task,
       TaskTemplate,
       Worker,
-      User,
     ]),
     TasksModule,
   ],

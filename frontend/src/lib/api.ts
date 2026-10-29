@@ -1249,15 +1249,15 @@ export const TICKET_CATEGORY_DEFINITIONS = [
     category: '方案工单',
     defaultTemplateId: 10,
     defaultTemplateName: '工单-方案工单-调度',
-    enabled: true,
-    description: '针对方案设计的工单，由调度机器人澄清后转交方案设计任务定义',
+    enabled: false,
+    description: '针对方案设计的工单（已关闭创建，历史工单保留查看）',
   },
   {
     category: '技术工单',
     defaultTemplateId: 11,
     defaultTemplateName: '工单-技术工单-调度',
-    enabled: false,
-    description: '业务同学向技术同学申请完成某个任务（暂未开放）',
+    enabled: true,
+    description: '业务同学向技术同学申请完成某个任务，由调度机器人澄清后转交技术任务定义',
   },
   {
     category: '数据工单',
@@ -2369,13 +2369,11 @@ export const api = {
   },
   /** 工单详情：工单 + 关联任务 + 可转派定义 */
   getTicket: (id: number) => request<TicketDetail>(`/tickets/${id}`),
-  /** 创建工单：按类型固定默认任务定义派发，责任方仅记录归属 */
+  /** 创建工单：按类型固定默认任务定义派发，处理机器人自动取该定义的启用机器人 */
   createTicket: (input: {
     category: TicketCategory
     title?: string
     description: string
-    assigneeType: TicketAssigneeType
-    assigneeId: number
   }) =>
     request<Ticket>('/tickets', {
       method: 'POST',

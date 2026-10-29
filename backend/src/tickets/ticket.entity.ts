@@ -7,7 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-/** 工单责任方类型：人类用户 / 机器人 */
+/** 工单处理方类型（当前由绑定机器人自动担任，保留 user 以兼容历史数据） */
 export type TicketAssigneeType = 'user' | 'worker';
 
 /**
@@ -43,7 +43,7 @@ export class Ticket {
   @Column({ type: 'varchar', length: 100 })
   createdByName: string;
 
-  /** 责任方（创建时选择，仅作责任归属记录，不参与任务派发） */
+  /** 处理方：由工单绑定的默认调度任务定义自动取首个启用机器人（固定 worker） */
   @Column({ type: 'varchar', length: 20 })
   assigneeType: TicketAssigneeType;
 

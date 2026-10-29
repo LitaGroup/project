@@ -71,7 +71,7 @@ export function TicketDetailPage() {
           </Badge>
           <TicketStatusBadge status={ticket.status} />
           <Badge variant="secondary" size="sm">
-            责任方 · {ticket.assigneeName}
+            处理机器人 · {ticket.assigneeName}
           </Badge>
         </>
       }

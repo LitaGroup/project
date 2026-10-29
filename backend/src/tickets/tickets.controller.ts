@@ -12,7 +12,6 @@ import {
   Req,
 } from '@nestjs/common';
 import type { AuthedRequest } from '../auth/auth.guard';
-import type { TicketAssigneeType } from './ticket.entity';
 import {
   CreateTicketInput,
   RouteTicketInput,
@@ -24,8 +23,6 @@ class CreateTicketDto implements CreateTicketInput {
   category: string;
   title?: string;
   description?: string;
-  assigneeType: TicketAssigneeType;
-  assigneeId: number;
 }
 
 class RouteTicketDto implements RouteTicketInput {
