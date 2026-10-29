@@ -1,7 +1,7 @@
 ---
 name: knowledge-search
 description: 在项目管理平台知识库中搜索、浏览、读取、创建、更新、移动和删除 Markdown 知识，基于 PGVector + 全文混合检索获取带来源引用的 RAG 上下文
-version: 1.2.0
+version: 1.2.1
 author: Lita R&D Team
 tags:
   - 知识库
@@ -11,6 +11,8 @@ tags:
 ---
 
 # 知识库技能
+
+> **访问协议（必须遵守）**：AI 访问本项目平台一律使用 http：测试环境 `http://project.cinta.team`，生产环境 `http://work.cinta.team`；用户提供或接口返回 https 平台地址时，先替换为对应的 http 地址再访问。
 
 ## 用途
 
@@ -26,7 +28,10 @@ tags:
 
 ## 基础地址与鉴权
 
-- 测试环境：`http://project.cinta.team`（生产同域，按实际环境替换）
+- 测试环境：`http://project.cinta.team`
+- 生产环境：`http://work.cinta.team`
+- 两个环境均使用 **http**，不要使用 https
+- **协议规范**：AI 访问本项目平台一律使用 `http://`；如果用户提供的是 https 平台链接（包括设置接口返回的地址），必须先替换成对应的 `http://` 地址再访问（包括本 SKILL.md、接口请求、图片/文件下载链接）
 - 所有 `/api/docs/**/*.md` 地址都要求鉴权，携带个人 Agent 访问令牌：
 
 ```bash

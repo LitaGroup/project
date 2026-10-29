@@ -1,7 +1,7 @@
 ---
 name: file-upload
 description: "上传任意文件到项目管理平台并返回无需登录即可访问的公共 URL。Use when: 需要分享报告、图片、压缩包、日志、文档或其他生成的文件。"
-version: 1.0.0
+version: 1.0.1
 author: Lita R&D Team
 tags:
   - 文件
@@ -11,6 +11,8 @@ tags:
 ---
 
 # File Upload 文件上传技能
+
+> **访问协议（必须遵守）**：AI 访问本项目平台一律使用 http：测试环境 `http://project.cinta.team`，生产环境 `http://work.cinta.team`；用户提供或接口返回 https 平台地址时，先替换为对应的 http 地址再访问。
 
 将本地任意文件上传到项目管理平台，返回一个无需登录、无需 Token 的公共访问 URL。
 
@@ -25,7 +27,9 @@ tags:
 ## 基础地址
 
 - 测试环境：`http://project.cinta.team`
-- 生产环境按实际域名替换。
+- 生产环境：`http://work.cinta.team`
+- 两个环境均使用 **http**，不要使用 https
+- **协议规范**：AI 访问本项目平台一律使用 `http://`；如果用户提供的是 https 平台链接（包括设置接口返回的地址），必须先替换成对应的 `http://` 地址再访问（包括本 SKILL.md、上传接口、公共下载链接）
 - 下文以 `{BASE}` 表示基础地址（不含 `/api`）。
 
 ## 鉴权
@@ -75,7 +79,7 @@ curl -fsS \
 update: "2026-10-27 15:30:00"
 title: "文件上传成功"
 filename: "report.pdf"
-url: "http://project.cinta.team/files/20261027/7f7c0f5e-7d9b-4fc3-b4b8-8c780bc8f80c.pdf"
+url: "http://work.cinta.team/files/20261027/7f7c0f5e-7d9b-4fc3-b4b8-8c780bc8f80c.pdf"
 ---
 
 # 文件上传成功
@@ -83,7 +87,7 @@ url: "http://project.cinta.team/files/20261027/7f7c0f5e-7d9b-4fc3-b4b8-8c780bc8f
 - 文件名：report.pdf
 - 大小：1.2 MB
 - 类型：application/pdf
-- 公开地址：http://project.cinta.team/files/20261027/7f7c0f5e-7d9b-4fc3-b4b8-8c780bc8f80c.pdf
+- 公开地址：http://work.cinta.team/files/20261027/7f7c0f5e-7d9b-4fc3-b4b8-8c780bc8f80c.pdf
 
 该地址无需登录或 Token 即可公开访问。
 ```
@@ -93,7 +97,7 @@ Agent 应提取 frontmatter 的 `url`（或正文中的「公开地址」）返�
 ## 验证公开地址
 
 ```bash
-curl -I "http://project.cinta.team/files/20261027/7f7c0f5e-7d9b-4fc3-b4b8-8c780bc8f80c.pdf"
+curl -I "http://work.cinta.team/files/20261027/7f7c0f5e-7d9b-4fc3-b4b8-8c780bc8f80c.pdf"
 ```
 
 预期返回 `200`，且不需要携带 `X-Agent-Token` 或 Cookie。

@@ -1,7 +1,7 @@
 ---
 name: project-manage
 description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同
-version: 1.20.0
+version: 1.20.1
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -13,6 +13,8 @@ tags:
 ---
 
 # 项目管理技能
+
+> **访问协议（必须遵守）**：AI 访问本项目平台一律使用 http：测试环境 `http://project.cinta.team`，生产环境 `http://work.cinta.team`；用户提供或接口返回 https 平台地址时，先替换为对应的 http 地址再访问。
 
 ## 技能描述
 
@@ -35,11 +37,14 @@ tags:
 15. 任务提问与验收：project 接管提问答复；执行机器人申请验收，人或机器人需求方通过、返工或判失败（见第 12.3～12.6 节）
 16. 上传任意文件（≤50MB）并获取无需登录即可访问的公共 URL（见第 13 节；也可单独安装 `file-upload` 技能）
 
-本文件可通过 `http://{host}/SKILL.md` 直接获取。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
+本文件可通过测试环境 `http://project.cinta.team/SKILL.md` 或生产环境 `http://work.cinta.team/SKILL.md` 获取（必须使用 http；如果用户提供的是 https 链接，先替换为对应的 http 地址再访问）。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
 ## 基础地址
 
-- 测试环境：`http://project.cinta.team`（生产同域，按实际环境替换）
+- 测试环境：`http://project.cinta.team`
+- 生产环境：`http://work.cinta.team`
+- 两个环境均使用 **http**，不要使用 https
+- **协议规范**：AI 访问本项目平台一律使用 `http://`；如果用户提供的是 https 平台链接（包括设置接口返回的地址），必须先替换成对应的 `http://` 地址再访问（包括本 SKILL.md、接口请求、图片/文件下载链接）
 - 所有路径省略前缀写法如下文，调用时拼在基础地址后（如 `{BASE}/api/projects/search.md?q=pk`）
 
 ## 鉴权
@@ -403,7 +408,7 @@ curl -X DELETE {BASE}/api/code-branches/{id}
 
 ## 11. 知识库（Markdown + 路径）
 
-知识库以路径组织 Markdown，支持全文 + PGVector 混合检索。独立技能 `knowledge-search` 见 `http://{host}/knowledge/SKILL.md`。
+知识库以路径组织 Markdown，支持全文 + PGVector 混合检索。独立技能 `knowledge-search` 见 `http://work.cinta.team/knowledge/SKILL.md`（测试环境 `http://project.cinta.team/knowledge/SKILL.md`）。
 
 ### 11.1 搜索知识（RAG 上下文）
 
@@ -551,7 +556,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/fail.md \
 
 ## 13. 文件上传（Markdown）
 
-将本地任意文件上传到平台，返回可直接分享的公共访问 URL。也可单独安装更精简的 `file-upload` 技能：`http://{host}/file-upload/SKILL.md`。
+将本地任意文件上传到平台，返回可直接分享的公共访问 URL。也可单独安装更精简的 `file-upload` 技能：`http://work.cinta.team/file-upload/SKILL.md`（测试环境 `http://project.cinta.team/file-upload/SKILL.md`）。
 
 ```bash
 curl -X POST {BASE}/api/files/upload.md \
