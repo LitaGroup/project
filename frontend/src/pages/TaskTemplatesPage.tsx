@@ -22,8 +22,8 @@ import {
 import { api, type TaskTemplate, type Worker } from '../lib/api'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 
-/** 系统未知任务定义固定 ID（与后端约定一致，平台保留、不可删除） */
-const UNKNOWN_TASK_TEMPLATE_ID = 6
+/** 系统任务定义固定 ID（未知任务 + 六类工单调度），平台保留、不可删除或改名 */
+const SYSTEM_TASK_TEMPLATE_IDS = new Set([6, 10, 11, 12, 13, 14, 15])
 
 /** 任务定义列表：任务类型 + 可复用描述 + 多个默认处理机器人 */
 export function TaskTemplatesPage() {
@@ -127,7 +127,7 @@ export function TaskTemplatesPage() {
                   >
                     编辑
                   </Link>
-                  {template.id !== UNKNOWN_TASK_TEMPLATE_ID && (
+                  {!SYSTEM_TASK_TEMPLATE_IDS.has(template.id) && (
                     <DeleteTemplateButton
                       template={template}
                       onDeleted={reload}

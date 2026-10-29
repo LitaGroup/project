@@ -42,6 +42,10 @@ import { ProfilePage } from './pages/ProfilePage'
 import { AppsPage } from './pages/AppsPage'
 import { LoginPage } from './pages/LoginPage'
 import { UserListPage } from './pages/UserListPage'
+import { TicketsPage } from './pages/TicketsPage'
+import { TicketCreatePage } from './pages/TicketCreatePage'
+import { TicketDetailPage } from './pages/TicketDetailPage'
+import { TicketConfigPage } from './pages/TicketConfigPage'
 
 /** 路由级登录守卫：未登录一律跳 /login（会话加载中先不渲染，避免登录用户闪跳） */
 function RequireAuth() {
@@ -154,10 +158,21 @@ function App() {
           <Route path="/tasks/schedulers/:workerId" element={<SchedulerRedirect />} />
           <Route path="/tasks/executors" element={<ExecutorsPage />} />
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
+          <Route
+            path="/tickets/solution"
+            element={<TicketsPage category="方案工单" />}
+          />
+          <Route
+            path="/tickets/solution/new"
+            element={<TicketCreatePage category="方案工单" />}
+          />
+          <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
+          <Route path="/tickets" element={<Navigate to="/tickets/solution" replace />} />
           <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/admin/users" element={<UserListPage />} />
+          <Route path="/admin/ticket-config" element={<TicketConfigPage />} />
           </Route>
         </Route>
       </Routes>

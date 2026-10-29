@@ -245,6 +245,11 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       1,
       '缺少加载状态，请补充',
       '张三',
+      expect.objectContaining({
+        modelContent: expect.stringContaining(
+          '必须重新调用 POST http://localhost:3100/api/tasks/1/handoff/apply.md',
+        ) as string,
+      }),
     );
     expect(dispatchService.addEvent).toHaveBeenCalledWith(
       1,
@@ -270,6 +275,9 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     expect(dispatchService.continueConversation).not.toHaveBeenCalled();
     expect(saved.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
     expect(saved.resumePrompt).toContain('请返工');
+    expect(saved.resumePrompt).toContain(
+      '必须重新调用 POST http://localhost:3100/api/tasks/1/handoff/apply.md',
+    );
     expect(dispatchService.addEvent).toHaveBeenCalledWith(
       1,
       '操作',
@@ -330,6 +338,11 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       1,
       '请补充测试数据',
       '张三',
+      expect.objectContaining({
+        modelContent: expect.stringContaining(
+          '必须重新调用 POST http://localhost:3100/api/tasks/1/handoff/apply.md',
+        ) as string,
+      }),
     );
     expect(tasksRepo.increment).toHaveBeenCalledWith(
       { id: 1 },

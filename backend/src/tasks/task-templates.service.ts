@@ -14,9 +14,12 @@ import { Worker } from '../workers/worker.entity';
 import { TaskTemplate } from './task-template.entity';
 import {
   ensureTaskTemplateSequenceFloor,
+  isSystemTaskTemplateId,
+  SYSTEM_TICKET_TASK_TEMPLATES,
   SYSTEM_UNKNOWN_TASK_TEMPLATE_DESCRIPTION,
   SYSTEM_UNKNOWN_TASK_TEMPLATE_ID,
   SYSTEM_UNKNOWN_TASK_TEMPLATE_NAME,
+  TICKET_TASK_TYPE,
 } from './system-task-templates';
 
 export interface CreateTaskTemplateInput {
@@ -47,7 +50,55 @@ export class TaskTemplatesService implements OnModuleInit {
   /** 系统任务定义使用 id < 1000；网页新建的自定义定义从 1000 开始 */
   async onModuleInit(): Promise<void> {
     await this.ensureUnknownTemplate();
+    await this.ensureTicketTemplates();
     await ensureTaskTemplateSequenceFloor(this.templates);
+  }
+
+  /**
+   * 保证六类工单调度定义存在（固定 ID 10-15）。
+   * ID 已被其他定义占用时直接报错，避免静默覆盖生产数据。
+   */
+  private async ensureTicketTemplates(): Promise<void> {
+    for (const definition of SYSTEM_TICKET_TASK_TEMPLATES) {
+      const existing = await this.templates.findOne({
+        where: { id: definition.id },
+      });
+      if (existing) {
+        if (
+          existing.name !== definition.name ||
+          existing.type !== TICKET_TASK_TYPE
+        ) {
+          throw new Error(
+            `系统工单任务定义 ID=${definition.id} 已被「${existing.name}」占用，` +
+              `期望名称为「${definition.name}」且类型为「${TICKET_TASK_TYPE}」，请先清理冲突数据`,
+          );
+        }
+        continue;
+      }
+      await this.templates.query(
+        `INSERT INTO task_templates ("id", "name", "type", "description", "agentIds")
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT ("id") DO NOTHING`,
+        [
+          definition.id,
+          definition.name,
+          TICKET_TASK_TYPE,
+          definition.description,
+          '[]',
+        ],
+      );
+      const created = await this.templates.findOne({
+        where: { id: definition.id },
+      });
+      if (!created) {
+        throw new Error(
+          `系统工单任务定义「${definition.name}」#${definition.id} 创建失败`,
+        );
+      }
+      this.logger.log(
+        `已内置系统工单任务定义「${definition.name}」#${definition.id}（请配置处理机器人）`,
+      );
+    }
   }
 
   /** 保证系统未知任务定义（固定 ID=6）存在，供无法匹配的任务兜底 */
@@ -124,15 +175,26 @@ export class TaskTemplatesService implements OnModuleInit {
     input: UpdateTaskTemplateInput,
   ): Promise<TaskTemplate> {
     const template = await this.findOne(id);
+    const system = isSystemTaskTemplateId(id);
     if (input.name !== undefined) {
       const name = input.name.trim();
       if (!name) throw new BadRequestException('模板名称不能为空');
+      if (system && name !== template.name) {
+        throw new BadRequestException(
+          `系统任务定义「${template.name}」（ID=${id}）不允许改名`,
+        );
+      }
       await this.assertNameAvailable(name, id);
       template.name = name;
     }
     if (input.type !== undefined) {
       const type = await this.taskTypes.assertExists(input.type);
       if (!type) throw new BadRequestException('任务类型不能为空');
+      if (system && type !== template.type) {
+        throw new BadRequestException(
+          `系统任务定义「${template.name}」（ID=${id}）不允许修改任务类型`,
+        );
+      }
       template.type = type;
     }
     if (input.description !== undefined) {
@@ -145,9 +207,9 @@ export class TaskTemplatesService implements OnModuleInit {
   }
 
   async remove(id: number): Promise<void> {
-    if (id === SYSTEM_UNKNOWN_TASK_TEMPLATE_ID) {
+    if (isSystemTaskTemplateId(id)) {
       throw new BadRequestException(
-        '系统未知任务定义（ID=6）由平台保留，不能删除',
+        `系统任务定义（ID=${id}）由平台保留，不能删除`,
       );
     }
     const template = await this.findOne(id);

@@ -273,6 +273,7 @@ export class TaskDeliveryService {
     const current = await this.mustFind(task.id);
     const count = current.acceptRejectCount ?? 1;
     const operator = actorName(actor);
+    const reworkPrompt = this.buildReworkPrompt(task.id, content);
 
     if (count <= MAX_ACCEPT_REJECTS) {
       const claimed = await this.dispatchService.claimExecution(
@@ -290,7 +291,7 @@ export class TaskDeliveryService {
           },
           {
             subStatus: TaskSubStatus.PENDING_RESUME,
-            resumePrompt: `# 验收返工\n\n${content}`,
+            resumePrompt: reworkPrompt,
             remindCount: 0,
             firstRemindedAt: null,
             lastRemindedAt: null,
@@ -306,6 +307,7 @@ export class TaskDeliveryService {
             task.id,
             content,
             operator,
+            { modelContent: reworkPrompt },
           );
         } catch (error) {
           await this.tasks.update(
@@ -313,7 +315,7 @@ export class TaskDeliveryService {
             {
               status: TaskStatus.WAITING,
               subStatus: TaskSubStatus.PENDING_RESUME,
-              resumePrompt: `# 验收返工\n\n${content}`,
+              resumePrompt: reworkPrompt,
             },
           );
           throw error;
@@ -411,6 +413,25 @@ export class TaskDeliveryService {
       );
     }
     return saved;
+  }
+
+  /** 返工 Prompt：明确退回原因，并要求新一轮交付重新申请验收。 */
+  private buildReworkPrompt(taskId: number, content: string): string {
+    return [
+      '# 验收返工',
+      '',
+      '需求方未通过本次验收，任务已退回执行机器人继续处理。',
+      '',
+      '## 退回原因',
+      '',
+      content,
+      '',
+      '## 后续要求',
+      '',
+      `请根据退回原因完成修改并自检。完成后如需继续验收，必须重新调用 POST ${this.apiUrl}/tasks/${taskId}/handoff/apply.md 提交验收申请。`,
+      '',
+      '此前的验收申请已失效，不能视为本次交付已申请验收。',
+    ].join('\n');
   }
 
   /** 需求方展示名：机器人需求方取机器人名，人类需求方取用户姓名。 */

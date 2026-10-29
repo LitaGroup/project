@@ -1243,6 +1243,109 @@ export interface TaskPackage {
   liveLines?: string[]
 }
 
+/** 工单类型：首期仅方案工单开放创建，其余类型保留配置与内置调度定义 */
+export const TICKET_CATEGORY_DEFINITIONS = [
+  {
+    category: '方案工单',
+    defaultTemplateId: 10,
+    defaultTemplateName: '工单-方案工单-调度',
+    enabled: true,
+    description: '针对方案设计的工单，由调度机器人澄清后转交方案设计任务定义',
+  },
+  {
+    category: '技术工单',
+    defaultTemplateId: 11,
+    defaultTemplateName: '工单-技术工单-调度',
+    enabled: false,
+    description: '业务同学向技术同学申请完成某个任务（暂未开放）',
+  },
+  {
+    category: '数据工单',
+    defaultTemplateId: 12,
+    defaultTemplateName: '工单-数据工单-调度',
+    enabled: false,
+    description: '数据查询、数据导出、报表设计等申请（暂未开放）',
+  },
+  {
+    category: '运维工单',
+    defaultTemplateId: 13,
+    defaultTemplateName: '工单-运维工单-调度',
+    enabled: false,
+    description: '线上数据库、NACOS 等操作申请（暂未开放）',
+  },
+  {
+    category: '需求工单',
+    defaultTemplateId: 14,
+    defaultTemplateName: '工单-需求工单-调度',
+    enabled: false,
+    description: '业务同学向产品同学提出需求申请（暂未开放）',
+  },
+  {
+    category: 'BUG反馈',
+    defaultTemplateId: 15,
+    defaultTemplateName: '工单-BUG工单-调度',
+    enabled: false,
+    description: '线上故障反馈工单（暂未开放）',
+  },
+] as const
+
+export type TicketCategory = (typeof TICKET_CATEGORY_DEFINITIONS)[number]['category']
+export type TicketAssigneeType = 'user' | 'worker'
+
+/** 工单推导状态：工作流子状态 + 已完成/已失败/已取消 */
+export type TicketStatus =
+  | '待分配'
+  | '待接受'
+  | '待反馈'
+  | '待继续'
+  | '待验收'
+  | '处理中'
+  | '已完成'
+  | '已失败'
+  | '已取消'
+
+export interface Ticket {
+  id: number
+  code: string
+  category: TicketCategory
+  title: string
+  description: string | null
+  createdById: number
+  createdByName: string
+  assigneeType: TicketAssigneeType
+  assigneeId: number
+  assigneeName: string
+  taskId: number
+  /** 按关联任务实时推导的工单状态 */
+  status: TicketStatus
+  task: TaskPackage | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TicketAllowedTemplate {
+  id: number
+  name: string
+  type: string
+  description: string | null
+  agentIds: number[]
+}
+
+export interface TicketDetail extends Ticket {
+  config: TicketConfig
+  allowedTemplates: TicketAllowedTemplate[]
+}
+
+export interface TicketConfig {
+  category: TicketCategory
+  defaultTemplateId: number
+  defaultTemplateName: string
+  allowedTemplateIds: number[]
+  allowedTemplates: Array<{ id: number; name: string; type: string }>
+  enabled: boolean
+  description: string
+}
+
 /** 任务看板 SSE（GET /api/tasks/stream）：初始快照 + 增量事件 */
 export type TaskRealtimeMessage =
   | { type: 'snapshot'; tasks: TaskPackage[]; at: number }
@@ -1366,6 +1469,8 @@ export interface TaskChatSnapshot {
   agentOwnerName: string | null
   /** 人工介入次数 */
   interventionCount: number
+  /** 当前任务是否曾提交过验收申请（后续返工也保持为 true） */
+  hasAcceptanceApplication: boolean
   /** 当前任务事件时间线（倒序） */
   events: TaskEvent[]
 }
@@ -2248,6 +2353,44 @@ export const api = {
     request<WorkerDebugSnapshot>(`/workers/${workerId}/debug/reset`, {
       method: 'POST',
     }),
+
+  /** 工单列表（category/status/q 可选） */
+  listTickets: (params?: {
+    category?: string
+    status?: string
+    q?: string
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.category) qs.set('category', params.category)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.q) qs.set('q', params.q)
+    const q = qs.toString()
+    return request<Ticket[]>(`/tickets${q ? `?${q}` : ''}`)
+  },
+  /** 工单详情：工单 + 关联任务 + 可转派定义 */
+  getTicket: (id: number) => request<TicketDetail>(`/tickets/${id}`),
+  /** 创建工单：按类型固定默认任务定义派发，责任方仅记录归属 */
+  createTicket: (input: {
+    category: TicketCategory
+    title?: string
+    description: string
+    assigneeType: TicketAssigneeType
+    assigneeId: number
+  }) =>
+    request<Ticket>('/tickets', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 工单类型配置（管理端） */
+  listTicketConfigs: () => request<TicketConfig[]>('/ticket-configs'),
+  updateTicketConfig: (category: string, allowedTemplateIds: number[]) =>
+    request<TicketConfig>(
+      `/ticket-configs/${encodeURIComponent(category)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ allowedTemplateIds }),
+      },
+    ),
 
   /** 任务定义列表 */
   listTaskTemplates: () => request<TaskTemplate[]>('/task-templates'),

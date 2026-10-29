@@ -43,6 +43,9 @@ const LIST_PATH = '/tasks/templates'
 /** 默认兜底任务类型（与后端 TASK_TYPE_DEFAULT 一致） */
 const DEFAULT_TASK_TYPE = '其它'
 
+/** 系统任务定义：名称与类型由平台保留，只允许维护描述和处理机器人 */
+const SYSTEM_TASK_TEMPLATE_IDS = new Set([6, 10, 11, 12, 13, 14, 15])
+
 interface AgentOption {
   id: string
   name: string
@@ -115,6 +118,9 @@ export function TaskTemplateEditPage() {
     [taskTypes, taskType],
   )
 
+  const systemTemplate = Boolean(
+    template && SYSTEM_TASK_TEMPLATE_IDS.has(template.id),
+  )
   const initialTitle = template ? `编辑「${template.name}」` : '新建任务定义'
   const typedName = name.trim()
   const pageTitle = template
@@ -255,7 +261,13 @@ export function TaskTemplateEditPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="如：后端接口技术设计"
+                disabled={systemTemplate}
               />
+              {systemTemplate && (
+                <span className="text-xs text-foreground-muted">
+                  系统任务定义名称与类型由平台保留，只允许维护描述和处理机器人
+                </span>
+              )}
             </label>
             <label className="flex flex-col gap-1 text-sm">
               任务类型
@@ -267,6 +279,7 @@ export function TaskTemplateEditPage() {
                 items={Object.fromEntries(
                   typeNames.map((name) => [name, name]),
                 )}
+                disabled={systemTemplate}
               >
                 <SelectTrigger>
                   <SelectValue />

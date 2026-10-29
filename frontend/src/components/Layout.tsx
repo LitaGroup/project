@@ -89,6 +89,7 @@ const NAV_SECTIONS: NavSection[] = [
       !p.startsWith('/admin') &&
       !p.startsWith('/code') &&
       !p.startsWith('/tasks') &&
+      !p.startsWith('/tickets') &&
       !p.startsWith('/docs'),
     items: [
       { to: '/', label: '概览', icon: LayoutDashboard, ready: true },
@@ -122,6 +123,20 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    key: 'tickets',
+    label: '工单',
+    to: '/tickets/solution',
+    match: (p) => p.startsWith('/tickets'),
+    items: [
+      { to: '/tickets/solution', label: '方案工单', icon: FileText, ready: true },
+      { to: '/tickets/tech', label: '技术工单', icon: Settings, ready: false },
+      { to: '/tickets/data', label: '数据工单', icon: ChartPie, ready: false },
+      { to: '/tickets/ops', label: '运维工单', icon: Cpu, ready: false },
+      { to: '/tickets/requirement', label: '需求工单', icon: ClipboardList, ready: false },
+      { to: '/tickets/bug', label: 'BUG反馈', icon: Bug, ready: false },
+    ],
+  },
+  {
     key: 'knowledge',
     label: '知识',
     to: '/docs/detail/',
@@ -143,7 +158,10 @@ const NAV_SECTIONS: NavSection[] = [
     label: '管理',
     to: '/admin/users',
     match: (p) => p.startsWith('/admin'),
-    items: [{ to: '/admin/users', label: '用户列表', icon: Users, ready: true }],
+    items: [
+      { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
+      { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
+    ],
   },
 ]
 

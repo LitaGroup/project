@@ -94,6 +94,9 @@ export class TaskChatService implements OnModuleDestroy {
   /** taskId → 等待投递给机器人的用户消息（FIFO） */
   private readonly queuedUsers = new Map<number, TaskQueuedUserMessage[]>();
 
+  /** 队列消息 id → 实际发给模型的 Prompt（展示内容保持用户原始输入） */
+  private readonly queuedPrompts = new Map<string, string>();
+
   constructor(
     @InjectRepository(Task)
     private readonly tasks: Repository<Task>,
@@ -113,6 +116,7 @@ export class TaskChatService implements OnModuleDestroy {
     this.flushTimers.clear();
     this.creating.clear();
     this.queuedUsers.clear();
+    this.queuedPrompts.clear();
     this.subject.complete();
   }
 
@@ -325,6 +329,10 @@ export class TaskChatService implements OnModuleDestroy {
       interventionCount: currentEvents.filter(
         (event) => event.meta?.intervention === true,
       ).length,
+      hasAcceptanceApplication: taskEvents.some(
+        (event) =>
+          event.taskId === task.id && event.meta?.deliveryApply === true,
+      ),
       events: currentEvents,
     };
   }
@@ -461,6 +469,7 @@ export class TaskChatService implements OnModuleDestroy {
     taskId: number,
     content: string,
     operator: string | null,
+    prompt?: string,
   ): Promise<TaskQueuedUserMessage> {
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
@@ -472,6 +481,10 @@ export class TaskChatService implements OnModuleDestroy {
       createdAt: new Date().toISOString(),
       status: 'queued',
     };
+    const modelText = prompt?.trim();
+    if (modelText && modelText !== text) {
+      this.queuedPrompts.set(message.id, modelText);
+    }
     const queue = this.queuedUsers.get(taskId) ?? [];
     queue.push(message);
     this.queuedUsers.set(taskId, queue);
@@ -509,6 +522,14 @@ export class TaskChatService implements OnModuleDestroy {
     await this.broadcastQueueMessage(message);
   }
 
+  /** 队列消息实际发给模型的 Prompt（未单独指定时由调用方回退展示内容） */
+  queuedUserMessagePrompt(taskId: number, messageId: string): string | null {
+    const exists = (this.queuedUsers.get(taskId) ?? []).some(
+      (message) => message.id === messageId,
+    );
+    return exists ? (this.queuedPrompts.get(messageId) ?? null) : null;
+  }
+
   /** opencode 已接受：移出队列（随后任务事件会生成正式用户气泡） */
   async removeQueuedUserMessage(
     taskId: number,
@@ -518,6 +539,7 @@ export class TaskChatService implements OnModuleDestroy {
     const next = queue.filter((message) => message.id !== messageId);
     if (next.length === 0) this.queuedUsers.delete(taskId);
     else this.queuedUsers.set(taskId, next);
+    this.queuedPrompts.delete(messageId);
     await this.broadcastQueueDelete(taskId, [messageId]);
   }
 
@@ -526,6 +548,7 @@ export class TaskChatService implements OnModuleDestroy {
     const queue = this.queuedUsers.get(taskId) ?? [];
     if (queue.length === 0) return;
     this.queuedUsers.delete(taskId);
+    for (const message of queue) this.queuedPrompts.delete(message.id);
     await this.broadcastQueueDelete(
       taskId,
       queue.map((message) => message.id),

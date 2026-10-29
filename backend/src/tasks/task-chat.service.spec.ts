@@ -351,6 +351,7 @@ describe('TaskChatService snapshot 最终产出去重', () => {
   });
 
   let tasks: { findOne: jest.Mock; find: jest.Mock };
+  let eventsRepo: { find: jest.Mock };
   let messagesRepo: {
     findOne: jest.Mock;
     upsert: jest.Mock;
@@ -365,6 +366,7 @@ describe('TaskChatService snapshot 最终产出去重', () => {
       findOne: jest.fn().mockResolvedValue(baseTask),
       find: jest.fn().mockResolvedValue([baseTask]),
     };
+    eventsRepo = { find: jest.fn().mockResolvedValue([]) };
     messagesRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       upsert: jest.fn().mockResolvedValue(undefined),
@@ -373,12 +375,30 @@ describe('TaskChatService snapshot 最终产出去重', () => {
     };
     service = new TaskChatService(
       tasks as unknown as Repository<Task>,
-      { find: jest.fn().mockResolvedValue([]) } as never,
+      eventsRepo as never,
       messagesRepo as never,
       { find: jest.fn().mockResolvedValue([]) } as never,
       { findOne: jest.fn() } as never,
       {} as never,
     );
+  });
+
+  it('快照保留历史验收申请标记，返工后仍为 true', async () => {
+    eventsRepo.find.mockResolvedValue([
+      {
+        id: 1,
+        taskId: 34,
+        type: '状态变更',
+        content: '执行机器人申请验收',
+        meta: { deliveryApply: true },
+        operator: '机器人',
+        createdAt: new Date('2026-10-27T10:05:00Z'),
+      },
+    ]);
+
+    const snapshot = await service.snapshot(34);
+
+    expect(snapshot.hasAcceptanceApplication).toBe(true);
   });
 
   it('最终产出与已落库的单条回复完全相同时不再生成 result 消息', async () => {
@@ -535,6 +555,23 @@ describe('TaskChatService 发送队列', () => {
 
     await service.discardQueuedUserMessages(7);
     expect(service.queuedUserMessages(7)).toEqual([]);
+  });
+
+  it('队列消息单独保存模型 Prompt，原始内容仍用于展示', async () => {
+    const message = await service.enqueueUserMessage(
+      7,
+      '请补充错误提示',
+      '张三',
+      '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
+    );
+
+    expect(service.queuedUserMessages(7)[0].content).toBe('请补充错误提示');
+    expect(service.queuedUserMessagePrompt(7, message.id)).toContain(
+      '必须重新申请验收',
+    );
+
+    await service.discardQueuedUserMessages(7);
+    expect(service.queuedUserMessagePrompt(7, message.id)).toBeNull();
   });
 
   it('聊天快照包含当前任务的待发送队列', async () => {

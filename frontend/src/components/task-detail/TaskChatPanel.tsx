@@ -81,6 +81,8 @@ interface TaskChatPanelProps {
   queuedMessages: TaskQueuedUserMessage[]
   connection: 'connecting' | 'live' | 'reconnecting'
   busy: boolean
+  /** 是否曾提交过验收申请（返工后仍允许需求方验收） */
+  hasAcceptanceApplication: boolean
   onSendMessage: (content: string) => Promise<void>
   /** 回答（answers）或跳过（null）机器人提问 */
   onReplyQuestion: (questionId: string, answers: string[][] | null) => Promise<void>
@@ -98,6 +100,7 @@ export function TaskChatPanel({
   queuedMessages,
   connection,
   busy,
+  hasAcceptanceApplication,
   onSendMessage,
   onReplyQuestion,
   onAction,
@@ -206,6 +209,7 @@ export function TaskChatPanel({
                 busy={busy}
                 robotRunning={robotRunning}
                 queuedMessages={queuedMessages}
+                hasAcceptanceApplication={hasAcceptanceApplication}
                 onAction={onAction}
               />
             </ThreadPrimitive.ViewportFooter>
@@ -460,6 +464,7 @@ function ChatFooter({
   busy,
   robotRunning,
   queuedMessages,
+  hasAcceptanceApplication,
   onAction,
 }: {
   task: TaskPackage
@@ -467,10 +472,13 @@ function ChatFooter({
   busy: boolean
   robotRunning: boolean
   queuedMessages: TaskQueuedUserMessage[]
+  hasAcceptanceApplication: boolean
   onAction: (fn: (id: number) => Promise<unknown>) => void
 }) {
   const finished = task.status === '已结束'
   const awaitingAcceptance = task.subStatus === '待验收'
+  const canAccept =
+    !finished && (awaitingAcceptance || hasAcceptanceApplication)
   const placeholder = finished
     ? '任务已结束，不能继续对话'
     : awaitingAcceptance
@@ -667,7 +675,7 @@ function ChatFooter({
           <Button
             size="sm"
             variant="primary"
-            disabled={busy || task.subStatus !== '待验收'}
+            disabled={busy || !canAccept}
             onClick={() => onAction((id) => api.acceptTask(id))}
           >
             验收完成

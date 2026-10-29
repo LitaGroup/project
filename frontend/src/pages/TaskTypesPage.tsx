@@ -35,7 +35,12 @@ import { api, type TaskTypeDef } from '../lib/api'
 /** 系统任务类型（与后端常量一致，不可改名/删除） */
 const DEFAULT_TASK_TYPE = '其它'
 const UNKNOWN_TASK_TYPE = '未知任务'
-const SYSTEM_TASK_TYPE_NAMES = new Set([DEFAULT_TASK_TYPE, UNKNOWN_TASK_TYPE])
+const TICKET_TASK_TYPE = '工单'
+const SYSTEM_TASK_TYPE_NAMES = new Set([
+  DEFAULT_TASK_TYPE,
+  UNKNOWN_TASK_TYPE,
+  TICKET_TASK_TYPE,
+])
 
 /** 名称规则：2-8 个中文字符，或 1-64 个英文字符 */
 const CHINESE_NAME = /^[\u4e00-\u9fff]{2,8}$/

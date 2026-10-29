@@ -39,6 +39,7 @@ describe('TasksService 任务详情与对话', () => {
     update: jest.Mock;
   };
   let taskTemplatesRepo: { findOne: jest.Mock };
+  let eventsRepo: { find: jest.Mock };
   let usersRepo: { findOne: jest.Mock };
   let dispatchService: {
     addEvent: jest.Mock;
@@ -64,6 +65,7 @@ describe('TasksService 任务详情与对话', () => {
         ),
     };
     taskTemplatesRepo = { findOne: jest.fn() };
+    eventsRepo = { find: jest.fn().mockResolvedValue([]) };
     usersRepo = { findOne: jest.fn() };
     dispatchService = {
       addEvent: jest.fn().mockResolvedValue(undefined),
@@ -73,7 +75,7 @@ describe('TasksService 任务详情与对话', () => {
     };
     service = new TasksService(
       tasksRepo as never,
-      { find: jest.fn().mockResolvedValue([]) } as never,
+      eventsRepo as never,
       { delete: jest.fn() } as never,
       taskTemplatesRepo as never,
       usersRepo as never,
@@ -198,6 +200,55 @@ describe('TasksService 任务详情与对话', () => {
     expect(created.templateId).toBe(3);
     expect(created.templateName).toBe('前端任务定义');
     expect(created.code).toBe('TK-0005');
+  });
+
+  it('曾申请验收的任务返工后仍可验收', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      }),
+    );
+    eventsRepo.find.mockResolvedValue([
+      { taskId: 1, meta: { deliveryApply: true } },
+    ]);
+
+    const saved = await service.accept(1, '验收人');
+
+    expect(saved.status).toBe(TaskStatus.FINISHED);
+    expect(saved.subStatus).toBe(TaskSubStatus.COMPLETED);
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      {
+        id: 1,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      expect.objectContaining({
+        status: TaskStatus.FINISHED,
+        subStatus: TaskSubStatus.COMPLETED,
+      }),
+    );
+    expect(dispatchService.addEvent).toHaveBeenCalledWith(
+      1,
+      '状态变更',
+      '状态变更：进行中-执行中 → 已结束-完成',
+      '验收人',
+      { intervention: true },
+    );
+  });
+
+  it('从未申请验收的执行中任务不可验收', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      }),
+    );
+
+    await expect(service.accept(1, '验收人')).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(tasksRepo.update).not.toHaveBeenCalled();
   });
 
   it('完成与取消记录人工介入标记', async () => {

@@ -159,6 +159,28 @@ export function TaskStatusBadge({
   )
 }
 
+/** 工单状态 → Badge variant：待处理蓝 / 反馈黄 / 处理中主色 / 完成绿 / 失败红 / 取消淡 */
+const ticketVariantByStatus: Record<
+  string,
+  'info' | 'success' | 'warning' | 'error' | 'soft' | 'primary' | 'secondary'
+> = {
+  待分配: 'info',
+  待接受: 'info',
+  待反馈: 'warning',
+  待继续: 'warning',
+  待验收: 'warning',
+  处理中: 'primary',
+  已完成: 'success',
+  已失败: 'error',
+  已取消: 'soft',
+}
+
+export function TicketStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={ticketVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+  )
+}
+
 /** 机器人实时状态 → Badge variant：空闲淡 / 工作中绿 / 等待黄 / 验收蓝 */
 const workerLiveVariant: Record<
   string,

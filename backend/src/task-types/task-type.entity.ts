@@ -12,10 +12,14 @@ export const TASK_TYPE_DEFAULT = '其它';
 /** 自动识别分配无法匹配时使用的系统任务类型 */
 export const TASK_TYPE_UNKNOWN = '未知任务';
 
+/** 工单任务使用的系统任务类型 */
+export const TASK_TYPE_TICKET = '工单';
+
 /** 系统维护、不可改名或删除的任务类型 */
 export const SYSTEM_TASK_TYPE_NAMES: readonly string[] = [
   TASK_TYPE_DEFAULT,
   TASK_TYPE_UNKNOWN,
+  TASK_TYPE_TICKET,
 ];
 
 /** 初始任务类型字典（迁移写入；开发环境无迁移时启动补齐，均按名称幂等） */
@@ -37,6 +41,11 @@ export const DEFAULT_TASK_TYPES: Array<{ name: string; description: string }> =
       name: TASK_TYPE_UNKNOWN,
       description:
         '平台无法匹配任务定义/类型对应机器人时自动归入，由系统未知任务定义（ID=6）接管',
+    },
+    {
+      name: TASK_TYPE_TICKET,
+      description:
+        '工单创建的调度任务类型，按工单类型绑定的系统任务定义分发，不允许改名与删除',
     },
   ];
 

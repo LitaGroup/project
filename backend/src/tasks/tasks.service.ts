@@ -897,23 +897,30 @@ export class TasksService {
     return saved;
   }
 
-  /** 验收：等待中-待验收 → 已结束-完成 */
+  /**
+   * 验收：只要当前待验收或曾提交过验收申请，未结束任务均可验收完成。
+   * 返工后任务可能已回到执行中，历史验收申请仍允许需求方直接通过。
+   */
   async accept(id: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(id);
+    const pendingAcceptance =
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_ACCEPT;
     if (
-      task.status !== TaskStatus.WAITING ||
-      task.subStatus !== TaskSubStatus.PENDING_ACCEPT
+      task.status === TaskStatus.FINISHED ||
+      (!pendingAcceptance && !(await this.hasAcceptanceApplication(id)))
     ) {
       throw new BadRequestException(
         `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可验收`,
       );
     }
+    const from = `${task.status}-${task.subStatus}`;
     const now = new Date();
     const updated = await this.tasks.update(
       {
         id: task.id,
-        status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_ACCEPT,
+        status: task.status,
+        subStatus: task.subStatus,
       },
       {
         status: TaskStatus.FINISHED,
@@ -921,6 +928,8 @@ export class TasksService {
         acceptedAt: now,
         acceptedBy: operator,
         deliveredAt: now,
+        missingItems: null,
+        resumePrompt: null,
       },
     );
     if (!updated.affected) {
@@ -930,11 +939,20 @@ export class TasksService {
     await this.addEvent(
       id,
       '状态变更',
-      '状态变更：等待中-待验收 → 已结束-完成',
+      `状态变更：${from} → 已结束-完成`,
       operator,
       { intervention: true },
     );
     return saved;
+  }
+
+  /** 是否提交过验收申请（申请事件 meta.deliveryApply） */
+  private async hasAcceptanceApplication(id: number): Promise<boolean> {
+    const events = await this.events.find({
+      where: { taskId: id },
+      select: { id: true, taskId: true, meta: true },
+    });
+    return events.some((event) => event.meta?.deliveryApply === true);
   }
 
   /** 取消：任意未结束任务可取消（执行中先中断会话） */

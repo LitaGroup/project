@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
@@ -13,7 +13,7 @@ import {
   type TaskQueuedUserMessage,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
-import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { PageBreadcrumb, type Crumb } from '../components/PageBreadcrumb'
 import { TaskChatPanel } from '../components/task-detail/TaskChatPanel'
 import { TaskSidePanel } from '../components/task-detail/TaskSidePanel'
 import { formatDuration, taskDurationMs } from '../lib/duration'
@@ -26,7 +26,21 @@ type ConnectionState = 'connecting' | 'live' | 'reconnecting'
  */
 export function TaskPackageDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const taskId = Number(id)
+  return <TaskDetailView taskId={Number(id)} />
+}
+
+/** 可复用的任务详情主体：工单详情页在同一任务对话外补充工单面包屑与状态徽标 */
+export function TaskDetailView({
+  taskId,
+  breadcrumb,
+  title,
+  extraBadges,
+}: {
+  taskId: number
+  breadcrumb?: Crumb[]
+  title?: string
+  extraBadges?: ReactNode
+}) {
   const [task, setTask] = useState<TaskPackage | null>(null)
   const [pipeline, setPipeline] = useState<TaskPipelineStage[]>([])
   const [messages, setMessages] = useState<TaskChatMessage[]>([])
@@ -36,6 +50,8 @@ export function TaskPackageDetailPage() {
   const [requesterName, setRequesterName] = useState<string | null>(null)
   const [agentOwnerName, setAgentOwnerName] = useState<string | null>(null)
   const [interventionCount, setInterventionCount] = useState(0)
+  const [hasAcceptanceApplication, setHasAcceptanceApplication] =
+    useState(false)
   const [events, setEvents] = useState<TaskChatSnapshot['events']>([])
   const [now, setNow] = useState(() => Date.now())
   const [connection, setConnection] = useState<ConnectionState>('connecting')
@@ -59,6 +75,7 @@ export function TaskPackageDetailPage() {
       setRequesterName(data.requesterName)
       setAgentOwnerName(data.agentOwnerName)
       setInterventionCount(data.interventionCount)
+      setHasAcceptanceApplication(data.hasAcceptanceApplication)
       setEvents(data.events)
       setError(null)
     } catch (e) {
@@ -259,18 +276,21 @@ export function TaskPackageDetailPage() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <PageBreadcrumb
-        items={[
-          { label: '任务', to: '/tasks/list' },
-          { label: currentTask.title },
-        ]}
+        items={
+          breadcrumb ?? [
+            { label: '任务', to: '/tasks/list' },
+            { label: currentTask.title },
+          ]
+        }
       />
 
       <header className="shrink-0">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="truncate text-xl font-semibold text-foreground-intense">
-              {currentTask.code} {currentTask.title}
+              {title ?? `${currentTask.code} ${currentTask.title}`}
             </h1>
+            {extraBadges}
             <TaskStatusBadge
               status={currentTask.status}
               subStatus={currentTask.subStatus}
@@ -316,6 +336,7 @@ export function TaskPackageDetailPage() {
           queuedMessages={queuedMessages}
           connection={connection}
           busy={busy}
+          hasAcceptanceApplication={hasAcceptanceApplication}
           onSendMessage={sendMessage}
           onReplyQuestion={replyQuestion}
           onAction={act}

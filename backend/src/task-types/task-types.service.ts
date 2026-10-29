@@ -11,7 +11,9 @@ import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import {
   DEFAULT_TASK_TYPES,
+  SYSTEM_TASK_TYPE_NAMES,
   TASK_TYPE_DEFAULT,
+  TASK_TYPE_TICKET,
   TASK_TYPE_UNKNOWN,
   TaskType,
 } from './task-type.entity';
@@ -70,20 +72,27 @@ export class TaskTypesService implements OnModuleInit {
         .orIgnore()
         .execute();
     }
-    // 已有数据的库补入「未知任务」系统类型（新库在上面的全量初始化中已写入）
-    const unknown = await this.types.findOne({
-      where: { name: TASK_TYPE_UNKNOWN },
-    });
-    if (!unknown) {
+    // 已有数据的库补入新增系统类型（新库在上面的全量初始化中已写入）
+    const systemTypes: Array<{ name: string; description: string }> = [
+      {
+        name: TASK_TYPE_UNKNOWN,
+        description:
+          '平台无法匹配任务定义/类型对应机器人时自动归入，由系统未知任务定义（ID=6）接管',
+      },
+      {
+        name: TASK_TYPE_TICKET,
+        description:
+          '工单创建的调度任务类型，按工单类型绑定的系统任务定义分发，不允许改名与删除',
+      },
+    ];
+    for (const item of systemTypes) {
+      const exists = await this.types.findOne({ where: { name: item.name } });
+      if (exists) continue;
       await this.types
         .createQueryBuilder()
         .insert()
         .into(TaskType)
-        .values({
-          name: TASK_TYPE_UNKNOWN,
-          description:
-            '平台无法匹配任务定义/类型对应机器人时自动归入，由系统未知任务定义（ID=6）接管',
-        })
+        .values(item)
         .orIgnore()
         .execute();
     }
@@ -126,6 +135,9 @@ export class TaskTypesService implements OnModuleInit {
         if (type.name === TASK_TYPE_UNKNOWN) {
           throw new BadRequestException('系统类型「未知任务」不允许改名');
         }
+        if (SYSTEM_TASK_TYPE_NAMES.includes(type.name)) {
+          throw new BadRequestException(`系统类型「${type.name}」不允许改名`);
+        }
         await this.assertNameAvailable(name, id);
         renamed = { from: type.name, to: name };
         type.name = name;
@@ -146,6 +158,9 @@ export class TaskTypesService implements OnModuleInit {
     }
     if (type.name === TASK_TYPE_UNKNOWN) {
       throw new BadRequestException('系统类型「未知任务」不可删除');
+    }
+    if (SYSTEM_TASK_TYPE_NAMES.includes(type.name)) {
+      throw new BadRequestException(`系统类型「${type.name}」不可删除`);
     }
     const taskCount = await this.tasks.count({ where: { type: type.name } });
     if (taskCount > 0) {

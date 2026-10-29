@@ -33,6 +33,7 @@ import { SettingsModule } from './settings/settings.module';
 import { FilesModule } from './files/files.module';
 import { ImagesModule } from './images/images.module';
 import { ReleasesModule } from './releases/releases.module';
+import { TicketsModule } from './tickets/tickets.module';
 
 @Module({
   imports: [
@@ -82,6 +83,7 @@ import { ReleasesModule } from './releases/releases.module';
     WorkersModule,
     TaskTypesModule,
     TasksModule,
+    TicketsModule,
     ScriptsModule,
     FeishuModule,
     GithubModule,

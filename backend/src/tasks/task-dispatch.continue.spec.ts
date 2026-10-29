@@ -39,6 +39,7 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
     hasQueuedUserMessages: jest.Mock;
     enqueueUserMessage: jest.Mock;
     queuedUserMessages: jest.Mock;
+    queuedUserMessagePrompt: jest.Mock;
     markQueuedUserMessageSending: jest.Mock;
     removeQueuedUserMessage: jest.Mock;
     restoreQueuedUserMessage: jest.Mock;
@@ -70,6 +71,7 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       hasQueuedUserMessages: jest.fn().mockReturnValue(false),
       enqueueUserMessage: jest.fn().mockResolvedValue(undefined),
       queuedUserMessages: jest.fn().mockReturnValue([]),
+      queuedUserMessagePrompt: jest.fn().mockReturnValue(null),
       markQueuedUserMessageSending: jest.fn(),
       removeQueuedUserMessage: jest.fn().mockResolvedValue(undefined),
       restoreQueuedUserMessage: jest.fn().mockResolvedValue(undefined),
@@ -136,10 +138,32 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       1,
       '补充说明',
       '张三',
+      undefined,
     );
     expect(dispatchSpy).not.toHaveBeenCalled();
     expect(eventsRepo.save).not.toHaveBeenCalled();
     expect(saved.subStatus).toBe(TaskSubStatus.EXECUTING);
+  });
+
+  it('返工消息入队时保留原始展示内容，模型 Prompt 单独保存', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      }),
+    );
+    taskChat.isRunning.mockReturnValue(true);
+
+    await service.continueConversation(1, '请补充错误提示', '张三', {
+      modelContent: '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
+    });
+
+    expect(taskChat.enqueueUserMessage).toHaveBeenCalledWith(
+      1,
+      '请补充错误提示',
+      '张三',
+      '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
+    );
   });
 
   it('队首消息投递成功后才移出队列并生成用户气泡', async () => {
@@ -182,6 +206,50 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       }),
     );
     expect(taskChat.removeQueuedUserMessage).toHaveBeenCalledWith(1, queued.id);
+  });
+
+  it('队列中的返工消息投递完整 Prompt，用户气泡仍展示原始反馈', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      }),
+    );
+    const queued = {
+      id: 'queue:1:rework',
+      taskId: 1,
+      sender: { id: 'user:张三', name: '张三', kind: 'user' },
+      content: '请补充错误提示',
+      createdAt: new Date().toISOString(),
+      status: 'queued' as const,
+    };
+    taskChat.queuedUserMessages.mockReturnValue([queued]);
+    taskChat.markQueuedUserMessageSending.mockResolvedValue({
+      ...queued,
+      status: 'sending',
+    });
+    taskChat.queuedUserMessagePrompt.mockReturnValue(
+      '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
+    );
+
+    await (
+      service as unknown as {
+        drainQueuedConversation(taskId: number): Promise<void>;
+      }
+    ).drainQueuedConversation(1);
+
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      1,
+      '张三',
+      '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
+    );
+    expect(eventsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 1,
+        type: '反馈',
+        content: '请补充错误提示',
+      }),
+    );
   });
 
   it('队首投递失败时保留消息并记录错误，不生成用户气泡', async () => {

@@ -120,6 +120,8 @@ export interface TaskChatSnapshot {
   agentOwnerName: string | null;
   /** 当前任务人工介入次数（事件 meta.intervention） */
   interventionCount: number;
+  /** 当前任务是否曾提交过验收申请（不受当前状态影响） */
+  hasAcceptanceApplication: boolean;
   /** 当前任务事件时间线（倒序，供右侧任务事件面板） */
   events: TaskEvent[];
 }

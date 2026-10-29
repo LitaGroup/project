@@ -448,6 +448,7 @@ export class TaskDispatchService
     taskId: number,
     content: string,
     operator: string | null,
+    options?: { modelContent?: string },
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
     if (task.status === TaskStatus.FINISHED) {
@@ -466,6 +467,9 @@ export class TaskDispatchService
     }
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
+    // 模型可见内容可补充返工等系统指令，聊天展示始终保留用户原始输入。
+    const modelText = options?.modelContent?.trim() || text;
+    const queuedPrompt = modelText !== text ? modelText : undefined;
     // 机器人本轮仍在执行（或平台正在派发）时先入队；当前轮结束后再逐条投递。
     if (
       this.taskChat.isRunning(taskId) ||
@@ -473,30 +477,42 @@ export class TaskDispatchService
       this.queueDraining.has(taskId) ||
       this.awaitingTurnStart.has(taskId)
     ) {
-      await this.taskChat.enqueueUserMessage(taskId, text, operator);
+      await this.taskChat.enqueueUserMessage(
+        taskId,
+        text,
+        operator,
+        queuedPrompt,
+      );
       return task;
     }
     // 上一次投递失败/暂停后仍有积压：新消息排到队尾，并触发队首继续发送。
     if (this.taskChat.hasQueuedUserMessages(taskId)) {
-      await this.taskChat.enqueueUserMessage(taskId, text, operator);
+      await this.taskChat.enqueueUserMessage(
+        taskId,
+        text,
+        operator,
+        queuedPrompt,
+      );
       this.scheduleQueueDrain(taskId);
       return task;
     }
-    return this.sendConversationTurn(taskId, text, operator);
+    return this.sendConversationTurn(taskId, modelText, operator, text);
   }
 
   /**
    * 投递一轮用户消息。只有 opencode 接受 prompt 后才记录反馈事件，
    * 避免投递失败时对话里出现一条实际未发送的用户气泡。
+   * prompt 为模型完整输入，chatContent 为用户气泡展示的原始输入。
    */
   private async sendConversationTurn(
     taskId: number,
-    content: string,
+    prompt: string,
     operator: string | null,
+    chatContent = prompt,
   ): Promise<Task> {
     await this.taskChat.archiveResult(taskId);
-    const saved = await this.dispatch(taskId, operator, content);
-    await this.addEvent(taskId, '反馈', content, operator, {
+    const saved = await this.dispatch(taskId, operator, prompt);
+    await this.addEvent(taskId, '反馈', chatContent, operator, {
       intervention: true,
       chat: true,
     });
@@ -536,7 +552,15 @@ export class TaskDispatchService
           sending.sender.name && sending.sender.name !== '用户'
             ? sending.sender.name
             : null;
-        await this.sendConversationTurn(taskId, sending.content, operator);
+        const prompt =
+          this.taskChat.queuedUserMessagePrompt(taskId, sending.id) ??
+          sending.content;
+        await this.sendConversationTurn(
+          taskId,
+          prompt,
+          operator,
+          sending.content,
+        );
         await this.taskChat.removeQueuedUserMessage(taskId, sending.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -565,6 +589,7 @@ export class TaskDispatchService
     taskId: number,
     agentId: number,
     operator: string | null,
+    options?: { force?: boolean },
   ): Promise<Task> {
     if (!Number.isInteger(agentId) || agentId < 1) {
       throw new BadRequestException('机器人 ID 必须为正整数');
@@ -579,7 +604,8 @@ export class TaskDispatchService
     if (worker.role === WorkerRole.SCHEDULER) {
       throw new BadRequestException('调度机器人不承接任务，请分配给工作者');
     }
-    if (task.agentId === agentId) return task;
+    // 工单转派即使目标机器人相同，也需要结束当前轮并重新走接受流程
+    if (task.agentId === agentId && !options?.force) return task;
 
     const oldAgent = task.agentId
       ? await this.workers.findOne({ where: { id: task.agentId } })
