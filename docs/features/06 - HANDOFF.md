@@ -8,9 +8,12 @@
 
 1. 调用 机器人做自我总结，我总结后的文档，形成 REPORT，并上传到 project 知识库中，并将总结报告返回到聊天记录中
 2. 总结报告的命名：task/handoff/{date}/{task-id}/{version}.md  其中 version 从0 开始，没生成一次，加1；date 格式为：yyyyMMdd
-3. 任务相关形成的文档重新调整一下命名和路径，且去掉 版本 部分
-   1. task/{date}/{task-id}/REVIEW  复盘文档（知识路径不带 .md 后缀）
-   2. task/{date}/{task-id}/HANDOFF  交付文档（知识路径不带 .md 后缀）
+3. 任务相关文档统一放在任务目录 `task/{date}/{task-id}/` 下，去掉版本部分（知识路径不带 `.md` 后缀，阅读名为 `X.md`）：
+   1. `API.md` 接口文档
+   2. `TECH_DESIGN.md` 技术方案文档
+   3. `HANDOFF.md` 交付文档
+   4. `REVIEW.md` 复盘文档（验收通过后由平台生成）
+   5. 需求中明确指定文档地址时，按需求指定的地址写入，不再使用默认任务目录
 4. 总结报告要求包含的内容：
    1. 任务的原始输入、任务的整理后的输入
    2. 任务的交付物与结论
@@ -48,7 +51,7 @@ flowchart TD
 
 任务交付文档（当前实现）：
 
-1. 任务创建时即创建交付文档，路径固定为 `task/{任务创建日期}/{task-code}/HANDOFF`，初始正文为 `> 正在处理中……`
+1. 任务创建时即创建交付文档，路径固定为 `task/{任务创建日期}/{task-code}/HANDOFF`（阅读名 `HANDOFF.md`），初始正文为 `> 正在处理中……`；同一目录下可用 `GET/POST /api/tasks/{taskId}/documents.md` 维护 `API.md`、`TECH_DESIGN.md` 等普通文档
 2. 执行机器人在任务执行过程中通过 `GET /api/tasks/{taskId}/handoff.md` 读取、`POST /api/tasks/{taskId}/handoff/update.md` 更新正文（完整 `content` 或 `append` + `baseVersion`）
 3. 正文完全由执行机器人根据任务内容、任务定义和实际进展编写，平台不拼接固定章节；需求方也可在工作台直接编辑
 4. 平台在 Frontmatter 维护 `document/task/version/updated_by/update`，每次有效正文变更版本递增；版本冲突返回 409
@@ -125,3 +128,4 @@ flowchart TD
 7. 任务负责人提交反馈后重新识别并派发机器人；验收计数与接管快照保留。
 8. 子任务机器人提问优先由直接父任务机器人自动答复：平台使用父机器人执行器、模型和工位创建一次性独立咨询会话，不干扰父任务执行状态；无可用父机器人或自动答复失败时，通知任务需求方人工回答。
 9. 任务详情展示验收不通过次数、负责人接管信息，以及父任务机器人自动答复中/失败状态。
+10. 任务文档目录统一为 `/task/{yyyyMMdd}/{任务编号}/`：`HANDOFF.md` 走 `handoff/update.md`；`API.md`、`TECH_DESIGN.md` 等普通文档走 `GET/POST /api/tasks/:id/documents.md`（`name` 支持带/不带 `.md`，同名覆盖）；`REVIEW.md` 由平台验收后生成。`/task/**` 在通用知识接口中只读，禁止绕过任务流程改写。

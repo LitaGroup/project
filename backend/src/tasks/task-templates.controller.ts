@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Param,
   ParseIntPipe,
@@ -14,6 +15,7 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import { TaskTemplate } from './task-template.entity';
 import {
   CreateTaskTemplateInput,
+  TaskTemplateActor,
   TaskTemplatesService,
   TaskTemplateWithFollow,
   UpdateTaskTemplateInput,
@@ -85,5 +87,63 @@ export class TaskTemplatesController {
   @HttpCode(204)
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.templatesService.remove(id);
+  }
+}
+
+/** 用户 Agent / 公共 Agent 记录用户身份；机器人 Token 仅记录机器人名称 */
+function resolveTemplateActor(req: AuthedRequest): TaskTemplateActor | null {
+  if (req.user) return { id: req.user.id, name: req.user.name };
+  if (req.worker) return { id: null, name: req.worker.name };
+  return null;
+}
+
+/** GET /api/task-templates.md：Agent 用的任务定义清单 */
+@Controller('task-templates.md')
+export class TaskTemplatesListMarkdownController {
+  constructor(private readonly templatesService: TaskTemplatesService) {}
+
+  @Get()
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  list(): Promise<string> {
+    return this.templatesService.listMarkdown();
+  }
+}
+
+/** 任务定义 Agent CRUD：详情与写操作 */
+@Controller('task-templates')
+export class TaskTemplatesMarkdownController {
+  constructor(private readonly templatesService: TaskTemplatesService) {}
+
+  @Get(':id.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  findOne(@Param('id', ParseIntPipe) id: number): Promise<string> {
+    return this.templatesService.findOneMarkdown(id);
+  }
+
+  @Post('create.md')
+  @HttpCode(200)
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  create(
+    @Body() dto: CreateTaskTemplateDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    return this.templatesService.createMarkdown(dto, resolveTemplateActor(req));
+  }
+
+  @Post(':id/update.md')
+  @HttpCode(200)
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTaskTemplateDto,
+  ): Promise<string> {
+    return this.templatesService.updateMarkdown(id, dto);
+  }
+
+  @Post(':id/delete.md')
+  @HttpCode(200)
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  remove(@Param('id', ParseIntPipe) id: number): Promise<string> {
+    return this.templatesService.removeMarkdown(id);
   }
 }

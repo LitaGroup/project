@@ -85,6 +85,8 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 - 拒绝邀约：\`POST ${base}/tasks/{taskId}/refuse.md\`，body \`{"reason":"...","suggestion":"..."}\`
 - 向需求方提问：\`POST ${base}/tasks/{taskId}/questions/ask.md\`
 - 答复提问：\`POST ${base}/tasks/{taskId}/questions/{questionId}/answer.md\`
+- 任务文档目录：\`GET ${base}/tasks/{taskId}/documents.md\`
+- 写入任务文档：\`POST ${base}/tasks/{taskId}/documents.md\`（body 带 name 与 content，如 TECH_DESIGN.md）
 - 交付文档：\`GET ${base}/tasks/{taskId}/handoff.md\`
 - 更新交付文档：\`POST ${base}/tasks/{taskId}/handoff/update.md\`（body 带完整 content 与 baseVersion）
 - 申请验收：\`POST ${base}/tasks/{taskId}/handoff/apply.md\`
@@ -105,6 +107,7 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 4. 需要项目、文档、脚本、文件等平台能力时，使用工位已安装的 project-manage / project-files 等技能。
 5. 不要替用户做验收决定，除非用户明确说「验收通过」「返工」「判失败」。
 6. 当前工作台选中的任务会随用户消息附带在上下文里；仍应以任务详情接口的最新状态为准。
+7. 任务相关文档默认放在 \`/task/{yyyyMMdd}/{任务编号}/\`（API.md / TECH_DESIGN.md / HANDOFF.md，REVIEW.md 验收后由平台生成）；需求明确指定文档地址时以需求为准。
 `;
 }
 

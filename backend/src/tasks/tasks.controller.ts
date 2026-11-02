@@ -19,6 +19,7 @@ import {
 import { Observable } from 'rxjs';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { WorkersService } from '../workers/workers.service';
 import { Task, TaskMissingItem } from './task.entity';
 import {
@@ -36,6 +37,7 @@ import {
 } from './task-delivery.service';
 import { TaskDispatchService } from './task-dispatch.service';
 import type { TaskDeliveryReportInput } from './task-delivery-report';
+import { TaskDocumentService } from './task-document.service';
 import { TaskHandoffService } from './task-handoff.service';
 import {
   AnswerQuestionInput,
@@ -127,6 +129,16 @@ class HandoffUpdateDto {
   baseVersion?: number;
 }
 
+/** 任务目录下的普通文档（API.md / TECH_DESIGN.md 等） */
+class TaskDocumentUpsertDto {
+  /** 文档名，支持 API / API.md / TECH_DESIGN.md */
+  name?: string;
+  /** 完整 Markdown 正文 */
+  content?: string;
+  /** 文档标题，缺省为「编号 标题 · 文档名.md」 */
+  title?: string;
+}
+
 /** AI 技能 task-deliver-reply：需求方通过或拒绝验收 */
 class DeliveryReplyDto implements DeliveryReplyInput {
   /** accept=通过验收；refuse=拒绝并退回执行 */
@@ -185,6 +197,7 @@ export class TasksController {
     private readonly taskChat: TaskChatService,
     private readonly taskHandoff: TaskHandoffService,
     private readonly deliveryService: TaskDeliveryService,
+    private readonly taskDocuments: TaskDocumentService,
     private readonly collaboration: TaskCollaborationService,
     private readonly workersService: WorkersService,
     private readonly tasksAgent: TasksAgentService,
@@ -398,6 +411,57 @@ export class TasksController {
       dto,
     );
     return this.collaboration.actionMarkdown('提问已答复', task);
+  }
+
+  /**
+   * 任务文档目录清单（含 HANDOFF，验收后含 REVIEW）。
+   * 任务相关文档默认归档到 /task/{yyyyMMdd}/{任务编号}/。
+   */
+  @Get(':id/documents.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async taskDocumentsIndex(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<string> {
+    const task = await this.tasksService.mustFind(id);
+    await this.taskDocuments.ensureHandoff(task);
+    const documents = await this.taskDocuments.listTaskDocuments(task);
+    return this.taskDocuments.taskDocumentsMarkdown(task, documents);
+  }
+
+  /**
+   * 写入任务目录下的普通文档（API.md / TECH_DESIGN.md 等）。
+   * HANDOFF / REVIEW 由任务流程维护，须走对应 handoff 接口。
+   */
+  @Post(':id/documents.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async upsertTaskDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: TaskDocumentUpsertDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.tasksService.mustFind(id);
+    this.assertTaskDocumentAuthor(task, req);
+    const entry = await this.taskDocuments.upsertTaskDocument(task, {
+      name: dto.name ?? '',
+      content: dto.content,
+      title: dto.title,
+      updatedBy: req.worker?.name ?? req.user?.name ?? '系统',
+    });
+    return [
+      mdFrontmatter({
+        title: `任务 ${task.code} 文档已更新`,
+        update: new Date(),
+      }),
+      `# 任务文档已更新`,
+      '',
+      `- 文档：\`${entry.name}\``,
+      `- 知识路径：\`${entry.path}\``,
+      `- 阅读地址：\`/api${entry.markdownUrl}\``,
+      `- 更新时间：${beijingTime(new Date())}`,
+      '',
+      `> 任务文档目录：\`${this.taskDocuments.taskDirectory(task)}\`。HANDOFF 请使用 \`POST /api/tasks/${task.id}/handoff/update.md\` 维护。`,
+      '',
+    ].join('\n');
   }
 
   /** 读取任务交付文档（任务全生命周期文档，Frontmatter 含平台维护的版本号）。 */
@@ -705,6 +769,19 @@ export class TasksController {
       throw new ForbiddenException('该操作仅接受机器人身份（X-Worker-Token）');
     }
     return req.worker;
+  }
+
+  /** 机器人令牌只能维护自己执行或自己作为需求方的任务文档；用户令牌按平台既有权限处理。 */
+  private assertTaskDocumentAuthor(task: Task, req: AuthedRequest): void {
+    if (!req.worker) return;
+    const isExecutor = task.agentId === req.worker.id;
+    const isRequester =
+      task.requesterType === 'worker' && task.requesterId === req.worker.id;
+    if (!isExecutor && !isRequester) {
+      throw new ForbiddenException(
+        '仅任务执行机器人或需求方机器人可以维护任务文档',
+      );
+    }
   }
 
   /**

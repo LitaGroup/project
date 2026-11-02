@@ -17,6 +17,11 @@ import { WorkerDebugController } from './worker-debug.controller';
 import { WorkerDebugService } from './worker-debug.service';
 import { PersonalAgentsService } from './personal-agents.service';
 import { WorkersController } from './workers.controller';
+import {
+  WorkersListMarkdownController,
+  WorkersMarkdownController,
+} from './workers-markdown.controller';
+import { WorkersMarkdownService } from './workers-markdown.service';
 import { WorkersService } from './workers.service';
 
 @Module({
@@ -32,9 +37,15 @@ import { WorkersService } from './workers.service';
     ]),
     ExecutorsModule,
   ],
-  controllers: [WorkerDebugController, WorkersController],
+  controllers: [
+    WorkerDebugController,
+    WorkersListMarkdownController,
+    WorkersMarkdownController,
+    WorkersController,
+  ],
   providers: [
     WorkersService,
+    WorkersMarkdownService,
     SystemWorkersService,
     WorkerAiService,
     WorkerOptimizeService,

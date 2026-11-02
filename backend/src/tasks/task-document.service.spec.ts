@@ -391,4 +391,123 @@ describe('TaskDocumentService 任务文档', () => {
     expect(migrated).toBe(0);
     expect(knowledge.update).not.toHaveBeenCalled();
   });
+
+  it('任务文档目录沿用 HANDOFF 所在目录，REVIEW 与 HANDOFF 同目录', () => {
+    currentTask = task({
+      handoffPath: '/task/20261020/TK-0001/HANDOFF',
+      acceptedAt: new Date('2026-10-28T12:00:00+08:00'),
+    });
+
+    expect(service.taskDirectory(currentTask)).toBe('/task/20261020/TK-0001');
+    expect(service.reviewPath(currentTask)).toBe(
+      '/task/20261020/TK-0001/REVIEW',
+    );
+    expect(service.taskDocumentPath(currentTask, 'TECH_DESIGN.md')).toBe(
+      '/task/20261020/TK-0001/TECH_DESIGN',
+    );
+  });
+
+  it('列任务目录文档时只取直属文章，HANDOFF/REVIEW 优先', async () => {
+    knowledge.listArticlesByPrefix.mockResolvedValue([
+      node('/task/20261028/TK-0001/API'),
+      node('/task/20261028/TK-0001/REVIEW'),
+      node('/task/20261028/TK-0001/HANDOFF'),
+      node('/task/20261028/TK-0001/sub/TECH_DESIGN'),
+    ]);
+
+    const documents = await service.listTaskDocuments(currentTask);
+
+    expect(knowledge.listArticlesByPrefix).toHaveBeenCalledWith(
+      '/task/20261028/TK-0001',
+    );
+    expect(documents.map((document) => document.name)).toEqual([
+      'HANDOFF.md',
+      'REVIEW.md',
+      'API.md',
+    ]);
+    expect(documents[2].markdownUrl).toBe(
+      '/docs/detail/task/20261028/TK-0001/API.md',
+    );
+  });
+
+  it('写入任务目录普通文档时补 .md 阅读名并生成 Frontmatter', async () => {
+    const document = await service.upsertTaskDocument(currentTask, {
+      name: 'TECH_DESIGN.md',
+      content: '# 技术方案\n\n正文',
+      updatedBy: '后端机器人',
+    });
+
+    expect(document.name).toBe('TECH_DESIGN.md');
+    expect(document.path).toBe('/task/20261028/TK-0001/TECH_DESIGN');
+    expect(knowledge.createArticleAtPath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/task/20261028/TK-0001/TECH_DESIGN',
+        title: 'TK-0001 活动页开发 · TECH_DESIGN.md',
+        content: expect.stringContaining('document: "TECH_DESIGN"') as string,
+      }),
+    );
+    expect(knowledge.createArticleAtPath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('updated_by: "后端机器人"') as string,
+      }),
+    );
+  });
+
+  it('HANDOFF / REVIEW 不允许从任务普通文档接口写入', async () => {
+    await expect(
+      service.upsertTaskDocument(currentTask, {
+        name: 'HANDOFF.md',
+        content: '# 覆盖',
+        updatedBy: '后端机器人',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.upsertTaskDocument(currentTask, {
+        name: 'review',
+        content: '# 覆盖',
+        updatedBy: '后端机器人',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(knowledge.update).not.toHaveBeenCalled();
+    expect(knowledge.createArticleAtPath).not.toHaveBeenCalled();
+  });
+
+  it('任务文档清单包含目录约定与阅读地址', () => {
+    const markdown = service.taskDocumentsMarkdown(currentTask, [
+      {
+        name: 'HANDOFF.md',
+        path: '/task/20261028/TK-0001/HANDOFF',
+        url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
+        markdownUrl: '/docs/detail/task/20261028/TK-0001/HANDOFF.md',
+        title: '交付文档',
+        updatedAt: '2026-10-28T10:00:00+08:00',
+      },
+      {
+        name: 'API.md',
+        path: '/task/20261028/TK-0001/API',
+        url: '/docs/detail/task/20261028/TK-0001/API',
+        markdownUrl: '/docs/detail/task/20261028/TK-0001/API.md',
+        title: '接口文档',
+        updatedAt: null,
+      },
+    ]);
+
+    expect(markdown).toContain('文档目录：`/task/20261028/TK-0001`');
+    expect(markdown).toContain('需求中明确指定文档地址时');
+    expect(markdown).toContain('API.md');
+    expect(markdown).toContain('/api/docs/detail/task/20261028/TK-0001/API.md');
+    expect(markdown).toContain('/tasks/1/documents.md');
+  });
+
+  it('任务文档名拒绝路径分隔符与空名称', async () => {
+    for (const name of ['', '../API', 'a/b', '.md']) {
+      await expect(
+        service.upsertTaskDocument(currentTask, {
+          name,
+          content: '正文',
+          updatedBy: '后端机器人',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
+  });
 });

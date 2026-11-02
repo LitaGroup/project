@@ -40,6 +40,29 @@ export interface TaskHandoffUpdateInput {
   updatedBy: string;
 }
 
+/** 任务目录下的文档（不含正文）：文件名为 `API.md` 这类带后缀的阅读名。 */
+export interface TaskDocumentEntry {
+  /** 阅读名，如 API.md / HANDOFF.md */
+  name: string;
+  /** 知识路径（不带 .md 后缀），如 /task/20261102/TK-0001/API */
+  path: string;
+  /** 网页阅读地址（不带 .md） */
+  url: string;
+  /** Markdown 接口地址（带 .md） */
+  markdownUrl: string;
+  title: string;
+  updatedAt: string | null;
+}
+
+export interface TaskAuxDocumentInput {
+  /** 文档名，支持 API / API.md / TECH_DESIGN.md */
+  name: string;
+  /** 完整 Markdown 正文（Frontmatter 由平台生成） */
+  content?: string;
+  title?: string;
+  updatedBy: string;
+}
+
 interface LegacyReviewDocument {
   node: KnowledgeNode;
   date: string;
@@ -50,6 +73,13 @@ interface LegacyReviewDocument {
 /** 新任务交付文档的初始正文（正文被编辑后即失效） */
 const INITIAL_HANDOFF_BODY = '> 正在处理中……';
 const HANDOFF_DOCUMENT = 'HANDOFF';
+const REVIEW_DOCUMENT = 'REVIEW';
+
+/** 任务目录下由平台统一维护、不能从通用文档接口写入的文档 */
+const PLATFORM_TASK_DOCUMENTS = new Set([HANDOFF_DOCUMENT, REVIEW_DOCUMENT]);
+
+/** 文档名：字母/数字开头，允许点、下划线、短横线（如 API.md、TECH_DESIGN.md） */
+const TASK_DOCUMENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** 旧版任务总结：/task/handoff/{yyyyMMdd}/{taskCode}/{version}.md */
 const LEGACY_REVIEW_PATH = /^\/task\/handoff\/(\d{8})\/([^/]+)\/(\d+)\.md$/;
@@ -58,8 +88,26 @@ const LEGACY_REVIEW_PATH = /^\/task\/handoff\/(\d{8})\/([^/]+)\/(\d+)\.md$/;
  * 早期任务文档把 `.md` 写进了知识路径（如 `/task/.../HANDOFF.md`）。
  * 知识接口把结尾 `.md` 当作 Markdown 视图后缀，这类节点无法通过浏览器或 API 访问，需去掉。
  */
-const SUFFIXED_TASK_DOCUMENT_PATH =
-  /^\/task\/(\d{8})\/([^/]+)\/(HANDOFF|REVIEW)\.md$/;
+const SUFFIXED_TASK_DOCUMENT_PATH = /^\/task\/(\d{8})\/([^/]+)\/([^/]+)\.md$/;
+
+/** 统一文档名：去掉可选的 .md 后缀；HANDOFF/REVIEW 大小写归一。 */
+function normalizeTaskDocumentName(raw: string): string {
+  const input = raw?.trim();
+  if (!input) throw new BadRequestException('文档名称不能为空');
+  const name = input.toLowerCase().endsWith('.md') ? input.slice(0, -3) : input;
+  if (!name || !TASK_DOCUMENT_NAME.test(name) || name.includes('..')) {
+    throw new BadRequestException(
+      '文档名称只能包含字母、数字、点、下划线和短横线（如 API.md、TECH_DESIGN.md）',
+    );
+  }
+  const upper = name.toUpperCase();
+  return PLATFORM_TASK_DOCUMENTS.has(upper) ? upper : name;
+}
+
+/** 知识路径里的文档名不带 .md，阅读名统一补上。 */
+function documentReadName(name: string): string {
+  return name.toLowerCase().endsWith('.md') ? name : `${name}.md`;
+}
 
 function dateStamp(value: Date): string {
   return beijingTime(value).slice(0, 10).replace(/-/g, '');
@@ -78,9 +126,10 @@ function frontmatterVersion(markdown: string): number | null {
 }
 
 /**
- * 任务文档：
+ * 任务文档（统一放在 /task/{yyyyMMdd}/{任务编号}/）：
  * - HANDOFF：任务创建时生成，执行机器人/需求方持续维护，申请验收时锁定版本
- * - REVIEW：验收通过后生成/覆盖的复盘文档
+ * - REVIEW：验收通过后生成/覆盖的复盘文档，与 HANDOFF 同目录
+ * - API / TECH_DESIGN 等：执行过程中由任务接口读写的普通文档
  * 知识路径不带 `.md` 后缀（`.md` 是知识接口的 Markdown 视图后缀）。
  * 同时负责把旧版 /task/handoff/{date}/{code}/{version}.md 收敛到 REVIEW。
  */
@@ -351,7 +400,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     });
   }
 
-  /** 复盘文档写入：固定使用验收日期路径，重新生成覆盖同一篇 */
+  /** 复盘文档写入：固定使用任务文档目录，重新生成覆盖同一篇 */
   async upsertReview(input: {
     task: Task;
     title: string;
@@ -361,15 +410,144 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     return this.upsertArticle(path, input.title, input.content);
   }
 
+  /**
+   * 任务文档目录：`/task/{yyyyMMdd}/{任务编号}`。
+   * 已登记 HANDOFF 的历史任务沿用其所在目录，保证 API/REVIEW 与 HANDOFF 同目录。
+   */
+  taskDirectory(task: Task): string {
+    const saved = task.handoffPath?.trim();
+    if (saved) {
+      const slash = saved.lastIndexOf('/');
+      if (slash > 0) return saved.slice(0, slash);
+    }
+    return `/task/${dateStamp(task.createdAt ?? new Date())}/${task.code}`;
+  }
+
+  /** 任务目录下某篇文档的知识路径（不带 .md） */
+  taskDocumentPath(task: Task, name: string): string {
+    return `${this.taskDirectory(task)}/${normalizeTaskDocumentName(name)}`;
+  }
+
+  /** 复盘文档与交付文档放在同一任务目录下 */
   reviewPath(task: Task): string {
-    const date = dateStamp(task.acceptedAt ?? task.deliveredAt ?? new Date());
-    return `/task/${date}/${task.code}/REVIEW`;
+    return `${this.taskDirectory(task)}/${REVIEW_DOCUMENT}`;
   }
 
   handoffPath(task: Task): string {
     const saved = task.handoffPath?.trim();
     if (saved) return saved;
-    return `/task/${dateStamp(task.createdAt ?? new Date())}/${task.code}/HANDOFF`;
+    return `${this.taskDirectory(task)}/${HANDOFF_DOCUMENT}`;
+  }
+
+  /** 列出任务目录下的文档（HANDOFF 优先，REVIEW 次之，其余按名称排序）。 */
+  async listTaskDocuments(task: Task): Promise<TaskDocumentEntry[]> {
+    this.assertKnowledge();
+    const directory = this.taskDirectory(task);
+    const nodes = await this.knowledge.listArticlesByPrefix(directory);
+    return nodes
+      .filter((node) => node.parentPath === directory)
+      .map((node) => this.documentEntry(node))
+      .sort((a, b) => {
+        const rank = (name: string): number =>
+          name === `${HANDOFF_DOCUMENT}.md`
+            ? 0
+            : name === `${REVIEW_DOCUMENT}.md`
+              ? 1
+              : 2;
+        return (
+          rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'en')
+        );
+      });
+  }
+
+  /**
+   * 写入任务目录下的普通文档（API.md / TECH_DESIGN.md 等）。
+   * HANDOFF 与 REVIEW 由任务流程维护，不允许从这里覆盖。
+   */
+  async upsertTaskDocument(
+    task: Task,
+    input: TaskAuxDocumentInput,
+  ): Promise<TaskDocumentEntry> {
+    const name = normalizeTaskDocumentName(input.name);
+    if (PLATFORM_TASK_DOCUMENTS.has(name)) {
+      throw new BadRequestException(
+        `${name}.md 由任务流程维护：交付文档请用 handoff/update.md，复盘文档在验收通过后由平台生成`,
+      );
+    }
+    const path = this.taskDocumentPath(task, name);
+    const now = new Date();
+    const title =
+      input.title?.trim() || `${task.code} ${task.title} · ${name}.md`;
+    const body = stripKnowledgeFrontmatter(input.content ?? '').trim();
+    const content = `${mdFrontmatter({
+      update: now,
+      document: name,
+      task: task.code,
+      updated_by: input.updatedBy,
+    })}${body}\n`;
+    await this.upsertArticle(path, title, content);
+    return {
+      name: `${name}.md`,
+      path,
+      url: `/docs/detail/${encodeKnowledgePath(path)}`,
+      markdownUrl: `/docs/detail/${encodeKnowledgePath(path)}.md`,
+      title,
+      updatedAt: now.toISOString(),
+    };
+  }
+
+  /** 任务文档目录的 Markdown 清单（Agent 读取约定与已有文档）。 */
+  taskDocumentsMarkdown(task: Task, documents: TaskDocumentEntry[]): string {
+    const directory = this.taskDirectory(task);
+    const lines = [
+      mdFrontmatter({
+        title: `任务 ${task.code} 文档`,
+        description: task.title,
+        update: new Date(),
+      }),
+      `# ${task.code} ${task.title} · 任务文档`,
+      '',
+      `- 文档目录：\`${directory}\``,
+      `- 目录约定：任务相关文档默认放在该目录；需求中明确指定文档地址时，以需求指定的地址为准。`,
+      `- 常用文档：\`API.md\`（接口）、\`TECH_DESIGN.md\`（技术方案）、\`HANDOFF.md\`（交付，执行中持续维护）、\`REVIEW.md\`（复盘，验收通过后由平台生成）。`,
+      `- 知识路径不带 \`.md\` 后缀：例如 \`API.md\` 的路径是 \`${directory}/API\`，阅读地址是 \`/api/docs/detail/${encodeKnowledgePath(directory)}/API.md\`。`,
+      '',
+      '## 已有文档',
+      '',
+    ];
+    if (documents.length === 0) {
+      lines.push('（暂无文档）', '');
+    } else {
+      lines.push(
+        '| 文档 | 知识路径 | 阅读地址 | 更新时间 |',
+        '| --- | --- | --- | --- |',
+      );
+      for (const document of documents) {
+        lines.push(
+          `| ${document.name} | \`${document.path}\` | \`/api${document.markdownUrl}\` | ${
+            document.updatedAt ? beijingTime(document.updatedAt) : '-'
+          } |`,
+        );
+      }
+      lines.push('');
+    }
+    lines.push(
+      '## 写入文档',
+      '',
+      '任务目录下的普通文档（不含 HANDOFF / REVIEW）使用任务接口写入，通用知识接口对 `/task/**` 只读：',
+      '',
+      '```bash',
+      'TOKEN=$(cat .opencode/agent-token)',
+      `curl -sS -X POST '{BASE}/api/tasks/${task.id}/documents.md' \\`,
+      '  -H "X-Worker-Token: $TOKEN" \\',
+      '  -H "Content-Type: application/json" \\',
+      '  -d \'{"name":"TECH_DESIGN.md","content":"# 技术方案\\n\\n..."}\'',
+      '```',
+      '',
+      'HANDOFF 使用 `POST /api/tasks/{id}/handoff/update.md` 维护；需求指定了项目文档或其它知识路径时，分别使用 `POST /api/documents/upsert.md` 或 `POST /api/docs/nodes/create.md`。',
+      '',
+    );
+    return lines.join('\n');
   }
 
   /** 按路径创建或覆盖文章 */
@@ -519,6 +697,17 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     return migrated;
   }
 
+  private documentEntry(node: KnowledgeNode): TaskDocumentEntry {
+    return {
+      name: documentReadName(node.name),
+      path: node.path,
+      url: `/docs/detail/${encodeKnowledgePath(node.path)}`,
+      markdownUrl: `/docs/detail/${encodeKnowledgePath(node.path)}.md`,
+      title: node.title,
+      updatedAt: node.updatedAt ? node.updatedAt.toISOString() : null,
+    };
+  }
+
   private handoffTitle(task: Task): string {
     return `${task.code} ${task.title} · 任务交付文档`;
   }
@@ -616,12 +805,9 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     const task = await this.tasks.findOne({
       where: { code: candidate.code },
     });
-    const targetDate = task?.acceptedAt
-      ? dateStamp(task.acceptedAt)
-      : task?.deliveredAt
-        ? dateStamp(task.deliveredAt)
-        : candidate.date;
-    const targetPath = `/task/${targetDate}/${candidate.code}/REVIEW`;
+    const targetPath = task
+      ? this.reviewPath(task)
+      : `/task/${candidate.date}/${candidate.code}/${REVIEW_DOCUMENT}`;
     const title = task
       ? `${task.code} ${task.title} · 任务复盘`
       : `${candidate.code} · 任务复盘`;

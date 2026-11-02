@@ -4,12 +4,20 @@ import { Worker } from '../workers/worker.entity';
 import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { TaskType } from './task-type.entity';
-import { TaskTypesController } from './task-types.controller';
+import {
+  TaskTypesController,
+  TaskTypesListMarkdownController,
+  TaskTypesMarkdownController,
+} from './task-types.controller';
 import { TaskTypesService } from './task-types.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([TaskType, Task, TaskTemplate, Worker])],
-  controllers: [TaskTypesController],
+  controllers: [
+    TaskTypesListMarkdownController,
+    TaskTypesMarkdownController,
+    TaskTypesController,
+  ],
   providers: [TaskTypesService],
   exports: [TaskTypesService],
 })

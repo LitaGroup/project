@@ -22,6 +22,9 @@ describe('TaskTemplatesService', () => {
   const taskTypes = {
     assertExists: jest.fn(),
   };
+  const workers = {
+    find: jest.fn(),
+  };
   let service: TaskTemplatesService;
 
   const template = (id: number): TaskTemplate => ({
@@ -38,9 +41,10 @@ describe('TaskTemplatesService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    workers.find.mockResolvedValue([]);
     service = new TaskTemplatesService(
       templates as unknown as Repository<TaskTemplate>,
-      {} as Repository<Worker>,
+      workers as unknown as Repository<Worker>,
       follows as unknown as Repository<TaskTemplateFollow>,
       taskTypes as unknown as TaskTypesService,
     );
@@ -108,5 +112,73 @@ describe('TaskTemplatesService', () => {
     await service.remove(5);
 
     expect(follows.delete).toHaveBeenCalledWith({ templateId: 5 });
+  });
+
+  describe('Agent Markdown', () => {
+    it('清单展示关联机器人名称和系统来源', async () => {
+      templates.find.mockResolvedValue([
+        {
+          ...template(6),
+          name: '未知任务',
+          agentIds: [1001, 9999],
+        },
+      ]);
+      workers.find.mockResolvedValue([{ id: 1001, name: '小王' }]);
+
+      const markdown = await service.listMarkdown();
+
+      expect(markdown).toContain('[6](/api/task-templates/6.md)');
+      expect(markdown).toContain('小王#1001');
+      expect(markdown).toContain('#9999');
+      expect(markdown).toContain('系统');
+      expect(markdown).toContain('POST /api/task-templates/create.md');
+    });
+
+    it('详情包含任务定义描述与系统限制', async () => {
+      templates.findOne.mockResolvedValue({
+        ...template(10),
+        description: '任务范围\n交付要求',
+      });
+
+      const markdown = await service.findOneMarkdown(10);
+
+      expect(markdown).toContain('系统（不可改名、不可修改类型、不可删除）');
+      expect(markdown).toContain('任务范围');
+      expect(markdown).toContain('交付要求');
+    });
+
+    it('机器人 Token 创建时记录机器人名称但不伪造用户 ID', async () => {
+      templates.findOne.mockResolvedValue(null);
+      taskTypes.assertExists.mockResolvedValue('其它');
+      templates.save.mockImplementation((value: TaskTemplate) =>
+        Promise.resolve({ ...value, id: 1000 }),
+      );
+
+      const markdown = await service.createMarkdown(
+        { name: '机器人定义' },
+        { id: null, name: '机器人 A' },
+      );
+
+      expect(templates.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdById: null,
+          createdByName: '机器人 A',
+        }),
+      );
+      expect(markdown).toContain('# 任务定义已创建');
+      expect(markdown).toContain('GET /api/task-templates/1000.md');
+    });
+
+    it('删除结果不再返回失效的详情链接', async () => {
+      const target = { ...template(7), name: '待删除定义' };
+      templates.findOne.mockResolvedValue(target);
+      templates.remove.mockResolvedValue(target);
+
+      const markdown = await service.removeMarkdown(7);
+
+      expect(markdown).toContain('# 任务定义已删除');
+      expect(markdown).toContain('已创建的历史任务不受影响');
+      expect(markdown).not.toContain('/api/task-templates/7.md');
+    });
   });
 });

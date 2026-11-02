@@ -1897,9 +1897,34 @@ export class TaskDispatchService
     );
     sections.push(
       [
+        '# 任务文档',
+        '',
+        `任务文档目录：\`${this.taskDocuments.taskDirectory(task)}\`。`,
+        '约定：',
+        '1. 需求中明确指定了文档地址（项目文档、知识路径或平台文档链接）时，按指定地址写入；没有指定时，任务相关文档一律放在上述任务文档目录。',
+        '2. 常用文档名：`API.md` 接口文档、`TECH_DESIGN.md` 技术方案、`HANDOFF.md` 交付文档；`REVIEW.md` 由平台在验收通过后生成，不要自行创建或覆盖。',
+        '3. 知识路径不带 `.md` 后缀，例如 `TECH_DESIGN.md` 对应 `/task/{yyyyMMdd}/{任务编号}/TECH_DESIGN`，阅读地址是 `/api/docs/detail/task/{yyyyMMdd}/{任务编号}/TECH_DESIGN.md`。',
+        '4. 任务目录下的普通文档用任务接口读写（通用知识接口对 `/task/**` 只读）：',
+        '',
+        '```bash',
+        'TOKEN=$(cat .opencode/agent-token)',
+        `curl -sS '${this.apiUrl}/tasks/${task.id}/documents.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN"',
+        '',
+        `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/documents.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN" \\',
+        '  -H "Content-Type: application/json" \\',
+        '  -d \'{"name":"TECH_DESIGN.md","content":"# 技术方案\\n\\n..."}\'',
+        '```',
+        '',
+        '5. 需求指定的是项目文档时用 `POST /api/documents/upsert.md`（按 `projectId + fileName`），指定的是其它知识路径时用 `POST /api/docs/nodes/create.md`。',
+      ].join('\n'),
+    );
+    sections.push(
+      [
         '# 交付文档（HANDOFF）',
         '',
-        `本任务的交付文档路径：\`${handoffPath}\`，当前版本：v${handoffVersion}。`,
+        `本任务的交付文档：\`${handoffPath}\`（即 \`HANDOFF.md\`），当前版本：v${handoffVersion}。`,
         '文档从任务创建时即存在，正文完全由你根据任务内容、任务定义、输出要求和实际进展编写；平台只维护 Frontmatter 中的版本号和更新时间。',
         '',
         '要求：',

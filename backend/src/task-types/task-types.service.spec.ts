@@ -283,4 +283,62 @@ describe('TaskTypesService', () => {
       );
     });
   });
+
+  describe('Agent Markdown', () => {
+    it('清单包含 frontmatter、详情链接和系统类型说明', async () => {
+      typesRepo.find.mockResolvedValue([
+        typeOf({
+          id: 1,
+          name: '其它',
+          description: '第一行\n第二行 | 竖线',
+        }),
+      ]);
+
+      const markdown = await service.listMarkdown();
+
+      expect(markdown).toContain('update: "');
+      expect(markdown).toContain('[1](/api/task-types/1.md)');
+      expect(markdown).toContain('系统');
+      expect(markdown).toContain('第一行 第二行 \\| 竖线');
+      expect(markdown).toContain('POST /api/task-types/create.md');
+    });
+
+    it('详情包含完整描述和系统类型限制', async () => {
+      typesRepo.findOne.mockResolvedValue(
+        typeOf({ id: 2, name: '未知任务', description: '系统兜底' }),
+      );
+
+      const markdown = await service.findOneMarkdown(2);
+
+      expect(markdown).toContain('# 未知任务');
+      expect(markdown).toContain('系统（名称不可修改，不可删除）');
+      expect(markdown).toContain('系统兜底');
+    });
+
+    it('创建返回 Markdown 结果和阅读地址', async () => {
+      typesRepo.findOne.mockResolvedValue(null);
+      typesRepo.save.mockImplementation((value: TaskType) =>
+        Promise.resolve({ ...value, id: 9 }),
+      );
+
+      const markdown = await service.createMarkdown({
+        name: '数据分析',
+        description: '数据查询',
+      });
+
+      expect(markdown).toContain('# 任务类型已创建');
+      expect(markdown).toContain('GET /api/task-types/9.md');
+    });
+
+    it('删除先校验再删除，并在结果中说明类型名称', async () => {
+      typesRepo.findOne.mockResolvedValue(typeOf({ id: 3, name: '测试' }));
+
+      const markdown = await service.removeMarkdown(3);
+
+      expect(typesRepo.remove).toHaveBeenCalled();
+      expect(markdown).toContain('# 任务类型已删除');
+      expect(markdown).toContain('名称：测试');
+      expect(markdown).not.toContain('/api/task-types/3.md');
+    });
+  });
 });

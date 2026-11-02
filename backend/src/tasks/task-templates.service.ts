@@ -6,8 +6,10 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { WorkerRole } from '../common/enums';
+import { mdFrontmatter } from '../common/frontmatter';
+import { markdownCell, markdownLabel } from '../common/markdown-table';
 import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 import { TaskTypesService } from '../task-types/task-types.service';
 import { Worker } from '../workers/worker.entity';
@@ -35,9 +37,9 @@ export interface CreateTaskTemplateInput {
 
 export type UpdateTaskTemplateInput = Partial<CreateTaskTemplateInput>;
 
-/** 创建人信息（来自当前登录用户） */
+/** 创建人信息（用户/公共 Agent 记录用户 ID；机器人 Token 仅记录机器人名称） */
 export interface TaskTemplateActor {
-  id: number;
+  id: number | null;
   name: string;
 }
 
@@ -191,6 +193,150 @@ export class TaskTemplatesService implements OnModuleInit {
       throw new NotFoundException(`TaskTemplate ${id} not found`);
     }
     return template;
+  }
+
+  /** Agent 清单：GET /api/task-templates.md */
+  async listMarkdown(): Promise<string> {
+    const templates = await this.findAll();
+    const agentNames = await this.agentNames(
+      templates.flatMap((template) => template.agentIds ?? []),
+    );
+    const lines = [
+      mdFrontmatter({ title: '任务定义' }),
+      '# 任务定义',
+      '',
+      `共 ${templates.length} 个任务定义。`,
+      '',
+      '| ID | 名称 | 任务类型 | 处理机器人 | 来源 | 创建人 | 更新时间 |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
+    ];
+    for (const template of templates) {
+      lines.push(
+        `| [${template.id}](/api/task-templates/${template.id}.md) | ${markdownCell(template.name)} | ${markdownCell(template.type)} | ${markdownCell(this.agentLabel(template.agentIds, agentNames))} | ${isSystemTaskTemplateId(template.id) ? '系统' : '自定义'} | ${markdownCell(template.createdByName ?? '-')} | ${template.updatedAt.toISOString()} |`,
+      );
+    }
+    if (templates.length === 0) {
+      lines.push('| - | （暂无任务定义） | - | - | - | - | - |');
+    }
+    lines.push(
+      '',
+      '系统任务定义（ID 6、10-15）不可改名、不可修改类型、不可删除；描述和处理机器人仍可维护。',
+      '',
+      '## AI 操作',
+      '',
+      '```bash',
+      'curl -X POST /api/task-templates/create.md -H \'Content-Type: application/json\' -d \'{"name":"活动前端开发","type":"前端开发","description":"任务定义描述","agentIds":[1001]}\'  # 创建',
+      'curl -X POST /api/task-templates/{id}/update.md -H \'Content-Type: application/json\' -d \'{"description":"新的任务定义描述","agentIds":[1001,1002]}\'  # 编辑',
+      'curl -X POST /api/task-templates/{id}/delete.md  # 删除（系统定义拒绝）',
+      '```',
+      '',
+    );
+    return lines.join('\n');
+  }
+
+  /** Agent 详情：GET /api/task-templates/:id.md */
+  async findOneMarkdown(id: number): Promise<string> {
+    const template = await this.findOne(id);
+    const agentNames = await this.agentNames(template.agentIds ?? []);
+    return [
+      mdFrontmatter({ update: template.updatedAt, title: template.name }),
+      `# ${template.name}`,
+      '',
+      `- ID：${template.id}`,
+      `- 任务类型：${template.type}`,
+      `- 来源：${isSystemTaskTemplateId(id) ? '系统（不可改名、不可修改类型、不可删除）' : '自定义'}`,
+      `- 处理机器人：${this.agentLabel(template.agentIds, agentNames)}`,
+      `- 创建人：${template.createdByName ?? '—'}`,
+      `- 创建时间：${template.createdAt.toISOString()}`,
+      `- 更新时间：${template.updatedAt.toISOString()}`,
+      '',
+      '## 任务定义描述',
+      '',
+      template.description?.trim() || '（暂无任务定义描述）',
+      '',
+      '## AI 操作',
+      '',
+      '```bash',
+      `curl -X POST /api/task-templates/${template.id}/update.md -H 'Content-Type: application/json' -d '{"description":"新的任务定义描述","agentIds":[1001]}'  # 编辑`,
+      `curl -X POST /api/task-templates/${template.id}/delete.md  # 删除（系统定义拒绝）`,
+      '```',
+      '',
+    ].join('\n');
+  }
+
+  /** Agent 创建：POST /api/task-templates/create.md */
+  async createMarkdown(
+    input: CreateTaskTemplateInput,
+    actor?: TaskTemplateActor | null,
+  ): Promise<string> {
+    const template = await this.create(input, actor);
+    return this.renderMutationMarkdown('创建', template);
+  }
+
+  /** Agent 编辑：POST /api/task-templates/:id/update.md */
+  async updateMarkdown(
+    id: number,
+    input: UpdateTaskTemplateInput,
+  ): Promise<string> {
+    const template = await this.update(id, input);
+    return this.renderMutationMarkdown('更新', template);
+  }
+
+  /** Agent 删除：POST /api/task-templates/:id/delete.md */
+  async removeMarkdown(id: number): Promise<string> {
+    const template = await this.findOne(id);
+    await this.remove(id);
+    return [
+      mdFrontmatter({ title: template.name }),
+      '# 任务定义已删除',
+      '',
+      `- ID：${template.id}`,
+      `- 名称：${template.name}`,
+      `- 任务类型：${template.type}`,
+      '',
+      '已创建的历史任务不受影响。',
+      '',
+    ].join('\n');
+  }
+
+  private renderMutationMarkdown(
+    action: string,
+    template: TaskTemplate,
+  ): string {
+    return [
+      mdFrontmatter({ update: template.updatedAt, title: template.name }),
+      `# 任务定义已${action}`,
+      '',
+      `- ID：${template.id}`,
+      `- 名称：${template.name}`,
+      `- 任务类型：${template.type}`,
+      `- 来源：${isSystemTaskTemplateId(template.id) ? '系统' : '自定义'}`,
+      `- 阅读地址：GET /api/task-templates/${template.id}.md`,
+      '',
+    ].join('\n');
+  }
+
+  private async agentNames(agentIds: number[]): Promise<Map<number, string>> {
+    const ids = [...new Set(agentIds)].filter(
+      (id) => Number.isInteger(id) && id > 0,
+    );
+    if (ids.length === 0) return new Map();
+    const workers = await this.workers.find({ where: { id: In(ids) } });
+    return new Map(workers.map((worker) => [worker.id, worker.name]));
+  }
+
+  private agentLabel(
+    agentIds: number[] | null | undefined,
+    names: Map<number, string>,
+  ): string {
+    const ids = agentIds ?? [];
+    if (ids.length === 0) return '—';
+    return ids
+      .map((id) => {
+        const name = names.get(id);
+        return name ? `${markdownLabel(name)}#${id}` : `#${id}`;
+      })
+      .join('、');
   }
 
   async create(

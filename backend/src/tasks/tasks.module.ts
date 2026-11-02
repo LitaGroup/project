@@ -26,7 +26,11 @@ import { TaskLoopService } from './task-loop.service';
 import { TaskNotifyService } from './task-notify.service';
 import { TaskQuestionAutoAnswerService } from './task-question-auto-answer.service';
 import { TaskRealtimeService } from './task-realtime.service';
-import { TaskTemplatesController } from './task-templates.controller';
+import {
+  TaskTemplatesController,
+  TaskTemplatesListMarkdownController,
+  TaskTemplatesMarkdownController,
+} from './task-templates.controller';
 import { TaskTemplatesService } from './task-templates.service';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
@@ -59,6 +63,8 @@ import { WorkbenchService } from './workbench.service';
   ],
   controllers: [
     TasksController,
+    TaskTemplatesListMarkdownController,
+    TaskTemplatesMarkdownController,
     TaskTemplatesController,
     WorkbenchController,
     TasksListMarkdownController,

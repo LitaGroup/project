@@ -59,6 +59,8 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 - 执行中 → 待反馈：需要需求方澄清时调用 task-question-ask，由 project 创建和展示提问；不要使用 opencode 原生 question。调用后停止本轮，等待平台恢复。
 - 待反馈 → 待继续 → 执行中：需求方答复后，平台在机器人空闲时恢复原任务会话。
 - 执行中维护交付文档：任务创建时就生成 HANDOFF，执行过程中持续调用 task-handoff-update 写入当前进展和最终交付内容，便于需求方实时查看。
+- 任务文档目录：任务相关文档默认放在 /task/{yyyyMMdd}/{任务编号}/，常用 API.md（接口）、TECH_DESIGN.md（技术方案）、HANDOFF.md（交付）、REVIEW.md（复盘，验收后平台生成）；需求明确指定文档地址时按指定地址写入，不要另起目录。
+- 任务目录下的普通文档用 task-documents-list / task-documents-update 读写；HANDOFF 仍用 task-handoff-update，REVIEW 不要自行创建。
 - 执行中 → 待验收：完成、自检并准备好交付物后调用 task-handoff-apply；申请验收只锁定当前交付文档版本，会话结束不等于完成，未申请验收会一直保持执行中。
 - 待验收 → 完成/待继续或执行中/失败：只能由任务需求方分别调用 task-handoff-accept、task-handoff-refuse 或 task-fail。机器人不得代替需求方验收或判失败。
 
@@ -84,6 +86,8 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 - task-refuse：POST /api/tasks/{taskId}/refuse.md
 - task-question-ask：POST /api/tasks/{taskId}/questions/ask.md
 - task-question-answer：POST /api/tasks/{taskId}/questions/{questionId}/answer.md
+- task-documents-list：GET /api/tasks/{taskId}/documents.md
+- task-documents-update：POST /api/tasks/{taskId}/documents.md
 - task-handoff-read：GET /api/tasks/{taskId}/handoff.md
 - task-handoff-update：POST /api/tasks/{taskId}/handoff/update.md
 - task-handoff-apply：POST /api/tasks/{taskId}/handoff/apply.md

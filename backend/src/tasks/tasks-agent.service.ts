@@ -13,6 +13,7 @@ import { Worker } from '../workers/worker.entity';
 import { PersonalAgentsService } from '../workers/personal-agents.service';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
+import { TaskDocumentService } from './task-document.service';
 import { TaskEvent } from './task-event.entity';
 import { CreateTaskInput, TasksService } from './tasks.service';
 
@@ -63,6 +64,7 @@ export class TasksAgentService {
     @InjectRepository(User)
     private readonly users: Repository<User>,
     private readonly tasksService: TasksService,
+    private readonly taskDocuments: TaskDocumentService,
     private readonly workersService: WorkersService,
     private readonly personalAgents: PersonalAgentsService,
   ) {}
@@ -218,6 +220,10 @@ export class TasksAgentService {
       );
     }
     const names = await this.namesOf([task]);
+    const documents = await this.taskDocuments
+      .listTaskDocuments(task)
+      .catch(() => []);
+    const directory = this.taskDocuments.taskDirectory(task);
     const children = task.children ?? [];
     const events = (task.events ?? []).slice(0, 20);
     const lines: string[] = [
@@ -240,7 +246,27 @@ export class TasksAgentService {
       task.handoffPath
         ? `- 交付文档：[${task.handoffPath}](/api/tasks/${task.id}/handoff.md)（v${task.handoffVersion}${task.handoffSubmittedVersion ? `，已提交 v${task.handoffSubmittedVersion}` : ''}）`
         : '',
+      `- 任务文档目录：\`${directory}\`（需求明确指定文档地址时以需求为准）`,
       '',
+      '## 任务文档',
+      '',
+      `任务相关文档默认放在 \`${directory}\`：\`API.md\` 接口、\`TECH_DESIGN.md\` 技术方案、\`HANDOFF.md\` 交付、\`REVIEW.md\` 复盘（验收后平台生成）。`,
+      '',
+    ];
+    if (documents.length === 0) {
+      lines.push('（暂无其它文档）', '');
+    } else {
+      lines.push('| 文档 | 阅读地址 | 更新时间 |', '| --- | --- | --- |');
+      for (const document of documents) {
+        lines.push(
+          `| ${document.name} | [/api${document.markdownUrl}](/api${document.markdownUrl}) | ${
+            document.updatedAt ? beijingTime(document.updatedAt) : '-'
+          } |`,
+        );
+      }
+      lines.push('');
+    }
+    lines.push(
       '## 任务描述',
       '',
       body(task.description),
@@ -261,7 +287,7 @@ export class TasksAgentService {
       '',
       body(task.workPlan),
       '',
-    ];
+    );
     if ((task.missingItems ?? []).length > 0) {
       lines.push('## 待反馈事项', '');
       for (const item of task.missingItems ?? []) {
@@ -303,6 +329,8 @@ export class TasksAgentService {
       '- 答复：`POST /api/tasks/{id}/questions/{questionId}/answer.md`',
       '- 交付文档：`GET /api/tasks/{id}/handoff.md`',
       '- 更新交付文档：`POST /api/tasks/{id}/handoff/update.md`（body 带 `content` 与 `baseVersion`）',
+      '- 任务文档目录：`GET /api/tasks/{id}/documents.md`',
+      '- 写入任务文档：`POST /api/tasks/{id}/documents.md`（body 带 `name` 与 `content`，如 `TECH_DESIGN.md`）',
       '- 申请验收：`POST /api/tasks/{id}/handoff/apply.md`',
       '- 验收通过：`POST /api/tasks/{id}/handoff/accept.md`',
       '- 验收返工：`POST /api/tasks/{id}/handoff/refuse.md`',

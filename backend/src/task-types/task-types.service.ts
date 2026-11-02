@@ -9,6 +9,8 @@ import { Repository } from 'typeorm';
 import { Worker } from '../workers/worker.entity';
 import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
+import { mdFrontmatter } from '../common/frontmatter';
+import { markdownCell, markdownLabel } from '../common/markdown-table';
 import {
   DEFAULT_TASK_TYPES,
   SYSTEM_TASK_TYPE_NAMES,
@@ -110,6 +112,126 @@ export class TaskTypesService implements OnModuleInit {
       throw new NotFoundException(`TaskType ${id} not found`);
     }
     return type;
+  }
+
+  /** Agent 清单：GET /api/task-types.md */
+  async listMarkdown(): Promise<string> {
+    const types = await this.findAll();
+    const lines = [
+      mdFrontmatter({ title: '任务类型' }),
+      '# 任务类型',
+      '',
+      `共 ${types.length} 个类型。`,
+      '',
+      '| ID | 名称 | 来源 | 描述 | 更新时间 |',
+      '| --- | --- | --- | --- | --- |',
+    ];
+    for (const type of types) {
+      lines.push(
+        `| [${type.id}](/api/task-types/${type.id}.md) | ${markdownCell(type.name)} | ${this.isSystemType(type) ? '系统' : '自定义'} | ${markdownCell(markdownLabel(type.description))} | ${type.updatedAt.toISOString()} |`,
+      );
+    }
+    if (types.length === 0) {
+      lines.push('| - | （暂无任务类型） | - | - | - |');
+    }
+    lines.push(
+      '',
+      '系统类型「其它」「未知任务」「工单」不可改名或删除，但允许修改描述。',
+      '',
+      '## AI 操作',
+      '',
+      '```bash',
+      'curl -X POST /api/task-types/create.md -H \'Content-Type: application/json\' -d \'{"name":"数据分析","description":"数据查询与分析"}\'  # 创建',
+      'curl -X POST /api/task-types/{id}/update.md -H \'Content-Type: application/json\' -d \'{"name":"新类型名称","description":"新的描述"}\'  # 编辑（改名会同步任务/任务定义/机器人任务定义）',
+      'curl -X POST /api/task-types/{id}/delete.md  # 删除（被引用或系统类型时拒绝）',
+      '```',
+      '',
+    );
+    return lines.join('\n');
+  }
+
+  /** Agent 详情：GET /api/task-types/:id.md */
+  async findOneMarkdown(id: number): Promise<string> {
+    const type = await this.findOne(id);
+    return [
+      mdFrontmatter({ update: type.updatedAt, title: type.name }),
+      `# ${type.name}`,
+      '',
+      `- ID：${type.id}`,
+      `- 来源：${this.isSystemType(type) ? '系统（名称不可修改，不可删除）' : '自定义'}`,
+      `- 创建时间：${type.createdAt.toISOString()}`,
+      `- 更新时间：${type.updatedAt.toISOString()}`,
+      '',
+      '## 类型描述',
+      '',
+      type.description.trim() || '（暂无描述）',
+      '',
+      '## AI 操作',
+      '',
+      '```bash',
+      `curl -X POST /api/task-types/${type.id}/update.md -H 'Content-Type: application/json' -d '{"description":"新的描述"}'  # 编辑`,
+      `curl -X POST /api/task-types/${type.id}/delete.md  # 删除（系统类型或仍被引用时拒绝）`,
+      '```',
+      '',
+    ].join('\n');
+  }
+
+  /** Agent 创建：POST /api/task-types/create.md */
+  async createMarkdown(input: CreateTaskTypeInput): Promise<string> {
+    const type = await this.create(input);
+    return this.renderMutationMarkdown('创建', type);
+  }
+
+  /** Agent 编辑：POST /api/task-types/:id/update.md */
+  async updateMarkdown(
+    id: number,
+    input: UpdateTaskTypeInput,
+  ): Promise<string> {
+    const before = await this.findOne(id);
+    const type = await this.update(id, input);
+    const renamed = before.name !== type.name;
+    return this.renderMutationMarkdown('更新', type, { renamed });
+  }
+
+  /** Agent 删除：POST /api/task-types/:id/delete.md */
+  async removeMarkdown(id: number): Promise<string> {
+    const type = await this.findOne(id);
+    await this.remove(id);
+    return [
+      mdFrontmatter({ title: type.name }),
+      '# 任务类型已删除',
+      '',
+      `- ID：${type.id}`,
+      `- 名称：${type.name}`,
+      '',
+    ].join('\n');
+  }
+
+  private isSystemType(type: TaskType): boolean {
+    return SYSTEM_TASK_TYPE_NAMES.includes(type.name);
+  }
+
+  private renderMutationMarkdown(
+    action: string,
+    type: TaskType,
+    options?: { renamed?: boolean },
+  ): string {
+    const lines = [
+      mdFrontmatter({ update: type.updatedAt, title: type.name }),
+      `# 任务类型已${action}`,
+      '',
+      `- ID：${type.id}`,
+      `- 名称：${type.name}`,
+      `- 来源：${this.isSystemType(type) ? '系统' : '自定义'}`,
+      `- 阅读地址：GET /api/task-types/${type.id}.md`,
+    ];
+    if (options?.renamed) {
+      lines.push(
+        '- 引用同步：已同步任务、任务定义与机器人任务定义中的类型名称',
+      );
+    }
+    lines.push('');
+    return lines.join('\n');
   }
 
   async create(input: CreateTaskTypeInput): Promise<TaskType> {

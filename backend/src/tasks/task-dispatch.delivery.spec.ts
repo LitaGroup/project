@@ -44,6 +44,7 @@ describe('TaskDispatchService 显式申请验收', () => {
     ensureHandoff: jest.Mock;
     prepareForAcceptance: jest.Mock;
     handoffPath: jest.Mock;
+    taskDirectory: jest.Mock;
   };
   let service: TaskDispatchService;
 
@@ -92,6 +93,7 @@ describe('TaskDispatchService 显式申请验收', () => {
       ensureHandoff: jest.fn().mockResolvedValue(handoff),
       prepareForAcceptance: jest.fn().mockResolvedValue(handoff),
       handoffPath: jest.fn().mockReturnValue('/task/20261028/TK-0001/HANDOFF'),
+      taskDirectory: jest.fn().mockReturnValue('/task/20261028/TK-0001'),
     };
     service = new TaskDispatchService(
       tasksRepo as never,
@@ -120,6 +122,9 @@ describe('TaskDispatchService 显式申请验收', () => {
       service as unknown as { buildPrompt(task: Task): Promise<string> }
     ).buildPrompt(baseTask());
 
+    expect(prompt).toContain('任务文档目录：`/task/20261028/TK-0001`');
+    expect(prompt).toContain('TECH_DESIGN.md');
+    expect(prompt).toContain('/tasks/1/documents.md');
     expect(prompt).toContain('交付文档（HANDOFF）');
     expect(prompt).toContain('/tasks/1/handoff/update.md');
     expect(prompt).toContain('当前版本：v3');
