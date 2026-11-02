@@ -17,6 +17,7 @@ export interface OptimizePromptInput {
   executorId?: number | null;
   providerId?: string | null;
   modelId?: string | null;
+  variant?: string | null;
 }
 
 /** 优化请求解析出的执行端点 */
@@ -24,6 +25,7 @@ export interface OptimizeEndpoint {
   executor: Executor;
   providerId: string;
   modelId: string;
+  variant: string | null;
   location?: { directory: string };
 }
 
@@ -73,10 +75,14 @@ export class WorkerAiService {
     endpoint: OptimizeEndpoint,
     hooks?: OptimizeRunHooks,
   ): Promise<string> {
-    const { executor, providerId, modelId, location } = endpoint;
+    const { executor, providerId, modelId, variant, location } = endpoint;
     const text = await runOpencodePrompt(new OpencodeClient(executor), {
       title: '优化机器人 AGENTS.md',
-      model: { id: modelId, providerID: providerId },
+      model: {
+        id: modelId,
+        providerID: providerId,
+        ...(variant ? { variant } : {}),
+      },
       location,
       prompt: `${PROMPT_OPTIMIZE_SYSTEM}\n\n---\n\n请优化以下机器人 AGENTS.md：\n\n${content}`,
       timeoutMs: 5 * 60_000,
@@ -92,6 +98,7 @@ export class WorkerAiService {
       : null;
     let providerId = input.providerId?.trim() || null;
     let modelId = input.modelId?.trim() || null;
+    let variant = input.variant?.trim() || null;
 
     let executor = input.executorId
       ? await this.executors.findOne({ where: { id: input.executorId } })
@@ -103,6 +110,7 @@ export class WorkerAiService {
       if (executor) {
         providerId ??= worker.providerId;
         modelId ??= worker.modelId;
+        variant ??= worker.variant;
       }
     }
     if (!executor) {
@@ -117,6 +125,7 @@ export class WorkerAiService {
         if (executor) {
           providerId ??= scheduler.providerId;
           modelId ??= scheduler.modelId;
+          variant ??= scheduler.variant;
         }
       }
     }
@@ -157,6 +166,7 @@ export class WorkerAiService {
       executor,
       providerId,
       modelId,
+      variant,
       location: workdir ? { directory: workdir } : undefined,
     };
   }

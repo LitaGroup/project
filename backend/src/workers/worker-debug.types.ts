@@ -4,6 +4,9 @@ import type {
 } from '../executors/opencode-client';
 import type { OpencodeTodo } from '../executors/opencode-todos';
 
+/** opencode 主 Agent 模式：build=可修改执行，plan=只分析规划 */
+export type WorkerDebugMode = 'build' | 'plan';
+
 /** 可调试机器人（调试页下拉/面板展示用） */
 export interface WorkerDebugOption {
   id: number;
@@ -13,6 +16,8 @@ export interface WorkerDebugOption {
   executorName: string;
   providerId: string;
   modelId: string;
+  /** 机器人默认思考等级（空=模型默认） */
+  variant: string | null;
 }
 
 /** 提问状态：待回答 / 已回答 / 已跳过 / 已失效（本轮结束等） */
@@ -31,6 +36,48 @@ export interface WorkerDebugQuestion {
   answers?: string[][];
   askedAt: string;
   toolCallId?: string;
+}
+
+/** 调试会话中用户选择的模型与思考等级 */
+export interface WorkerDebugModelSelection {
+  providerId: string;
+  modelId: string;
+  /** 思考等级变体 id；null 表示使用模型默认值 */
+  variant: string | null;
+}
+
+/** 模型的可选思考等级 */
+export interface WorkerDebugModelVariant {
+  id: string;
+  name: string;
+}
+
+/** 可切换的模型（附带思考等级变体） */
+export interface WorkerDebugModel {
+  id: string;
+  name: string;
+  variants: WorkerDebugModelVariant[];
+}
+
+/** 按供应商分组的模型清单 */
+export interface WorkerDebugModelProvider {
+  id: string;
+  name: string;
+  models: WorkerDebugModel[];
+}
+
+/** 我的 AGENT 模型选择器数据 */
+export interface WorkerDebugModelCatalog {
+  current: WorkerDebugModelSelection;
+  providers: WorkerDebugModelProvider[];
+}
+
+/** 对话附件（文件上传后按公开 URL 随消息发送） */
+export interface WorkerDebugAttachment {
+  name: string;
+  url: string;
+  size?: number;
+  mime?: string;
 }
 
 /** 机器人调试过程中的工具调用（与任务对话的工具结构保持一致） */
@@ -54,6 +101,8 @@ export interface WorkerDebugMessage {
   reasoning?: string;
   status: 'running' | 'complete' | 'error';
   createdAt: string;
+  /** 用户消息携带的附件（文件上传后的公开地址） */
+  files?: WorkerDebugAttachment[];
   /** message=普通对话气泡；question=机器人提问卡片（缺省按 message 处理） */
   kind?: 'message' | 'question';
   /** kind=question 时的问答卡片数据（独立消息，不打断助手文本流） */
@@ -70,6 +119,10 @@ export interface DebugStreamPayload {
 
 export interface WorkerDebugSnapshot {
   worker: WorkerDebugOption;
+  /** 当前选择/生效的模型与思考等级（我的 AGENT 选择器用） */
+  model: WorkerDebugModelSelection;
+  /** 当前主 Agent 模式（build / plan） */
+  mode: WorkerDebugMode;
   /** opencode 会话在首条消息发送时创建，7 天内复用同一会话续聊 */
   sessionId: string | null;
   status: 'idle' | 'running';

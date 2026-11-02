@@ -395,12 +395,13 @@ function KnowledgeArticleView({
       {error && <p className="text-sm">保存失败：{error}</p>}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-background">
         {/* 正文超出一屏时在面板内滚动：外层 overflow-hidden 只负责圆角裁剪 */}
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="md-editor-scroll min-h-0 flex-1">
           <MarkdownEditor
             key={`${article.id}:${article.updatedAt}`}
             ref={editorRef}
             value={content}
             readOnly={!editable}
+            github
             onChange={(markdown) => {
               setContent(markdown)
               setDirty(true)

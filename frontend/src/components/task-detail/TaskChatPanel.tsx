@@ -2,15 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
-  MessagePrimitive,
   ThreadPrimitive,
   useExternalStoreRuntime,
   type AppendMessage,
-  type MessageState,
-  type ReasoningMessagePart,
-  type TextMessagePart,
-  type ThreadMessageLike,
-  type ToolCallMessagePart,
 } from '@assistant-ui/react'
 import { Badge } from '@appica/ui-react/badge'
 import { Button, buttonVariants } from '@appica/ui-react/button'
@@ -31,48 +25,22 @@ import {
 } from '@appica/ui-react/select'
 import {
   AlertCircle,
-  MessageCircleQuestion,
   Send,
   Wrench,
 } from '@appica/icons-react'
 import {
   api,
   type TaskChatMessage,
-  type TaskChatQuestion,
-  type TaskChatSender,
   type TaskPackage,
   type TaskPipelineStage,
   type TaskQueuedUserMessage,
   type Worker,
 } from '../../lib/api'
-import { questionStatusLabel } from '../../lib/question'
-import { QuestionCard } from '../QuestionCard'
-import { SenderLine, WorkerAvatar } from './WorkerAvatar'
 import {
-  ChatAssistantParts,
-  CHAT_PLAIN_PARTS,
-  toChatToolPart,
-} from '../agent-chat/ChatParts'
-
-const FALLBACK_SENDER: TaskChatSender = {
-  id: 'system',
-  name: '系统',
-  kind: 'system',
-  roleLabel: '系统',
-}
-
-interface TaskQuestionAutoAnswer {
-  status?: 'running' | 'answered' | 'failed'
-  parentAgentName?: string
-  error?: string
-}
-
-interface ChatCustom {
-  taskId?: number
-  sender?: TaskChatSender
-  question?: TaskChatQuestion
-  autoAnswer?: TaskQuestionAutoAnswer
-}
+  TaskChatMessageItem,
+  TaskChatQueuedMessages,
+} from './TaskChatMessages'
+import { toTaskChatThreadMessage } from './task-chat-message'
 
 interface TaskChatPanelProps {
   task: TaskPackage
@@ -125,7 +93,7 @@ export function TaskChatPanel({
   // 执行中仍可输入：消息进入平台发送队列，待当前轮结束后自动投递。
   const runtime = useExternalStoreRuntime<TaskChatMessage>({
     messages,
-    convertMessage: toThreadMessage,
+    convertMessage: toTaskChatThreadMessage,
     onNew,
     isSendDisabled: busy || finished,
   })
@@ -176,30 +144,18 @@ export function TaskChatPanel({
               </div>
             )}
             <ThreadPrimitive.Messages>
-              {({ message }) => {
-                const custom = customOf(message)
-                const question = custom.question
-                if (question) {
-                  return (
-                    <QuestionBubble
-                      message={message}
-                      question={question}
-                      busy={busy}
-                      disabled={
-                        task.subStatus !== '待反馈' ||
-                        (custom.taskId !== undefined &&
-                          custom.taskId !== task.id)
-                      }
-                      onReply={onReplyQuestion}
-                    />
-                  )
-                }
-                return message.role === 'user' ? (
-                  <UserBubble message={message} />
-                ) : (
-                  <AssistantBubble message={message} />
-                )
-              }}
+              {({ message }) => (
+                <TaskChatMessageItem
+                  message={message}
+                  busy={busy}
+                  canReplyQuestion={(custom) =>
+                    task.subStatus === '待反馈' &&
+                    (custom.taskId === undefined ||
+                      custom.taskId === task.id)
+                  }
+                  onReplyQuestion={onReplyQuestion}
+                />
+              )}
             </ThreadPrimitive.Messages>
 
             <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background pt-2">
@@ -217,222 +173,6 @@ export function TaskChatPanel({
         </ThreadPrimitive.Root>
       </AssistantRuntimeProvider>
     </section>
-  )
-}
-
-/** 任务 → assistant-ui 消息（sender 放在 metadata.custom，供多机器人头像展示） */
-function toThreadMessage(message: TaskChatMessage): ThreadMessageLike {
-  const status =
-    message.role === 'assistant'
-      ? message.status === 'running'
-        ? ({ type: 'running' } as const)
-        : message.status === 'error'
-          ? ({ type: 'incomplete', reason: 'error' } as const)
-          : ({ type: 'complete', reason: 'stop' } as const)
-      : undefined
-  const content = message.content
-  const parts: Array<
-    ReasoningMessagePart | TextMessagePart | ToolCallMessagePart
-  > = []
-  if (message.reasoning?.trim()) {
-    parts.push({
-      type: 'reasoning',
-      text: message.reasoning,
-      ...(message.status === 'running'
-        ? { status: { type: 'running' as const } }
-        : {}),
-    })
-  }
-  for (const tool of message.tools ?? []) {
-    // question 工具由独立问答卡片展示，不在工具链里重复出现
-    if (tool.name === 'question') continue
-    parts.push(toChatToolPart(tool))
-  }
-  if (content) parts.push({ type: 'text', text: content })
-  return {
-    id: message.id,
-    role: message.role,
-    content: parts,
-    createdAt: new Date(message.createdAt),
-    status,
-    metadata: {
-      custom: {
-        taskId: message.taskId,
-        sender: message.sender,
-        question: message.question,
-        autoAnswer: readAutoAnswer(message.meta),
-      } satisfies ChatCustom,
-    },
-  }
-}
-
-function customOf(message: MessageState): ChatCustom {
-  return (message.metadata.custom ?? {}) as ChatCustom
-}
-
-/** 从消息 meta.autoAnswer 读取父机器人自动答复状态 */
-function readAutoAnswer(
-  meta: Record<string, unknown> | undefined,
-): TaskQuestionAutoAnswer | undefined {
-  const value = meta?.autoAnswer
-  if (!value || typeof value !== 'object') return undefined
-  const raw = value as Record<string, unknown>
-  const status =
-    raw.status === 'running' ||
-    raw.status === 'answered' ||
-    raw.status === 'failed'
-      ? raw.status
-      : undefined
-  return {
-    status,
-    parentAgentName:
-      typeof raw.parentAgentName === 'string'
-        ? raw.parentAgentName
-        : undefined,
-    error: typeof raw.error === 'string' ? raw.error : undefined,
-  }
-}
-
-function UserBubble({ message }: { message: MessageState }) {
-  const sender = customOf(message).sender ?? {
-    id: 'user',
-    name: '用户',
-    kind: 'user' as const,
-    roleLabel: '用户',
-  }
-  return (
-    <MessagePrimitive.Root className="flex justify-end gap-3 px-1">
-      <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1.5">
-        <SenderLine
-          sender={sender}
-          time={message.createdAt.toISOString()}
-          align="right"
-        />
-        <div className="min-w-0 max-w-full rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
-          <MessagePrimitive.Parts components={CHAT_PLAIN_PARTS} />
-        </div>
-      </div>
-      <WorkerAvatar sender={sender} size={30} className="mt-5" />
-    </MessagePrimitive.Root>
-  )
-}
-
-function AssistantBubble({ message }: { message: MessageState }) {
-  const custom = customOf(message)
-  const sender = custom.sender ?? FALLBACK_SENDER
-  const hasText = message.content.some(
-    (part) => part.type === 'text' && part.text?.trim(),
-  )
-  const hasReasoning = message.content.some(
-    (part) => part.type === 'reasoning' && part.text?.trim(),
-  )
-  const hasTools = message.content.some((part) => part.type === 'tool-call')
-  const running = message.status?.type === 'running'
-
-  return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <WorkerAvatar sender={sender} size={32} className="mt-0.5" />
-      <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
-          <SenderLine
-            sender={sender}
-            time={message.createdAt.toISOString()}
-          />
-          {running && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
-              <span className="size-1.5 animate-pulse rounded-full bg-info-emphasis" />
-              正在执行
-            </span>
-          )}
-        </div>
-
-        {hasText || hasReasoning || hasTools ? (
-          <div className="rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-4 py-3 text-sm leading-relaxed shadow-sm">
-            <ChatAssistantParts />
-            {running && hasText && <StreamingCaret />}
-          </div>
-        ) : (
-          running && (
-            <div className="inline-flex items-center gap-2 rounded-[var(--radius-lg)] rounded-tl-sm border border-border bg-background-subtle px-3 py-2 text-xs text-foreground-muted">
-              <span className="flex gap-1">
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle" />
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle [animation-delay:150ms]" />
-                <span className="size-1.5 animate-pulse rounded-full bg-foreground-subtle [animation-delay:300ms]" />
-              </span>
-              正在思考 / 调用工具…
-            </div>
-          )
-        )}
-      </div>
-    </MessagePrimitive.Root>
-  )
-}
-
-interface QuestionBubbleProps {
-  message: MessageState
-  question: TaskChatQuestion
-  busy: boolean
-  /** 仅等待中-待反馈可答，其余状态均禁用 */
-  disabled: boolean
-  onReply: (questionId: string, answers: string[][] | null) => Promise<void>
-}
-
-/** 机器人提问卡片：多问题 + 选项 + 自由输入，提交后变成回执 */
-function QuestionBubble({
-  message,
-  question,
-  busy,
-  disabled,
-  onReply,
-}: QuestionBubbleProps) {
-  const custom = customOf(message)
-  const sender = custom.sender ?? FALLBACK_SENDER
-  const autoAnswer = custom.autoAnswer
-  return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <WorkerAvatar sender={sender} size={32} className="mt-0.5" />
-      <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
-          <SenderLine sender={sender} time={message.createdAt.toISOString()} />
-          <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
-            <MessageCircleQuestion className="size-3.5" />
-            {questionStatusLabel(question)}
-          </span>
-          {question.state === 'pending' &&
-            autoAnswer?.status === 'running' && (
-              <span className="text-[11px] text-foreground-muted">
-                父任务机器人
-                {autoAnswer.parentAgentName
-                  ? `「${autoAnswer.parentAgentName}」`
-                  : ''}
-                回答中…
-              </span>
-            )}
-          {question.state === 'pending' &&
-            autoAnswer?.status === 'failed' && (
-              <span
-                className="text-[11px] text-warning-foreground"
-                title={autoAnswer.error}
-              >
-                父任务机器人答复失败，等待需求方回答
-              </span>
-            )}
-        </div>
-
-        <QuestionCard
-          question={question}
-          disabled={disabled}
-          busy={busy}
-          onReply={onReply}
-        />
-      </div>
-    </MessagePrimitive.Root>
-  )
-}
-
-function StreamingCaret() {
-  return (
-    <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
   )
 }
 
@@ -506,9 +246,9 @@ function ChatFooter({
           : task.subStatus === '待继续'
             ? '反馈已收到，正在排队等待机器人空闲后继续执行'
             : task.subStatus === '待验收'
-              ? `机器人已申请验收，验收不通过累计 ${task.acceptRejectCount ?? 0} 次；第 4 次起转任务负责人处理`
+              ? `机器人已申请验收，验收不通过累计 ${task.acceptRejectCount ?? 0} 次；第 4 次起转任务执行方处理`
               : task.subStatus === '待反馈' && task.ownerTakeoverAt
-                ? `验收不通过已转任务负责人${task.ownerTakeoverName ? `「${task.ownerTakeoverName}」` : ''}处理，补充意见后等待机器人继续执行`
+                ? `验收不通过已转任务执行方${task.ownerTakeoverName ? `「${task.ownerTakeoverName}」` : ''}处理，补充意见后等待机器人继续执行`
                 : task.subStatus === '待反馈'
                   ? '等待需求方补充资料或回答机器人提问'
                   : task.subStatus === '完成'
@@ -570,50 +310,10 @@ function ChatFooter({
         </div>
       )}
 
-      {queuedMessages.length > 0 && (
-        <div className="mb-2 rounded-[var(--radius-md)] border border-border bg-background-subtle">
-          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-[11px]">
-            <span className="font-medium text-foreground-emphasis">
-              发送队列
-            </span>
-            <span className="text-foreground-muted">
-              {queuedMessages.length} 条待发送
-            </span>
-          </div>
-          <ol className="max-h-36 overflow-y-auto px-3 py-2">
-            {queuedMessages.map((message, index) => (
-              <li
-                key={message.id}
-                className="flex gap-2 border-b border-border py-1.5 text-xs last:border-b-0 last:pb-0 first:pt-0"
-              >
-                <span className="mt-0.5 shrink-0 font-mono text-[10px] text-foreground-subtle">
-                  {index + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="whitespace-pre-wrap break-words leading-relaxed text-foreground-emphasis">
-                    {message.content}
-                  </p>
-                  <p
-                    className={`mt-1 text-[10px] ${
-                      message.error
-                        ? 'text-error-foreground'
-                        : message.status === 'sending'
-                          ? 'text-info-foreground'
-                          : 'text-foreground-muted'
-                    }`}
-                  >
-                    {message.error
-                      ? `发送失败：${message.error}（保留在队列，下一次发送时重试）`
-                      : message.status === 'sending'
-                        ? '正在发送…'
-                        : '等待发送'}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
+      <TaskChatQueuedMessages
+        messages={queuedMessages}
+        className="mb-2"
+      />
 
       <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
         <ComposerPrimitive.Input

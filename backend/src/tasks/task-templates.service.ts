@@ -11,6 +11,7 @@ import { WorkerRole } from '../common/enums';
 import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 import { TaskTypesService } from '../task-types/task-types.service';
 import { Worker } from '../workers/worker.entity';
+import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import {
   ensureTaskTemplateSequenceFloor,
@@ -34,6 +35,15 @@ export interface CreateTaskTemplateInput {
 
 export type UpdateTaskTemplateInput = Partial<CreateTaskTemplateInput>;
 
+/** 创建人信息（来自当前登录用户） */
+export interface TaskTemplateActor {
+  id: number;
+  name: string;
+}
+
+/** 任务定义列表项：附带当前用户是否已关注 */
+export type TaskTemplateWithFollow = TaskTemplate & { followedByMe: boolean };
+
 /** 任务定义管理（TaskTemplate）：一类任务的可复用类型、描述与默认处理机器人 */
 @Injectable()
 export class TaskTemplatesService implements OnModuleInit {
@@ -44,6 +54,8 @@ export class TaskTemplatesService implements OnModuleInit {
     private readonly templates: Repository<TaskTemplate>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
+    @InjectRepository(TaskTemplateFollow)
+    private readonly follows: Repository<TaskTemplateFollow>,
     private readonly taskTypes: TaskTypesService,
   ) {}
 
@@ -140,8 +152,37 @@ export class TaskTemplatesService implements OnModuleInit {
     );
   }
 
-  findAll(): Promise<TaskTemplate[]> {
-    return this.templates.find({ order: { updatedAt: 'DESC', id: 'DESC' } });
+  /** 任务定义列表（附 followedByMe，供个人中心「我的任务定义」使用） */
+  async findAll(userId?: number | null): Promise<TaskTemplateWithFollow[]> {
+    const templates = await this.templates.find({
+      order: { updatedAt: 'DESC', id: 'DESC' },
+    });
+    if (!userId) return templates.map((t) => ({ ...t, followedByMe: false }));
+    const follows = await this.follows.find({ where: { userId } });
+    const followedIds = new Set(follows.map((follow) => follow.templateId));
+    return templates.map((template) => ({
+      ...template,
+      followedByMe: followedIds.has(template.id),
+    }));
+  }
+
+  /** 关注任务定义（重复关注幂等） */
+  async follow(id: number, userId: number): Promise<TaskTemplateWithFollow> {
+    const template = await this.findOne(id);
+    await this.follows
+      .createQueryBuilder()
+      .insert()
+      .values({ templateId: id, userId })
+      .orIgnore()
+      .execute();
+    return { ...template, followedByMe: true };
+  }
+
+  /** 取消关注任务定义（未关注时幂等） */
+  async unfollow(id: number, userId: number): Promise<TaskTemplateWithFollow> {
+    const template = await this.findOne(id);
+    await this.follows.delete({ templateId: id, userId });
+    return { ...template, followedByMe: false };
   }
 
   async findOne(id: number): Promise<TaskTemplate> {
@@ -152,7 +193,10 @@ export class TaskTemplatesService implements OnModuleInit {
     return template;
   }
 
-  async create(input: CreateTaskTemplateInput): Promise<TaskTemplate> {
+  async create(
+    input: CreateTaskTemplateInput,
+    actor?: TaskTemplateActor | null,
+  ): Promise<TaskTemplateWithFollow> {
     const name = input.name?.trim();
     if (!name) throw new BadRequestException('模板名称不能为空');
     await this.assertNameAvailable(name, null);
@@ -160,14 +204,17 @@ export class TaskTemplatesService implements OnModuleInit {
       (await this.taskTypes.assertExists(input.type)) ?? TASK_TYPE_DEFAULT;
     const agentIds = await this.normalizeAgents(input.agentIds);
 
-    return this.templates.save(
+    const template = await this.templates.save(
       this.templates.create({
         name,
         type,
         description: input.description?.trim() || null,
         agentIds,
+        createdById: actor?.id ?? null,
+        createdByName: actor?.name ?? null,
       }),
     );
+    return { ...template, followedByMe: false };
   }
 
   async update(
@@ -214,6 +261,7 @@ export class TaskTemplatesService implements OnModuleInit {
     }
     const template = await this.findOne(id);
     await this.templates.remove(template);
+    await this.follows.delete({ templateId: id });
   }
 
   private async assertNameAvailable(

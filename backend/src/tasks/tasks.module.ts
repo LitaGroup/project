@@ -11,6 +11,7 @@ import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskMessage } from './task-message.entity';
+import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskWorkerInbox } from './task-worker-inbox.entity';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
@@ -29,6 +30,13 @@ import { TaskTemplatesController } from './task-templates.controller';
 import { TaskTemplatesService } from './task-templates.service';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
+import {
+  TasksAgentMarkdownController,
+  TasksListMarkdownController,
+} from './tasks-agent.controller';
+import { TasksAgentService } from './tasks-agent.service';
+import { WorkbenchController } from './workbench.controller';
+import { WorkbenchService } from './workbench.service';
 
 @Module({
   imports: [
@@ -37,6 +45,7 @@ import { TasksService } from './tasks.service';
       TaskEvent,
       TaskMessage,
       TaskTemplate,
+      TaskTemplateFollow,
       TaskWorkerInbox,
       Worker,
       User,
@@ -48,9 +57,16 @@ import { TasksService } from './tasks.service';
     TaskTypesModule,
     KnowledgeModule,
   ],
-  controllers: [TasksController, TaskTemplatesController],
+  controllers: [
+    TasksController,
+    TaskTemplatesController,
+    WorkbenchController,
+    TasksListMarkdownController,
+    TasksAgentMarkdownController,
+  ],
   providers: [
     TasksService,
+    TasksAgentService,
     TaskAssignmentService,
     TaskChatService,
     TaskDeliveryService,
@@ -64,6 +80,7 @@ import { TasksService } from './tasks.service';
     TaskCollaborationService,
     TaskRealtimeService,
     TaskTemplatesService,
+    WorkbenchService,
   ],
   exports: [
     TasksService,

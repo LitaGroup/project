@@ -1,0 +1,580 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
+import type { MessageEvent } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Observable } from 'rxjs';
+import { FindOptionsWhere, In, Repository } from 'typeorm';
+import type { User } from '../auth/user.entity';
+import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { WorkerRuntime } from '../common/enums';
+import { Worker } from '../workers/worker.entity';
+import type {
+  WorkerDebugAttachment,
+  WorkerDebugMode,
+  WorkerDebugModelCatalog,
+  WorkerDebugModelSelection,
+  WorkerDebugSnapshot,
+} from '../workers/worker-debug.types';
+import {
+  PersonalAgentInfo,
+  PersonalAgentsService,
+} from '../workers/personal-agents.service';
+import { WorkersService } from '../workers/workers.service';
+import { Task } from './task.entity';
+import type { TaskDeliveryReportInput } from './task-delivery-report';
+import { TaskChatService } from './task-chat.service';
+import type { TaskChatQuestionInfo } from './task-chat.types';
+import { TaskCollaborationService } from './task-collaboration.service';
+import { TaskDeliveryService } from './task-delivery.service';
+import { TaskDispatchService } from './task-dispatch.service';
+import type { TaskActor } from './task-requester';
+import { TasksService } from './tasks.service';
+import { deriveWorkbenchRoles, type WorkbenchRole } from './workbench-roles';
+
+export type { WorkbenchRole } from './workbench-roles';
+
+/** 操作台任务项：任务本体 + 当前用户可扮演的角色与下一步动作 */
+export interface WorkbenchTask extends Task {
+  /** agent=我的真人机器人执行；owner=我的 AGENT 执行；requester=我（或我的 AGENT）是需求方；responsible=我负责的机器人/已接管任务 */
+  workbenchRoles: WorkbenchRole[];
+  /** 当前需要当前用户处理的动作；空表示等待其他参与方 */
+  workbenchAction: string | null;
+}
+
+export interface WorkbenchSummary {
+  worker: Worker;
+  /** 当前用户的个人 AI AGENT（工作台「我的 AGENT」TAB） */
+  agent: PersonalAgentInfo;
+  tasks: WorkbenchTask[];
+}
+
+const WORKBENCH_STATUSES = [
+  TaskStatus.WAITING,
+  TaskStatus.RUNNING,
+  TaskStatus.FINISHED,
+];
+/** 操作台单次返回上限：等待/进行通常很少；已完成只保留最近记录，避免清单无限增长 */
+const WORKBENCH_TASK_LIMIT = 300;
+
+/**
+ * 操作台：真人通过自己的绑定机器人参与任务。
+ * 所有方法都先校验“当前登录用户 === 任务执行机器人绑定的用户”，
+ * 再复用任务中心的机器人协同/交付服务，避免为真人另建一套状态机。
+ */
+@Injectable()
+export class WorkbenchService {
+  constructor(
+    @InjectRepository(Task)
+    private readonly tasks: Repository<Task>,
+    @InjectRepository(Worker)
+    private readonly workers: Repository<Worker>,
+    private readonly workersService: WorkersService,
+    private readonly personalAgents: PersonalAgentsService,
+    private readonly collaboration: TaskCollaborationService,
+    private readonly deliveryService: TaskDeliveryService,
+    private readonly dispatchService: TaskDispatchService,
+    private readonly taskChat: TaskChatService,
+    private readonly tasksService: TasksService,
+  ) {}
+
+  /** 当前用户的工作台任务清单：进行中 + 等待中 + 最近已完成 */
+  async summary(user: User): Promise<WorkbenchSummary> {
+    const worker = await this.workersService.mustHumanWorker(user.id);
+    const agent = await this.personalAgents
+      .infoForUser(user)
+      .catch((error: Error) => ({
+        worker: null,
+        available: false,
+        reason: `个人 AGENT 加载失败：${error.message}`,
+      }));
+    const personalAgentId = agent.worker?.id ?? null;
+    const ownedWorkers = await this.workers.find({
+      where: { ownerUserId: user.id },
+      select: { id: true },
+    });
+    const ownedWorkerIds = ownedWorkers.map((item) => item.id);
+    const where: FindOptionsWhere<Task>[] = [
+      { agentId: worker.id, status: In(WORKBENCH_STATUSES) },
+      {
+        requesterType: 'worker' as const,
+        requesterId: worker.id,
+        status: In(WORKBENCH_STATUSES),
+      },
+      {
+        requesterType: 'user' as const,
+        requesterId: user.id,
+        status: In(WORKBENCH_STATUSES),
+      },
+      {
+        ownerTakeoverUserId: user.id,
+        status: In(WORKBENCH_STATUSES),
+      },
+    ];
+    if (personalAgentId) {
+      where.push(
+        { agentId: personalAgentId, status: In(WORKBENCH_STATUSES) },
+        {
+          requesterType: 'worker' as const,
+          requesterId: personalAgentId,
+          status: In(WORKBENCH_STATUSES),
+        },
+      );
+    }
+    if (ownedWorkerIds.length > 0) {
+      where.push({
+        agentId: In(ownedWorkerIds),
+        status: In(WORKBENCH_STATUSES),
+      });
+    }
+    const rows = await this.tasks.find({
+      where,
+      order: { updatedAt: 'DESC' },
+      take: WORKBENCH_TASK_LIMIT,
+    });
+    const byId = new Map<number, Task>();
+    for (const row of rows) byId.set(row.id, row);
+    const tasks = [...byId.values()].map((task) =>
+      this.toWorkbenchTask(task, worker, user, personalAgentId, ownedWorkerIds),
+    );
+    // 默认兜底排序；前端会按“分配到自己机器人”的时间分三组倒序展示。
+    tasks.sort((a, b) => {
+      const actionA = a.workbenchAction ? 0 : 1;
+      const actionB = b.workbenchAction ? 0 : 1;
+      if (actionA !== actionB) return actionA - actionB;
+      const assignedA = a.assignedAt ?? a.updatedAt;
+      const assignedB = b.assignedAt ?? b.updatedAt;
+      return new Date(assignedB).getTime() - new Date(assignedA).getTime();
+    });
+    return { worker, agent, tasks };
+  }
+
+  /** 当前用户必须是其个人机器人，且该机器人是任务执行方 */
+  private async agentWorker(
+    user: User,
+    taskId: number,
+  ): Promise<{ worker: Worker; task: Task }> {
+    const worker = await this.workersService.mustHumanWorker(user.id);
+    if (worker.runtime !== WorkerRuntime.HUMAN) {
+      throw new BadRequestException('当前用户绑定的不是真人机器人');
+    }
+    const task = await this.tasks.findOne({ where: { id: taskId } });
+    if (!task) throw new BadRequestException('任务不存在');
+    if (task.agentId !== worker.id) {
+      throw new ForbiddenException('仅任务的真人执行机器人可以操作');
+    }
+    return { worker, task };
+  }
+
+  /** 真人接受任务 */
+  acceptTask(user: User, taskId: number): Promise<Task> {
+    return this.withAgentWorker(user, taskId, (worker) =>
+      this.collaboration.accept(taskId, worker),
+    );
+  }
+
+  /** 真人拒绝任务（必须给理由与分发建议） */
+  refuseTask(
+    user: User,
+    taskId: number,
+    reason: string,
+    suggestion?: string,
+  ): Promise<Task> {
+    return this.withAgentWorker(user, taskId, (worker) =>
+      this.collaboration.refuse(taskId, worker, reason, suggestion),
+    );
+  }
+
+  /** 真人执行回复：直接落库并实时推送，不进入 opencode 队列 */
+  async sendMessage(
+    user: User,
+    taskId: number,
+    content: string,
+  ): Promise<Task> {
+    const { worker, task } = await this.agentWorker(user, taskId);
+    const text = content.trim();
+    if (!text) throw new BadRequestException('消息内容不能为空');
+    if (
+      task.status !== TaskStatus.RUNNING ||
+      task.subStatus !== TaskSubStatus.EXECUTING
+    ) {
+      throw new BadRequestException('仅执行中的任务可以发送执行回复');
+    }
+    await this.taskChat.postAssistantMessage(taskId, text, {
+      meta: {
+        humanWorkerMessage: true,
+        workerId: worker.id,
+        perspective: 'responsible',
+      },
+    });
+    await this.dispatchService.addEvent(
+      taskId,
+      '操作',
+      `真人机器人在操作台回复`,
+      worker.name,
+      { humanWorker: true },
+    );
+    return this.tasks.findOneOrFail({ where: { id: taskId } });
+  }
+
+  /** 真人向需求方提问 */
+  askQuestion(
+    user: User,
+    taskId: number,
+    questions: TaskChatQuestionInfo[],
+  ): Promise<{ task: Task; questionId: string }> {
+    return this.withAgentWorker(user, taskId, (worker) =>
+      this.collaboration.ask(taskId, worker, { questions }),
+    );
+  }
+
+  /** 真人提交结构化交付说明并申请验收 */
+  applyHandoff(
+    user: User,
+    taskId: number,
+    report: TaskDeliveryReportInput,
+  ): Promise<Task> {
+    if (!report.delivery?.trim()) {
+      throw new BadRequestException('交付结果 delivery 不能为空');
+    }
+    return this.withAgentWorker(user, taskId, async (worker) => {
+      const applied = await this.dispatchService.applyForAcceptance(
+        taskId,
+        worker,
+        { requesterName: user.name ?? worker.name, report },
+      );
+      return applied.task;
+    });
+  }
+
+  /** 真人撤销交付：任务回到执行中，旧验收申请失效 */
+  revokeHandoff(user: User, taskId: number): Promise<Task> {
+    return this.withAgentWorker(user, taskId, (worker) =>
+      this.dispatchService.revokeAcceptance(taskId, worker),
+    );
+  }
+
+  /** 真人作为父任务需求方或执行方创建子任务 */
+  async createSubtask(
+    user: User,
+    taskId: number,
+    input: {
+      /** 双角色用户按当前 Tab 明确指定身份；未传时保留旧的自动判断 */
+      perspective?: 'requester' | 'responsible';
+      templateId: number;
+      title: string;
+      description?: string | null;
+      input?: string | null;
+      outputSpec?: string | null;
+    },
+  ): Promise<Task> {
+    const worker = await this.workersService.mustHumanWorker(user.id);
+    const task = await this.tasks.findOne({ where: { id: taskId } });
+    if (!task) throw new BadRequestException('任务不存在');
+    let actor: TaskActor;
+    if (input.perspective === 'requester') {
+      actor = (await this.requesterTask(user, taskId)).actor;
+    } else if (input.perspective === 'responsible') {
+      if (task.agentId !== worker.id) {
+        throw new ForbiddenException(
+          '仅任务的执行机器人可以以执行方身份创建子任务',
+        );
+      }
+      actor = { type: 'worker', worker };
+    } else {
+      actor =
+        task.agentId === worker.id
+          ? { type: 'worker', worker }
+          : (await this.requesterTask(user, taskId)).actor;
+    }
+    return this.collaboration.createSubtaskForActor(taskId, actor, input);
+  }
+
+  /** 需求方取消任务 */
+  async cancelTask(user: User, taskId: number): Promise<Task> {
+    await this.requesterTask(user, taskId);
+    return this.tasksService.cancel(taskId, user.name ?? null);
+  }
+
+  /** 需求方身份：优先真人机器人 / 个人 AGENT，历史数据回退用户本人 */
+  private requesterActor(
+    task: Task,
+    user: User,
+    worker: Worker,
+    personalAgent: Worker | null,
+  ): TaskActor {
+    if (task.requesterType === 'worker') {
+      if (task.requesterId === worker.id) {
+        return { type: 'worker', worker };
+      }
+      if (personalAgent && task.requesterId === personalAgent.id) {
+        return { type: 'worker', worker: personalAgent };
+      }
+    }
+    return { type: 'user', user };
+  }
+
+  /** 确认当前用户/其机器人/其个人 AGENT 是任务需求方 */
+  private async requesterTask(
+    user: User,
+    taskId: number,
+  ): Promise<{ worker: Worker; task: Task; actor: TaskActor }> {
+    const worker = await this.workersService.mustHumanWorker(user.id);
+    const personalAgent = await this.personalAgents.findForUser(user.id);
+    const task = await this.tasks.findOne({ where: { id: taskId } });
+    if (!task) throw new BadRequestException('任务不存在');
+    const isWorkerRequester =
+      task.requesterType === 'worker' &&
+      (task.requesterId === worker.id ||
+        task.requesterId === personalAgent?.id);
+    const isLegacyUserRequester =
+      task.requesterType === 'user' && task.requesterId === user.id;
+    const isLegacyCreator = !task.requesterType && task.createdById === user.id;
+    if (!isWorkerRequester && !isLegacyUserRequester && !isLegacyCreator) {
+      throw new ForbiddenException('仅任务需求方可以操作');
+    }
+    return {
+      worker,
+      task,
+      actor: this.requesterActor(task, user, worker, personalAgent),
+    };
+  }
+
+  /** 验收通过 */
+  acceptHandoff(user: User, taskId: number): Promise<Task> {
+    return this.withRequesterTask(user, taskId, ({ actor }) =>
+      this.deliveryService.acceptHandoff(taskId, actor),
+    );
+  }
+
+  /** 验收不通过/返工 */
+  rejectHandoff(user: User, taskId: number, content: string): Promise<Task> {
+    return this.withRequesterTask(user, taskId, ({ actor }) =>
+      this.deliveryService.refuseHandoff(taskId, actor, content),
+    );
+  }
+
+  /** 判定失败 */
+  failTask(user: User, taskId: number, reason: string): Promise<Task> {
+    return this.withRequesterTask(user, taskId, ({ actor }) =>
+      this.collaboration.fail(taskId, actor, reason),
+    );
+  }
+
+  /** 答复或跳过真人/AI 机器人的提问 */
+  replyQuestion(
+    user: User,
+    taskId: number,
+    questionId: string,
+    input: { answers?: string[][]; reject?: boolean },
+  ): Promise<Task> {
+    return this.withRequesterTask(user, taskId, ({ actor }) =>
+      this.collaboration.answer(taskId, questionId, actor, input),
+    );
+  }
+
+  /** 我的 AGENT：可用状态（工作台 TAB 头部/异常态） */
+  agentInfo(user: User): Promise<PersonalAgentInfo> {
+    return this.personalAgents.infoForUser(user);
+  }
+
+  /** 我的 AGENT：对话快照（每个任务独立会话） */
+  agentSnapshot(
+    user: User,
+    taskId?: number | null,
+  ): Promise<WorkerDebugSnapshot> {
+    return this.personalAgents.snapshot(user, taskId);
+  }
+
+  /** 我的 AGENT：对话 SSE（每个任务独立会话） */
+  agentStream(user: User, taskId?: number | null): Observable<MessageEvent> {
+    return this.personalAgents.stream(user, taskId);
+  }
+
+  /** 我的 AGENT：发送消息；可携带当前工作台选中任务作为上下文 */
+  async agentSend(
+    user: User,
+    content: string,
+    taskId?: number | null,
+    files?: WorkerDebugAttachment[],
+  ): Promise<WorkerDebugSnapshot> {
+    const text = content.trim();
+    if (!text && !files?.length) {
+      throw new BadRequestException('消息内容不能为空');
+    }
+    let taskContext: string | null = null;
+    if (taskId) {
+      const task = await this.tasks.findOne({ where: { id: Number(taskId) } });
+      if (!task) throw new BadRequestException('任务不存在');
+      const worker = await this.workersService.mustHumanWorker(user.id);
+      const personalAgent = await this.personalAgents.findForUser(user.id);
+      const ownedWorkers = await this.workers.find({
+        where: { ownerUserId: user.id },
+        select: { id: true },
+      });
+      const roles = deriveWorkbenchRoles(task, user, {
+        humanWorker: worker,
+        personalAgentId: personalAgent?.id ?? null,
+        ownedWorkerIds: ownedWorkers.map((item) => item.id),
+      });
+      if (roles.length === 0) {
+        throw new ForbiddenException('仅工作台内的任务可以作为 AGENT 上下文');
+      }
+      taskContext = [
+        '# 当前工作台任务',
+        '',
+        `- 任务 ID：${task.id}`,
+        `- 编号：${task.code}`,
+        `- 标题：${task.title}`,
+        `- 状态：${task.status}-${task.subStatus}`,
+        `- 你在该任务中的角色：${roles.join(' / ')}`,
+        `- 详情接口：GET /api/tasks/${task.id}.md`,
+        '',
+        '如需操作该任务，先读取详情确认最新状态，再按个人 AGENT 角色定义中的接口执行。',
+      ].join('\n');
+    }
+    return this.personalAgents.send(user, text, {
+      taskId,
+      taskContext,
+      files,
+    });
+  }
+
+  /** 我的 AGENT：模型与思考等级清单 */
+  agentModels(
+    user: User,
+    taskId?: number | null,
+  ): Promise<WorkerDebugModelCatalog> {
+    return this.personalAgents.models(user, taskId);
+  }
+
+  /** 我的 AGENT：切换模型/思考等级 */
+  agentSetModel(
+    user: User,
+    input: WorkerDebugModelSelection,
+    taskId?: number | null,
+  ): Promise<WorkerDebugSnapshot> {
+    return this.personalAgents.setModel(user, input, taskId);
+  }
+
+  /** 我的 AGENT：切换 build / plan 模式 */
+  agentSetMode(
+    user: User,
+    mode: WorkerDebugMode,
+    taskId?: number | null,
+  ): Promise<WorkerDebugSnapshot> {
+    return this.personalAgents.setMode(user, mode, taskId);
+  }
+
+  /** 我的 AGENT：中断当前轮次 */
+  agentInterrupt(
+    user: User,
+    taskId?: number | null,
+  ): Promise<WorkerDebugSnapshot> {
+    return this.personalAgents.interrupt(user, taskId);
+  }
+
+  /** 我的 AGENT：回答/跳过提问 */
+  agentReplyQuestion(
+    user: User,
+    questionId: string,
+    input: { answers?: string[][]; reject?: boolean },
+    taskId?: number | null,
+  ): Promise<WorkerDebugSnapshot> {
+    return this.personalAgents.replyQuestion(user, questionId, input, taskId);
+  }
+
+  /** 我的 AGENT：重置会话 */
+  agentReset(user: User, taskId?: number | null): Promise<WorkerDebugSnapshot> {
+    return this.personalAgents.reset(user, taskId);
+  }
+
+  private async withAgentWorker<T>(
+    user: User,
+    taskId: number,
+    fn: (worker: Worker) => Promise<T>,
+  ): Promise<T> {
+    const { worker } = await this.agentWorker(user, taskId);
+    return fn(worker);
+  }
+
+  private async withRequesterTask<T>(
+    user: User,
+    taskId: number,
+    fn: (context: {
+      worker: Worker;
+      task: Task;
+      actor: TaskActor;
+    }) => Promise<T>,
+  ): Promise<T> {
+    const context = await this.requesterTask(user, taskId);
+    return fn(context);
+  }
+
+  private toWorkbenchTask(
+    task: Task,
+    worker: Worker,
+    user: User,
+    personalAgentId: number | null,
+    ownedWorkerIds: number[] = [],
+  ): WorkbenchTask {
+    const roles = deriveWorkbenchRoles(task, user, {
+      humanWorker: worker,
+      personalAgentId,
+      ownedWorkerIds,
+    });
+    return {
+      ...task,
+      workbenchRoles: roles,
+      workbenchAction: this.actionOf(task, roles),
+    };
+  }
+
+  private actionOf(task: Task, roles: WorkbenchRole[]): string | null {
+    if (roles.includes('agent')) {
+      if (
+        task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_ACCEPTANCE
+      ) {
+        return '接受任务';
+      }
+      if (
+        task.status === TaskStatus.RUNNING &&
+        task.subStatus === TaskSubStatus.EXECUTING
+      ) {
+        return '继续执行';
+      }
+      if (
+        task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_RESUME
+      ) {
+        return '恢复执行';
+      }
+    }
+    if (roles.includes('requester')) {
+      if (
+        task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_FEEDBACK
+      ) {
+        return '答复提问';
+      }
+      if (
+        task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_ACCEPT
+      ) {
+        return '验收交付';
+      }
+    }
+    if (roles.includes('responsible')) {
+      if (
+        task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_FEEDBACK
+      ) {
+        return '提供反馈';
+      }
+    }
+    return null;
+  }
+}

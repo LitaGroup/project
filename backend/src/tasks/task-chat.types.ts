@@ -1,8 +1,11 @@
 import type { TaskEvent } from './task-event.entity';
 import type { Task } from './task.entity';
 
-/** 聊天消息发送方：用户 / 机器人 / 调度机器人 / 系统 */
+/** 聊天消息发送方：需求方 / 机器人 / 调度机器人 / 系统 */
 export type TaskChatSenderKind = 'user' | 'worker' | 'scheduler' | 'system';
+
+/** 对话身份：需求方 / 执行方 */
+export type TaskChatPerspective = 'requester' | 'responsible';
 
 /** 消息发送方（机器人使用 workers.id 做稳定的前端配色/头像标识） */
 export interface TaskChatSender {
@@ -72,6 +75,8 @@ export interface TaskChatMessage {
   taskId: number;
   role: 'user' | 'assistant';
   sender: TaskChatSender;
+  /** 该消息属于任务哪一方；旧消息缺失时按 role 推断（user=需求方 / assistant=执行方） */
+  perspective?: TaskChatPerspective;
   /** Markdown 正文；工具调用/提问消息可能为空 */
   content: string;
   /** 思考过程（opencode session.reasoning.* 流式累积） */
@@ -90,6 +95,8 @@ export interface TaskQueuedUserMessage {
   id: string;
   taskId: number;
   sender: TaskChatSender;
+  /** 发送身份：需求方 / 执行方 */
+  perspective?: TaskChatPerspective;
   content: string;
   createdAt: string;
   status: 'queued' | 'sending';

@@ -69,6 +69,12 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 4. 对子任务提问调用 task-question-answer；对交付物调用 task-handoff-accept、task-handoff-refuse 或 task-fail；对被拒绝任务根据拒绝理由和分发建议决定是否重新创建子任务。
 5. 处理完子任务事件后继续父任务。不要代替子任务执行机器人调用 task-accept、task-question-ask 或 task-handoff-apply。
 
+### 我的任务与创建根任务
+
+- 任务清单：GET /api/tasks.md?scope=mine（按身份只返回自己作为需求方/执行方的任务）
+- 任务详情：GET /api/tasks/{taskId}.md（仅需求方/执行方可读）
+- 创建根任务：POST /api/tasks/create.md（body 至少提供 title 或 description；平台自动分配机器人）
+
 ### 可用操作
 
 - task-defines：GET /api/tasks/defines.md
@@ -316,7 +322,11 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       const session = await client.createSession({
         title: `初始化机器人 #${worker.id} ${worker.name}`.slice(0, 100),
         // 空值已在 start() 校验过（缺失即 400），此处断言非空
-        model: { id: worker.modelId!, providerID: worker.providerId! },
+        model: {
+          id: worker.modelId!,
+          providerID: worker.providerId!,
+          ...(worker.variant ? { variant: worker.variant } : {}),
+        },
         location: { directory: workdir },
       });
       // 订阅执行器事件：把该会话的工具调用转成进度行（先订阅再下发，避免漏事件）

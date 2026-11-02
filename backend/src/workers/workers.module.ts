@@ -15,6 +15,7 @@ import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
 import { WorkerStandardCatalogService } from './worker-standard-catalog.service';
 import { WorkerDebugController } from './worker-debug.controller';
 import { WorkerDebugService } from './worker-debug.service';
+import { PersonalAgentsService } from './personal-agents.service';
 import { WorkersController } from './workers.controller';
 import { WorkersService } from './workers.service';
 
@@ -41,7 +42,8 @@ import { WorkersService } from './workers.service';
     WorkerSkillCatalogService,
     WorkerStandardCatalogService,
     WorkerDebugService,
+    PersonalAgentsService,
   ],
-  exports: [WorkersService],
+  exports: [WorkersService, PersonalAgentsService],
 })
 export class WorkersModule {}

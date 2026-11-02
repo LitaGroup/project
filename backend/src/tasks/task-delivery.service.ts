@@ -9,10 +9,11 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../auth/user.entity';
-import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
 import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
+import type { TaskChatPerspective } from './task-chat.types';
 import type { TaskDeliveryReportInput } from './task-delivery-report';
 import { TaskDispatchService } from './task-dispatch.service';
 import { TaskHandoffService } from './task-handoff.service';
@@ -195,15 +196,45 @@ export class TaskDeliveryService {
     taskId: number,
     actor: User,
     content: string,
+    perspective: TaskChatPerspective = 'requester',
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
+    const humanWorker = await this.workers.findOne({
+      where: { humanUserId: actor.id },
+      select: { id: true, name: true, runtime: true },
+    });
+    const personalAgent = await this.workers.findOne({
+      where: { personalAgentUserId: actor.id },
+      select: { id: true, name: true, runtime: true },
+    });
+    const requesterWorker =
+      humanWorker &&
+      humanWorker.runtime === WorkerRuntime.HUMAN &&
+      task.requesterType === 'worker' &&
+      task.requesterId === humanWorker.id
+        ? humanWorker
+        : personalAgent &&
+            task.requesterType === 'worker' &&
+            task.requesterId === personalAgent.id
+          ? personalAgent
+          : null;
     if (
       task.status === TaskStatus.WAITING &&
       task.subStatus === TaskSubStatus.PENDING_ACCEPT
     ) {
-      return this.reject(taskId, actor, content);
+      return this.refuse(
+        task,
+        requesterWorker
+          ? { type: 'worker', worker: requesterWorker }
+          : { type: 'user', user: actor },
+        content,
+      );
     }
-    return this.tasksService.sendMessage(taskId, content, actor.name ?? null);
+    return this.tasksService.sendMessage(taskId, content, actor.name ?? null, {
+      actorWorkerId:
+        perspective === 'requester' ? (requesterWorker?.id ?? null) : null,
+      perspective,
+    });
   }
 
   /** 验收通过（网页 JSON 接口）：仅任务需求方可操作，异步生成复盘并销毁会话 */

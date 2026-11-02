@@ -1,20 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import {
-  AssistantRuntimeProvider,
-  ComposerPrimitive,
-  MessagePrimitive,
-  ThreadPrimitive,
-  useExternalStoreRuntime,
-  type AppendMessage,
-  type MessageState,
-  type ThreadMessageLike,
-} from '@assistant-ui/react'
-import type {
-  ReasoningMessagePart,
-  TextMessagePart,
-  ToolCallMessagePart,
-} from '@assistant-ui/react'
 import { Button } from '@appica/ui-react/button'
 import {
   AlertDialog,
@@ -29,30 +14,19 @@ import {
 import {
   CircleCheck,
   Loader,
-  MessageCircleQuestion,
   Refresh,
-  Send,
   X,
 } from '@appica/icons-react'
 import {
   api,
-  type WorkerDebugMessage,
-  type WorkerDebugOption,
-  type WorkerDebugQuestion,
   type WorkerDebugSnapshot,
   type WorkerDebugTodo,
 } from '../lib/api'
-import { QuestionCard } from '../components/QuestionCard'
-import { questionStatusLabel } from '../lib/question'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
-import {
-  ChatAssistantParts,
-  CHAT_PLAIN_PARTS,
-  toChatToolPart,
-} from '../components/agent-chat/ChatParts'
+import { DebugChat } from '../components/agent-chat/DebugChat'
 
 /**
- * 机器人调试：/tasks/workers/:workerId/debug，从机器人列表进入。
+ * 机器人调试：/admin/workers/:workerId/debug，从机器人列表进入。
  * 同一用户 + 机器人复用一个 opencode 会话，支持真正的多轮上下文；
  * 对话经 SSE 实时流式推送（文本/思考/待办/终态），右侧面板展示 todowrite 待办。
  */
@@ -157,7 +131,7 @@ export function WorkerDebugPage() {
     return (
       <p role="alert" className="text-sm text-foreground-muted">
         调试链接无效，请从
-        <Link to="/tasks/workers" className="mx-1 underline">
+        <Link to="/admin/workers" className="mx-1 underline">
           机器人列表
         </Link>
         进入
@@ -256,104 +230,19 @@ export function WorkerDebugPage() {
               running={running}
               onSend={send}
               onReplyQuestion={replyQuestion}
+              emptyTitle="发送第一条消息开始调试"
+              emptyHint="首条消息沿用工作目录中的 AGENTS.md 与技能，后续消息使用当前会话"
+              placeholder={
+                running
+                  ? '机器人正在回复…'
+                  : '输入调试消息，Enter 发送，Shift+Enter 换行…'
+              }
             />
             <TodoPanel todos={snapshot.todos ?? []} />
           </div>
         </div>
       )}
     </div>
-  )
-}
-
-function DebugChat({
-  snapshot,
-  running,
-  onSend,
-  onReplyQuestion,
-}: {
-  snapshot: WorkerDebugSnapshot
-  running: boolean
-  onSend: (content: string) => Promise<void>
-  onReplyQuestion: (questionId: string, answers: string[][] | null) => Promise<void>
-}) {
-  const onNew = useCallback(
-    async (message: AppendMessage) => {
-      const text = message.content
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('\n')
-        .trim()
-      if (text) await onSend(text)
-    },
-    [onSend],
-  )
-  const runtime = useExternalStoreRuntime<WorkerDebugMessage>({
-    messages: snapshot.messages,
-    convertMessage: toThreadMessage,
-    onNew,
-    isSendDisabled: running,
-  })
-
-  return (
-    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-      <AssistantRuntimeProvider runtime={runtime}>
-        <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-          <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
-            {snapshot.messages.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
-                <RobotAvatar
-                  name={snapshot.worker.name}
-                  avatarUrl={snapshot.worker.avatarUrl}
-                  size={48}
-                />
-                <p>发送第一条消息开始调试</p>
-                <p className="text-xs">
-                  首条消息沿用工作目录中的 AGENTS.md 与技能，后续消息使用当前会话
-                </p>
-              </div>
-            )}
-            <ThreadPrimitive.Messages>
-              {({ message }) => {
-                const question = customOf(message).question
-                if (question) {
-                  return (
-                    <DebugQuestionBubble
-                      question={question}
-                      worker={snapshot.worker}
-                      onReply={onReplyQuestion}
-                    />
-                  )
-                }
-                return message.role === 'user' ? (
-                  <UserMessage />
-                ) : (
-                  <AssistantMessage
-                    running={message.status?.type === 'running'}
-                    worker={snapshot.worker}
-                  />
-                )
-              }}
-            </ThreadPrimitive.Messages>
-          </ThreadPrimitive.Viewport>
-          <div className="shrink-0 border-t border-border bg-background p-3">
-            <ComposerPrimitive.Root className="flex items-end gap-2 rounded-[var(--radius-md)] border border-border bg-background px-2 py-1.5 focus-within:border-border-strong">
-              <ComposerPrimitive.Input
-                rows={2}
-                placeholder={
-                  running ? '机器人正在回复…' : '输入调试消息，Enter 发送，Shift+Enter 换行…'
-                }
-                className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-foreground-muted"
-              />
-              <ComposerPrimitive.Send asChild>
-                <Button size="icon-sm" aria-label="发送消息">
-                  <Send className="size-4" />
-                </Button>
-              </ComposerPrimitive.Send>
-            </ComposerPrimitive.Root>
-          </div>
-        </ThreadPrimitive.Root>
-      </AssistantRuntimeProvider>
-    </section>
   )
 }
 
@@ -421,124 +310,4 @@ function todoTextStyle(status: WorkerDebugTodo['status']): string {
     return 'min-w-0 break-words text-foreground-muted line-through'
   }
   return 'min-w-0 break-words text-foreground-intense'
-}
-
-/** 思考（reasoning）分片：流式时默认展开，结束后折叠，可点击回看 */
-interface ChatCustom {
-  question?: WorkerDebugQuestion
-}
-
-function customOf(message: MessageState): ChatCustom {
-  return (message.metadata.custom ?? {}) as ChatCustom
-}
-
-function toThreadMessage(message: WorkerDebugMessage): ThreadMessageLike {
-  const status =
-    message.role === 'assistant'
-      ? message.status === 'running'
-        ? ({ type: 'running' } as const)
-        : message.status === 'error'
-          ? ({ type: 'incomplete', reason: 'error' } as const)
-          : ({ type: 'complete', reason: 'stop' } as const)
-      : undefined
-  const parts: Array<
-    ReasoningMessagePart | TextMessagePart | ToolCallMessagePart
-  > = []
-  if (message.reasoning?.trim()) {
-    parts.push({
-      type: 'reasoning',
-      text: message.reasoning,
-      ...(message.status === 'running'
-        ? { status: { type: 'running' } as const }
-        : {}),
-    })
-  }
-  for (const tool of message.tools ?? []) {
-    if (tool.name === 'question') continue
-    parts.push(toChatToolPart(tool))
-  }
-  if (message.content) {
-    parts.push({ type: 'text', text: message.content })
-  }
-  return {
-    id: message.id,
-    role: message.role,
-    content: parts,
-    createdAt: new Date(message.createdAt),
-    status,
-    metadata: {
-      custom: {
-        question: message.question,
-      } satisfies ChatCustom,
-    },
-  }
-}
-
-function UserMessage() {
-  return (
-    <MessagePrimitive.Root className="flex justify-end px-1">
-      <div className="min-w-0 max-w-[85%] rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
-        <MessagePrimitive.Parts components={CHAT_PLAIN_PARTS} />
-      </div>
-    </MessagePrimitive.Root>
-  )
-}
-
-function AssistantMessage({
-  running,
-  worker,
-}: {
-  running: boolean
-  worker: WorkerDebugOption
-}) {
-  return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <RobotAvatar
-        name={worker.name}
-        avatarUrl={worker.avatarUrl}
-        size={32}
-        className="mt-1"
-      />
-      <div className="min-w-0 max-w-[88%] pt-1 text-sm leading-relaxed">
-        <ChatAssistantParts />
-        {running && (
-          <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
-        )}
-      </div>
-    </MessagePrimitive.Root>
-  )
-}
-
-/** 机器人提问卡片：多问题 + 选项 + 自由输入，提交后变成回执（本轮结束后不可再答） */
-function DebugQuestionBubble({
-  question,
-  worker,
-  onReply,
-}: {
-  question: WorkerDebugQuestion
-  worker: WorkerDebugOption
-  onReply: (questionId: string, answers: string[][] | null) => Promise<void>
-}) {
-  return (
-    <MessagePrimitive.Root className="flex gap-3 px-1">
-      <RobotAvatar
-        name={worker.name}
-        avatarUrl={worker.avatarUrl}
-        size={32}
-        className="mt-0.5"
-      />
-      <div className="min-w-0 max-w-[88%] pt-1 text-sm leading-relaxed">
-        <div className="mb-1.5 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-foreground-muted">
-            {worker.name}
-          </span>
-          <span className="inline-flex items-center gap-1 text-[11px] text-info-foreground">
-            <MessageCircleQuestion className="size-3.5" />
-            {questionStatusLabel(question, '等待回答')}
-          </span>
-        </div>
-        <QuestionCard question={question} onReply={onReply} />
-      </div>
-    </MessagePrimitive.Root>
-  )
 }

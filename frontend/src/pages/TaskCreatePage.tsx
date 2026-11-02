@@ -148,7 +148,7 @@ export function TaskCreatePage() {
             </CardDescription>
           </CardHeader>
           <div className="relative mx-2 mb-2 min-h-0 flex-1">
-            <div className="absolute inset-0 overflow-auto bg-background-muted">
+            <div className="md-editor-scroll absolute inset-0 bg-background-muted">
               <MarkdownEditor
                 ref={descriptionRef}
                 value=""

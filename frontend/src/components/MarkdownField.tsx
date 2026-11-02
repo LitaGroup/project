@@ -27,7 +27,7 @@ export function MarkdownField({
     <div className="flex flex-col gap-1 text-sm">
       <span>{label}</span>
       <div
-        className={`${heightClassName} overflow-auto rounded-[var(--radius-md)] bg-background-muted`}
+        className={`${heightClassName} md-editor-scroll rounded-[var(--radius-md)] bg-background-muted`}
       >
         <MarkdownEditor
           key={editorKey}

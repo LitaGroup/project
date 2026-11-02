@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { beijingTime } from '../common/frontmatter';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
@@ -73,9 +73,10 @@ export interface TaskHandoffResult {
 
 interface HandoffEndpoint {
   worker: Worker | null;
-  executor: Executor;
+  executor: Executor | null;
   providerId: string;
   modelId: string;
+  variant: string | null;
   workdir: string | null;
 }
 
@@ -284,31 +285,74 @@ export class TaskHandoffService {
     const endpoint = await this.resolveEndpoint(task);
     const definition = await this.taskDocuments.taskDefinitionOf(task);
     const stats = this.statsOf(task, events);
-    const raw = await runOpencodePrompt(new OpencodeClient(endpoint.executor), {
-      title: `任务复盘 ${task.code}`.slice(0, 100),
-      model: { id: endpoint.modelId, providerID: endpoint.providerId },
-      location: endpoint.workdir
-        ? { directory: endpoint.workdir }
-        : endpoint.executor.defaultLocation
-          ? { directory: endpoint.executor.defaultLocation }
-          : undefined,
-      prompt: this.buildPrompt(task, endpoint, events, messages, stats),
-      timeoutMs: HANDOFF_TIMEOUT_MS,
-    });
-    const sections = splitHandoffSummary(raw);
+    // 真人机器人没有可调用复盘的执行器：REVIEW 直接采用申请验收时提交的交付说明，
+    // 缺失小节保留明确占位，不编造 AI 复盘。
+    if (endpoint.executor) {
+      const raw = await runOpencodePrompt(
+        new OpencodeClient(endpoint.executor),
+        {
+          title: `任务复盘 ${task.code}`.slice(0, 100),
+          model: {
+            id: endpoint.modelId,
+            providerID: endpoint.providerId,
+            ...(endpoint.variant ? { variant: endpoint.variant } : {}),
+          },
+          location: endpoint.workdir
+            ? { directory: endpoint.workdir }
+            : endpoint.executor.defaultLocation
+              ? { directory: endpoint.executor.defaultLocation }
+              : undefined,
+          prompt: this.buildPrompt(task, endpoint, events, messages, stats),
+          timeoutMs: HANDOFF_TIMEOUT_MS,
+        },
+      );
+      const aiSections = splitHandoffSummary(raw);
+      return await this.saveReview(task, {
+        endpoint,
+        events,
+        stats,
+        sections: aiSections,
+        definition,
+      });
+    }
 
+    const sections = normalizeTaskDeliveryReport(
+      handoffReportOf(events) ?? {
+        delivery: task.result?.trim() || null,
+      },
+    );
+    return await this.saveReview(task, {
+      endpoint,
+      events,
+      stats,
+      sections,
+      definition,
+    });
+  }
+
+  /** 保存复盘文档并把同一聊天消息从 running 更新为完成 */
+  private async saveReview(
+    task: Task,
+    input: {
+      endpoint: HandoffEndpoint;
+      events: TaskEvent[];
+      stats: TaskHandoffStats;
+      sections: HandoffSections;
+      definition: { name: string | null; description: string | null };
+    },
+  ): Promise<TaskHandoffResult> {
     const now = new Date();
     const path = this.taskDocuments.reviewPath(task);
     const title = `${task.code} ${task.title} · 任务复盘`;
     const content = this.buildReport({
       task,
-      endpoint,
-      events,
-      stats,
-      sections,
+      endpoint: input.endpoint,
+      events: input.events,
+      stats: input.stats,
+      sections: input.sections,
       path,
       generatedAt: now,
-      definition,
+      definition: input.definition,
     });
     const document = await this.taskDocuments.upsertReview({
       task,
@@ -322,15 +366,15 @@ export class TaskHandoffService {
       '',
       `📚 已归档到知识库：[${document.path}](${document.url})`,
     ].join('\n');
-    await this.taskChat.postAssistantMessage(taskId, chatContent, {
-      messageId,
+    await this.taskChat.postAssistantMessage(task.id, chatContent, {
+      messageId: this.reviewMessageId(task.id),
       status: 'complete',
       meta: {
         review: {
           status: 'complete',
           path: document.path,
           url: document.url,
-          stats,
+          stats: input.stats,
         },
       },
     });
@@ -385,6 +429,17 @@ export class TaskHandoffService {
     const worker = workerId
       ? await this.workers.findOne({ where: { id: workerId } })
       : null;
+    // 真人机器人不依赖执行器：复盘由申请验收时的结构化交付说明直接生成。
+    if (worker?.runtime === WorkerRuntime.HUMAN) {
+      return {
+        worker,
+        executor: null,
+        providerId: '',
+        modelId: '',
+        variant: null,
+        workdir: null,
+      };
+    }
     const executorId = task.executorId ?? worker?.executorId ?? null;
     if (!executorId) {
       throw new BadRequestException(
@@ -420,6 +475,7 @@ export class TaskHandoffService {
       executor,
       providerId,
       modelId,
+      variant: worker?.variant ?? null,
       workdir: worker ? this.workersService.workdirOf(worker.id) : null,
     };
   }

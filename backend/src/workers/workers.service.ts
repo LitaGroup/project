@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  OnApplicationBootstrap,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -39,6 +41,8 @@ export interface CreateWorkerInput {
   executorId?: number | null;
   providerId?: string | null;
   modelId?: string | null;
+  /** 默认思考等级（opencode variant id；空=模型默认） */
+  variant?: string | null;
   prompt?: string | null;
   skills?: WorkerSkill[] | null;
   standards?: WorkerStandard[] | null;
@@ -81,7 +85,8 @@ export interface WorkerView extends Worker {
 const ACTIVE_STATUSES = [TaskStatus.WAITING, TaskStatus.RUNNING];
 
 @Injectable()
-export class WorkersService {
+export class WorkersService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(WorkersService.name);
   /** 工位根目录（执行器机器上的路径约定，环境变量 WORKER_BASE_DIR） */
   private readonly workerBaseDir: string | null;
 
@@ -106,6 +111,24 @@ export class WorkersService {
     config: ConfigService,
   ) {
     this.workerBaseDir = config.get<string>('WORKER_BASE_DIR')?.trim() || null;
+  }
+
+  /** 启动时补齐真人机器人；通讯录同步可能在应用启动后继续创建新用户 */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.ensureHumanWorkersForAllUsers().catch((error: Error) => {
+      this.logger.error(`真人机器人初始化失败: ${error.message}`);
+    });
+  }
+
+  /** 为用户系统全量用户补齐唯一的真人机器人 */
+  async ensureHumanWorkersForAllUsers(): Promise<number> {
+    const users = await this.users.find({
+      select: { id: true, name: true, avatarUrl: true, enabled: true },
+    });
+    for (const user of users) {
+      await this.ensureHumanWorker(user);
+    }
+    return users.length;
   }
 
   /** 工位路径：{WORKER_BASE_DIR}/worker/{id}/（不落库实时计算） */
@@ -263,6 +286,7 @@ export class WorkersService {
       executorId: input.executorId ?? null,
       providerId: input.providerId?.trim() || null,
       modelId: input.modelId?.trim() || null,
+      variant: input.variant?.trim() || null,
       prompt: input.prompt?.trim() || null,
       skills,
       standards,
@@ -306,20 +330,34 @@ export class WorkersService {
       throw new BadRequestException('机器人角色由系统维护，不能修改');
     }
     if (
+      !worker.humanUserId &&
       input.runtime !== undefined &&
       input.runtime !== WorkerRuntime.OPENCODE
     ) {
       throw new BadRequestException('机器人运行时统一为 opencode');
     }
-    worker.runtime = WorkerRuntime.OPENCODE;
-    if (input.executorId !== undefined) {
+    if (!worker.humanUserId) worker.runtime = WorkerRuntime.OPENCODE;
+    if (!worker.humanUserId && input.executorId !== undefined) {
       worker.executorId = input.executorId ?? null;
+    }
+    if (
+      worker.humanUserId &&
+      (input.providerId !== undefined ||
+        input.modelId !== undefined ||
+        input.variant !== undefined)
+    ) {
+      throw new BadRequestException(
+        '真人机器人不能配置 AI 供应商/模型/思考等级',
+      );
     }
     if (input.providerId !== undefined) {
       worker.providerId = input.providerId?.trim() || null;
     }
     if (input.modelId !== undefined) {
       worker.modelId = input.modelId?.trim() || null;
+    }
+    if (input.variant !== undefined) {
+      worker.variant = input.variant?.trim() || null;
     }
     if (input.prompt !== undefined)
       worker.prompt = input.prompt?.trim() || null;
@@ -342,12 +380,20 @@ export class WorkersService {
     return this.findOneView(id);
   }
 
-  /** 删除机器人（系统机器人不可删除；已分配未完结任务时会拒绝） */
+  /** 删除机器人（系统/真人机器人不可删除；已分配未完结任务时会拒绝） */
   async remove(id: number): Promise<void> {
     const worker = await this.findOne(id);
     if (worker.systemKey || isSystemWorkerId(worker.id)) {
       throw new BadRequestException(
         '系统机器人由代码内置，不能在网页删除（可停用）',
+      );
+    }
+    if (worker.humanUserId) {
+      throw new BadRequestException('真人机器人与用户一一绑定，不能删除');
+    }
+    if (worker.personalAgentUserId) {
+      throw new BadRequestException(
+        '个人 AGENT 与用户一一绑定，不能删除（可停用或编辑配置）',
       );
     }
     const active = await this.tasks.count({
@@ -370,10 +416,26 @@ export class WorkersService {
     await this.workers.remove(worker);
   }
 
-  /** 配置校验：所有机器人统一走执行器（opencode），调度机器人也不例外；停用的机器人允许配置不完整 */
+  /** 配置校验：AI 机器人统一走执行器（opencode）；真人机器人由绑定用户执行，不需要执行器配置 */
   private async assertConfig(worker: Worker): Promise<void> {
+    if (worker.humanUserId) {
+      if (worker.runtime !== WorkerRuntime.HUMAN) {
+        throw new BadRequestException('绑定用户的机器人运行时必须为 human');
+      }
+      if (
+        worker.executorId ||
+        worker.providerId ||
+        worker.modelId ||
+        worker.variant
+      ) {
+        throw new BadRequestException(
+          '真人机器人不能配置 AI 执行器/供应商/模型/思考等级',
+        );
+      }
+      return;
+    }
     if (worker.runtime !== WorkerRuntime.OPENCODE) {
-      throw new BadRequestException('机器人运行时统一为 opencode');
+      throw new BadRequestException('AI 机器人运行时统一为 opencode');
     }
     if (worker.executorId) {
       const executor = await this.executors.findOne({
@@ -420,5 +482,88 @@ export class WorkersService {
       select: { feishuOpenId: true },
     });
     return user?.feishuOpenId ?? null;
+  }
+
+  /** 按绑定用户查真人机器人 */
+  async findByHumanUserId(userId: number): Promise<Worker | null> {
+    if (userId <= 0) return null;
+    return this.workers.findOne({ where: { humanUserId: userId } });
+  }
+
+  /** 当前绑定用户的真人机器人（供任务动作/操作台校验执行人） */
+  async mustHumanWorker(userId: number): Promise<Worker> {
+    const worker = await this.findByHumanUserId(userId);
+    if (!worker) {
+      throw new NotFoundException('当前用户尚未绑定真人机器人');
+    }
+    return worker;
+  }
+
+  /**
+   * 确保每个用户都有唯一的真人机器人：通讯录同步、登录和迁移共用入口。
+   * 真人机器人是“用户在机器人协作体系中的执行器”，不需要 opencode 工位与模型配置。
+   */
+  async ensureHumanWorker(
+    user: Pick<User, 'id' | 'name' | 'enabled'> & {
+      avatarUrl?: string | null;
+    },
+  ): Promise<Worker> {
+    const existing = await this.findByHumanUserId(user.id);
+    if (existing) {
+      const patch: Partial<Worker> = {};
+      const name = await this.humanWorkerName(user);
+      if (existing.name !== name) patch.name = name;
+      if (existing.humanUserName !== user.name) {
+        patch.humanUserName = user.name;
+      }
+      if (existing.avatarUrl !== (user.avatarUrl ?? null)) {
+        patch.avatarUrl = user.avatarUrl ?? null;
+      }
+      if (existing.enabled !== user.enabled) patch.enabled = user.enabled;
+      if (Object.keys(patch).length > 0) {
+        await this.workers.update({ id: existing.id }, patch);
+        Object.assign(existing, patch);
+      }
+      return existing;
+    }
+
+    await this.ensureCustomWorkerIdFloor();
+    const name = await this.humanWorkerName(user);
+    const worker = this.workers.create({
+      name: name,
+      intro: `真人机器人：由「${user.name}」在操作台执行任务`,
+      avatarUrl: user.avatarUrl ?? null,
+      role: WorkerRole.WORKER,
+      runtime: WorkerRuntime.HUMAN,
+      executorId: null,
+      providerId: null,
+      modelId: null,
+      prompt: null,
+      skills: null,
+      standards: null,
+      taskDefs: null,
+      humanUserId: user.id,
+      humanUserName: user.name,
+      enabled: user.enabled,
+    });
+    const saved = await this.workers.save(worker);
+    this.logger.log(
+      `已为用户「${user.name}」#${user.id} 创建真人机器人 #${saved.id}`,
+    );
+    return saved;
+  }
+
+  /** 真人机器人展示名：使用用户飞书中文名称，冲突时稳定追加用户 ID */
+  private async humanWorkerName(
+    user: Pick<User, 'id' | 'name'>,
+  ): Promise<string> {
+    const base = (user.name?.trim() || `用户#${user.id}`).slice(0, 100);
+    const row = await this.workers.findOne({
+      where: { name: base },
+      select: { id: true, humanUserId: true },
+    });
+    if (!row || row.humanUserId === user.id) return base;
+    const suffix = `#${user.id}`;
+    return `${base.slice(0, 100 - suffix.length)}${suffix}`;
   }
 }

@@ -23,7 +23,38 @@ import {
 } from '@appica/icons-react'
 import { MermaidDiagram } from '../MermaidDiagram'
 
-const MARKDOWN_PLUGINS = [remarkGfm]
+interface ChatMdastNode {
+  type: string
+  value?: string
+  children?: ChatMdastNode[]
+}
+
+/** 单换行渲染为硬换行：聊天输入所见即所得，不把换行折叠成空格 */
+function remarkChatLineBreaks() {
+  return (tree: unknown): void => {
+    const walk = (node: ChatMdastNode): void => {
+      if (!node.children) return
+      const next: ChatMdastNode[] = []
+      for (const child of node.children) {
+        walk(child)
+        const { value } = child
+        if (child.type === 'text' && value?.includes('\n')) {
+          const segments = value.split('\n')
+          segments.forEach((segment, index) => {
+            if (index > 0) next.push({ type: 'break' })
+            if (segment) next.push({ type: 'text', value: segment })
+          })
+        } else {
+          next.push(child)
+        }
+      }
+      node.children = next
+    }
+    walk(tree as ChatMdastNode)
+  }
+}
+
+const MARKDOWN_PLUGINS = [remarkGfm, remarkChatLineBreaks]
 const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
   mermaid: { SyntaxHighlighter: MermaidDiagram },
 }
@@ -43,11 +74,20 @@ function ChatMarkdownLink({
 
 const MARKDOWN_COMPONENTS = { a: ChatMarkdownLink }
 
-/** 机器人对话 Markdown（任务详情与机器人调试共用） */
-export function ChatMarkdownText() {
+/** 机器人对话 Markdown（任务详情、工作台与机器人调试共用）
+ *  text 仅用于与 assistant-ui 的 TextMessagePartProps 保持类型兼容，
+ *  实际渲染由 MarkdownTextPrimitive 从消息上下文读取。 */
+export function ChatMarkdownText({
+  className,
+}: {
+  className?: string
+  text?: string
+}) {
   return (
     <MarkdownTextPrimitive
-      className="task-chat-markdown"
+      className={
+        className ? `task-chat-markdown ${className}` : 'task-chat-markdown'
+      }
       smooth={false}
       defer
       remarkPlugins={MARKDOWN_PLUGINS}
@@ -57,11 +97,9 @@ export function ChatMarkdownText() {
   )
 }
 
-/** 文本分片：用户消息等不需要 Markdown 渲染的场景 */
-export function ChatPlainText({ text }: { text?: string }) {
-  // wrap-anywhere（overflow-wrap: anywhere）：长 URL / 连续英文也能断行，
-  // 且会参与 min-content 计算，避免把气泡撑出容器
-  return <span className="wrap-anywhere whitespace-pre-wrap">{text}</span>
+/** 主色气泡（bg-primary）内的 Markdown：颜色继承气泡文字色，保证对比度 */
+function ChatMarkdownTextOnPrimary() {
+  return <ChatMarkdownText className="task-chat-markdown-on-primary" />
 }
 
 /** 思考过程：流式时默认展开并实时滚到底部，结束后折叠，可点击回看 */
@@ -355,7 +393,14 @@ export function ChatAssistantParts() {
 }
 
 // oxlint-disable-next-line react/only-export-components
-export const CHAT_PLAIN_PARTS = {
-  Text: ChatPlainText,
+export const CHAT_MARKDOWN_PARTS = {
+  Text: ChatMarkdownText,
+  Empty: () => null,
+}
+
+/** 主色气泡（用户消息）内的 Markdown 分片 */
+// oxlint-disable-next-line react/only-export-components
+export const CHAT_MARKDOWN_PARTS_ON_PRIMARY = {
+  Text: ChatMarkdownTextOnPrimary,
   Empty: () => null,
 }

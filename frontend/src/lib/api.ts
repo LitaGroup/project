@@ -877,7 +877,7 @@ export type ExecutorType = (typeof EXECUTOR_TYPES)[number]
 export const WORKER_ROLES = ['工作者', '调度器'] as const
 export type WorkerRole = (typeof WORKER_ROLES)[number]
 
-export const WORKER_RUNTIMES = ['opencode'] as const
+export const WORKER_RUNTIMES = ['opencode', 'human'] as const
 export type WorkerRuntime = (typeof WORKER_RUNTIMES)[number]
 
 export const WORKER_LIVE_STATUSES = ['空闲中', '工作中', '等待中', '验收中'] as const
@@ -915,9 +915,15 @@ export const TASK_SUB_STATUSES = [
 export type TaskSubStatus = (typeof TASK_SUB_STATUSES)[number]
 
 /** 执行器：实际执行任务的工具实例（本期 opencode server） */
+export interface ExecutorProviderModelVariant {
+  id: string
+  name: string
+}
 export interface ExecutorProviderModel {
   id: string
   name: string
+  /** 可选思考等级；旧缓存没有该字段时前端触发一次重新同步 */
+  variants?: ExecutorProviderModelVariant[]
 }
 export interface ExecutorProvider {
   id: string
@@ -1009,12 +1015,19 @@ export interface Worker {
   executorId: number | null
   providerId: string | null
   modelId: string | null
+  /** 默认思考等级（opencode variant id；空=模型默认） */
+  variant: string | null
   prompt: string | null
   skills: WorkerSkill[] | null
   standards: WorkerStandard[] | null
   taskDefs: WorkerTaskDef[] | null
   ownerUserId: number | null
   ownerName: string | null
+  /** 真人机器人绑定的用户；runtime=human 时即实际执行人 */
+  humanUserId: number | null
+  humanUserName: string | null
+  /** 个人 AI AGENT 的归属用户；工作台「我的 AGENT」使用该机器人 */
+  personalAgentUserId: number | null
   enabled: boolean
   /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
@@ -1035,6 +1048,8 @@ export interface WorkerDebugOption {
   executorName: string
   providerId: string
   modelId: string
+  /** 机器人默认思考等级（空=模型默认） */
+  variant: string | null
 }
 
 /** 机器人提问（调试对话中的问答卡片，结构与任务对话的 TaskChatQuestion 一致） */
@@ -1066,6 +1081,8 @@ export interface WorkerDebugMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  /** 用户消息携带的附件（文件上传后的公开地址） */
+  files?: WorkerDebugAttachment[]
   /** 流式累积的思考内容（session.reasoning.* 事件；可能为空） */
   reasoning?: string
   status: 'running' | 'complete' | 'error'
@@ -1078,6 +1095,45 @@ export interface WorkerDebugMessage {
   tools?: WorkerDebugTool[]
 }
 
+/** 对话附件 */
+export interface WorkerDebugAttachment {
+  name: string
+  url: string
+  size?: number
+  mime?: string
+}
+
+/** 调试会话当前模型与思考等级 */
+export interface WorkerDebugModelSelection {
+  providerId: string
+  modelId: string
+  variant: string | null
+}
+
+/** 模型可选思考等级 */
+export interface WorkerDebugModelVariant {
+  id: string
+  name: string
+}
+
+export interface WorkerDebugModel {
+  id: string
+  name: string
+  variants: WorkerDebugModelVariant[]
+}
+
+export interface WorkerDebugModelProvider {
+  id: string
+  name: string
+  models: WorkerDebugModel[]
+}
+
+/** 我的 AGENT 模型选择器数据 */
+export interface WorkerDebugModelCatalog {
+  current: WorkerDebugModelSelection
+  providers: WorkerDebugModelProvider[]
+}
+
 /** opencode 待办（todowrite 工具产出，随调试快照返回） */
 export interface WorkerDebugTodo {
   content: string
@@ -1086,8 +1142,15 @@ export interface WorkerDebugTodo {
 }
 
 /** 调试对话快照；同一用户 + 机器人固定绑定一个 sessionId，7 天不活跃才重置 */
+/** opencode 主 Agent 模式：build=可修改执行，plan=只分析规划 */
+export type WorkerDebugMode = 'build' | 'plan'
+
 export interface WorkerDebugSnapshot {
   worker: WorkerDebugOption
+  /** 当前选择/生效的模型与思考等级 */
+  model: WorkerDebugModelSelection
+  /** 当前主 Agent 模式（build / plan） */
+  mode: WorkerDebugMode
   sessionId: string | null
   status: 'idle' | 'running'
   messages: WorkerDebugMessage[]
@@ -1189,6 +1252,8 @@ export interface TaskPackage {
   outputSpec: string | null
   missingItems: TaskMissingItem[] | null
   /** 主状态：等待中 / 进行中 / 已结束 */
+  /** 最近一次分配时间（操作台按此倒序；可能为空） */
+  assignedAt: string | null
   status: TaskStatus
   /** 子状态：待分配 / 待接受 / 待反馈 / 待继续 / 待验收 / 执行中 / 完成 / 已拒绝 / 失败 / 取消 */
   subStatus: TaskSubStatus
@@ -1216,9 +1281,9 @@ export interface TaskPackage {
   acceptedAt: string | null
   acceptedBy: string | null
   deliveredAt: string | null
-  /** 累计验收不通过次数（第 4 次起转任务负责人） */
+  /** 累计验收不通过次数（第 4 次起转任务执行方） */
   acceptRejectCount: number
-  /** 转任务负责人的时间（未升级为 null） */
+  /** 转任务执行方的时间（未升级为 null） */
   ownerTakeoverAt: string | null
   ownerTakeoverUserId: number | null
   ownerTakeoverName: string | null
@@ -1354,7 +1419,10 @@ export type TaskRealtimeMessage =
   | { type: 'task.delete'; ids: number[]; at: number }
   | { type: 'ping'; at: number }
 
-/** 任务聊天发送方：用户 / 机器人 / 调度机器人 / 系统 */
+/** 任务对话身份：需求方 / 执行方 */
+export type TaskChatPerspective = 'requester' | 'responsible'
+
+/** 任务聊天发送方：需求方 / 机器人 / 调度机器人 / 系统 */
 export interface TaskChatSender {
   id: string
   name: string
@@ -1423,6 +1491,8 @@ export interface TaskChatMessage {
   taskId: number
   role: 'user' | 'assistant'
   sender: TaskChatSender
+  /** 该消息属于任务哪一方；旧消息缺失时按 role 推断 */
+  perspective?: TaskChatPerspective
   /** Markdown 正文；工具调用/提问消息可能为空 */
   content: string
   /** 机器人思考过程（session.reasoning.*） */
@@ -1441,6 +1511,8 @@ export interface TaskQueuedUserMessage {
   id: string
   taskId: number
   sender: TaskChatSender
+  /** 发送身份：需求方 / 执行方 */
+  perspective?: TaskChatPerspective
   content: string
   createdAt: string
   status: 'queued' | 'sending'
@@ -1463,9 +1535,9 @@ export interface TaskChatSnapshot {
   messages: TaskChatMessage[]
   /** 当前任务等待投递的消息 */
   queuedMessages: TaskQueuedUserMessage[]
-  /** 当前任务需求人姓名 */
+  /** 当前任务需求方姓名 */
   requesterName: string | null
-  /** 当前执行机器人负责人姓名 */
+  /** 当前执行机器人执行方姓名 */
   agentOwnerName: string | null
   /** 人工介入次数 */
   interventionCount: number
@@ -1473,6 +1545,57 @@ export interface TaskChatSnapshot {
   hasAcceptanceApplication: boolean
   /** 当前任务事件时间线（倒序） */
   events: TaskEvent[]
+}
+
+/** 工作台角色：我执行 / 我的 AGENT 执行 / 我是需求方 / 我是执行方 */
+export type WorkbenchRole = 'agent' | 'owner' | 'requester' | 'responsible'
+
+/** 操作台任务：任务本体 + 当前用户角色与下一步动作 */
+export interface WorkbenchTask extends TaskPackage {
+  workbenchRoles: WorkbenchRole[]
+  /** 当前需要当前用户处理的动作；null 表示等待其他参与方 */
+  workbenchAction: string | null
+}
+
+/** 工作台「我的 AGENT」机器人视图（服务端只返回对话所需字段） */
+export interface WorkbenchAgentWorker {
+  id: number
+  name: string
+  intro: string | null
+  avatarUrl: string | null
+  executorId: number | null
+  providerId: string | null
+  modelId: string | null
+  variant: string | null
+  enabled: boolean
+  personalAgentUserId: number | null
+}
+
+/** 工作台「我的 AGENT」可用状态 */
+export interface WorkbenchAgentInfo {
+  /** 个人 AGENT 机器人；创建失败时为 null */
+  worker: WorkbenchAgentWorker | null
+  available: boolean
+  /** 不可用原因 */
+  reason: string | null
+}
+
+/** 操作台初始数据 */
+export interface WorkbenchSummary {
+  worker: Worker
+  /** 当前用户的个人 AI AGENT */
+  agent: WorkbenchAgentInfo
+  tasks: WorkbenchTask[]
+}
+
+/** 操作台交付说明（复用 HANDOFF/REVIEW 结构） */
+export interface WorkbenchHandoffInput {
+  delivery?: string | null
+  problems?: string | null
+  detours?: string | null
+  lessons?: string | null
+  followUps?: string | null
+  other?: string | null
 }
 
 /** 任务聊天 SSE 推送 */
@@ -1505,6 +1628,12 @@ export interface TaskTemplate {
   description: string | null
   /** 默认处理机器人 workers.id 列表 */
   agentIds: number[]
+  /** 创建人用户 ID（系统内置定义为空） */
+  createdById: number | null
+  /** 创建人姓名快照 */
+  createdByName: string | null
+  /** 当前登录用户是否已关注（仅列表接口返回） */
+  followedByMe?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -1968,6 +2097,25 @@ export const api = {
     }
     return res.json() as Promise<{ path: string; url: string }>
   },
+  /** 上传通用文件（聊天附件/Agent 共用），返回公开地址 */
+  uploadFile: async (
+    file: File,
+  ): Promise<{ filename: string; size: number; mime: string; url: string }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/files', { method: 'POST', body: form })
+    if (res.status === 401) handleUnauthorized('/files')
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      throw new Error(body?.message ?? `上传失败 (${res.status})`)
+    }
+    return res.json() as Promise<{
+      filename: string
+      size: number
+      mime: string
+      url: string
+    }>
+  },
   /** 资源列表：传 projectId 按项目过滤，不传返回全部；默认隐藏软删除（includeDeleted 含全部） */
   listResources: (projectId?: number, includeDeleted = false) => {
     const params = new URLSearchParams()
@@ -2242,6 +2390,7 @@ export const api = {
     executorId?: number | null
     providerId?: string | null
     modelId?: string | null
+    variant?: string | null
     prompt?: string | null
     skills?: WorkerSkill[] | null
     standards?: WorkerStandard[] | null
@@ -2264,6 +2413,7 @@ export const api = {
       executorId: number | null
       providerId: string | null
       modelId: string | null
+      variant: string | null
       prompt: string | null
       skills: WorkerSkill[] | null
       standards: WorkerStandard[] | null
@@ -2285,6 +2435,7 @@ export const api = {
     executorId?: number | null
     providerId?: string | null
     modelId?: string | null
+    variant?: string | null
   }) =>
     request<WorkerOptimizeSnapshot>('/workers/optimize-prompt', {
       method: 'POST',
@@ -2419,6 +2570,14 @@ export const api = {
     }),
   deleteTaskTemplate: (id: number) =>
     request<void>(`/task-templates/${id}`, { method: 'DELETE' }),
+  /** 关注任务定义（个人中心「我的任务定义」） */
+  followTaskTemplate: (id: number) =>
+    request<TaskTemplate>(`/task-templates/${id}/follow`, { method: 'POST' }),
+  /** 取消关注任务定义 */
+  unfollowTaskTemplate: (id: number) =>
+    request<TaskTemplate>(`/task-templates/${id}/follow`, {
+      method: 'DELETE',
+    }),
 
   /** 任务类型字典（识别与筛选用，平台内维护） */
   listTaskTypes: () => request<TaskTypeDef[]>('/task-types'),
@@ -2458,6 +2617,143 @@ export const api = {
     return request<TaskPackage[]>(`/tasks${q ? `?${q}` : ''}`)
   },
   getTaskPackage: (id: number) => request<TaskPackage>(`/tasks/${id}`),
+  /** 操作台：绑定机器人 + 我执行/待我处理的任务 */
+  getWorkbench: () => request<WorkbenchSummary>('/workbench'),
+  workbenchAccept: (id: number) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/accept`, { method: 'POST' }),
+  workbenchRefuse: (id: number, reason: string, suggestion?: string) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/refuse`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, suggestion }),
+    }),
+  workbenchSendMessage: (id: number, content: string) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  workbenchAskQuestion: (
+    id: number,
+    questions: TaskChatQuestionInfo[],
+  ) =>
+    request<{ task: TaskPackage; questionId: string }>(
+      `/workbench/tasks/${id}/questions`,
+      { method: 'POST', body: JSON.stringify({ questions }) },
+    ),
+  workbenchApplyHandoff: (id: number, report: WorkbenchHandoffInput) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/handoff/apply`, {
+      method: 'POST',
+      body: JSON.stringify(report),
+    }),
+  workbenchRevokeHandoff: (id: number) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/handoff/revoke`, {
+      method: 'POST',
+    }),
+  workbenchCreateSubtask: (id: number, input: {
+    perspective: 'requester' | 'responsible'
+    templateId: number
+    title: string
+    description?: string | null
+    input?: string | null
+    outputSpec?: string | null
+  }) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/subtasks`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  workbenchAcceptHandoff: (id: number) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/handoff/accept`, {
+      method: 'POST',
+    }),
+  /** 需求方取消任务 */
+  workbenchCancelTask: (id: number) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/cancel`, {
+      method: 'POST',
+    }),
+  workbenchRejectHandoff: (id: number, content: string) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/handoff/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  workbenchFailTask: (id: number, reason: string) =>
+    request<TaskPackage>(`/workbench/tasks/${id}/fail`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  workbenchReplyQuestion: (
+    id: number,
+    questionId: string,
+    body: { answers?: string[][]; reject?: boolean },
+  ) =>
+    request<TaskPackage>(
+      `/workbench/tasks/${id}/questions/${encodeURIComponent(questionId)}/reply`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  /** 我的 AGENT：可用状态（未创建/执行器离线时带原因） */
+  getWorkbenchAgent: () =>
+    request<WorkbenchAgentInfo>('/workbench/agent'),
+  /** 我的 AGENT：对话快照（taskId 为空使用通用会话，否则每个任务独立会话） */
+  getWorkbenchAgentSnapshot: (taskId?: number | null) =>
+    request<WorkerDebugSnapshot>(
+      `/workbench/agent/snapshot${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}`,
+    ),
+  /** 我的 AGENT：发送消息；taskId 同时隔离会话与作为本轮工作台任务上下文 */
+  sendWorkbenchAgentMessage: (
+    content: string,
+    taskId?: number | null,
+    files?: WorkerDebugAttachment[],
+  ) =>
+    request<WorkerDebugSnapshot>('/workbench/agent/messages', {
+      method: 'POST',
+      body: JSON.stringify({ content, taskId: taskId ?? null, files }),
+    }),
+  /** 我的 AGENT：可切换的模型与思考等级清单 */
+  getWorkbenchAgentModels: (taskId?: number | null) =>
+    request<WorkerDebugModelCatalog>(
+      `/workbench/agent/models${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}`,
+    ),
+  /** 我的 AGENT：切换模型/思考等级（返回最新快照） */
+  setWorkbenchAgentModel: (
+    input: WorkerDebugModelSelection,
+    taskId?: number | null,
+  ) =>
+    request<WorkerDebugSnapshot>('/workbench/agent/model', {
+      method: 'POST',
+      body: JSON.stringify({ ...input, taskId: taskId ?? null }),
+    }),
+  /** 我的 AGENT：切换 build / plan 模式（返回最新快照） */
+  setWorkbenchAgentMode: (mode: WorkerDebugMode, taskId?: number | null) =>
+    request<WorkerDebugSnapshot>('/workbench/agent/mode', {
+      method: 'POST',
+      body: JSON.stringify({ mode, taskId: taskId ?? null }),
+    }),
+  /** 我的 AGENT：中断当前轮次 */
+  interruptWorkbenchAgent: (taskId?: number | null) =>
+    request<WorkerDebugSnapshot>('/workbench/agent/interrupt', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: taskId ?? null }),
+    }),
+  /** 我的 AGENT：回答（answers）或跳过（null）提问 */
+  replyWorkbenchAgentQuestion: (
+    questionId: string,
+    answers: string[][] | null,
+    taskId?: number | null,
+  ) =>
+    request<WorkerDebugSnapshot>(
+      `/workbench/agent/questions/${encodeURIComponent(questionId)}/reply`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          ...(answers ? { answers } : { reject: true }),
+          taskId: taskId ?? null,
+        }),
+      },
+    ),
+  /** 我的 AGENT：重置当前任务会话 */
+  resetWorkbenchAgent: (taskId?: number | null) =>
+    request<WorkerDebugSnapshot>('/workbench/agent/reset', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: taskId ?? null }),
+    }),
   /** 任务详情页聊天快照：当前任务 + 所属 PIPELINE + 对话消息 */
   getTaskChat: (id: number) => request<TaskChatSnapshot>(`/tasks/${id}/chat`),
   createTaskPackage: (input: {
@@ -2506,10 +2802,14 @@ export const api = {
       body: JSON.stringify({ content }),
     }),
   /** 任务对话发送消息：等待阶段补充需求，执行阶段直接续聊 */
-  sendTaskMessage: (id: number, content: string) =>
+  sendTaskMessage: (
+    id: number,
+    content: string,
+    perspective?: TaskChatPerspective,
+  ) =>
     request<TaskPackage>(`/tasks/${id}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, perspective }),
     }),
   /** 人工分配机器人（执行中会中断旧机器人并重新执行） */
   assignTask: (id: number, agentId: number) =>
@@ -2539,7 +2839,7 @@ export const api = {
   /** 验收通过：等待中-待验收 → 已结束-完成（后台生成任务复盘） */
   acceptTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/accept`, { method: 'POST' }),
-  /** 验收不通过：前 3 次退回机器人，第 4 次起转任务负责人待反馈 */
+  /** 验收不通过：前 3 次退回机器人，第 4 次起转任务执行方待反馈 */
   rejectTask: (id: number, content: string) =>
     request<TaskPackage>(`/tasks/${id}/reject`, {
       method: 'POST',

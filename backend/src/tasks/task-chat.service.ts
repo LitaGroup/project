@@ -10,7 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { filter, Observable, Subject, Subscription } from 'rxjs';
 import { In, Repository } from 'typeorm';
 import { User } from '../auth/user.entity';
-import { WorkerRole } from '../common/enums';
+import { WorkerRole, WorkerRuntime } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
@@ -22,6 +22,7 @@ import type {
   TaskChatQuestionState,
   TaskChatSender,
   TaskChatSnapshot,
+  TaskChatPerspective,
   TaskChatStreamMessage,
   TaskChatTool,
   TaskPipelineStage,
@@ -278,6 +279,7 @@ export class TaskChatService implements OnModuleDestroy {
             id: `initial:${rootTask.id}`,
             taskId: rootTask.id,
             role: 'user',
+            perspective: 'requester',
             sender: await this.userSenderForTask(rootTask),
             content,
             createdAt: rootTask.createdAt.toISOString(),
@@ -329,12 +331,21 @@ export class TaskChatService implements OnModuleDestroy {
       interventionCount: currentEvents.filter(
         (event) => event.meta?.intervention === true,
       ).length,
-      hasAcceptanceApplication: taskEvents.some(
-        (event) =>
-          event.taskId === task.id && event.meta?.deliveryApply === true,
+      hasAcceptanceApplication: this.hasActiveAcceptanceApplication(
+        taskEvents.filter((event) => event.taskId === task.id),
       ),
       events: currentEvents,
     };
+  }
+
+  /** 最新一次交付事件决定验收申请是否仍有效；撤销交付会让旧申请失效 */
+  private hasActiveAcceptanceApplication(events: TaskEvent[]): boolean {
+    let active = false;
+    for (const event of [...events].sort((a, b) => a.id - b.id)) {
+      if (event.meta?.deliveryApply === true) active = true;
+      if (event.meta?.deliveryRevoke === true) active = false;
+    }
+    return active;
   }
 
   /** 任务聊天 SSE：初始 ready + 实时消息/阶段更新/快照刷新信号 */
@@ -470,13 +481,18 @@ export class TaskChatService implements OnModuleDestroy {
     content: string,
     operator: string | null,
     prompt?: string,
+    perspective: TaskChatPerspective = 'requester',
   ): Promise<TaskQueuedUserMessage> {
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
     const message: TaskQueuedUserMessage = {
       id: `queue:${taskId}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
       taskId,
-      sender: this.userSender(operator),
+      sender: this.userSender(
+        operator,
+        perspective === 'responsible' ? '执行方' : '需求方',
+      ),
+      perspective,
       content: text,
       createdAt: new Date().toISOString(),
       status: 'queued',
@@ -1026,6 +1042,7 @@ export class TaskChatService implements OnModuleDestroy {
       return {
         ...base,
         role: 'user',
+        perspective: 'requester',
         sender: this.userSender(event.operator),
         content:
           description || stage.task.description?.trim() || stage.task.title,
@@ -1033,23 +1050,27 @@ export class TaskChatService implements OnModuleDestroy {
       };
     }
 
-    // 需求方反馈：进入对话流，而非时间线；父机器人需求方也保留机器人身份。
+    // 需求方/执行方反馈：进入对话流，而非时间线；父机器人身份同样保留。
     if (event.type === '反馈') {
+      const perspective: TaskChatPerspective =
+        meta.perspective === 'responsible' ? 'responsible' : 'requester';
       const actorWorkerId =
         typeof meta.actorWorkerId === 'number' ? meta.actorWorkerId : null;
+      const roleLabel = perspective === 'requester' ? '需求方' : '执行方';
       const sender =
         meta.actorType === 'worker' && actorWorkerId
           ? {
               id: `worker:${actorWorkerId}`,
-              name: event.operator ?? '需求方机器人',
+              name: event.operator ?? `${roleLabel}机器人`,
               kind: 'worker' as const,
               workerId: actorWorkerId,
-              roleLabel: '需求方机器人',
+              roleLabel,
             }
-          : this.userSender(event.operator);
+          : this.userSender(event.operator, roleLabel);
       return {
         ...base,
-        role: 'user',
+        role: perspective === 'responsible' ? 'assistant' : 'user',
+        perspective,
         sender,
         content: event.content,
         kind: 'message',
@@ -1129,12 +1150,13 @@ export class TaskChatService implements OnModuleDestroy {
 
   private workerToSender(worker: Worker): TaskChatSender {
     const scheduler = worker.role === WorkerRole.SCHEDULER;
+    const human = worker.runtime === WorkerRuntime.HUMAN;
     return {
       id: `${scheduler ? 'scheduler' : 'worker'}:${worker.id}`,
       name: worker.name,
       kind: scheduler ? 'scheduler' : 'worker',
       workerId: worker.id,
-      roleLabel: scheduler ? '调度器' : '机器人',
+      roleLabel: scheduler ? '调度器' : human ? '真人机器人' : '机器人',
       avatarUrl: worker.avatarUrl,
     };
   }
@@ -1165,13 +1187,16 @@ export class TaskChatService implements OnModuleDestroy {
     return this.userSender(null);
   }
 
-  private userSender(name: string | null | undefined): TaskChatSender {
-    const userName = name?.trim() || '用户';
+  private userSender(
+    name: string | null | undefined,
+    roleLabel = '需求方',
+  ): TaskChatSender {
+    const userName = name?.trim() || roleLabel;
     return {
       id: `user:${userName}`,
       name: userName,
       kind: 'user',
-      roleLabel: '用户',
+      roleLabel,
     };
   }
 
@@ -1278,11 +1303,26 @@ export class TaskChatService implements OnModuleDestroy {
     });
   }
 
+  private perspectiveOf(
+    message: Pick<TaskChatMessage, 'role' | 'meta' | 'perspective'>,
+  ): TaskChatPerspective {
+    return message.meta?.perspective === 'responsible' ||
+      message.perspective === 'responsible'
+      ? 'responsible'
+      : message.meta?.perspective === 'requester' ||
+          message.perspective === 'requester'
+        ? 'requester'
+        : message.role === 'assistant'
+          ? 'responsible'
+          : 'requester';
+  }
+
   private toPublic(message: InternalChatMessage): TaskChatMessage {
     return {
       id: message.id,
       taskId: message.taskId,
       role: message.role,
+      perspective: this.perspectiveOf(message),
       sender: message.sender,
       content: message.content,
       reasoning: message.reasoning || undefined,
@@ -1348,6 +1388,10 @@ export class TaskChatService implements OnModuleDestroy {
       id: row.messageKey,
       taskId: row.taskId,
       role: row.role,
+      perspective: this.perspectiveOf({
+        role: row.role,
+        meta: row.meta ?? undefined,
+      }),
       sender: row.sender,
       content: row.content,
       reasoning: row.reasoning || undefined,

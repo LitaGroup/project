@@ -64,6 +64,12 @@ function createService(env: Record<string, string> = {}) {
     getUserDepartment: jest.fn().mockResolvedValue('研发部'),
     listAllUsers: jest.fn().mockResolvedValue([]),
   };
+  const workers = {
+    ensureHumanWorker: jest.fn().mockResolvedValue(undefined),
+  };
+  const personalAgents = {
+    ensureForUser: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new AuthService(
     createConfig({
       FEISHU_APP_ID: 'cli_test',
@@ -73,8 +79,10 @@ function createService(env: Record<string, string> = {}) {
     }),
     repo as never,
     feishu as never,
+    workers as never,
+    personalAgents as never,
   );
-  return { service, repo, feishu };
+  return { service, repo, feishu, workers, personalAgents };
 }
 
 const FEISHU_INFO = {
@@ -156,6 +164,22 @@ describe('AuthService（飞书登录 + 会话）', () => {
       expect(again.name).toBe('张三改');
       // 新值为 null 时不覆盖旧值
       expect(again.avatarUrl).toBe(FEISHU_INFO.avatarUrl);
+    });
+
+    it('飞书登录时同步确保真人机器人绑定', async () => {
+      const { service, workers } = createService();
+      const user = await service.upsertFeishuUser(FEISHU_INFO);
+      expect(workers.ensureHumanWorker).toHaveBeenCalledTimes(1);
+      expect(workers.ensureHumanWorker).toHaveBeenCalledWith(
+        expect.objectContaining({ id: user.id, name: '张三' }),
+      );
+
+      // 重复登录同样检查绑定，由 ensureHumanWorker 保证不重复创建
+      await service.upsertFeishuUser({ ...FEISHU_INFO, name: '张三丰' });
+      expect(workers.ensureHumanWorker).toHaveBeenCalledTimes(2);
+      expect(workers.ensureHumanWorker).toHaveBeenLastCalledWith(
+        expect.objectContaining({ id: user.id, name: '张三丰' }),
+      );
     });
 
     it('登录时落主部门名称', async () => {

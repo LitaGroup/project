@@ -9,7 +9,12 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ExecutorType } from '../common/enums';
-import { Executor, ExecutorProvider } from './executor.entity';
+import { variantLabel } from '../common/variants';
+import {
+  Executor,
+  ExecutorProvider,
+  ExecutorProviderModel,
+} from './executor.entity';
 import { OpencodeClient } from './opencode-client';
 import { OpencodeEventHub } from './opencode-event-hub.service';
 
@@ -151,6 +156,23 @@ export class ExecutorsService implements OnApplicationBootstrap {
     }
   }
 
+  /** model 清单条目 → 供应商缓存模型（含思考等级） */
+  private toProviderModel(model: {
+    id: string;
+    modelID?: string;
+    name?: string;
+    variants?: Array<{ id: string }>;
+  }): ExecutorProviderModel {
+    return {
+      id: model.modelID ?? model.id,
+      name: model.name ?? model.modelID ?? model.id,
+      variants: (model.variants ?? []).map((variant) => ({
+        id: variant.id,
+        name: variantLabel(variant.id),
+      })),
+    };
+  }
+
   /**
    * 同步供应商与模型缓存：GET /api/provider（清单）+ GET /api/model（模型带 providerID），
    * 按 providerID 分组合并为 providersCache。
@@ -167,10 +189,7 @@ export class ExecutorsService implements OnApplicationBootstrap {
       name: p.name ?? p.id,
       models: models
         .filter((m) => m.providerID === p.id)
-        .map((m) => ({
-          id: m.modelID ?? m.id,
-          name: m.name ?? m.modelID ?? m.id,
-        })),
+        .map((m) => this.toProviderModel(m)),
     }));
     // 仅出现在 model 清单里的 provider 也保留（provider 清单可能只含已接入集成）
     const known = new Set(cache.map((p) => p.id));
@@ -184,10 +203,7 @@ export class ExecutorsService implements OnApplicationBootstrap {
       if (p.models.length === 0) {
         p.models = models
           .filter((m) => m.providerID === p.id)
-          .map((m) => ({
-            id: m.modelID ?? m.id,
-            name: m.name ?? m.modelID ?? m.id,
-          }));
+          .map((m) => this.toProviderModel(m));
       }
     }
     executor.providersCache = cache;

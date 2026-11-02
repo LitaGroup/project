@@ -38,7 +38,7 @@ import {
   type MarkdownEditorHandle,
 } from '../components/MarkdownEditor'
 
-const LIST_PATH = '/tasks/templates'
+const LIST_PATH = '/admin/task-templates'
 
 /** 默认兜底任务类型（与后端 TASK_TYPE_DEFAULT 一致） */
 const DEFAULT_TASK_TYPE = '其它'
@@ -234,7 +234,7 @@ export function TaskTemplateEditPage() {
             </CardDescription>
           </CardHeader>
           <div className="relative mx-2 mb-2 min-h-0 flex-1">
-            <div className="absolute inset-0 overflow-auto bg-background-muted">
+            <div className="md-editor-scroll absolute inset-0 bg-background-muted">
               <MarkdownEditor
                 key={`${template?.id ?? 'new'}:description`}
                 ref={descriptionRef}

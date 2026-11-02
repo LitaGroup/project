@@ -126,6 +126,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
           templateId: result.templateId,
           templateName: result.templateName,
           agentId: result.agentId,
+          assignedAt: new Date(),
           offerAttemptAt: null,
           missingItems: null,
           remindCount: 0,

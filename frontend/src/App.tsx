@@ -39,6 +39,7 @@ import { ProjectDefectsPage } from './pages/ProjectDefectsPage'
 import { ProjectTestsPage } from './pages/ProjectTestsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ProfilePage } from './pages/ProfilePage'
+import { ProfileTaskDefinitionsPage } from './pages/ProfileTaskDefinitionsPage'
 import { AppsPage } from './pages/AppsPage'
 import { LoginPage } from './pages/LoginPage'
 import { UserListPage } from './pages/UserListPage'
@@ -46,6 +47,7 @@ import { TicketsPage } from './pages/TicketsPage'
 import { TicketCreatePage } from './pages/TicketCreatePage'
 import { TicketDetailPage } from './pages/TicketDetailPage'
 import { TicketConfigPage } from './pages/TicketConfigPage'
+import { WorkbenchPage } from './pages/WorkbenchPage'
 
 /** 路由级登录守卫：未登录一律跳 /login（会话加载中先不渲染，避免登录用户闪跳） */
 function RequireAuth() {
@@ -60,9 +62,29 @@ function SchedulerRedirect() {
   const { workerId } = useParams<{ workerId: string }>()
   return (
     <Navigate
-      to={workerId ? `/tasks/workers/${workerId}` : '/tasks/workers'}
+      to={workerId ? `/admin/workers/${workerId}` : '/admin/workers'}
       replace
     />
+  )
+}
+
+/** 任务定义已迁移到管理模块：保留旧详情链接兼容 */
+function LegacyTaskTemplateRedirect() {
+  const { templateId } = useParams<{ templateId: string }>()
+  return <Navigate to={`/admin/task-templates/${templateId}`} replace />
+}
+
+/** 机器人已迁移到管理模块：保留旧详情链接兼容 */
+function LegacyWorkerRedirect() {
+  const { workerId } = useParams<{ workerId: string }>()
+  return <Navigate to={`/admin/workers/${workerId}`} replace />
+}
+
+/** 机器人调试已迁移到管理模块：保留旧链接兼容 */
+function LegacyWorkerDebugRedirect() {
+  const { workerId } = useParams<{ workerId: string }>()
+  return (
+    <Navigate to={`/admin/workers/${workerId}/debug`} replace />
   )
 }
 
@@ -76,6 +98,8 @@ function App() {
         <Route element={<RequireAuth />}>
           <Route element={<Layout />}>
           <Route path="/" element={<OverviewPage />} />
+          <Route path="/workbench" element={<WorkbenchPage />} />
+          <Route path="/workbench/tasks/:taskId" element={<WorkbenchPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route
@@ -132,32 +156,69 @@ function App() {
           <Route path="/tasks/list" element={<TasksPage />} />
           <Route path="/tasks/new" element={<TaskCreatePage />} />
           <Route path="/tasks/live" element={<WorkersLivePage />} />
-          <Route path="/tasks/types" element={<TaskTypesPage />} />
-          <Route path="/tasks/templates" element={<TaskTemplatesPage />} />
+          {/* 任务类型 / 任务定义 / 机器人 / 执行器已迁移到管理模块：旧链接兼容 */}
+          <Route
+            path="/tasks/types"
+            element={<Navigate to="/admin/task-types" replace />}
+          />
+          <Route
+            path="/tasks/templates"
+            element={<Navigate to="/admin/task-templates" replace />}
+          />
           <Route
             path="/tasks/templates/new"
-            element={<TaskTemplateEditPage />}
+            element={<Navigate to="/admin/task-templates/new" replace />}
           />
           <Route
             path="/tasks/templates/:templateId"
-            element={<TaskTemplateEditPage />}
+            element={<LegacyTaskTemplateRedirect />}
           />
-          <Route path="/tasks/workers" element={<WorkersPage />} />
-          <Route path="/tasks/workers/new" element={<WorkerEditPage />} />
-          <Route path="/tasks/workers/:workerId" element={<WorkerEditPage />} />
+          <Route
+            path="/tasks/workers"
+            element={<Navigate to="/admin/workers" replace />}
+          />
+          <Route
+            path="/tasks/workers/new"
+            element={<Navigate to="/admin/workers/new" replace />}
+          />
+          <Route
+            path="/tasks/workers/:workerId"
+            element={<LegacyWorkerRedirect />}
+          />
           <Route
             path="/tasks/workers/:workerId/debug"
-            element={<WorkerDebugPage />}
+            element={<LegacyWorkerDebugRedirect />}
           />
           {/* 调试入口已并入机器人列表行内按钮：旧链接兼容 */}
           <Route
             path="/tasks/debug"
-            element={<Navigate to="/tasks/workers" replace />}
+            element={<Navigate to="/admin/workers" replace />}
           />
           {/* 调度器已合并进机器人：旧链接兼容 */}
           <Route path="/tasks/schedulers" element={<SchedulerRedirect />} />
           <Route path="/tasks/schedulers/:workerId" element={<SchedulerRedirect />} />
-          <Route path="/tasks/executors" element={<ExecutorsPage />} />
+          <Route
+            path="/tasks/executors"
+            element={<Navigate to="/admin/executors" replace />}
+          />
+          <Route path="/admin/task-types" element={<TaskTypesPage />} />
+          <Route path="/admin/task-templates" element={<TaskTemplatesPage />} />
+          <Route
+            path="/admin/task-templates/new"
+            element={<TaskTemplateEditPage />}
+          />
+          <Route
+            path="/admin/task-templates/:templateId"
+            element={<TaskTemplateEditPage />}
+          />
+          <Route path="/admin/workers" element={<WorkersPage />} />
+          <Route path="/admin/workers/new" element={<WorkerEditPage />} />
+          <Route path="/admin/workers/:workerId" element={<WorkerEditPage />} />
+          <Route
+            path="/admin/workers/:workerId/debug"
+            element={<WorkerDebugPage />}
+          />
+          <Route path="/admin/executors" element={<ExecutorsPage />} />
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
           <Route
             path="/tickets/solution"
@@ -180,6 +241,11 @@ function App() {
           <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/profile/robot" element={<WorkerEditPage personal />} />
+          <Route
+            path="/profile/task-definitions"
+            element={<ProfileTaskDefinitionsPage />}
+          />
           <Route path="/admin/users" element={<UserListPage />} />
           <Route path="/admin/ticket-config" element={<TicketConfigPage />} />
           <Route path="/admin/repos" element={<ReposPage />} />

@@ -94,7 +94,7 @@ export function TicketCreatePage({ category }: { category: TicketCategory }) {
             </CardDescription>
           </CardHeader>
           <div className="relative mx-2 mb-2 min-h-0 flex-1">
-            <div className="absolute inset-0 overflow-auto bg-background-muted">
+            <div className="md-editor-scroll absolute inset-0 bg-background-muted">
               <MarkdownEditor
                 ref={descriptionRef}
                 value=""
@@ -110,7 +110,7 @@ export function TicketCreatePage({ category }: { category: TicketCategory }) {
           <CardHeader className="flex-none">
             <CardTitle>处理方式</CardTitle>
             <CardDescription>
-              无需选择负责人或机器人，平台按工单类型绑定的任务定义自动分配
+              无需选择执行方或机器人，平台按工单类型绑定的任务定义自动分配
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">

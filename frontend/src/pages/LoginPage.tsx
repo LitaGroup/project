@@ -26,7 +26,7 @@ export function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>登录</CardTitle>
-          <CardDescription>使用飞书账号登录 AI 项目管理平台</CardDescription>
+          <CardDescription>使用飞书账号登录 Lita 工作中心</CardDescription>
         </CardHeader>
         <div className="flex flex-col gap-3 px-6 pb-6 group-data-inset/card:px-4">
           {error && (

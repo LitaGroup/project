@@ -237,6 +237,10 @@ export class TicketsService implements OnModuleInit {
       );
     }
 
+    const requesterWorker = await this.workers.findOne({
+      where: { humanUserId: user.id },
+      select: { id: true },
+    });
     const title =
       (input.title?.trim() ? unescapeMarkdown(input.title.trim()) : '') ||
       deriveTaskTitle(description) ||
@@ -248,8 +252,8 @@ export class TicketsService implements OnModuleInit {
       templateId: template.id,
       agentId: agent.id,
       createdById: user.id,
-      requesterType: 'user',
-      requesterId: user.id,
+      requesterType: requesterWorker ? 'worker' : 'user',
+      requesterId: requesterWorker?.id ?? user.id,
       operatorName: user.name,
     });
     // 工单严格绑定默认定义：直接进入待接受，不再经过通用分配器的同类型/未知任务兜底

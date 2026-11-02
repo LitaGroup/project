@@ -21,6 +21,7 @@ import { WorkerView, WorkersService } from '../workers/workers.service';
 import { User } from '../auth/user.entity';
 import { Worker } from '../workers/worker.entity';
 import { Task, TaskMissingItem } from './task.entity';
+import type { TaskChatPerspective } from './task-chat.types';
 import { TaskEvent } from './task-event.entity';
 import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
@@ -415,6 +416,7 @@ export class TasksService {
           ? unescapeMarkdownUrlColons(input.outputSpec.trim())
           : null,
         agentId: input.agentId ?? null,
+        assignedAt: input.agentId ? new Date() : null,
         schedulerId: input.schedulerId ?? null,
         parentId: input.parentId ?? null,
         createdById: input.createdById ?? null,
@@ -483,8 +485,15 @@ export class TasksService {
         : null;
     }
     if (input.agentId !== undefined) {
+      const previousAgentId = task.agentId;
       if (input.agentId) await this.assertWorker(input.agentId);
       task.agentId = input.agentId ?? null;
+      task.assignedAt =
+        input.agentId && input.agentId !== previousAgentId
+          ? new Date()
+          : input.agentId
+            ? task.assignedAt
+            : null;
     }
     if (input.result !== undefined) task.result = input.result;
     if (input.missingItems !== undefined) {
@@ -600,11 +609,17 @@ export class TasksService {
     if (!workPlan) throw new BadRequestException('工作计划不能为空');
 
     const task = await this.mustFind(id);
-    if (input.agentId !== undefined && input.agentId !== null) {
-      if (!Number.isInteger(input.agentId) || input.agentId < 1) {
-        throw new BadRequestException('机器人 ID 必须为正整数');
+    if (input.agentId !== undefined) {
+      const previousAgentId = task.agentId;
+      if (input.agentId !== undefined && input.agentId !== null) {
+        if (!Number.isInteger(input.agentId) || input.agentId < 1) {
+          throw new BadRequestException('机器人 ID 必须为正整数');
+        }
+        await this.assertWorker(input.agentId);
       }
-      await this.assertWorker(input.agentId);
+      if (input.agentId && input.agentId !== previousAgentId) {
+        task.assignedAt = new Date();
+      }
     }
     task.title = title;
     task.content = content;
@@ -794,6 +809,10 @@ export class TasksService {
     id: number,
     content: string,
     operator: string | null,
+    options?: {
+      actorWorkerId?: number | null;
+      perspective?: TaskChatPerspective;
+    },
   ): Promise<Task> {
     const task = await this.mustFind(id);
     if (task.status === TaskStatus.FINISHED) {
@@ -810,8 +829,13 @@ export class TasksService {
         TaskSubStatus.PENDING_ACCEPTANCE,
         TaskSubStatus.PENDING_FEEDBACK,
       ].includes(task.subStatus);
-    if (usesIdentify) return this.supplement(id, text, operator);
-    return this.dispatchService.continueConversation(id, text, operator);
+    if (usesIdentify) {
+      return this.supplement(id, text, operator, options);
+    }
+    return this.dispatchService.continueConversation(id, text, operator, {
+      actorWorkerId: options?.actorWorkerId,
+      perspective: options?.perspective,
+    });
   }
 
   /**
@@ -822,6 +846,10 @@ export class TasksService {
     id: number,
     content: string,
     operator: string | null,
+    options?: {
+      actorWorkerId?: number | null;
+      perspective?: TaskChatPerspective;
+    },
   ): Promise<Task> {
     const task = await this.mustFind(id);
     const allowed =
@@ -857,6 +885,13 @@ export class TasksService {
     await this.addEvent(id, '反馈', text, operator, {
       intervention: true,
       chat: true,
+      ...(options?.perspective ? { perspective: options.perspective } : {}),
+      ...(options?.actorWorkerId
+        ? {
+            actorType: 'worker' as const,
+            actorWorkerId: options.actorWorkerId,
+          }
+        : {}),
     });
     await this.addEvent(
       id,
@@ -946,13 +981,18 @@ export class TasksService {
     return saved;
   }
 
-  /** 是否提交过验收申请（申请事件 meta.deliveryApply） */
+  /** 是否提交过验收申请（按最新交付事件判断，撤销交付会让旧申请失效） */
   private async hasAcceptanceApplication(id: number): Promise<boolean> {
     const events = await this.events.find({
       where: { taskId: id },
       select: { id: true, taskId: true, meta: true },
     });
-    return events.some((event) => event.meta?.deliveryApply === true);
+    let active = false;
+    for (const event of events.sort((a, b) => a.id - b.id)) {
+      if (event.meta?.deliveryApply === true) active = true;
+      if (event.meta?.deliveryRevoke === true) active = false;
+    }
+    return active;
   }
 
   /** 取消：任意未结束任务可取消（执行中先中断会话） */

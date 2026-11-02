@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -18,6 +19,7 @@ import {
 import { Observable } from 'rxjs';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { WorkersService } from '../workers/workers.service';
 import { Task, TaskMissingItem } from './task.entity';
 import {
   CreateTaskInput,
@@ -27,6 +29,7 @@ import {
   UpdateTaskInput,
 } from './tasks.service';
 import { TaskChatService } from './task-chat.service';
+import type { TaskChatPerspective } from './task-chat.types';
 import {
   DeliveryReplyInput,
   TaskDeliveryService,
@@ -41,6 +44,8 @@ import {
   TaskCollaborationService,
 } from './task-collaboration.service';
 import type { TaskActor } from './task-requester';
+import { TasksAgentService } from './tasks-agent.service';
+import { PersonalAgentsService } from '../workers/personal-agents.service';
 
 class CreateTaskDto implements CreateTaskInput {
   title?: string;
@@ -77,6 +82,8 @@ class FeedbackDto {
 
 class MessageDto {
   content?: string;
+  /** 双角色用户显式指定发送身份；缺省按需求方兼容旧调用 */
+  perspective?: TaskChatPerspective;
 }
 
 /** 验收不通过：反馈原因与返工要求（必填） */
@@ -170,6 +177,9 @@ export class TasksController {
     private readonly taskHandoff: TaskHandoffService,
     private readonly deliveryService: TaskDeliveryService,
     private readonly collaboration: TaskCollaborationService,
+    private readonly workersService: WorkersService,
+    private readonly tasksAgent: TasksAgentService,
+    private readonly personalAgents: PersonalAgentsService,
   ) {}
 
   /** 概览统计（任务概览页顶部卡片） */
@@ -223,6 +233,17 @@ export class TasksController {
     return this.collaboration.definesMarkdown();
   }
 
+  /** Agent 用任务详情：按需求方/执行方身份收敛，返回 Markdown。 */
+  @Get(':id.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async taskDetailMarkdown(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<string> {
+    const scope = await this.tasksAgent.resolveScope(req);
+    return this.tasksAgent.detailMarkdown(scope, id);
+  }
+
   /** 详情：任务 + 子任务 + 事件时间线 + 实时输出行 */
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
@@ -230,12 +251,19 @@ export class TasksController {
   }
 
   @Post()
-  create(@Body() dto: CreateTaskDto, @Req() req: AuthedRequest): Promise<Task> {
+  async create(
+    @Body() dto: CreateTaskDto,
+    @Req() req: AuthedRequest,
+  ): Promise<Task> {
+    // 新流程里人类也是通过“个人真人机器人”参与协作；createdById 继续保留真实操作人。
+    const humanWorker = req.user
+      ? await this.workersService.findByHumanUserId(req.user.id)
+      : null;
     return this.tasksService.create({
       ...dto,
       createdById: req.user?.id ?? null,
-      requesterType: req.user ? 'user' : null,
-      requesterId: req.user?.id ?? null,
+      requesterType: humanWorker ? 'worker' : req.user ? 'user' : null,
+      requesterId: humanWorker?.id ?? req.user?.id ?? null,
     });
   }
 
@@ -357,7 +385,7 @@ export class TasksController {
     const task = await this.collaboration.answer(
       id,
       questionId,
-      this.requireActor(req),
+      await this.requireRequesterActor(req, id),
       dto,
     );
     return this.collaboration.actionMarkdown('提问已答复', task);
@@ -383,7 +411,7 @@ export class TasksController {
   ): Promise<string> {
     const task = await this.collaboration.acceptHandoff(
       id,
-      this.requireActor(req),
+      await this.requireRequesterActor(req, id),
     );
     return this.collaboration.actionMarkdown('任务验收已通过', task);
   }
@@ -398,7 +426,7 @@ export class TasksController {
   ): Promise<string> {
     const task = await this.collaboration.refuseHandoff(
       id,
-      this.requireActor(req),
+      await this.requireRequesterActor(req, id),
       dto.content ?? '',
     );
     return this.collaboration.actionMarkdown('任务验收已拒绝', task);
@@ -414,7 +442,7 @@ export class TasksController {
   ): Promise<string> {
     const task = await this.collaboration.fail(
       id,
-      this.requireActor(req),
+      await this.requireRequesterActor(req, id),
       dto.reason ?? '',
     );
     return this.collaboration.actionMarkdown('任务已判定失败', task, [
@@ -499,7 +527,21 @@ export class TasksController {
     @Req() req: AuthedRequest,
   ): Promise<Task> {
     if (!req.user) throw new ForbiddenException('发送消息需要用户身份');
-    return this.deliveryService.sendMessage(id, req.user, dto.content ?? '');
+    if (
+      dto.perspective !== undefined &&
+      dto.perspective !== 'requester' &&
+      dto.perspective !== 'responsible'
+    ) {
+      throw new BadRequestException(
+        'perspective 必须为 requester 或 responsible',
+      );
+    }
+    return this.deliveryService.sendMessage(
+      id,
+      req.user,
+      dto.content ?? '',
+      dto.perspective,
+    );
   }
 
   /**
@@ -507,18 +549,22 @@ export class TasksController {
    * 第 4 次起转等待中-待反馈，由执行机器人负责人处理。
    */
   @Post(':id/reject')
-  reject(
+  async reject(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: RejectTaskDto,
     @Req() req: AuthedRequest,
   ): Promise<Task> {
     if (!req.user) throw new ForbiddenException('拒绝验收需要用户身份');
-    return this.deliveryService.reject(id, req.user, dto.content ?? '');
+    return this.collaboration.refuseHandoff(
+      id,
+      await this.requireRequesterActor(req, id),
+      dto.content ?? '',
+    );
   }
 
   /** 网页任务失败：仅需求方在待验收阶段操作。 */
   @Post(':id/fail')
-  failTaskJson(
+  async failTaskJson(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: FailTaskDto,
     @Req() req: AuthedRequest,
@@ -526,7 +572,7 @@ export class TasksController {
     if (!req.user) throw new ForbiddenException('判定任务失败需要用户身份');
     return this.collaboration.fail(
       id,
-      { type: 'user', user: req.user },
+      await this.requireRequesterActor(req, id),
       dto.reason ?? '',
     );
   }
@@ -576,7 +622,7 @@ export class TasksController {
       return this.collaboration.answer(
         id,
         questionId,
-        { type: 'user', user: req.user },
+        await this.requireRequesterActor(req, id),
         { answers: dto.answers, reject: dto.reject === true },
       );
     }
@@ -591,12 +637,14 @@ export class TasksController {
 
   /** 验收通过：仅任务需求方操作；异步生成 REVIEW 复盘并销毁执行会话 */
   @Post(':id/accept')
-  accept(
+  async accept(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthedRequest,
   ): Promise<Task> {
-    if (!req.user) throw new ForbiddenException('验收需要用户身份');
-    return this.deliveryService.acceptTask(id, req.user);
+    return this.collaboration.acceptHandoff(
+      id,
+      await this.requireRequesterActor(req, id),
+    );
   }
 
   /** 重新生成任务复盘（已结束-完成；固定覆盖 REVIEW） */
@@ -625,9 +673,35 @@ export class TasksController {
     return req.worker;
   }
 
-  private requireActor(req: AuthedRequest): TaskActor {
+  /**
+   * 需求方身份解析：机器人令牌优先；登录用户在“新流程需求方=个人真人机器人”时
+   * 自动映射为绑定机器人，历史 user 需求方仍按用户本人校验。
+   */
+  private async requireRequesterActor(
+    req: AuthedRequest,
+    taskId: number,
+  ): Promise<TaskActor> {
     if (req.worker) return { type: 'worker', worker: req.worker };
-    if (req.user) return { type: 'user', user: req.user };
-    throw new ForbiddenException('缺少任务需求方身份');
+    if (!req.user) throw new ForbiddenException('缺少任务需求方身份');
+    const task = await this.tasksService.mustFind(taskId);
+    const humanWorker = await this.workersService.findByHumanUserId(
+      req.user.id,
+    );
+    if (
+      humanWorker &&
+      task.requesterType === 'worker' &&
+      task.requesterId === humanWorker.id
+    ) {
+      return { type: 'worker', worker: humanWorker };
+    }
+    const personalAgent = await this.personalAgents.findForUser(req.user.id);
+    if (
+      personalAgent &&
+      task.requesterType === 'worker' &&
+      task.requesterId === personalAgent.id
+    ) {
+      return { type: 'worker', worker: personalAgent };
+    }
+    return { type: 'user', user: req.user };
   }
 }

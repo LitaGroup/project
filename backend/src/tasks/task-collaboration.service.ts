@@ -111,13 +111,40 @@ export class TaskCollaborationService {
     worker: Worker,
     input: CreateSubtaskInput,
   ): Promise<Task> {
+    return this.createSubtaskForActor(
+      parentId,
+      { type: 'worker', worker },
+      input,
+    );
+  }
+
+  /**
+   * 父任务执行方或需求方创建子任务：执行方要求任务处于执行中，
+   * 需求方在任务未结束时均可追加子任务。子任务需求方为当前操作人。
+   */
+  async createSubtaskForActor(
+    parentId: number,
+    actor: TaskActor,
+    input: CreateSubtaskInput,
+  ): Promise<Task> {
     const parent = await this.mustFind(parentId);
-    if (
-      parent.status !== TaskStatus.RUNNING ||
-      parent.subStatus !== TaskSubStatus.EXECUTING ||
-      parent.agentId !== worker.id
-    ) {
-      throw new ForbiddenException('仅父任务当前执行机器人可以创建子任务');
+    if (parent.status === TaskStatus.FINISHED) {
+      throw new ForbiddenException('任务已结束，不能创建子任务');
+    }
+    const isExecutor =
+      actor.type === 'worker' && parent.agentId === actor.worker.id;
+    if (isExecutor) {
+      if (
+        parent.status !== TaskStatus.RUNNING ||
+        parent.subStatus !== TaskSubStatus.EXECUTING
+      ) {
+        throw new ForbiddenException(
+          '仅父任务当前执行机器人可以在执行中创建子任务',
+        );
+      }
+    } else {
+      // 需求方可在任务未结束的任意阶段追加子任务
+      assertTaskRequester(parent, actor);
     }
     if (!Number.isInteger(input.templateId) || input.templateId < 1) {
       throw new BadRequestException('templateId 必须为正整数');
@@ -132,6 +159,7 @@ export class TaskCollaborationService {
     if (enabledWorkers.length === 0) {
       throw new BadRequestException('该任务定义当前没有启用的处理机器人');
     }
+    const operatorName = actorName(actor);
     const child = await this.tasksService.create({
       title: input.title,
       description: input.description ?? input.input ?? null,
@@ -139,16 +167,16 @@ export class TaskCollaborationService {
       outputSpec: input.outputSpec ?? null,
       templateId: template.id,
       parentId: parent.id,
-      createdById: parent.createdById,
-      requesterType: 'worker',
-      requesterId: worker.id,
-      operatorName: worker.name,
+      createdById: actor.type === 'user' ? actor.user.id : parent.createdById,
+      requesterType: actor.type,
+      requesterId: actor.type === 'worker' ? actor.worker.id : actor.user.id,
+      operatorName,
     });
     await this.tasksService.addEvent(
       parent.id,
       '操作',
       `创建子任务 ${child.code}「${child.title}」（任务定义：${template.name}）`,
-      worker.name,
+      operatorName,
       { childTaskId: child.id, templateId: template.id },
     );
     return child;

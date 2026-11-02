@@ -107,6 +107,10 @@ export class Worker {
   @Column({ type: 'varchar', length: 200, nullable: true })
   modelId: string | null;
 
+  /** 默认思考等级（opencode variant id；空=模型默认） */
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  variant: string | null;
+
   /** 机器人定义 AGENTS.md（Markdown，保存后同步到工位） */
   @Column({ type: 'text', nullable: true })
   prompt: string | null;
@@ -122,6 +126,25 @@ export class Worker {
   /** 任务定义（接什么活） */
   @Column({ type: 'simple-json', nullable: true })
   taskDefs: WorkerTaskDef[] | null;
+
+  /** 绑定的真实用户（runtime=human 时即执行器；与负责人 ownerUserId 无关） */
+  @Index('IDX_workers_humanUserId', { unique: true })
+  @Column({ type: 'int', nullable: true })
+  humanUserId: number | null;
+
+  /** 绑定用户姓名快照（展示用） */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  humanUserName: string | null;
+
+  /**
+   * 个人 AI AGENT 的归属用户。
+   * 每个用户在系统中有一个真人机器人（humanUserId）用于「我作为执行者」，
+   * 另有唯一的个人 AI AGENT（personalAgentUserId）用于工作台「我的 AGENT」对话，
+   * 由它通过平台技能代表用户操作任务。
+   */
+  @Index('IDX_workers_personalAgentUserId', { unique: true })
+  @Column({ type: 'int', nullable: true })
+  personalAgentUserId: number | null;
 
   /** 责任人（用户系统内，验收任务产出） */
   @Column({ type: 'int', nullable: true })

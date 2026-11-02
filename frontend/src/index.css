@@ -11,6 +11,50 @@
   }
 }
 
+/* 全局鼠标手势：按钮 / Tab / 链接及等价 ARIA 交互元素（含任务卡片、任务列表、
+   工作台任务条目等可点击区域）悬停统一显示手型。
+   放在 @layer base 作为低优先级默认，组件可用 cursor-* 工具类覆盖。 */
+@layer base {
+  :is(
+    button,
+    a[href],
+    summary,
+    [role='button'],
+    [role='link'],
+    [role='tab'],
+    [role='menuitem'],
+    [role='option'],
+    [role='combobox'],
+    [role='switch'],
+    [role='checkbox'],
+    [role='radio']
+  ):not(:disabled):not([aria-disabled='true']):not([data-disabled]) {
+    cursor: pointer;
+  }
+}
+
+/* 禁用态（disabled / aria-disabled / data-disabled 三种表达）悬停固定显示
+   「禁止」手势。刻意放在 layer 外：unlayered 普通规则优先级高于所有分层规则，
+   否则会被 Appica 组件自带的 utilities 层工具类盖过，如 Badge 的
+   [a,button]:cursor-pointer（不排除禁用态）与 Select 触发器的
+   data-disabled:cursor-default，导致禁用按钮仍显示手型/箭头。 */
+:is(
+  button,
+  a[href],
+  summary,
+  [role='button'],
+  [role='link'],
+  [role='tab'],
+  [role='menuitem'],
+  [role='option'],
+  [role='combobox'],
+  [role='switch'],
+  [role='checkbox'],
+  [role='radio']
+):is(:disabled, [aria-disabled='true'], [data-disabled]) {
+  cursor: not-allowed;
+}
+
 /* 机器人默认头像占位：产品约定为「黑图」，刻意使用固定色值（主题例外，同 .terminal-gruvbox），
    边框圈由组件内的 ring-border-strong 提供。 */
 .worker-avatar-empty {
@@ -21,12 +65,22 @@
    - 背景透明，跟随容器/页面背景（主题自带白底）
    - 字号与页面正文一致、内边距收紧（Crepe 默认 60px 120px，页面内容区放不下）
    - 只读模式隐藏块操作、斜杠菜单、选区工具栏等编辑态交互元素 */
+.md-editor,
+.md-editor > div,
+.md-editor .milkdown,
+.md-editor .milkdown .ProseMirror {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .md-editor .milkdown {
   --crepe-base-font-size: 14px;
   /* 标题/正文沿用应用字体，避免 Crepe 默认衬线标题与页面观感割裂 */
   --crepe-font-default: inherit;
   --crepe-font-title: inherit;
   background: transparent;
+  /* 点击 contenteditable 时浏览器可能触发滚动锚定，表现为滚动条位置跳动 */
+  overflow-anchor: none;
 }
 
 /* 编辑器铺满容器：Crepe 默认只把可编辑区撑到内容高度，
@@ -37,6 +91,7 @@
 }
 .md-editor .milkdown .ProseMirror {
   min-height: 100%;
+  overflow-anchor: none;
 }
 .md-editor .milkdown .ProseMirror {
   padding: 16px 24px;
@@ -134,6 +189,280 @@
 }
 .md-editor-appica .milkdown .ProseMirror ::selection {
   background: var(--selection-color);
+}
+
+/* Milkdown 编辑器变体：GitHub 风格（知识库文章）
+   对齐 GitHub Markdown 的字号、标题分隔线、引用、代码块与表格；
+   颜色/圆角仍走 Appica 角色 token，跟随平台亮暗主题 */
+.md-editor-github .milkdown {
+  --crepe-base-font-size: 16px;
+  --crepe-font-default: inherit;
+  --crepe-font-title: inherit;
+  --crepe-font-code: var(--font-mono);
+  background: transparent;
+}
+.md-editor-github .milkdown .ProseMirror {
+  padding: 24px 32px;
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+/* Crepe 的虚拟光标会在正文最前面插入零高度 widget，不能用 :first-child
+   判断第一个内容块，否则光标插入/移除时首个标题会多出 24px 上边距并造成跳动 */
+.md-editor-github
+  .milkdown
+  .ProseMirror
+  > :nth-child(
+    1 of :not(.ProseMirror-widget):not(.prosemirror-virtual-cursor):not(
+        .crepe-drop-cursor
+      )
+  ) {
+  margin-top: 0 !important;
+}
+.md-editor-github
+  .milkdown
+  .ProseMirror
+  > :nth-last-child(
+    1 of :not(.ProseMirror-widget):not(.prosemirror-virtual-cursor):not(
+        .crepe-drop-cursor
+      )
+  ) {
+  margin-bottom: 0 !important;
+}
+.md-editor-github .milkdown .ProseMirror :is(h1, h2, h3, h4, h5, h6) {
+  margin: 24px 0 16px;
+  padding: 0;
+  color: var(--foreground-intense);
+  font-family: inherit;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.md-editor-github .milkdown .ProseMirror h1 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+  font-size: 2em;
+}
+.md-editor-github .milkdown .ProseMirror h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.5em;
+}
+.md-editor-github .milkdown .ProseMirror h3 {
+  font-size: 1.25em;
+}
+.md-editor-github .milkdown .ProseMirror h4 {
+  font-size: 1em;
+}
+.md-editor-github .milkdown .ProseMirror h5 {
+  font-size: 0.875em;
+}
+.md-editor-github .milkdown .ProseMirror h6 {
+  color: var(--foreground-muted);
+  font-size: 0.85em;
+}
+.md-editor-github .milkdown .ProseMirror p {
+  margin: 0 0 16px;
+  padding: 0;
+  line-height: 1.5;
+}
+.md-editor-github .milkdown .ProseMirror strong {
+  font-weight: 600;
+}
+.md-editor-github .milkdown .ProseMirror a {
+  color: var(--info-emphasis);
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+.md-editor-github
+  .milkdown
+  .ProseMirror
+  :is(h1, h2, h3, h4, h5, h6)
+  code {
+  padding: 0 0.2em;
+  font-size: inherit;
+}
+.md-editor-github .milkdown .ProseMirror code {
+  display: inline;
+  padding: 0.2em 0.4em;
+  border-radius: var(--radius-xs);
+  background: var(--background-muted);
+  color: var(--foreground-intense);
+  font-family: var(--font-mono);
+  font-size: 85%;
+  line-height: inherit;
+  white-space: break-spaces;
+}
+.md-editor-github .milkdown .ProseMirror pre {
+  margin: 0 0 16px;
+  padding: 16px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--background-muted);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 85%;
+  line-height: 1.45;
+  word-wrap: normal;
+}
+.md-editor-github .milkdown .ProseMirror pre code {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  font-size: 100%;
+  line-height: inherit;
+  white-space: pre;
+}
+.md-editor-github .milkdown .ProseMirror .milkdown-code-block {
+  margin: 0 0 16px;
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--background-muted);
+}
+.md-editor-github .milkdown .ProseMirror .milkdown-code-block .cm-editor,
+.md-editor-github .milkdown .ProseMirror .milkdown-code-block .cm-gutters {
+  background: transparent;
+}
+.md-editor-github .milkdown .ProseMirror .milkdown-code-block .cm-scroller {
+  font-family: var(--font-mono);
+  font-size: 85%;
+  line-height: 1.45;
+}
+.md-editor-github .milkdown .ProseMirror blockquote {
+  box-sizing: border-box;
+  margin: 0 0 16px;
+  padding: 0 1em;
+  border-left: 0.25em solid var(--border-strong);
+  color: var(--foreground-muted);
+}
+.md-editor-github .milkdown .ProseMirror blockquote::before {
+  display: none;
+}
+.md-editor-github .milkdown .ProseMirror blockquote > :first-child {
+  margin-top: 0;
+}
+.md-editor-github .milkdown .ProseMirror blockquote > :last-child {
+  margin-bottom: 0;
+}
+.md-editor-github .milkdown .ProseMirror > :is(ul, ol) {
+  margin-bottom: 16px;
+}
+.md-editor-github .milkdown .ProseMirror .milkdown-list-item-block {
+  margin: 0;
+}
+.md-editor-github .milkdown .ProseMirror
+  .milkdown-list-item-block
+  + .milkdown-list-item-block {
+  margin-top: 0.25em;
+}
+.md-editor-github
+  .milkdown
+  .ProseMirror
+  .milkdown-list-item-block
+  > .list-item
+  > .children
+  > p {
+  margin: 0;
+}
+.md-editor-github .milkdown .ProseMirror hr {
+  height: 0.25em;
+  margin: 24px 0;
+  padding: 0;
+  border: 0;
+  background: var(--border);
+  background-clip: border-box;
+}
+.md-editor-github .milkdown .ProseMirror img {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.md-editor-github .milkdown .ProseMirror .milkdown-table-block {
+  margin: 0 0 16px;
+}
+.md-editor-github .milkdown .ProseMirror table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+.md-editor-github .milkdown .ProseMirror :is(th, td) {
+  padding: 6px 13px;
+  border: 1px solid var(--border-strong);
+}
+.md-editor-github .milkdown .ProseMirror th {
+  font-weight: 600;
+}
+.md-editor-github .milkdown .ProseMirror tr {
+  background: var(--background);
+}
+.md-editor-github .milkdown .ProseMirror tr:nth-child(2n) {
+  background: var(--background-muted);
+}
+@media (max-width: 640px) {
+  .md-editor-github .milkdown .ProseMirror {
+    padding: 16px;
+  }
+}
+
+/* 去掉鼠标悬停时出现的块操作、表格行列操作与图片右上角操作图标，
+   避免遮挡正文和撑宽滚动区域；斜杠菜单仍可正常使用 */
+.md-editor .milkdown .milkdown-block-handle,
+.md-editor .milkdown .milkdown-table-block .handle,
+.md-editor .milkdown .milkdown-image-block .operation {
+  display: none !important;
+}
+
+/* 当前内容块类型标签：只在编辑态、鼠标悬停或光标所在块时出现，
+   由 MarkdownEditor 放在 .milkdown 浮层里，不修改内容 DOM、不写入 Markdown */
+.md-editor-block-types .milkdown .ProseMirror {
+  padding-left: 32px;
+}
+.md-block-type-badge {
+  position: absolute;
+  z-index: 4;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--background-muted);
+  color: var(--foreground-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+  transition:
+    opacity 120ms ease,
+    visibility 120ms ease;
+}
+.md-block-type-badge.md-show {
+  opacity: 1;
+  visibility: visible;
+}
+.md-readonly .md-block-type-badge {
+  display: none;
+}
+
+/* Markdown 编辑器的滚动容器：纵向滚动，横向浮动控件不撑出滚动条；
+   代码块和表格自身保留局部横向滚动能力 */
+.md-editor-scroll {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  /* 滚动条出现/消失时保留槽位，避免编辑区宽度和光标位置跳动 */
+  scrollbar-gutter: stable;
 }
 
 /* 任务详情页聊天 Markdown（assistant-ui MarkdownTextPrimitive 输出原生 HTML）：
@@ -244,6 +573,46 @@
 .task-chat-markdown img {
   max-width: 100%;
   border-radius: var(--radius-md);
+}
+
+/* 主色气泡（用户消息）内的聊天 Markdown：颜色继承气泡文字色，
+   背景/边框用 primary-foreground 的低透明度保证对比度 */
+.task-chat-markdown-on-primary,
+.task-chat-markdown-on-primary :is(h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+}
+.task-chat-markdown-on-primary code {
+  color: inherit;
+  background: color-mix(in srgb, var(--primary-foreground) 16%, transparent);
+}
+.task-chat-markdown-on-primary pre {
+  background: color-mix(in srgb, var(--primary-foreground) 12%, transparent);
+}
+.task-chat-markdown-on-primary pre code {
+  color: inherit;
+  background: transparent;
+}
+.task-chat-markdown-on-primary blockquote {
+  color: inherit;
+  border-left-color: color-mix(
+    in srgb,
+    var(--primary-foreground) 45%,
+    transparent
+  );
+}
+.task-chat-markdown-on-primary th {
+  color: inherit;
+  background: color-mix(in srgb, var(--primary-foreground) 12%, transparent);
+}
+.task-chat-markdown-on-primary :is(th, td) {
+  border-color: color-mix(in srgb, var(--primary-foreground) 35%, transparent);
+}
+.task-chat-markdown-on-primary hr {
+  border-top-color: color-mix(
+    in srgb,
+    var(--primary-foreground) 35%,
+    transparent
+  );
 }
 
 /* 检查运行详情页终端面板：Gruvbox Dark 主题。

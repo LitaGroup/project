@@ -46,7 +46,7 @@ describe('TicketsService', () => {
     update: jest.Mock;
   };
   let templates: { findOne: jest.Mock; find: jest.Mock };
-  let workers: { find: jest.Mock };
+  let workers: { find: jest.Mock; findOne: jest.Mock };
   let tasksService: {
     create: jest.Mock;
     remove: jest.Mock;
@@ -87,7 +87,10 @@ describe('TicketsService', () => {
       findOne: jest.fn(),
       find: jest.fn().mockResolvedValue([]),
     };
-    workers = { find: jest.fn().mockResolvedValue([]) };
+    workers = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
     tasksService = {
       create: jest.fn().mockResolvedValue(task()),
       remove: jest.fn().mockResolvedValue(undefined),

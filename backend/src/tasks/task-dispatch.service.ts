@@ -40,6 +40,7 @@ import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskChatService } from './task-chat.service';
+import type { TaskChatPerspective } from './task-chat.types';
 import { TaskDocumentService } from './task-document.service';
 import type { TaskDocumentResult } from './task-document.service';
 import {
@@ -199,7 +200,18 @@ export class TaskDispatchService
       const running = await manager.findOne(Task, {
         where: { agentId: task.agentId!, status: TaskStatus.RUNNING },
       });
-      if (running) return null;
+      // 真人机器人可并行执行；AI 机器人仍保持一个进行中任务的互斥约束。
+      if (
+        running &&
+        (
+          await manager.findOne(Worker, {
+            where: { id: task.agentId! },
+            select: { id: true, runtime: true },
+          })
+        )?.runtime !== WorkerRuntime.HUMAN
+      ) {
+        return null;
+      }
       task.status = TaskStatus.RUNNING;
       task.subStatus = TaskSubStatus.EXECUTING;
       task.resumePrompt = null;
@@ -210,11 +222,26 @@ export class TaskDispatchService
     });
   }
 
-  /** 机器人是否已有执行中任务（LOOP 快速筛选；最终占用仍以 claimExecution 为准）。 */
+  /** 机器人是否已有执行中任务（LOOP 快速筛选；真人可并行，最终占用仍以 claimExecution 为准）。 */
   async isWorkerBusy(workerId: number): Promise<boolean> {
+    const worker = await this.workers.findOne({
+      where: { id: workerId },
+      select: { id: true, runtime: true },
+    });
+    if (worker?.runtime === WorkerRuntime.HUMAN) return false;
     return this.tasks.exists({
       where: { agentId: workerId, status: TaskStatus.RUNNING },
     });
+  }
+
+  /** 是否真人执行机器人 */
+  async isHumanWorker(workerId: number | null | undefined): Promise<boolean> {
+    if (!workerId) return false;
+    const worker = await this.workers.findOne({
+      where: { id: workerId },
+      select: { id: true, runtime: true },
+    });
+    return worker?.runtime === WorkerRuntime.HUMAN;
   }
 
   /**
@@ -231,6 +258,7 @@ export class TaskDispatchService
     operator: string | null,
     userMessage?: string,
     mode: 'execute' | 'offer' = 'execute',
+    perspective?: TaskChatPerspective,
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
     const offering = mode === 'offer';
@@ -252,6 +280,50 @@ export class TaskDispatchService
     const worker = await this.workers.findOne({ where: { id: task.agentId } });
     if (!worker || !worker.enabled) {
       throw new NotFoundException(`机器人 #${task.agentId} 不存在或已停用`);
+    }
+    // 真人机器人没有 opencode 会话：邀约/继续对话只是操作台待办与消息记录，
+    // 状态变更由真人通过接受、回复、申请验收等操作台接口显式推进。
+    if (worker.runtime === WorkerRuntime.HUMAN) {
+      if (offering) {
+        const firstOffer = !task.offerAttemptAt;
+        if (firstOffer) {
+          await this.addEvent(
+            task.id,
+            '操作',
+            `任务已进入「${worker.name}」操作台，等待真人接受或拒绝`,
+            operator,
+            { humanWorker: true, offer: true },
+          );
+          this.pushLine(task.id, '▶ 已发送到真人机器人操作台，等待接受或拒绝');
+        }
+        task.offerAttemptAt = new Date();
+        await this.tasks.update(
+          {
+            id: task.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+          },
+          { offerAttemptAt: task.offerAttemptAt },
+        );
+        return this.mustFind(task.id);
+      }
+      await this.addEvent(
+        task.id,
+        continuing ? '反馈' : '操作',
+        continuing
+          ? `消息已发送到「${worker.name}」操作台`
+          : `任务由「${worker.name}」在操作台执行`,
+        operator,
+        {
+          humanWorker: true,
+          continued: continuing,
+          ...(perspective ? { perspective } : {}),
+        },
+      );
+      if (continuing) {
+        this.pushLine(task.id, '▶ 消息已同步到真人机器人操作台');
+      }
+      return this.mustFind(task.id);
     }
     if (worker.runtime !== WorkerRuntime.OPENCODE) {
       throw new NotFoundException('仅支持 runtime=opencode 的机器人派发');
@@ -325,7 +397,11 @@ export class TaskDispatchService
         }
         const created = await client.createSession({
           title: `${task.code} ${task.title}`,
-          model: { id: worker.modelId, providerID: worker.providerId },
+          model: {
+            id: worker.modelId,
+            providerID: worker.providerId,
+            ...(worker.variant ? { variant: worker.variant } : {}),
+          },
           location: { directory: workdir },
         });
         sessionId = created.id;
@@ -448,7 +524,13 @@ export class TaskDispatchService
     taskId: number,
     content: string,
     operator: string | null,
-    options?: { modelContent?: string },
+    options?: {
+      modelContent?: string;
+      /** 用户消息实际以某个真人机器人身份展示（新流程人类需求方=个人机器人） */
+      actorWorkerId?: number | null;
+      /** 发送身份：需求方 / 执行方 */
+      perspective?: TaskChatPerspective;
+    },
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
     if (task.status === TaskStatus.FINISHED) {
@@ -477,26 +559,49 @@ export class TaskDispatchService
       this.queueDraining.has(taskId) ||
       this.awaitingTurnStart.has(taskId)
     ) {
-      await this.taskChat.enqueueUserMessage(
-        taskId,
-        text,
-        operator,
-        queuedPrompt,
-      );
+      if (options?.perspective) {
+        await this.taskChat.enqueueUserMessage(
+          taskId,
+          text,
+          operator,
+          queuedPrompt,
+          options.perspective,
+        );
+      } else {
+        await this.taskChat.enqueueUserMessage(
+          taskId,
+          text,
+          operator,
+          queuedPrompt,
+        );
+      }
       return task;
     }
     // 上一次投递失败/暂停后仍有积压：新消息排到队尾，并触发队首继续发送。
     if (this.taskChat.hasQueuedUserMessages(taskId)) {
-      await this.taskChat.enqueueUserMessage(
-        taskId,
-        text,
-        operator,
-        queuedPrompt,
-      );
+      if (options?.perspective) {
+        await this.taskChat.enqueueUserMessage(
+          taskId,
+          text,
+          operator,
+          queuedPrompt,
+          options.perspective,
+        );
+      } else {
+        await this.taskChat.enqueueUserMessage(
+          taskId,
+          text,
+          operator,
+          queuedPrompt,
+        );
+      }
       this.scheduleQueueDrain(taskId);
       return task;
     }
-    return this.sendConversationTurn(taskId, modelText, operator, text);
+    return this.sendConversationTurn(taskId, modelText, operator, text, {
+      actorWorkerId: options?.actorWorkerId,
+      perspective: options?.perspective,
+    });
   }
 
   /**
@@ -509,12 +614,31 @@ export class TaskDispatchService
     prompt: string,
     operator: string | null,
     chatContent = prompt,
+    options?: {
+      actorWorkerId?: number | null;
+      perspective?: TaskChatPerspective;
+    },
   ): Promise<Task> {
     await this.taskChat.archiveResult(taskId);
-    const saved = await this.dispatch(taskId, operator, prompt);
+    const saved = options?.perspective
+      ? await this.dispatch(
+          taskId,
+          operator,
+          prompt,
+          'execute',
+          options.perspective,
+        )
+      : await this.dispatch(taskId, operator, prompt);
     await this.addEvent(taskId, '反馈', chatContent, operator, {
       intervention: true,
       chat: true,
+      ...(options?.perspective ? { perspective: options.perspective } : {}),
+      ...(options?.actorWorkerId
+        ? {
+            actorType: 'worker' as const,
+            actorWorkerId: options.actorWorkerId,
+          }
+        : {}),
     });
     return saved;
   }
@@ -549,18 +673,28 @@ export class TaskDispatchService
       if (!sending) return;
       try {
         const operator =
-          sending.sender.name && sending.sender.name !== '用户'
+          sending.sender.name && sending.sender.name !== '需求方'
             ? sending.sender.name
             : null;
         const prompt =
           this.taskChat.queuedUserMessagePrompt(taskId, sending.id) ??
           sending.content;
-        await this.sendConversationTurn(
-          taskId,
-          prompt,
-          operator,
-          sending.content,
-        );
+        if (sending.perspective) {
+          await this.sendConversationTurn(
+            taskId,
+            prompt,
+            operator,
+            sending.content,
+            { perspective: sending.perspective },
+          );
+        } else {
+          await this.sendConversationTurn(
+            taskId,
+            prompt,
+            operator,
+            sending.content,
+          );
+        }
         await this.taskChat.removeQueuedUserMessage(taskId, sending.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -634,6 +768,7 @@ export class TaskDispatchService
       task.opencodeSessionId = null;
     }
     task.agentId = agentId;
+    task.assignedAt = oldAgent?.id === agentId ? task.assignedAt : new Date();
     task.status = TaskStatus.WAITING;
     task.subStatus = TaskSubStatus.PENDING_ACCEPTANCE;
     task.offerAttemptAt = null;
@@ -1341,10 +1476,22 @@ export class TaskDispatchService
     const resultText = await this.collectResult(task);
     const now = new Date();
     const report = normalizeTaskDeliveryReport(input.report);
+    // 真人没有“最后一轮助手文本”，操作台提交的交付说明即为任务最终产出；
+    // AI 机器人仍优先取会话产出，报告用于 HANDOFF/REVIEW 结构化小节。
+    const deliveryResult =
+      task.agentId &&
+      (
+        await this.workers.findOne({
+          where: { id: task.agentId },
+          select: { id: true, runtime: true },
+        })
+      )?.runtime === WorkerRuntime.HUMAN
+        ? report.delivery?.trim() || null
+        : resultText;
     // 交付文档是验收申请的前置条件：写入失败时任务保持执行中，可修复后重试
     const handoff = await this.taskDocuments.upsertHandoff({
       task,
-      result: resultText ?? task.result,
+      result: deliveryResult ?? task.result,
       worker,
       appliedAt: now,
       report,
@@ -1359,7 +1506,7 @@ export class TaskDispatchService
       {
         status: TaskStatus.WAITING,
         subStatus: TaskSubStatus.PENDING_ACCEPT,
-        result: resultText ?? task.result,
+        result: deliveryResult ?? task.result,
         remindCount: 1,
         firstRemindedAt: now,
         lastRemindedAt: now,
@@ -1397,6 +1544,49 @@ export class TaskDispatchService
       `执行机器人已提交验收申请，交付文档：${handoff.path}`,
     );
     return { task: saved, handoff };
+  }
+
+  /**
+   * 撤销交付：仅当前执行机器人在等待中-待验收时可操作。
+   * 任务回到进行中-执行中；最新一次交付申请同步失效，需求方不能再直接验收旧交付。
+   */
+  async revokeAcceptance(taskId: number, worker: Worker): Promise<Task> {
+    const task = await this.mustFind(taskId);
+    if (task.agentId !== worker.id) {
+      throw new ForbiddenException(
+        `任务 ${task.code} 的执行机器人不是「${worker.name}」`,
+      );
+    }
+    const updated = await this.tasks.update(
+      {
+        id: taskId,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPT,
+      },
+      {
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+        remindCount: 0,
+        firstRemindedAt: null,
+        lastRemindedAt: null,
+      },
+    );
+    if (!updated.affected) {
+      throw new BadRequestException('任务状态已变化，请刷新后重试');
+    }
+    this.finishedAwaitingApply.delete(taskId);
+    this.pushLine(taskId, `↩ ${worker.name} 已撤销交付，任务继续执行`);
+    await this.addEvent(
+      taskId,
+      '状态变更',
+      `状态变更：等待中-待验收 → 进行中-执行中（${worker.name} 撤销交付）`,
+      worker.name,
+      {
+        workerId: worker.id,
+        deliveryRevoke: true,
+      },
+    );
+    return this.mustFind(taskId);
   }
 
   /**

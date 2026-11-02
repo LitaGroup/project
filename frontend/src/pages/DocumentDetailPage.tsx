@@ -317,7 +317,7 @@ export function DocumentDetailPage() {
                     </table>
                   </div>
                 )}
-                <div className="min-h-0 flex-1 overflow-auto">
+                <div className="md-editor-scroll min-h-0 flex-1">
                   {/* 统一用 MarkdownEditor；飞书导入的文档正文不允许本地修改：readOnly 只读展示，
                       内容变更走「更新同步」。key 保证切换文档（或重新同步后）内容重新载入 */}
                   <MarkdownEditor

@@ -48,6 +48,7 @@ import {
   ListCheck,
   Book,
   Package,
+  Plus,
   Robot,
   Search,
   Settings,
@@ -69,6 +70,8 @@ interface NavItem {
   ready: boolean
   /** 未启用项展示的徽标文案（缺省「待补充」） */
   badge?: string
+  /** 仅精确匹配该路径时高亮（个人中心 /profile 与 /profile/robot 共用一个分区） */
+  end?: boolean
 }
 
 /** 顶级导航分区：顶部 Tab 切换，各分区有独立的左侧导航 */
@@ -91,7 +94,8 @@ const NAV_SECTIONS: NavSection[] = [
       !p.startsWith('/admin') &&
       !p.startsWith('/tasks') &&
       !p.startsWith('/tickets') &&
-      !p.startsWith('/docs'),
+      !p.startsWith('/docs') &&
+      !p.startsWith('/workbench'),
     items: [
       { to: '/', label: '概览', icon: LayoutDashboard, ready: true },
       { to: '/projects', label: '项目', icon: Briefcase, ready: true },
@@ -117,10 +121,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/tasks/list', label: '任务', icon: ClipboardList, ready: true },
       { to: '/tasks', label: '任务概览', icon: ChartPie, ready: true },
       { to: '/tasks/live', label: '工作概览', icon: Activity, ready: true },
-      { to: '/tasks/types', label: '任务类型', icon: Label, ready: true },
-      { to: '/tasks/templates', label: '任务定义', icon: Package, ready: true },
-      { to: '/tasks/workers', label: '机器人', icon: Robot, ready: true },
-      { to: '/tasks/executors', label: '执行器', icon: Cpu, ready: true },
     ],
   },
   {
@@ -162,9 +162,37 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
       { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
       { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
+      { to: '/admin/task-types', label: '任务类型', icon: Label, ready: true },
+      { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },
+      { to: '/admin/workers', label: '机器人', icon: Robot, ready: true },
+      { to: '/admin/executors', label: '执行器', icon: Cpu, ready: true },
     ],
   },
 ]
+
+/** 个人中心分区：不占顶部 Tab，从右上角用户菜单进入，使用独立左侧导航 */
+const PROFILE_SECTION: NavSection = {
+  key: 'profile',
+  label: '个人中心',
+  to: '/profile',
+  match: (p) => p.startsWith('/profile'),
+  items: [
+    {
+      to: '/profile',
+      label: '个人中心',
+      icon: Users,
+      ready: true,
+      end: true,
+    },
+    { to: '/profile/robot', label: '我的代理', icon: Robot, ready: true },
+    {
+      to: '/profile/task-definitions',
+      label: '任务定义',
+      icon: Package,
+      ready: true,
+    },
+  ],
+}
 
 /** 顶栏右侧用户区：未登录显示飞书登录入口，已登录显示头像下拉（身份信息 + 个人中心 + 退出登录） */
 function UserArea() {
@@ -220,6 +248,12 @@ function UserArea() {
         <DropdownMenuItem onClick={() => navigate('/profile')}>
           个人中心
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/profile/robot')}>
+          我的代理
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/profile/task-definitions')}>
+          任务定义
+        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => void logout()}>退出登录</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -228,9 +262,17 @@ function UserArea() {
 
 export function Layout() {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const [searchOpen, setSearchOpen] = useState(false)
-  const activeSection =
-    NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0]
+  const [createOpen, setCreateOpen] = useState(false)
+  const isWorkbench = pathname.startsWith('/workbench')
+  const isProfile = pathname.startsWith('/profile')
+  // 工作台/个人中心不归属任何顶级分区（避免高亮「项目」），个人中心使用独立左侧导航
+  const activeSection = isWorkbench
+    ? undefined
+    : isProfile
+      ? PROFILE_SECTION
+      : (NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0])
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -238,26 +280,33 @@ export function Layout() {
         event.preventDefault()
         setSearchOpen(true)
       }
+      // Option/Alt+N：macOS 上 Option+N 是死键（event.key 为 Dead），必须用物理键位 code 判断
+      if (event.altKey && event.code === 'KeyN') {
+        event.preventDefault()
+        setCreateOpen(true)
+      }
     }
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
   }, [])
 
   return (
-    <div className="flex min-h-screen flex-col bg-background-muted">
-      {/* 顶部导航 */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-border-strong bg-background px-6">
-        <div className="flex items-center gap-8">
+    <div className="flex min-h-screen flex-col bg-background">
+      {/* 顶部导航：与普通页面保持一致，统一按 20% 起始（工作台正文左侧同为 20%） */}
+      <header className="grid h-14 shrink-0 grid-cols-[20%_minmax(0,1fr)_auto] items-center bg-background">
+        <div className="flex h-full items-center px-6">
           <Link
             to="/"
             className="text-base font-semibold text-foreground-intense"
           >
-            AI 项目管理平台
+            Lita 工作中心
           </Link>
+        </div>
+        <div className="flex h-full min-w-0 items-center pl-3">
           <LayoutGroup id="top-navigation">
             <nav className="flex items-center gap-1">
               {NAV_SECTIONS.map((section) => {
-                const active = section.key === activeSection.key
+                const active = section.key === activeSection?.key
                 return (
                   <Link
                     key={section.key}
@@ -284,7 +333,7 @@ export function Layout() {
             </nav>
           </LayoutGroup>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 px-6">
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger
@@ -309,6 +358,57 @@ export function Layout() {
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          <DropdownMenu
+            open={createOpen}
+            onOpenChange={(open) => setCreateOpen(open)}
+          >
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        aria-label="新建任务、工单"
+                        aria-keyshortcuts="Alt+N"
+                      >
+                        <Plus size={16} />
+                      </Button>
+                    }
+                  />
+                }
+              />
+              <TooltipContent className="flex items-center gap-2">
+                新建任务、工单
+                <KbdGroup size="sm">
+                  <Kbd>⌥</Kbd>
+                  <Kbd>N</Kbd>
+                </KbdGroup>
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="min-w-40">
+              <DropdownMenuItem onClick={() => navigate('/tasks/new')}>
+                <ClipboardList size={16} />
+                新建任务
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate('/tickets/tech/new')}>
+                <Settings size={16} />
+                新建技术工单
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Link
+            to="/workbench"
+            aria-current={isWorkbench ? 'page' : undefined}
+            className={`rounded-[var(--radius-md)] px-3 py-1.5 text-sm ${
+              isWorkbench
+                ? 'bg-background-muted font-medium text-foreground-intense'
+                : 'text-foreground-muted hover:text-foreground-intense'
+            }`}
+          >
+            工作台
+          </Link>
           <UserArea />
         </div>
       </header>
@@ -317,41 +417,57 @@ export function Layout() {
         onOpenChange={setSearchOpen}
       />
 
-      <div className="flex flex-1">
-        {/* 左侧导航 */}
-        <aside className="w-52 shrink-0 border-r border-border-strong bg-background p-3">
-          <Navigation orientation="vertical" activeLink={pathname}>
-            <NavigationList className="gap-1">
-              {activeSection.items.map((item) => (
-                <NavigationItem key={item.to}>
-                  <NavigationLink
-                    value={item.to}
-                    disabled={!item.ready}
-                    render={<NavLink to={item.to} end={item.to === '/'} />}
-                  >
-                    <span className="flex w-full items-center justify-between gap-2">
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <item.icon size={18} className="shrink-0" />
-                        <span className="truncate">{item.label}</span>
-                      </span>
-                      {!item.ready && (
-                        <Badge variant="soft">{item.badge ?? '待补充'}</Badge>
-                      )}
-                    </span>
-                  </NavigationLink>
-                </NavigationItem>
-              ))}
-            </NavigationList>
-          </Navigation>
-        </aside>
+      <div className="flex h-[calc(100vh-3.5rem)]">
+        {/* 普通页面：左侧 20% 导航，右侧 80% 浅色圆角内容画布 */}
+        {!isWorkbench && activeSection && (
+          <>
+            <aside className="w-[20%] shrink-0 overflow-y-auto bg-background p-3">
+              <Navigation orientation="vertical" activeLink={pathname}>
+                <NavigationList className="gap-1">
+                  {activeSection.items.map((item) => (
+                    <NavigationItem key={item.to}>
+                      <NavigationLink
+                        value={item.to}
+                        disabled={!item.ready}
+                        render={
+                          <NavLink
+                            to={item.to}
+                            end={item.end ?? item.to === '/'}
+                          />
+                        }
+                      >
+                        <span className="flex w-full items-center justify-between gap-2">
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            <item.icon size={18} className="shrink-0" />
+                            <span className="truncate">{item.label}</span>
+                          </span>
+                          {!item.ready && (
+                            <Badge variant="soft">{item.badge ?? '待补充'}</Badge>
+                          )}
+                        </span>
+                      </NavigationLink>
+                    </NavigationItem>
+                  ))}
+                </NavigationList>
+              </Navigation>
+            </aside>
 
-        {/* 内容区（min-w-0：允许内容收缩，宽内容才能在面板内出现横向滚动；
-            高度限定为视口减顶栏，页面可用 h-full 撑满剩余空间） */}
-        <main className="h-[calc(100vh-3.5rem)] min-w-0 flex-1 overflow-auto p-6 text-foreground-intense">
-          <PageTransition pageKey={pathname}>
+            <main className="h-full w-[80%] min-w-0 p-3">
+              <div className="h-full min-h-0 overflow-auto rounded-[var(--radius-lg)] bg-background-muted p-4 text-foreground-intense">
+                <PageTransition pageKey={pathname}>
+                  <Outlet />
+                </PageTransition>
+              </div>
+            </main>
+          </>
+        )}
+
+        {/* 工作台：页面自身渲染 20% 宽度任务列表（与普通页左侧导航同宽）+ 自适应内容画布 */}
+        {isWorkbench && (
+          <main className="h-full w-full min-w-0 text-foreground-intense">
             <Outlet />
-          </PageTransition>
-        </main>
+          </main>
+        )}
       </div>
     </div>
   )

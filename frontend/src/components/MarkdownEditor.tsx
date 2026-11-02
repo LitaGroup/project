@@ -11,6 +11,166 @@ async function uploadImage(file: File): Promise<string> {
   return url
 }
 
+/** 当前块的简短类型名：只占一个字位宽度，避免挤占正文 */
+function blockTypeLabel(element: HTMLElement): string | null {
+  const tag = element.tagName
+  if (/^H[1-6]$/.test(tag)) return tag
+  if (element.matches('.milkdown-table-block, table')) return '表格'
+  if (element.matches('.milkdown-code-block, pre')) return '代码'
+  if (element.matches('.milkdown-image-block')) return '图片'
+  if (element.matches('.milkdown-latex-block, .math-block')) return '公式'
+  if (tag === 'UL' || tag === 'OL') {
+    if (element.querySelector('.label.checked, .label.unchecked')) return '待办'
+    return tag === 'UL' ? '无序' : '有序'
+  }
+  if (tag === 'BLOCKQUOTE') return '引用'
+  if (tag === 'HR') return '分割'
+  if (tag === 'P') return '正文'
+  return null
+}
+
+/**
+ * 在编辑器左内边距里放一个独立的块类型标签（H1/H2/正文/代码等）。
+ * 标签是 .milkdown 的兄弟浮层，不修改 ProseMirror 节点 DOM（否则会被
+ * 编辑器同步逻辑移除，甚至触发反复重绘）；只跟随鼠标悬停块或光标所在块。
+ */
+function attachBlockTypeLabels(host: HTMLElement): () => void {
+  let detach: () => void = () => undefined
+  let waitObserver: MutationObserver | undefined
+  let bound = false
+
+  const bind = () => {
+    if (bound) return true
+    const proseMirror = host.querySelector<HTMLElement>('.ProseMirror')
+    const container = proseMirror?.parentElement
+    if (!proseMirror || !container) return false
+    detach = bindEditorBlocks(proseMirror, container)
+    bound = true
+    return true
+  }
+
+  if (!bind()) {
+    waitObserver = new MutationObserver(() => {
+      if (bind()) waitObserver?.disconnect()
+    })
+    waitObserver.observe(host, { childList: true, subtree: true })
+  }
+
+  return () => {
+    waitObserver?.disconnect()
+    detach()
+  }
+}
+
+function bindEditorBlocks(
+  pm: HTMLElement,
+  container: HTMLElement,
+): () => void {
+  const badge = document.createElement('span')
+  badge.className = 'md-block-type-badge'
+  badge.setAttribute('aria-hidden', 'true')
+  container.append(badge)
+
+  let selected: HTMLElement | null = null
+  let hovered: HTMLElement | null = null
+  let frame = 0
+
+  const topLevelBlock = (node: Node | null): HTMLElement | null => {
+    if (!node || node === pm) return null
+    let element = node instanceof HTMLElement ? node : node.parentElement
+    if (!element || !pm.contains(element)) return null
+    while (element.parentElement && element.parentElement !== pm) {
+      element = element.parentElement
+    }
+    return element.parentElement === pm ? element : null
+  }
+
+  const blockFromSelection = (): HTMLElement | null => {
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return null
+    const anchor = selection.anchorNode
+    if (!anchor || !pm.contains(anchor)) return null
+    if (anchor === pm) {
+      const index = Math.min(selection.anchorOffset, pm.children.length - 1)
+      const child = pm.children[index]
+      return child instanceof HTMLElement ? child : null
+    }
+    return topLevelBlock(anchor)
+  }
+
+  const render = () => {
+    const block =
+      hovered && pm.contains(hovered)
+        ? hovered
+        : selected && pm.contains(selected)
+          ? selected
+          : null
+    const label = block ? blockTypeLabel(block) : null
+    if (!block || !label) {
+      badge.classList.remove('md-show')
+      return
+    }
+
+    badge.textContent = label
+    badge.classList.add('md-show')
+    const blockRect = block.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+    badge.style.top = `${Math.round(blockRect.top - containerRect.top + 2)}px`
+    badge.style.left = `${Math.max(
+      2,
+      Math.round(
+        blockRect.left - containerRect.left - badge.offsetWidth - 6,
+      ),
+    )}px`
+  }
+
+  const scheduleRender = () => {
+    if (frame) return
+    frame = window.requestAnimationFrame(() => {
+      frame = 0
+      selected = blockFromSelection()
+      render()
+    })
+  }
+
+  const onPointerOver = (event: PointerEvent) => {
+    const target = event.target
+    if (!(target instanceof Node)) return
+    const block = topLevelBlock(target)
+    if (hovered === block) return
+    hovered = block
+    scheduleRender()
+  }
+
+  const onPointerLeave = () => {
+    if (!hovered) return
+    hovered = null
+    scheduleRender()
+  }
+
+  const observer = new MutationObserver(scheduleRender)
+  const resizeObserver = new ResizeObserver(scheduleRender)
+  observer.observe(pm, { childList: true })
+  resizeObserver.observe(pm)
+  resizeObserver.observe(container)
+  document.addEventListener('selectionchange', scheduleRender)
+  pm.addEventListener('input', scheduleRender)
+  pm.addEventListener('pointerover', onPointerOver)
+  pm.addEventListener('pointerleave', onPointerLeave)
+  scheduleRender()
+
+  return () => {
+    observer.disconnect()
+    resizeObserver.disconnect()
+    document.removeEventListener('selectionchange', scheduleRender)
+    pm.removeEventListener('input', scheduleRender)
+    pm.removeEventListener('pointerover', onPointerOver)
+    pm.removeEventListener('pointerleave', onPointerLeave)
+    if (frame) window.cancelAnimationFrame(frame)
+    badge.remove()
+  }
+}
+
 export interface MarkdownEditorHandle {
   /** 取编辑器当前 Markdown（含尚未触发 onChange 的输入，保存时使用） */
   getMarkdown: () => string
@@ -25,6 +185,13 @@ export interface MarkdownEditorProps {
   compact?: boolean
   /** Appica 风格：标题/链接/代码/引用按平台排版（中性色 + 角色 token），默认使用 Crepe 原生样式 */
   appica?: boolean
+  /** GitHub 风格：标题分隔线、代码块、引用和表格按 GitHub Markdown 习惯排版 */
+  github?: boolean
+  /**
+   * 编辑态在块左侧显示当前块类型（H1/H2/正文/代码等），鼠标悬停或光标所在块时出现。
+   * 默认开启，可显式关闭。
+   */
+  showBlockTypes?: boolean
   className?: string
   ref?: Ref<MarkdownEditorHandle>
 }
@@ -39,6 +206,8 @@ export function MarkdownEditor({
   readOnly = false,
   compact = false,
   appica = false,
+  github = false,
+  showBlockTypes,
   className,
   ref,
 }: MarkdownEditorProps) {
@@ -48,6 +217,8 @@ export function MarkdownEditor({
   const initialReadOnly = useRef(readOnly)
   const latestMarkdown = useRef(value)
   const onChangeRef = useRef(onChange)
+  const blockTypesEnabled = showBlockTypes ?? true
+  const blockTypesEnabledRef = useRef(blockTypesEnabled)
 
   useEffect(() => {
     onChangeRef.current = onChange
@@ -70,6 +241,10 @@ export function MarkdownEditor({
     host.append(root)
 
     let disposed = false
+    // 编辑器 DOM 由 Crepe 异步创建，这里先挂监听，等 .ProseMirror 出现后再绑定
+    const detachBlockTypes = blockTypesEnabledRef.current
+      ? attachBlockTypeLabels(host)
+      : undefined
     void (async () => {
       const { Crepe } = await import('@milkdown/crepe')
       if (disposed) {
@@ -79,18 +254,13 @@ export function MarkdownEditor({
       const crepe = new Crepe({
         root,
         defaultValue: initialValue.current,
+        features: {
+          // 不需要选中文字后弹出的浮动格式工具栏
+          [Crepe.Feature.Toolbar]: false,
+        },
         featureConfigs: {
-          // 内置 UI 的中文文案（斜杠菜单、选区工具栏、占位符）
+          // 内置 UI 的中文文案（斜杠菜单、占位符）
           [Crepe.Feature.Placeholder]: { text: '请输入内容…', mode: 'doc' },
-          [Crepe.Feature.Toolbar]: {
-            boldLabel: '加粗',
-            italicLabel: '斜体',
-            strikethroughLabel: '删除线',
-            codeLabel: '行内代码',
-            linkLabel: '链接',
-            latexLabel: '公式',
-            aiLabel: 'AI',
-          },
           [Crepe.Feature.BlockEdit]: {
             textGroup: {
               label: '文本',
@@ -143,6 +313,7 @@ export function MarkdownEditor({
 
     return () => {
       disposed = true
+      detachBlockTypes?.()
       const crepe = crepeRef.current
       crepeRef.current = null
       if (crepe) {
@@ -168,6 +339,8 @@ export function MarkdownEditor({
         readOnly ? 'md-readonly' : '',
         compact ? 'md-editor-compact' : '',
         appica ? 'md-editor-appica' : '',
+        github ? 'md-editor-github' : '',
+        blockTypesEnabled ? 'md-editor-block-types' : '',
         className,
       ]
         .filter(Boolean)

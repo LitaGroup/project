@@ -101,7 +101,11 @@ export class TaskIdentifyService {
     const types = await this.taskTypes.findAll();
     const text = await runOpencodePrompt(client, {
       title: `识别 ${task.code} ${task.title}`.slice(0, 100),
-      model: { id: scheduler.modelId, providerID: scheduler.providerId },
+      model: {
+        id: scheduler.modelId,
+        providerID: scheduler.providerId,
+        ...(scheduler.variant ? { variant: scheduler.variant } : {}),
+      },
       location: workdir ? { directory: workdir } : undefined,
       prompt: this.buildPrompt(task, roster, types),
       timeoutMs,

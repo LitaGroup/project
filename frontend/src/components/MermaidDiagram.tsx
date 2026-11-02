@@ -1,5 +1,4 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { SyntaxHighlighterProps } from '@assistant-ui/react-markdown/code-fence'
 
 type Mermaid = (typeof import('mermaid'))['default']
 
@@ -29,11 +28,11 @@ function useDarkMode(): boolean {
 }
 
 /**
- * Mermaid 代码块渲染器（assistant-ui SyntaxHighlighter 协议）：
+ * Mermaid 代码块渲染器（兼容 assistant-ui SyntaxHighlighter 协议）：
  * 把 ```mermaid 围栏代码块（flowchart TD / sequenceDiagram / gantt…）渲染为 SVG 图。
  * 解析失败（语法错误等）时回退展示原始代码；mermaid 配置 securityLevel=strict 防注入。
  */
-export function MermaidDiagram({ code }: SyntaxHighlighterProps) {
+export function MermaidDiagram({ code }: { code: string }) {
   const dark = useDarkMode()
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

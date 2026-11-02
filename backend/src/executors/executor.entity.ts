@@ -7,10 +7,18 @@ import {
 } from 'typeorm';
 import { ExecutorType } from '../common/enums';
 
+/** 模型可选思考等级（opencode variant） */
+export interface ExecutorProviderModelVariant {
+  id: string;
+  name: string;
+}
+
 /** 供应商缓存条目内的模型（id/modelID 同值，name 展示用） */
 export interface ExecutorProviderModel {
   id: string;
   name: string;
+  /** 可选思考等级；旧缓存没有该字段，前端可据此触发一次重新同步 */
+  variants?: ExecutorProviderModelVariant[];
 }
 
 /** 供应商缓存条目（从执行器 GET /api/provider + GET /api/model 拉取合并） */

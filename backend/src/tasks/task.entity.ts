@@ -32,10 +32,6 @@ export interface TaskPlanRef {
 @Index(['status'])
 @Index(['subStatus'])
 @Index(['status', 'subStatus'])
-@Index('IDX_tasks_one_running_per_worker', ['agentId'], {
-  unique: true,
-  where: `"status" = '进行中'`,
-})
 export class Task {
   @PrimaryGeneratedColumn()
   id: number;
@@ -114,6 +110,10 @@ export class Task {
   /** 待继续时下一次派发需要补充的上下文（答复/返工/子任务事件） */
   @Column({ type: 'text', nullable: true })
   resumePrompt: string | null;
+
+  /** 当前执行机器人最近一次分配时间（真人操作台按此倒序；无分配为空） */
+  @Column({ type: 'timestamptz', nullable: true })
+  assignedAt: Date | null;
 
   /** 最近一次任务邀约时间（待接受重试节流） */
   @Column({ type: 'timestamptz', nullable: true })

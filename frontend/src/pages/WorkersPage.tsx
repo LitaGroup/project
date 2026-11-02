@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Table,
@@ -10,6 +10,20 @@ import {
 } from '@appica/ui-react/table'
 import { Badge } from '@appica/ui-react/badge'
 import { Button, buttonVariants } from '@appica/ui-react/button'
+import { Input } from '@appica/ui-react/input'
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@appica/ui-react/select'
+import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
 import {
   AlertDialog,
   AlertDialogTrigger,
@@ -20,7 +34,13 @@ import {
   AlertDialogFooter,
   AlertDialogClose,
 } from '@appica/ui-react/alert-dialog'
-import { api, type Executor, type Worker } from '../lib/api'
+import {
+  api,
+  WORKER_LIVE_STATUSES,
+  WORKER_ROLES,
+  type Executor,
+  type Worker,
+} from '../lib/api'
 import { WorkerLiveBadge } from '../components/StatusBadge'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 
@@ -32,6 +52,11 @@ export function WorkersPage() {
   const [workers, setWorkers] = useState<Worker[] | null>(null)
   const [executors, setExecutors] = useState<Executor[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [keyword, setKeyword] = useState('')
+  const [roleFilter, setRoleFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [executorFilter, setExecutorFilter] = useState('all')
+  const [enabledFilter, setEnabledFilter] = useState('all')
 
   const reload = useCallback(() => {
     api
@@ -45,6 +70,56 @@ export function WorkersPage() {
 
   const executorName = new Map(executors.map((e) => [e.id, e.name]))
 
+  const executorItems = useMemo<Record<string, string>>(
+    () => ({
+      all: '不限执行器',
+      none: '未配置执行器',
+      ...Object.fromEntries(executors.map((e) => [String(e.id), e.name])),
+    }),
+    [executors],
+  )
+
+  const filtered = useMemo(() => {
+    const query = keyword.trim().toLowerCase()
+    return (workers ?? []).filter((worker) => {
+      if (query) {
+        const haystack = `${worker.id} ${worker.name} ${worker.intro ?? ''}`.toLowerCase()
+        if (!haystack.includes(query)) return false
+      }
+      if (roleFilter !== 'all' && worker.role !== roleFilter) return false
+      if (statusFilter !== 'all' && worker.liveStatus !== statusFilter) return false
+      if (executorFilter === 'none') {
+        if (worker.executorId != null) return false
+      } else if (executorFilter !== 'all') {
+        if (worker.executorId !== Number(executorFilter)) return false
+      }
+      if (enabledFilter === 'enabled' && !worker.enabled) return false
+      if (enabledFilter === 'disabled' && worker.enabled) return false
+      return true
+    })
+  }, [
+    workers,
+    keyword,
+    roleFilter,
+    statusFilter,
+    executorFilter,
+    enabledFilter,
+  ])
+
+  const hasFilter =
+    keyword.trim() !== '' ||
+    roleFilter !== 'all' ||
+    statusFilter !== 'all' ||
+    executorFilter !== 'all' ||
+    enabledFilter !== 'all'
+  const clearFilters = () => {
+    setKeyword('')
+    setRoleFilter('all')
+    setStatusFilter('all')
+    setExecutorFilter('all')
+    setEnabledFilter('all')
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -56,13 +131,132 @@ export function WorkersPage() {
           </p>
         </div>
         <Link
-          to="/tasks/workers/new"
+          to="/admin/workers/new"
           className={buttonVariants({ variant: 'outline', size: 'sm' })}
         >
           新建机器人
         </Link>
       </div>
       {error && <p className="text-sm">操作失败:{error}</p>}
+
+      <Toolbar aria-label="机器人筛选">
+        <ToolbarInput
+          className="w-64"
+          render={
+            <Input
+              placeholder="搜索名称、简介、ID…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索机器人名称、简介或 ID"
+            />
+          }
+        />
+        <ToolbarGroup aria-label="筛选">
+          <Select
+            value={roleFilter}
+            onValueChange={(value) => setRoleFilter(value as string)}
+            items={{
+              all: '不限类型',
+              ...Object.fromEntries(WORKER_ROLES.map((role) => [role, role])),
+            }}
+          >
+            <ToolbarButton
+              className="w-32"
+              render={
+                <SelectTrigger aria-label="按机器人类型筛选">
+                  <SelectValue placeholder="类型" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限类型</SelectItem>
+              {WORKER_ROLES.map((role) => (
+                <SelectItem key={role} value={role}>
+                  {role}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={statusFilter}
+            onValueChange={(value) => setStatusFilter(value as string)}
+            items={{
+              all: '不限状态',
+              ...Object.fromEntries(
+                WORKER_LIVE_STATUSES.map((status) => [status, status]),
+              ),
+            }}
+          >
+            <ToolbarButton
+              className="w-32"
+              render={
+                <SelectTrigger aria-label="按实时状态筛选">
+                  <SelectValue placeholder="状态" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限状态</SelectItem>
+              {WORKER_LIVE_STATUSES.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={executorFilter}
+            onValueChange={(value) => setExecutorFilter(value as string)}
+            items={executorItems}
+          >
+            <ToolbarButton
+              className="w-40"
+              render={
+                <SelectTrigger aria-label="按执行器筛选">
+                  <SelectValue placeholder="执行器" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              {Object.entries(executorItems).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={enabledFilter}
+            onValueChange={(value) => setEnabledFilter(value as string)}
+            items={{
+              all: '不限启用状态',
+              enabled: '启用',
+              disabled: '停用',
+            }}
+          >
+            <ToolbarButton
+              className="w-32"
+              render={
+                <SelectTrigger aria-label="按启用状态筛选">
+                  <SelectValue placeholder="启用状态" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">不限启用状态</SelectItem>
+              <SelectItem value="enabled">启用</SelectItem>
+              <SelectItem value="disabled">停用</SelectItem>
+            </SelectContent>
+          </Select>
+          {hasFilter && (
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              清空筛选
+            </Button>
+          )}
+        </ToolbarGroup>
+      </Toolbar>
 
       <Table hoverableRows>
         <TableHeader>
@@ -78,7 +272,7 @@ export function WorkersPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(workers ?? []).map((w) => (
+          {filtered.map((w) => (
             <TableRow key={w.id}>
               <TableCell className="max-w-64">
                 <p className="flex items-center gap-2 truncate font-medium" title={w.name}>
@@ -88,6 +282,16 @@ export function WorkersPage() {
                   {w.system && (
                     <Badge variant="soft" size="sm">
                       系统
+                    </Badge>
+                  )}
+                  {w.humanUserId && (
+                    <Badge variant="secondary" size="sm">
+                      真人
+                    </Badge>
+                  )}
+                  {w.personalAgentUserId && (
+                    <Badge variant="secondary" size="sm">
+                      个人 AGENT
                     </Badge>
                   )}
                 </p>
@@ -105,32 +309,42 @@ export function WorkersPage() {
                 <WorkerLiveBadge status={w.liveStatus} />
               </TableCell>
               <TableCell>
-                {w.executorId
-                  ? (executorName.get(w.executorId) ?? `#${w.executorId}`)
-                  : '未配置'}
+                {w.humanUserId
+                  ? (w.humanUserName ?? `用户 #${w.humanUserId}`)
+                  : w.executorId
+                    ? (executorName.get(w.executorId) ?? `#${w.executorId}`)
+                    : '未配置'}
               </TableCell>
               <TableCell className="truncate text-xs" title={`${w.providerId}/${w.modelId}`}>
-                {w.providerId ?? '-'}/{w.modelId ?? '-'}
+                {w.humanUserId
+                  ? '用户执行'
+                  : `${w.providerId ?? '-'}/${w.modelId ?? '-'}`}
               </TableCell>
               <TableCell>{w.ownerName ?? '—'}</TableCell>
               <TableCell>{w.enabled ? '启用' : '停用'}</TableCell>
               <TableCell className="text-center">
                 <div className="flex justify-center gap-2">
+                  {!w.humanUserId && (
+                    <Link
+                      to={`/admin/workers/${w.id}/debug`}
+                      className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                    >
+                      调试
+                    </Link>
+                  )}
                   <Link
-                    to={`/tasks/workers/${w.id}/debug`}
+                    to={`/admin/workers/${w.id}`}
                     className={buttonVariants({ variant: 'outline', size: 'sm' })}
                   >
-                    调试
+                    {w.humanUserId ? '查看' : '编辑'}
                   </Link>
-                  <Link
-                    to={`/tasks/workers/${w.id}`}
-                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
-                  >
-                    编辑
-                  </Link>
-                  {w.system ? (
+                  {w.system || w.humanUserId || w.personalAgentUserId ? (
                     <span className="self-center text-xs text-foreground-muted">
-                      系统内置
+                      {w.system
+                        ? '系统内置'
+                        : w.humanUserId
+                          ? '用户绑定'
+                          : '个人 AGENT'}
                     </span>
                   ) : (
                     <DeleteWorkerButton worker={w} onDeleted={reload} />
@@ -139,9 +353,11 @@ export function WorkersPage() {
               </TableCell>
             </TableRow>
           ))}
-          {workers !== null && workers.length === 0 && (
+          {workers !== null && filtered.length === 0 && (
             <TableRow>
-              <TableCell colSpan={8}>暂无机器人</TableCell>
+              <TableCell colSpan={8}>
+                {hasFilter ? '没有符合筛选条件的机器人' : '暂无机器人'}
+              </TableCell>
             </TableRow>
           )}
         </TableBody>

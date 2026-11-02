@@ -27,12 +27,25 @@ export interface OpencodeProviderInfo {
   name?: string;
 }
 
+/** 模型变体（思考等级；如 none/low/medium/high/xhigh/max） */
+export interface OpencodeModelVariant {
+  id: string;
+  settings?: Record<string, unknown>;
+}
+
 /** 模型（GET /api/model 条目） */
 export interface OpencodeModelInfo {
   id: string;
   modelID: string;
   providerID: string;
   name?: string;
+  enabled?: boolean;
+  /** 模型能力（仅需要判断是否支持工具调用） */
+  capabilities?: {
+    tools?: boolean;
+  };
+  /** 思考等级变体；模型不支持时为空 */
+  variants?: OpencodeModelVariant[];
 }
 
 /** 模型引用（建会话 / 发 prompt 时指定模型；id 即 modelID） */
@@ -53,17 +66,26 @@ export interface OpencodeSessionInfo {
 export interface OpencodeCreateSessionInput {
   title?: string;
   model?: OpencodeModelRef;
+  /** 主 Agent（build / plan）；缺省由 opencode 使用 build */
+  agent?: string;
   location?: { directory: string };
   /** 预授权规则集（无人值守执行关键；结构为 opencode Permission.Ruleset） */
   permissions?: unknown;
   metadata?: Record<string, unknown>;
 }
 
+/** 文件附件（opencode PromptInput.FileAttachment） */
+export interface OpencodeFileAttachment {
+  uri: string;
+  name?: string;
+  description?: string;
+}
+
 /** 发 prompt 入参：text 必填；skills 技能附件 / files 文件附件按需 */
 export interface OpencodePromptInput {
   text: string;
   skills?: unknown[];
-  files?: unknown[];
+  files?: OpencodeFileAttachment[];
 }
 
 /**
@@ -357,6 +379,81 @@ export class OpencodeClient {
       method: 'DELETE',
       signal,
     });
+  }
+
+  /** 切换会话后续轮次使用的主 Agent（build / plan） */
+  async switchAgent(
+    sessionId: string,
+    agent: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.request(`/api/session/${encodeURIComponent(sessionId)}/agent`, {
+      method: 'POST',
+      body: JSON.stringify({ agent }),
+      signal,
+    });
+  }
+
+  /** 切换会话后续轮次使用的模型/思考等级 */
+  async switchModel(
+    sessionId: string,
+    model: OpencodeModelRef,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.request(`/api/session/${encodeURIComponent(sessionId)}/model`, {
+      method: 'POST',
+      body: JSON.stringify({ model }),
+      signal,
+    });
+  }
+
+  /**
+   * 写入执行器工作目录（聊天附件落盘）。
+   * 返回执行器上的绝对路径，供 prompt files 使用 file:// URI。
+   */
+  async writeFile(
+    directory: string,
+    path: string,
+    data: Uint8Array,
+    signal?: AbortSignal,
+  ): Promise<{ path: string }> {
+    const query = new URLSearchParams({
+      path,
+      'location[directory]': directory,
+    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/api/experimental/fs/write?${query}`, {
+        method: 'POST',
+        headers: {
+          ...this.headers,
+          'Content-Type': 'application/octet-stream',
+        },
+        body: data as unknown as BodyInit,
+        signal,
+      });
+    } catch (e) {
+      throw new OpencodeClientError(
+        `执行器连接失败: ${(e as Error).message}`,
+        0,
+      );
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      let message = `HTTP ${res.status}`;
+      try {
+        const json = JSON.parse(body) as { message?: string };
+        if (json.message) message = json.message;
+      } catch {
+        if (body) message = `${message}: ${body.slice(0, 200)}`;
+      }
+      throw new OpencodeClientError(message, res.status);
+    }
+    const json = (await res.json().catch(() => null)) as
+      { path?: string } | { data?: { path?: string } } | null;
+    const payload = OpencodeClient.unwrap(json) as { path?: string } | null;
+    if (!payload?.path) throw new OpencodeClientError('写入附件失败', 500);
+    return { path: payload.path };
   }
 
   /** 建会话（title/model/location/permissions），返回会话信息 */

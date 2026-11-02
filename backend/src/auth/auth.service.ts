@@ -12,6 +12,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { Repository } from 'typeorm';
 import { UserRole } from '../common/enums';
 import { FeishuService } from '../feishu/feishu.service';
+import { WorkersService } from '../workers/workers.service';
+import { PersonalAgentsService } from '../workers/personal-agents.service';
 import { User } from './user.entity';
 
 /** 登录成功后发送的飞书欢迎消息标题 */
@@ -76,6 +78,8 @@ export class AuthService {
     @InjectRepository(User)
     private readonly usersRepo: Repository<User>,
     private readonly feishu: FeishuService,
+    private readonly workersService: WorkersService,
+    private readonly personalAgents: PersonalAgentsService,
   ) {
     this.http = axios.create({
       baseURL: 'https://open.feishu.cn/open-apis',
@@ -183,6 +187,8 @@ export class AuthService {
       this.applyFeishuTokens(existing, tokens);
       const user = await this.usersRepo.save(existing);
       await this.sendWelcome(user);
+      await this.ensureHumanWorker(user);
+      await this.ensurePersonalAgent(user);
       return user;
     }
     // 首个「登录」用户授予管理员：以库内是否已有管理员判定，
@@ -207,7 +213,31 @@ export class AuthService {
     );
     const saved = await this.usersRepo.save(user);
     await this.sendWelcome(saved);
+    await this.ensureHumanWorker(saved);
+    await this.ensurePersonalAgent(saved);
     return saved;
+  }
+
+  /** 登录/通讯录创建用户后同步绑定真人机器人（失败不阻断登录） */
+  private async ensureHumanWorker(user: User): Promise<void> {
+    try {
+      await this.workersService.ensureHumanWorker(user);
+    } catch (e) {
+      this.logger.warn(
+        `真人机器人绑定失败（${user.name}）: ${(e as Error).message}`,
+      );
+    }
+  }
+
+  /** 登录后确保个人 AI AGENT 存在（失败不阻断登录，工作台打开时会再次尝试） */
+  private async ensurePersonalAgent(user: User): Promise<void> {
+    try {
+      await this.personalAgents.ensureForUser(user);
+    } catch (e) {
+      this.logger.warn(
+        `个人 AGENT 创建失败（${user.name}）: ${(e as Error).message}`,
+      );
+    }
   }
 
   private applyFeishuTokens(user: User, tokens?: FeishuOAuthTokens): void {
@@ -438,8 +468,9 @@ export class AuthService {
         existing.department = c.department ?? existing.department;
         await this.usersRepo.save(existing);
         updated++;
+        await this.ensureHumanWorker(existing);
       } else {
-        await this.usersRepo.save(
+        const user = await this.usersRepo.save(
           this.usersRepo.create({
             feishuOpenId: c.openId,
             unionId: c.unionId,
@@ -453,6 +484,7 @@ export class AuthService {
           }),
         );
         created++;
+        await this.ensureHumanWorker(user);
       }
     }
     this.logger.log(

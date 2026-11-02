@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../auth/user.entity';
+import { WorkerRuntime } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
 import { FeishuService } from '../feishu/feishu.service';
@@ -70,8 +71,37 @@ export class TaskNotifyService {
     title: string,
     description: string,
   ): Promise<TaskNotifyResult> {
-    // 机器人需求方由持久化收件箱和 LOOP 唤醒，不误发给根任务人类创建人。
-    if (task.requesterType === 'worker') {
+    // 真人机器人需求方仍由其绑定用户在操作台处理；AI 机器人需求方由收件箱和 LOOP 唤醒。
+    if (task.requesterType === 'worker' && task.requesterId) {
+      const requesterWorker = await this.workers.findOne({
+        where: { id: task.requesterId },
+        select: {
+          id: true,
+          name: true,
+          humanUserId: true,
+          personalAgentUserId: true,
+          runtime: true,
+        },
+      });
+      const boundUserId =
+        requesterWorker?.runtime === WorkerRuntime.HUMAN
+          ? requesterWorker.humanUserId
+          : (requesterWorker?.personalAgentUserId ?? null);
+      if (!boundUserId) return { sent: false };
+      const user = await this.users.findOne({
+        where: { id: boundUserId },
+        select: { id: true, name: true, feishuOpenId: true },
+      });
+      if (user?.feishuOpenId) {
+        return this.sendCard(
+          task,
+          { openId: user.feishuOpenId, ownerName: user.name },
+          kind,
+          title,
+          description,
+          '需求方',
+        );
+      }
       return { sent: false };
     }
     const requesterId = await this.resolveRequesterUserId(task);

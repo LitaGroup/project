@@ -383,6 +383,56 @@ describe('TaskChatService snapshot 最终产出去重', () => {
     );
   });
 
+  it('任务创建消息使用需求方标签与需求方视角', async () => {
+    eventsRepo.find.mockResolvedValue([
+      {
+        id: 1,
+        taskId: 34,
+        type: '操作',
+        content: '创建任务',
+        meta: { description: '把按钮改成蓝色' },
+        operator: '张三',
+        createdAt: new Date('2026-10-27T10:00:00Z'),
+      },
+    ]);
+
+    const messages = (await service.snapshot(34)).messages;
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: 'user',
+      perspective: 'requester',
+      sender: { name: '张三', roleLabel: '需求方' },
+    });
+  });
+
+  it('执行方反馈进入对话时按执行方身份展示', async () => {
+    eventsRepo.find.mockResolvedValue([
+      {
+        id: 1,
+        taskId: 34,
+        type: '反馈',
+        content: '已完成调整',
+        meta: {
+          chat: true,
+          intervention: true,
+          perspective: 'responsible',
+        },
+        operator: '李四',
+        createdAt: new Date('2026-10-27T10:01:00Z'),
+      },
+    ]);
+
+    const messages = (await service.snapshot(34)).messages;
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      perspective: 'responsible',
+      sender: { name: '李四', roleLabel: '执行方' },
+    });
+  });
+
   it('快照保留历史验收申请标记，返工后仍为 true', async () => {
     eventsRepo.find.mockResolvedValue([
       {
@@ -524,6 +574,26 @@ describe('TaskChatService 发送队列', () => {
       { findOne: jest.fn().mockResolvedValue(null) } as never,
       {} as never,
     );
+  });
+
+  it('排队消息保留需求方/执行方身份与标签', async () => {
+    const requester = await service.enqueueUserMessage(7, '补充需求', '张三');
+    const responsible = await service.enqueueUserMessage(
+      7,
+      '执行反馈',
+      '李四',
+      undefined,
+      'responsible',
+    );
+
+    expect(requester).toMatchObject({
+      perspective: 'requester',
+      sender: { name: '张三', roleLabel: '需求方' },
+    });
+    expect(responsible).toMatchObject({
+      perspective: 'responsible',
+      sender: { name: '李四', roleLabel: '执行方' },
+    });
   });
 
   it('按 FIFO 保存待发送消息，并支持发送中、失败恢复与移除', async () => {

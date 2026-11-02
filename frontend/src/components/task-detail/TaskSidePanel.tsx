@@ -37,12 +37,12 @@ export function TaskSidePanel({
           </span>
         </div>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
-          <InfoItem label="需求人" value={requesterName ?? '—'} />
+          <InfoItem label="需求方" value={requesterName ?? '—'} />
           <InfoItem label="所属项目" value="—" />
           <InfoItem label="类型" value={task.type} />
           <InfoItem label="定义" value={task.templateName ?? '未设置'} />
           <InfoItem label="机器人" value={agentName ?? '未分配'} />
-          <InfoItem label="负责人" value={agentOwnerName ?? '—'} />
+          <InfoItem label="执行方" value={agentOwnerName ?? '—'} />
           <InfoItem label="持续时间" value={formatDuration(durationMs)} />
           <InfoItem label="介入次数" value={`${interventionCount} 次`} />
           <InfoItem
@@ -52,8 +52,8 @@ export function TaskSidePanel({
           {task.ownerTakeoverAt && (
             <div className="col-span-2">
               <InfoItem
-                label="负责人接管"
-                value={`${task.ownerTakeoverName ?? '未配置负责人'} · ${new Date(
+                label="执行方接管"
+                value={`${task.ownerTakeoverName ?? '未配置执行方'} · ${new Date(
                   task.ownerTakeoverAt,
                 ).toLocaleString()}`}
               />

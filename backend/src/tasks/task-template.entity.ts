@@ -38,6 +38,14 @@ export class TaskTemplate {
   @Column({ type: 'simple-json', default: '[]' })
   agentIds: number[];
 
+  /** 创建人用户 ID（users.id，可空；系统内置定义为空） */
+  @Column({ type: 'int', nullable: true })
+  createdById: number | null;
+
+  /** 创建人姓名快照（用户改名后仍保留创建时姓名） */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  createdByName: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

@@ -1,4 +1,6 @@
-# AI 项目管理平台
+# Lita 工作中心
+
+默认访问地址：<http://work.cinta.team>
 
 以 AI 为中心的项目管理平台。技术栈与约定见 [AGENTS.md](./AGENTS.md)。
 

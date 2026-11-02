@@ -1,6 +1,7 @@
 import {
   applyDebugStreamEvent,
   normalizeDebugAnswers,
+  normalizeDebugMode,
   parseQuestionEvent,
   pendingDebugQuestions,
   questionEventRequestId,
@@ -391,5 +392,15 @@ describe('normalizeDebugAnswers / questionEventRequestId', () => {
     expect(questionEventRequestId({ requestID: 'q1' })).toBe('q1');
     expect(questionEventRequestId({ request: { requestID: 'q2' } })).toBe('q2');
     expect(questionEventRequestId({})).toBeNull();
+  });
+});
+
+describe('normalizeDebugMode', () => {
+  it('仅 plan 进入计划模式，其它值回退 build', () => {
+    expect(normalizeDebugMode('plan')).toBe('plan');
+    expect(normalizeDebugMode('build')).toBe('build');
+    expect(normalizeDebugMode('')).toBe('build');
+    expect(normalizeDebugMode(undefined)).toBe('build');
+    expect(normalizeDebugMode('PLAN')).toBe('build');
   });
 });

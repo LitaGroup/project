@@ -10,10 +10,15 @@ import {
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
+import { readFile } from 'fs/promises';
+import { basename, join } from 'path';
 import { In, LessThan, MoreThanOrEqual, Repository } from 'typeorm';
 import { Observable } from 'rxjs';
 import { WorkerRuntime } from '../common/enums';
+import { fileWebroot } from '../common/paths';
+import { variantLabel } from '../common/variants';
 import { Executor } from '../executors/executor.entity';
 import {
   OpencodeEvent,
@@ -36,7 +41,12 @@ import { Worker } from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
 import type {
   DebugStreamPayload,
+  WorkerDebugAttachment,
   WorkerDebugMessage,
+  WorkerDebugModelCatalog,
+  WorkerDebugModelProvider,
+  WorkerDebugMode,
+  WorkerDebugModelSelection,
   WorkerDebugOption,
   WorkerDebugQuestion,
   WorkerDebugQuestionState,
@@ -47,13 +57,31 @@ import { WorkersService } from './workers.service';
 
 export type {
   DebugStreamPayload,
+  WorkerDebugAttachment,
   WorkerDebugMessage,
+  WorkerDebugModelCatalog,
+  WorkerDebugModelProvider,
+  WorkerDebugMode,
+  WorkerDebugModelSelection,
+  WorkerDebugModelVariant,
   WorkerDebugOption,
   WorkerDebugQuestion,
   WorkerDebugQuestionState,
   WorkerDebugSnapshot,
   WorkerDebugTool,
 } from './worker-debug.types';
+
+/** 工作台「我的 AGENT」等场景发送消息时的可选上下文 */
+export interface WorkerDebugSendOptions {
+  /** 会话范围：缺省 debug；我的 AI 用 agent:global / agent:task:{taskId} */
+  scope?: string;
+  /** 首轮消息的角色说明（仅会话首次初始化时使用） */
+  firstPrompt?: string;
+  /** 本轮实际发给执行器的前置上下文（不写入用户气泡） */
+  promptPrefix?: string;
+  /** 本轮随消息发送的附件（已上传文件的公开地址） */
+  files?: WorkerDebugAttachment[];
+}
 
 /**
  * 把 opencode 流式事件落到调试 assistant 消息上（纯函数，便于单测）。
@@ -350,6 +378,8 @@ interface DebugSession {
   key: string;
   userId: number;
   workerId: number;
+  /** 会话范围：debug / agent:global / agent:task:{taskId} */
+  contextKey: string;
   /** worker_debug_sessions.id（首条消息后落库） */
   rowId: number | null;
   context: DebugContext;
@@ -357,6 +387,14 @@ interface DebugSession {
   sessionId: string | null;
   /** 建 opencode 会话时绑定的执行器/供应商/模型；配置变更后须重置 */
   bound: DebugBinding | null;
+  /** 当前选择/生效的模型与思考等级 */
+  activeModel: WorkerDebugModelSelection;
+  /** 当前选择/生效的主 Agent（build / plan） */
+  activeAgent: WorkerDebugMode;
+  /** 已同步到 opencode 会话的模型标识（切换/重建后重置） */
+  appliedModelKey: string | null;
+  /** 已同步到 opencode 会话的主 Agent */
+  appliedAgent: WorkerDebugMode | null;
   initialized: boolean;
   running: boolean;
   interruptRequested: boolean;
@@ -367,6 +405,14 @@ interface DebugSession {
   todos: OpencodeTodo[];
   error: string | null;
   updatedAt: Date;
+}
+
+/** 机器人调试页默认会话范围（我的 AI 使用 agent:global / agent:task:{id}） */
+export const DEBUG_SCOPE = 'debug';
+
+/** 主 Agent 模式规范化：仅接受 build / plan，缺省 build */
+export function normalizeDebugMode(value: unknown): WorkerDebugMode {
+  return value === 'plan' ? 'plan' : 'build';
 }
 
 const RUN_TIMEOUT_MS = 10 * 60_000;
@@ -498,7 +544,12 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
           const assistantId = assistant.id;
           const afterMs = Date.parse(assistant.createdAt) || Date.now();
 
-          const session = this.newSession(row.userId, row.workerId, rowContext);
+          const session = this.newSession(
+            row.userId,
+            row.workerId,
+            rowContext,
+            row.contextKey || DEBUG_SCOPE,
+          );
           session.rowId = row.id;
           session.sessionId = sessionId;
           session.bound = {
@@ -506,6 +557,16 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
             providerId: row.providerId,
             modelId: row.modelId,
           };
+          session.activeModel =
+            row.activeProviderId && row.activeModelId
+              ? {
+                  providerId: row.activeProviderId,
+                  modelId: row.activeModelId,
+                  variant: row.activeVariant ?? null,
+                }
+              : this.defaultModelOf(rowContext);
+          session.activeAgent = normalizeDebugMode(row.activeAgent);
+          session.appliedAgent = session.activeAgent;
           session.initialized = true;
           // 不做中断恢复：活跃会话里的 pending 提问仍要保留并可回答
           session.messages = messages;
@@ -579,9 +640,10 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
   async snapshot(
     userId: number,
     workerId: number,
+    scope: string = DEBUG_SCOPE,
   ): Promise<WorkerDebugSnapshot> {
     const context = await this.resolveContext(workerId);
-    const session = await this.findSession(userId, workerId, context);
+    const session = await this.findSession(userId, workerId, context, scope);
     if (!session) return this.emptySnapshot(context.option);
     // 进入页面/服务重启后对账一次：漏收 question/form 事件的提问补建卡片，
     // opencode 侧已不存在的本地待答卡片置为失效。
@@ -590,20 +652,200 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     return this.toSnapshot(session);
   }
 
+  /** 可切换的模型/思考等级清单（「我的 AGENT」输入框模型选择器） */
+  async models(
+    userId: number,
+    workerId: number,
+    scope: string = DEBUG_SCOPE,
+  ): Promise<WorkerDebugModelCatalog> {
+    const context = await this.resolveContext(workerId);
+    const session = await this.findSession(userId, workerId, context, scope);
+    const client = new OpencodeClient(context.executor);
+    const [providers, models] = await Promise.all([
+      client.providers().catch(() => []),
+      client.models(),
+    ]);
+    const providerNames = new Map(
+      providers.map((provider) => [provider.id, provider.name ?? provider.id]),
+    );
+    const grouped = new Map<string, WorkerDebugModelProvider>();
+    for (const model of models) {
+      if (model.enabled === false || model.capabilities?.tools === false) {
+        continue;
+      }
+      const providerId = model.providerID;
+      const group = grouped.get(providerId) ?? {
+        id: providerId,
+        name: providerNames.get(providerId) ?? providerId,
+        models: [],
+      };
+      group.models.push({
+        id: model.modelID ?? model.id,
+        name: model.name ?? model.modelID ?? model.id,
+        variants: (model.variants ?? []).map((variant) => ({
+          id: variant.id,
+          name: variantLabel(variant.id),
+        })),
+      });
+      grouped.set(providerId, group);
+    }
+    return {
+      current: { ...(session?.activeModel ?? this.defaultModelOf(context)) },
+      providers: [...grouped.values()].sort((a, b) =>
+        a.name.localeCompare(b.name, 'zh-CN'),
+      ),
+    };
+  }
+
+  /** 切换当前调试会话的模型/思考等级（下一条消息生效） */
+  async setModel(
+    userId: number,
+    workerId: number,
+    input: WorkerDebugModelSelection,
+    scope: string = DEBUG_SCOPE,
+  ): Promise<WorkerDebugSnapshot> {
+    const providerId = input.providerId?.trim();
+    const modelId = input.modelId?.trim();
+    if (!providerId || !modelId) {
+      throw new BadRequestException('providerId 与 modelId 不能为空');
+    }
+    const context = await this.resolveContext(workerId);
+    const client = new OpencodeClient(context.executor);
+    const models = await client.models();
+    const model = models.find(
+      (item) =>
+        item.providerID === providerId && (item.modelID ?? item.id) === modelId,
+    );
+    if (!model || model.enabled === false) {
+      throw new BadRequestException('执行器未提供所选模型');
+    }
+    if (model.capabilities?.tools === false) {
+      throw new BadRequestException(
+        '该模型不支持工具调用，无法作为 AGENT 模型',
+      );
+    }
+    const variant = input.variant?.trim() || null;
+    if (
+      variant &&
+      !(model.variants ?? []).some((item) => item.id === variant)
+    ) {
+      throw new BadRequestException('该模型不支持所选思考等级');
+    }
+    const key = this.keyOf(userId, workerId, scope);
+    let session = await this.findSession(userId, workerId, context, scope);
+    if (session?.running) {
+      throw new ConflictException('机器人正在回复，请等待完成后再切换模型');
+    }
+    if (!session) {
+      session = this.newSession(userId, workerId, context, scope);
+      this.sessions.set(key, session);
+    }
+    if (session.sessionId) {
+      try {
+        await client.switchModel(session.sessionId, {
+          id: modelId,
+          providerID: providerId,
+          ...(variant ? { variant } : {}),
+        });
+        session.appliedModelKey = this.modelKey({
+          providerId,
+          modelId,
+          variant,
+        });
+      } catch (error) {
+        if (isSessionMissing(error)) {
+          // 远端会话已不存在：只更新选择，下一条消息会按新选择重建会话
+          session.sessionId = null;
+          session.bound = null;
+          session.initialized = false;
+          session.appliedModelKey = null;
+        } else {
+          throw new ServiceUnavailableException(
+            `切换模型失败：${(error as Error).message}`,
+          );
+        }
+      }
+    }
+    session.activeModel = { providerId, modelId, variant };
+    session.updatedAt = new Date();
+    await this.persist(session);
+    this.emitUpdate(session);
+    return this.toSnapshot(session);
+  }
+
+  /** 切换主 Agent 模式（build / plan；下一条消息生效） */
+  async setMode(
+    userId: number,
+    workerId: number,
+    mode: WorkerDebugMode,
+    scope: string = DEBUG_SCOPE,
+  ): Promise<WorkerDebugSnapshot> {
+    if (mode !== 'build' && mode !== 'plan') {
+      throw new BadRequestException('仅支持 build / plan 模式');
+    }
+    const context = await this.resolveContext(workerId);
+    const key = this.keyOf(userId, workerId, scope);
+    let session = await this.findSession(userId, workerId, context, scope);
+    if (session?.running) {
+      throw new ConflictException('机器人正在回复，请等待完成后再切换模式');
+    }
+    if (!session) {
+      session = this.newSession(userId, workerId, context, scope);
+      this.sessions.set(key, session);
+    }
+    if (session.sessionId && session.appliedAgent !== mode) {
+      try {
+        await session.client.switchAgent(session.sessionId, mode);
+        session.appliedAgent = mode;
+      } catch (error) {
+        if (isSessionMissing(error)) {
+          // 远端会话已不存在：只更新选择，下一条消息会按新模式重建会话
+          session.sessionId = null;
+          session.bound = null;
+          session.initialized = false;
+          session.appliedModelKey = null;
+          session.appliedAgent = null;
+        } else {
+          throw new ServiceUnavailableException(
+            `切换模式失败：${(error as Error).message}`,
+          );
+        }
+      }
+    }
+    session.activeAgent = mode;
+    session.updatedAt = new Date();
+    await this.persist(session);
+    this.emitUpdate(session);
+    return this.toSnapshot(session);
+  }
+
   /** 启动一轮调试并立即返回 running 快照；后续通过 SSE 推送最终消息 */
   async send(
     userId: number,
     workerId: number,
     content: string,
+    options?: WorkerDebugSendOptions,
   ): Promise<WorkerDebugSnapshot> {
-    const text = content?.trim();
-    if (!text) throw new BadRequestException('消息内容不能为空');
+    const text = content?.trim() ?? '';
+    const files = (options?.files ?? [])
+      .filter((file) => file.url?.trim())
+      .slice(0, 10)
+      .map((file) => ({
+        name: file.name?.trim() || '附件',
+        url: file.url.trim(),
+        ...(typeof file.size === 'number' ? { size: file.size } : {}),
+        ...(file.mime?.trim() ? { mime: file.mime.trim() } : {}),
+      }));
+    if (!text && files.length === 0) {
+      throw new BadRequestException('消息内容不能为空');
+    }
     if (text.length > 50_000) {
       throw new BadRequestException('单条消息不能超过 50000 个字符');
     }
     const context = await this.resolveContext(workerId);
-    const key = this.keyOf(userId, workerId);
-    let session = await this.findSession(userId, workerId, context);
+    const scope = options?.scope?.trim() || DEBUG_SCOPE;
+    const key = this.keyOf(userId, workerId, scope);
+    let session = await this.findSession(userId, workerId, context, scope);
     if (session?.running) {
       throw new ConflictException('机器人正在回复，请等待完成或先中断');
     }
@@ -612,7 +854,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException('机器人执行配置已变更，请先重置调试会话');
     }
     if (!session) {
-      session = this.newSession(userId, workerId, context);
+      session = this.newSession(userId, workerId, context, scope);
       this.sessions.set(key, session);
     } else {
       session.context = context;
@@ -624,6 +866,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       id: this.nextId('user'),
       role: 'user',
       content: text,
+      ...(files.length > 0 ? { files } : {}),
       status: 'complete',
       createdAt: now,
     });
@@ -645,7 +888,18 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     session.updatedAt = new Date();
     const runSeq = ++session.runSeq;
     await this.persist(session);
-    void this.run(session, assistantId, text, runSeq);
+    // promptPrefix 只进入执行器提示词，用户气泡仍展示原始消息
+    const promptText = options?.promptPrefix?.trim()
+      ? `${options.promptPrefix.trim()}\n\n${text}`
+      : text || '请查看附件。';
+    void this.run(
+      session,
+      assistantId,
+      promptText,
+      runSeq,
+      options?.firstPrompt,
+      files,
+    );
     this.emitUpdate(session);
     return this.toSnapshot(session);
   }
@@ -654,9 +908,10 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
   async interrupt(
     userId: number,
     workerId: number,
+    scope: string = DEBUG_SCOPE,
   ): Promise<WorkerDebugSnapshot> {
     const context = await this.resolveContext(workerId);
-    const session = await this.findSession(userId, workerId, context);
+    const session = await this.findSession(userId, workerId, context, scope);
     if (!session) return this.emptySnapshot(context.option);
     if (!session.running) return this.toSnapshot(session);
     session.interruptRequested = true;
@@ -676,14 +931,18 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 重置即解绑旧 opencode 会话；下一条消息会创建新会话并重新注入角色与技能 */
-  async reset(userId: number, workerId: number): Promise<WorkerDebugSnapshot> {
+  async reset(
+    userId: number,
+    workerId: number,
+    scope: string = DEBUG_SCOPE,
+  ): Promise<WorkerDebugSnapshot> {
     const context = await this.resolveContext(workerId);
-    const key = this.keyOf(userId, workerId);
+    const key = this.keyOf(userId, workerId, scope);
     const previous = this.sessions.get(key);
     this.sessions.delete(key);
     this.clearPersistTimer(key);
     await this.debugSessions
-      .delete({ userId, workerId })
+      .delete({ userId, workerId, contextKey: scope })
       .catch((error: Error) => {
         this.logger.warn(`删除调试会话绑定失败（${key}）: ${error.message}`);
       });
@@ -713,9 +972,10 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     workerId: number,
     questionId: string,
     input: { answers?: unknown; reject?: boolean },
+    scope: string = DEBUG_SCOPE,
   ): Promise<WorkerDebugSnapshot> {
     const context = await this.resolveContext(workerId);
-    const session = await this.findSession(userId, workerId, context);
+    const session = await this.findSession(userId, workerId, context, scope);
     const question = session?.messages.find(
       (message) => message.question?.id === questionId,
     )?.question;
@@ -828,6 +1088,73 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * 聊天附件落盘到执行器工作区：opencode prompt 的 files 只接受 file:// URI，
+   * 平台上传的公开地址先写入 .opencode/uploads，再以本地绝对路径随 prompt 发送。
+   * 落盘失败时保留原链接，由提示词告知机器人自行下载。
+   */
+  private async stageAttachments(
+    session: DebugSession,
+    files: WorkerDebugAttachment[],
+  ): Promise<{
+    files: Array<{ uri: string; name?: string; description?: string }>;
+    failed: WorkerDebugAttachment[];
+  }> {
+    if (files.length === 0) return { files: [], failed: [] };
+    const staged: Array<{
+      uri: string;
+      name?: string;
+      description?: string;
+    }> = [];
+    const failed: WorkerDebugAttachment[] = [];
+    for (const file of files) {
+      const localPath = this.localUploadPath(file.url);
+      if (!localPath) {
+        failed.push(file);
+        continue;
+      }
+      try {
+        const data = await readFile(localPath);
+        const safeName =
+          basename(file.name.replace(/\\/g, '/')).slice(0, 100) || '附件';
+        const target = `.opencode/uploads/${randomUUID()}-${safeName}`;
+        const written = await session.client.writeFile(
+          session.context.workdir,
+          target,
+          data,
+        );
+        staged.push({
+          uri: `file://${written.path}`,
+          name: file.name,
+          ...(file.mime ? { description: file.mime } : {}),
+        });
+      } catch (error) {
+        this.logger.warn(
+          `聊天附件写入工作区失败（${file.name}）: ${(error as Error).message}`,
+        );
+        failed.push(file);
+      }
+    }
+    return { files: staged, failed };
+  }
+
+  /** 平台上传地址 `/files/{YYYYMMDD}/{uuid}{ext}` → 本地文件绝对路径 */
+  private localUploadPath(url: string): string | null {
+    try {
+      const parsed = new URL(url, 'http://local');
+      const marker = '/files/';
+      const index = parsed.pathname.indexOf(marker);
+      if (index < 0) return null;
+      const relative = decodeURIComponent(
+        parsed.pathname.slice(index + marker.length),
+      );
+      if (!relative || relative.includes('..')) return null;
+      return join(fileWebroot(), relative);
+    } catch {
+      return null;
+    }
+  }
+
   private questionSubmitError(error: unknown): Error {
     if (error instanceof OpencodeClientError) {
       return new BadRequestException(`提问提交失败：${error.message}`);
@@ -840,6 +1167,8 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     assistantId: string,
     text: string,
     runSeq: number,
+    firstPrompt?: string,
+    files: WorkerDebugAttachment[] = [],
   ): Promise<void> {
     this.eventHub.retain(session.context.executor);
     try {
@@ -852,6 +1181,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
           session.sessionId = null;
           session.bound = null;
           session.initialized = false;
+          session.appliedModelKey = null;
         }
       }
       if (!session.sessionId) {
@@ -859,14 +1189,20 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
         const created = await session.client.createSession({
           title: `机器人调试 ${session.context.worker.name}`,
           model: {
-            id: session.context.worker.modelId!,
-            providerID: session.context.worker.providerId!,
+            id: session.activeModel.modelId,
+            providerID: session.activeModel.providerId,
+            ...(session.activeModel.variant
+              ? { variant: session.activeModel.variant }
+              : {}),
           },
+          agent: session.activeAgent,
           location: { directory: session.context.workdir },
         });
         session.sessionId = created.id;
         session.initialized = false;
         session.bound = this.bindingOf(session.context);
+        session.appliedModelKey = this.modelKey(session.activeModel);
+        session.appliedAgent = session.activeAgent;
         session.updatedAt = new Date();
         await this.persist(session);
       } else if (!session.bound) {
@@ -875,9 +1211,40 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
         await this.persist(session);
       }
       if (session.interruptRequested || session.runSeq !== runSeq) return;
-      const prompt = session.initialized ? text : this.buildFirstPrompt(text);
+      // 用户切换过模式：同步到 opencode 会话（重建会话时已在创建参数中指定）
+      if (
+        session.appliedAgent !== null &&
+        session.appliedAgent !== session.activeAgent
+      ) {
+        await session.client.switchAgent(
+          session.sessionId,
+          session.activeAgent,
+        );
+        session.appliedAgent = session.activeAgent;
+      }
+      // 用户切换过模型/思考等级：首轮或切换后同步到 opencode 会话
+      if (session.appliedModelKey !== this.modelKey(session.activeModel)) {
+        await session.client.switchModel(session.sessionId, {
+          id: session.activeModel.modelId,
+          providerID: session.activeModel.providerId,
+          ...(session.activeModel.variant
+            ? { variant: session.activeModel.variant }
+            : {}),
+        });
+        session.appliedModelKey = this.modelKey(session.activeModel);
+      }
+      const prompt = session.initialized
+        ? text
+        : this.buildFirstPrompt(text, firstPrompt);
+      const staged = await this.stageAttachments(session, files);
+      const promptText = staged.failed.length
+        ? `${prompt}\n\n# 附件（未能写入工作区，请通过链接下载）\n${staged.failed
+            .map((file) => `- ${file.name}: ${file.url}`)
+            .join('\n')}`
+        : prompt;
       const promptResult = await session.client.prompt(session.sessionId, {
-        text: prompt,
+        text: promptText,
+        ...(staged.files.length > 0 ? { files: staged.files } : {}),
       });
       session.initialized = true;
       // prompt 为异步接口（立即返回本轮用户消息），会话 outcome/time.idle 具有粘性：
@@ -1161,15 +1528,19 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 调试会话 SSE：订阅即推当前快照，后续变更实时推送，20s 心跳保活 */
-  stream(userId: number, workerId: number): Observable<MessageEvent> {
-    const key = this.keyOf(userId, workerId);
+  stream(
+    userId: number,
+    workerId: number,
+    scope: string = DEBUG_SCOPE,
+  ): Observable<MessageEvent> {
+    const key = this.keyOf(userId, workerId, scope);
     return new Observable<MessageEvent>((subscriber) => {
       let closed = false;
       const listener = (payload: DebugStreamPayload) => {
         if (!closed) subscriber.next({ data: payload });
       };
       this.updates.on(key, listener);
-      this.snapshot(userId, workerId)
+      this.snapshot(userId, workerId, scope)
         .then((snapshot) => {
           if (!closed) {
             subscriber.next({
@@ -1192,7 +1563,10 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** 首条提示：调试说明 + 用户消息（角色定义与技能由工位文件提供） */
-  private buildFirstPrompt(text: string): string {
+  private buildFirstPrompt(text: string, firstPrompt?: string): string {
+    if (firstPrompt?.trim()) {
+      return [firstPrompt.trim(), '# 用户消息', text].join('\n\n');
+    }
     return [
       '# 调试对话',
       '',
@@ -1250,6 +1624,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       executorName: executor.name,
       providerId: worker.providerId!,
       modelId: worker.modelId!,
+      variant: worker.variant ?? null,
     };
   }
 
@@ -1257,16 +1632,22 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     userId: number,
     workerId: number,
     context: DebugContext,
+    scope: string = DEBUG_SCOPE,
   ): DebugSession {
     return {
-      key: this.keyOf(userId, workerId),
+      key: this.keyOf(userId, workerId, scope),
       userId,
       workerId,
+      contextKey: scope,
       rowId: null,
       context,
       client: new OpencodeClient(context.executor),
       sessionId: null,
       bound: null,
+      activeModel: this.defaultModelOf(context),
+      activeAgent: 'build',
+      appliedModelKey: null,
+      appliedAgent: null,
       initialized: false,
       running: false,
       interruptRequested: false,
@@ -1283,8 +1664,9 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     userId: number,
     workerId: number,
     context: DebugContext,
+    scope: string = DEBUG_SCOPE,
   ): Promise<DebugSession | null> {
-    const key = this.keyOf(userId, workerId);
+    const key = this.keyOf(userId, workerId, scope);
     const existing = this.sessions.get(key);
     if (existing) {
       if (
@@ -1306,9 +1688,24 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       }
       return existing;
     }
-    const row = await this.debugSessions.findOne({
-      where: { userId, workerId },
+    let row = await this.debugSessions.findOne({
+      where: { userId, workerId, contextKey: scope },
     });
+    if (
+      !row &&
+      scope === 'agent:global' &&
+      context.worker.personalAgentUserId
+    ) {
+      // 开发环境 synchronize 不会执行数据迁移：把旧的个人 AGENT 调试会话
+      // 认领为「我的 AI」通用会话，保留此前的对话记录。
+      row = await this.debugSessions.findOne({
+        where: { userId, workerId, contextKey: DEBUG_SCOPE },
+      });
+      if (row) {
+        row.contextKey = 'agent:global';
+        await this.debugSessions.save(row);
+      }
+    }
     if (!row) return null;
     if (Date.now() - row.updatedAt.getTime() > SESSION_TTL_MS) {
       await this.debugSessions
@@ -1321,9 +1718,11 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     const hadRunning = (row.messages ?? []).some(
       (message) => message.role === 'assistant' && message.status === 'running',
     );
-    const session = this.newSession(userId, workerId, context);
+    const session = this.newSession(userId, workerId, context, scope);
     session.rowId = row.id;
     session.sessionId = row.sessionId;
+    session.activeAgent = normalizeDebugMode(row.activeAgent);
+    session.appliedAgent = row.sessionId ? session.activeAgent : null;
     session.bound =
       row.executorId && row.providerId && row.modelId
         ? {
@@ -1332,6 +1731,14 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
             modelId: row.modelId,
           }
         : null;
+    session.activeModel =
+      row.activeProviderId && row.activeModelId
+        ? {
+            providerId: row.activeProviderId,
+            modelId: row.activeModelId,
+            variant: row.activeVariant ?? null,
+          }
+        : this.defaultModelOf(context);
     session.initialized = Boolean(row.sessionId);
     session.messages = recoverDebugMessages(row.messages);
     session.todos = (row.todos ?? []).map((todo) => ({ ...todo }));
@@ -1351,6 +1758,20 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       providerId: context.worker.providerId!,
       modelId: context.worker.modelId!,
     };
+  }
+
+  /** 机器人配置的默认模型（用户未显式选择时使用） */
+  private defaultModelOf(context: DebugContext): WorkerDebugModelSelection {
+    return {
+      providerId: context.worker.providerId!,
+      modelId: context.worker.modelId!,
+      variant: context.worker.variant ?? null,
+    };
+  }
+
+  /** 模型选择标识（用于判断 opencode 会话是否需要切换模型） */
+  private modelKey(model: WorkerDebugModelSelection): string {
+    return `${model.providerId}/${model.modelId}/${model.variant ?? ''}`;
   }
 
   private sameBinding(bound: DebugBinding, context: DebugContext): boolean {
@@ -1402,10 +1823,15 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     const values = {
       userId: session.userId,
       workerId: session.workerId,
+      contextKey: session.contextKey,
+      activeAgent: session.activeAgent,
       executorId: session.bound?.executorId ?? session.context.executor.id,
       providerId:
         session.bound?.providerId ?? session.context.worker.providerId ?? null,
       modelId: session.bound?.modelId ?? session.context.worker.modelId ?? null,
+      activeProviderId: session.activeModel.providerId,
+      activeModelId: session.activeModel.modelId,
+      activeVariant: session.activeModel.variant,
       sessionId: session.sessionId,
       messages: session.messages,
       todos: session.todos,
@@ -1424,6 +1850,12 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
   private emptySnapshot(worker: WorkerDebugOption): WorkerDebugSnapshot {
     return {
       worker,
+      model: {
+        providerId: worker.providerId,
+        modelId: worker.modelId,
+        variant: worker.variant,
+      },
+      mode: 'build',
       sessionId: null,
       status: 'idle',
       messages: [],
@@ -1436,6 +1868,8 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
   private toSnapshot(session: DebugSession): WorkerDebugSnapshot {
     return {
       worker: session.context.option,
+      model: { ...session.activeModel },
+      mode: session.activeAgent,
       sessionId: session.sessionId,
       status: session.running ? 'running' : 'idle',
       messages: session.messages.map((message) => ({ ...message })),
@@ -1445,8 +1879,12 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private keyOf(userId: number, workerId: number): string {
-    return `${userId}:${workerId}`;
+  private keyOf(
+    userId: number,
+    workerId: number,
+    scope: string = DEBUG_SCOPE,
+  ): string {
+    return `${userId}:${workerId}:${scope}`;
   }
 
   private nextId(role: 'user' | 'assistant'): string {

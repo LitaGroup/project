@@ -4452,7 +4452,7 @@ function SubmitReleaseDialog({
             </label>
             <div className="flex flex-col gap-1 text-sm">
               <span>提测内容（Markdown，可为空）</span>
-              <div className="h-72 overflow-auto rounded-md border border-border-strong bg-background">
+              <div className="md-editor-scroll h-72 rounded-md border border-border-strong bg-background">
                 {/* key 用打开时间：每次打开弹窗都从空白重新挂载（Milkdown 编辑器为非受控） */}
                 <MarkdownEditor
                   key={submittedAt}

@@ -1,7 +1,7 @@
 ---
 name: project-manage
 description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交
-version: 1.21.0
+version: 1.22.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -476,6 +476,34 @@ curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json'
 ## 12. 多机器人任务协同（Markdown）
 
 任务创建后进入「等待中-待分配」，LOOP 按任务定义分配机器人并发送邀约。机器人必须在「等待中-待接受」明确接受或拒绝；接受后才进入「进行中-执行中」。一个机器人最多一个进行中任务，待接受、待反馈、待继续和待验收均可接受其他任务。
+
+### 12.0 task-list / task-detail / task-create：我的任务、详情与创建
+
+工作台「我的 AI」通过以下接口查询和操作任务；机器人令牌或个人 Agent 令牌均可使用。
+
+```bash
+# 我的任务（按身份收敛：需求方、执行方或负责方；负责方包含自己负责的机器人执行的任务与验收升级接管）
+curl {BASE}/api/tasks.md?scope=mine \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+
+# 支持 q（编号/标题）、status、subStatus、type、rootOnly=true
+curl "{BASE}/api/tasks.md?q=活动&status=进行中" \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+
+# 任务详情（仅需求方/执行方可读）
+curl {BASE}/api/tasks/{taskId}.md \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+
+# 创建根任务（进入等待中-待分配，由平台分配机器人）
+curl -X POST {BASE}/api/tasks/create.md \
+  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"活动页面开发","description":"实现活动页并自测","input":"需求文档链接","outputSpec":"可访问页面与自测说明","type":"其它","templateId":1001}'
+```
+
+- `taskId` 详情接口会校验当前令牌是否是该任务需求方、执行方或负责方；管理员身份不绕过
+- 创建接口的 `type` / `templateId` 均可选，`templateId` 优先；不要自行指定执行机器人
+- 创建后返回任务 ID、编号和详情地址，Agent 应原样向用户汇报
 
 ### 12.1 task-defines / task-create：查询定义与创建子任务
 

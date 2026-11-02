@@ -170,12 +170,14 @@ describe('TasksService 任务详情与对话', () => {
       1,
       '继续执行',
       '张三',
+      { actorWorkerId: undefined },
     );
     expect(dispatchService.continueConversation).toHaveBeenNthCalledWith(
       2,
       1,
       '继续修改',
       '张三',
+      { actorWorkerId: undefined },
     );
   });
 

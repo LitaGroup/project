@@ -38,6 +38,7 @@ interface GenerationEndpoint {
   executor: Executor;
   providerId: string;
   modelId: string;
+  variant: string | null;
   workdir: string;
 }
 
@@ -237,7 +238,14 @@ export class ScriptLibraryDescriptionService implements OnApplicationBootstrap {
     const workdir = this.workersService.workdirOf(worker.id);
     if (!workdir) return notReady('未配置 WORKER_BASE_DIR，无法确定工位目录');
     this.lastNotReadyReason = null;
-    return { worker, executor, providerId, modelId, workdir };
+    return {
+      worker,
+      executor,
+      providerId,
+      modelId,
+      variant: worker.variant ?? null,
+      workdir,
+    };
   }
 
   /** 生成单个脚本的描述：调机器人 #3 的 opencode 会话分析代码，成功落描述与内容哈希 */
@@ -259,7 +267,11 @@ export class ScriptLibraryDescriptionService implements OnApplicationBootstrap {
         new OpencodeClient(endpoint.executor),
         {
           title: `脚本描述 ${scriptPath}`,
-          model: { id: endpoint.modelId, providerID: endpoint.providerId },
+          model: {
+            id: endpoint.modelId,
+            providerID: endpoint.providerId,
+            ...(endpoint.variant ? { variant: endpoint.variant } : {}),
+          },
           location: { directory: endpoint.workdir },
           prompt: [
             '分析脚本：',

@@ -36,6 +36,7 @@ interface AutoAnswerEndpoint {
   executor: Executor;
   providerId: string;
   modelId: string;
+  variant: string | null;
   workdir: string | null;
 }
 
@@ -160,7 +161,11 @@ export class TaskQuestionAutoAnswerService {
             0,
             100,
           ),
-          model: { id: endpoint.modelId, providerID: endpoint.providerId },
+          model: {
+            id: endpoint.modelId,
+            providerID: endpoint.providerId,
+            ...(endpoint.variant ? { variant: endpoint.variant } : {}),
+          },
           location: endpoint.workdir
             ? { directory: endpoint.workdir }
             : endpoint.executor.defaultLocation
@@ -341,6 +346,7 @@ export class TaskQuestionAutoAnswerService {
       executor,
       providerId,
       modelId,
+      variant: worker.variant ?? null,
       workdir: this.workersService.workdirOf(worker.id),
     };
   }

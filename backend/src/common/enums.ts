@@ -196,11 +196,13 @@ export enum WorkerRole {
 }
 
 /**
- * 机器人运行时：统一走执行器（opencode 等）。
+ * 机器人运行时：AI 机器人走执行器（opencode 等），真人机器人由绑定用户在操作台执行。
  * PI 为历史值（原平台进程内 PI Agent），仅兼容存量数据，启动时迁移为 opencode，禁止再创建。
  */
 export enum WorkerRuntime {
   OPENCODE = 'opencode',
+  /** 真人机器人：执行器是绑定的真实用户（workers.humanUserId），在操作台接受/执行/交付 */
+  HUMAN = 'human',
   CODEX = 'codex',
   CLAUDE_CODE = 'claude-code',
   /** @deprecated 平台进程内 PI Agent 已移除（调度并入机器人，统一走执行器） */

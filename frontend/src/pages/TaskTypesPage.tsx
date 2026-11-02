@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Table,
   TableHeader,
@@ -10,6 +10,19 @@ import {
 import { Button } from '@appica/ui-react/button'
 import { Input } from '@appica/ui-react/input'
 import { Textarea } from '@appica/ui-react/textarea'
+import {
+  Toolbar,
+  ToolbarButton,
+  ToolbarGroup,
+  ToolbarInput,
+} from '@appica/ui-react/toolbar'
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from '@appica/ui-react/select'
 import {
   Dialog,
   DialogTrigger,
@@ -60,6 +73,8 @@ function validateName(value: string): string | null {
 export function TaskTypesPage() {
   const [types, setTypes] = useState<TaskTypeDef[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [keyword, setKeyword] = useState('')
+  const [scopeFilter, setScopeFilter] = useState('all')
 
   const reload = useCallback(() => {
     api
@@ -71,6 +86,26 @@ export function TaskTypesPage() {
   useEffect(() => {
     reload()
   }, [reload])
+
+  const filtered = useMemo(() => {
+    const query = keyword.trim().toLowerCase()
+    return (types ?? []).filter((type) => {
+      if (query) {
+        const haystack = `${type.name} ${type.description ?? ''}`.toLowerCase()
+        if (!haystack.includes(query)) return false
+      }
+      const system = SYSTEM_TASK_TYPE_NAMES.has(type.name)
+      if (scopeFilter === 'system' && !system) return false
+      if (scopeFilter === 'custom' && system) return false
+      return true
+    })
+  }, [types, keyword, scopeFilter])
+
+  const hasFilter = keyword.trim() !== '' || scopeFilter !== 'all'
+  const clearFilters = () => {
+    setKeyword('')
+    setScopeFilter('all')
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -85,6 +120,52 @@ export function TaskTypesPage() {
       </div>
       {error && <p className="text-sm">操作失败:{error}</p>}
 
+      <Toolbar aria-label="任务类型筛选">
+        <ToolbarInput
+          className="w-64"
+          render={
+            <Input
+              placeholder="搜索类型名称、描述…"
+              clearable
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onClear={() => setKeyword('')}
+              aria-label="搜索任务类型名称或描述"
+            />
+          }
+        />
+        <ToolbarGroup aria-label="筛选">
+          <Select
+            value={scopeFilter}
+            onValueChange={(value) => setScopeFilter(value as string)}
+            items={{
+              all: '全部分类',
+              system: '系统类型',
+              custom: '自定义类型',
+            }}
+          >
+            <ToolbarButton
+              className="w-36"
+              render={
+                <SelectTrigger aria-label="按类型分类筛选">
+                  <SelectValue placeholder="分类" />
+                </SelectTrigger>
+              }
+            />
+            <SelectContent>
+              <SelectItem value="all">全部分类</SelectItem>
+              <SelectItem value="system">系统类型</SelectItem>
+              <SelectItem value="custom">自定义类型</SelectItem>
+            </SelectContent>
+          </Select>
+          {hasFilter && (
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              清空筛选
+            </Button>
+          )}
+        </ToolbarGroup>
+      </Toolbar>
+
       <Table hoverableRows>
         <TableHeader>
           <TableRow>
@@ -94,7 +175,7 @@ export function TaskTypesPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {(types ?? []).map((type) => (
+          {filtered.map((type) => (
             <TableRow key={type.id}>
               <TableCell className="max-w-48 truncate font-medium">
                 {type.name}
@@ -117,10 +198,12 @@ export function TaskTypesPage() {
               </TableCell>
             </TableRow>
           ))}
-          {types !== null && types.length === 0 && (
+          {types !== null && filtered.length === 0 && (
             <TableRow>
               <TableCell colSpan={3}>
-                暂无任务类型，点右上角「新建任务类型」创建
+                {hasFilter
+                  ? '没有符合筛选条件的任务类型'
+                  : '暂无任务类型，点右上角「新建任务类型」创建'}
               </TableCell>
             </TableRow>
           )}

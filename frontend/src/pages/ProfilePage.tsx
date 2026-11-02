@@ -86,127 +86,129 @@ export function ProfilePage() {
 export LITA_PROJECT_TOKEN=${tokenValue}`
 
   return (
-    <div className="flex max-w-2xl flex-col gap-8">
+    <div className="flex w-full max-w-6xl flex-col gap-8">
       <h1 className="text-2xl font-semibold">个人中心</h1>
 
-      {/* 基本信息：头像 / 名称 / 部门 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>基本信息</CardTitle>
-          <CardDescription>来自飞书登录的账号信息，只读</CardDescription>
-        </CardHeader>
-        <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">
-          <div className="flex items-center gap-4">
-            <Avatar size="2xl">
-              {user.avatarUrl && (
-                <AvatarImage src={user.avatarUrl} alt={user.name} />
-              )}
-              <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <p className="text-lg font-semibold text-foreground-intense">
-                {user.name}
-              </p>
-              <p className="text-sm text-foreground-muted">
-                {user.department ?? '未获取部门'}
-              </p>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+        {/* 基本信息：头像 / 名称 / 部门（桌面右侧） */}
+        <Card className="min-w-0 lg:col-start-2 lg:row-start-1">
+          <CardHeader>
+            <CardTitle>基本信息</CardTitle>
+            <CardDescription>来自飞书登录的账号信息，只读</CardDescription>
+          </CardHeader>
+          <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">
+            <div className="flex items-center gap-4">
+              <Avatar size="2xl">
+                {user.avatarUrl && (
+                  <AvatarImage src={user.avatarUrl} alt={user.name} />
+                )}
+                <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="text-lg font-semibold text-foreground-intense">
+                  {user.name}
+                </p>
+                <p className="text-sm text-foreground-muted">
+                  {user.department ?? '未获取部门'}
+                </p>
+              </div>
+              <Badge variant="secondary" size="sm" className="ml-auto">
+                {user.role}
+              </Badge>
             </div>
-            <Badge variant="secondary" size="sm" className="ml-auto">
-              {user.role}
-            </Badge>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm">邮箱</span>
+              <span className="text-sm text-foreground-muted">
+                {user.email ?? '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm">最近登录</span>
+              <span className="text-sm text-foreground-muted">
+                {user.lastLoginAt
+                  ? new Date(user.lastLoginAt).toLocaleString()
+                  : '—'}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm">邮箱</span>
-            <span className="text-sm text-foreground-muted">
-              {user.email ?? '—'}
-            </span>
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm">最近登录</span>
-            <span className="text-sm text-foreground-muted">
-              {user.lastLoginAt
-                ? new Date(user.lastLoginAt).toLocaleString()
-                : '—'}
-            </span>
-          </div>
-        </div>
-      </Card>
+        </Card>
 
-      {/* Agent 访问令牌 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent 访问令牌</CardTitle>
-          <CardDescription>
-            AI agent 调用平台 .md 接口（/api/.../xxx.md）的鉴权令牌：请求头携带
-            X-Agent-Token 或 URL 加 ?token= 参数均可；重置后旧令牌立即失效，需同步更新
-            agent 侧配置
-          </CardDescription>
-        </CardHeader>
-        <div className="flex flex-col gap-3 px-6 pb-6 group-data-inset/card:px-4">
-          {tokenError ? (
-            <p className="text-sm">加载失败：{tokenError}</p>
-          ) : (
-            <code className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm break-all">
-              {token ?? '加载中…'}
-            </code>
-          )}
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleCopy} disabled={!token}>
-              {copied ? '已复制' : '复制'}
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger render={<Button variant="outline" size="sm" disabled={!token} />}>重置</AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>重置 Agent 访问令牌</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    确定重置吗？当前令牌会立即失效，所有使用该令牌的 agent
-                    需更新为新令牌后才能继续访问。
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogClose>
-                    <Button variant="outline" size="sm">取消</Button>
-                  </AlertDialogClose>
-                  <AlertDialogClose>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={handleReset}
-                      disabled={resetting}
-                    >
-                      {resetting ? '重置中…' : '确认重置'}
-                    </Button>
-                  </AlertDialogClose>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
-          <pre className="overflow-auto rounded-[var(--radius-md)] bg-background-muted p-3 text-sm whitespace-pre-wrap">
-            {`curl -H "X-Agent-Token: ${token ?? '<令牌>'}" ${apiUrl}/projects/search.md?q=项目名`}
-          </pre>
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">一键设置令牌（Shell）</p>
-            <p className="text-sm text-foreground-muted">
-              在终端执行以下脚本，令牌写入 <code>~/.env</code> 的 LITA_PROJECT_TOKEN，
-              Agent 无需每次手动传参即可调用 .md 接口。
-            </p>
-            <pre className="overflow-auto rounded-[var(--radius-md)] bg-background-muted p-3 text-sm whitespace-pre-wrap">
-              {setupScript}
-            </pre>
-            <div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCopyScript}
-                disabled={!token}
-              >
-                {copiedScript ? '已复制' : '复制脚本'}
+        {/* Agent 访问令牌（桌面左侧，宽度自适应） */}
+        <Card className="min-w-0 lg:col-start-1 lg:row-start-1">
+          <CardHeader>
+            <CardTitle>Agent 访问令牌</CardTitle>
+            <CardDescription>
+              AI agent 调用平台 .md 接口（/api/.../xxx.md）的鉴权令牌：请求头携带
+              X-Agent-Token 或 URL 加 ?token= 参数均可；重置后旧令牌立即失效，需同步更新
+              agent 侧配置
+            </CardDescription>
+          </CardHeader>
+          <div className="flex flex-col gap-3 px-6 pb-6 group-data-inset/card:px-4">
+            {tokenError ? (
+              <p className="text-sm">加载失败：{tokenError}</p>
+            ) : (
+              <code className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm break-all">
+                {token ?? '加载中…'}
+              </code>
+            )}
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={handleCopy} disabled={!token}>
+                {copied ? '已复制' : '复制'}
               </Button>
+              <AlertDialog>
+                <AlertDialogTrigger render={<Button variant="outline" size="sm" disabled={!token} />}>重置</AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>重置 Agent 访问令牌</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      确定重置吗？当前令牌会立即失效，所有使用该令牌的 agent
+                      需更新为新令牌后才能继续访问。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogClose>
+                      <Button variant="outline" size="sm">取消</Button>
+                    </AlertDialogClose>
+                    <AlertDialogClose>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={handleReset}
+                        disabled={resetting}
+                      >
+                        {resetting ? '重置中…' : '确认重置'}
+                      </Button>
+                    </AlertDialogClose>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+            <pre className="overflow-auto rounded-[var(--radius-md)] bg-background-muted p-3 text-sm break-all whitespace-pre-wrap">
+              {`curl -H "X-Agent-Token: ${token ?? '<令牌>'}" ${apiUrl}/projects/search.md?q=项目名`}
+            </pre>
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">一键设置令牌（Shell）</p>
+              <p className="text-sm text-foreground-muted">
+                在终端执行以下脚本，令牌写入 <code>~/.env</code> 的 LITA_PROJECT_TOKEN，
+                Agent 无需每次手动传参即可调用 .md 接口。
+              </p>
+              <pre className="overflow-auto rounded-[var(--radius-md)] bg-background-muted p-3 text-sm break-all whitespace-pre-wrap">
+                {setupScript}
+              </pre>
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyScript}
+                  disabled={!token}
+                >
+                  {copiedScript ? '已复制' : '复制脚本'}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
     </div>
   )
 }

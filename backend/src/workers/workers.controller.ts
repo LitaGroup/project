@@ -44,6 +44,7 @@ class CreateWorkerDto implements CreateWorkerInput {
   executorId?: number | null;
   providerId?: string | null;
   modelId?: string | null;
+  variant?: string | null;
   prompt?: string | null;
   skills?: Worker['skills'];
   standards?: Worker['standards'];
@@ -61,6 +62,7 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   executorId?: number | null;
   providerId?: string | null;
   modelId?: string | null;
+  variant?: string | null;
   prompt?: string | null;
   skills?: Worker['skills'];
   standards?: Worker['standards'];
@@ -75,6 +77,7 @@ class OptimizePromptDto implements OptimizePromptInput {
   executorId?: number | null;
   providerId?: string | null;
   modelId?: string | null;
+  variant?: string | null;
 }
 
 /** 工作概览的卡片数据（前端 5s 轮询） */

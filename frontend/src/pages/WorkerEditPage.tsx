@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { AnimatePresence, m } from 'framer-motion'
 import {
   Card,
@@ -7,7 +8,7 @@ import {
   CardTitle,
   CardDescription,
 } from '@appica/ui-react/card'
-import { Button } from '@appica/ui-react/button'
+import { Button, buttonVariants } from '@appica/ui-react/button'
 import { Loader } from '@appica/ui-react/loader'
 import { Input } from '@appica/ui-react/input'
 import { Textarea } from '@appica/ui-react/textarea'
@@ -34,6 +35,8 @@ import {
   type Executor,
   type PlatformUser,
   type Worker,
+  type WorkerDebugModelCatalog,
+  type WorkerDebugModelSelection,
   type WorkerInitializeSnapshot,
   type WorkerInitializeStatus,
   type WorkerOptimizeSnapshot,
@@ -44,6 +47,7 @@ import {
   type WorkerStandardCatalogItem,
 } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { ModelSettingsPicker } from '../components/agent-chat/ModelSettingsPicker'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 import {
   MarkdownEditor,
@@ -51,6 +55,8 @@ import {
 } from '../components/MarkdownEditor'
 
 type OptimizePhase = 'idle' | 'loading' | 'review'
+
+
 
 /** 新建机器人（含系统调度机器人编辑）时的默认 AGENTS.md 模板（与 AI 优化的结构保持一致） */
 const NEW_PROMPT_TEMPLATE = `## 角色定义
@@ -75,15 +81,17 @@ const NEW_PROMPT_TEMPLATE = `## 角色定义
  * 机器人新建与编辑（独立页面，调度机器人与工作者共用）。
  * 新建一律为自定义工作者；编辑时以服务端返回的 role 为准（系统调度机器人也在此配置）。
  */
-export function WorkerEditPage() {
+export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const { workerId } = useParams<{ workerId: string }>()
   const navigate = useNavigate()
 
+  /** 我的代理：从工作台接口解析当前用户的个人 AGENT ID */
+  const [resolvedWorkerId, setResolvedWorkerId] = useState<number | null>(null)
   const [role, setRole] = useState<WorkerRole>('工作者')
   const [executors, setExecutors] = useState<Executor[]>([])
   const [users, setUsers] = useState<PlatformUser[]>([])
   const [worker, setWorker] = useState<Worker | null>(null)
-  const [loading, setLoading] = useState(Boolean(workerId))
+  const [loading, setLoading] = useState(personal || Boolean(workerId))
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [name, setName] = useState('')
@@ -92,7 +100,11 @@ export function WorkerEditPage() {
   const [executorId, setExecutorId] = useState('')
   const [providerId, setProviderId] = useState('')
   const [modelId, setModelId] = useState('')
-  const [prompt, setPrompt] = useState(workerId ? '' : NEW_PROMPT_TEMPLATE)
+  /** 默认思考等级（opencode variant；空=模型默认） */
+  const [variant, setVariant] = useState('')
+  const [prompt, setPrompt] = useState(
+    personal || workerId ? '' : NEW_PROMPT_TEMPLATE,
+  )
   const [skills, setSkills] = useState<WorkerSkill[]>([])
   const [skillPickerOpen, setSkillPickerOpen] = useState(false)
   const [standards, setStandards] = useState<WorkerStandard[]>([])
@@ -121,27 +133,94 @@ export function WorkerEditPage() {
   /** 初始化成功后延迟回列表的定时器（卸载时清理） */
   const navigateTimerRef = useRef<number | null>(null)
 
-  const listPath = '/tasks/workers'
+  const effectiveWorkerId = personal
+    ? resolvedWorkerId
+    : workerId
+      ? Number(workerId)
+      : null
+  const listPath = personal ? '/profile' : '/admin/workers'
   const isScheduler = role === '调度器'
   /** 面包屑固定用初始标题；页面大标题跟随名称输入变化 */
-  const initialTitle = worker ? `编辑「${worker.name}」` : '新建机器人'
+  const initialTitle = personal
+    ? '我的代理'
+    : worker
+      ? `编辑「${worker.name}」`
+      : '新建机器人'
   const typedName = name.trim()
-  const pageTitle = worker
-    ? typedName
-      ? `编辑「${typedName}」`
-      : initialTitle
-    : typedName || initialTitle
+  const pageTitle = personal
+    ? '我的代理'
+    : worker
+      ? typedName
+        ? `编辑「${typedName}」`
+        : initialTitle
+      : typedName || initialTitle
+  const breadcrumbItems = personal
+    ? [{ label: '个人中心', to: '/profile' }, { label: '我的代理' }]
+    : [{ label: '机器人', to: listPath }, { label: initialTitle }]
 
   useEffect(() => {
     api.listExecutors().then(setExecutors).catch(() => undefined)
     api.listUsers().then(setUsers).catch(() => undefined)
   }, [])
 
+  /**
+   * 旧执行器缓存只有模型 id/name，没有思考等级；选中执行器后自动同步一次，
+   * 让「思考等级」下拉可以列出该执行器实际支持的 variant。
+   */
   useEffect(() => {
-    if (!workerId) return
+    const exec = executors.find((item) => String(item.id) === executorId)
+    if (!exec) return
+    const needsSync =
+      !exec.providersCache?.length ||
+      exec.providersCache.some((provider) =>
+        provider.models.some((model) => model.variants === undefined),
+      )
+    if (!needsSync) return
     let alive = true
     api
-      .getWorker(Number(workerId))
+      .syncExecutorProviders(exec.id)
+      .then((updated) => {
+        if (!alive) return
+        setExecutors((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        )
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [executorId, executors])
+
+  /** 我的代理：解析当前用户的个人 AGENT（工作台「我的 AI」实际对话的机器人） */
+  useEffect(() => {
+    if (!personal) return
+    let alive = true
+    api
+      .getWorkbenchAgent()
+      .then((info) => {
+        if (!alive) return
+        if (!info.worker) {
+          setLoadError(info.reason ?? '个人 AI AGENT 尚未创建')
+          setLoading(false)
+          return
+        }
+        setResolvedWorkerId(info.worker.id)
+      })
+      .catch((e: Error) => {
+        if (!alive) return
+        setLoadError(e.message)
+        setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [personal])
+
+  useEffect(() => {
+    if (!effectiveWorkerId) return
+    let alive = true
+    api
+      .getWorker(effectiveWorkerId)
       .then((w) => {
         if (!alive) return
         setWorker(w)
@@ -152,6 +231,7 @@ export function WorkerEditPage() {
         setExecutorId(w.executorId ? String(w.executorId) : '')
         setProviderId(w.providerId ?? '')
         setModelId(w.modelId ?? '')
+        setVariant(w.variant ?? '')
         setPrompt(w.prompt ?? '')
         setSkills(
           (w.skills ?? []).filter(
@@ -176,7 +256,7 @@ export function WorkerEditPage() {
     return () => {
       alive = false
     }
-  }, [workerId])
+  }, [effectiveWorkerId])
 
   /** 以一份初始化快照校准本地进度状态并开始订阅 SSE */
   const beginTracking = useCallback(
@@ -192,20 +272,20 @@ export function WorkerEditPage() {
 
   // 编辑页挂载时探测一次：刷新页面时若有进行中的初始化，恢复进度展示
   useEffect(() => {
-    if (!workerId) return
+    if (!effectiveWorkerId) return
     let alive = true
     api
-      .getWorkerInitialize(Number(workerId))
+      .getWorkerInitialize(effectiveWorkerId)
       .then((snapshot) => {
         if (alive && snapshot.status === 'running') {
-          beginTracking(Number(workerId), snapshot)
+          beginTracking(effectiveWorkerId, snapshot)
         }
       })
       .catch(() => undefined)
     return () => {
       alive = false
     }
-  }, [workerId, beginTracking])
+  }, [effectiveWorkerId, beginTracking])
 
   // 初始化进度 SSE：snapshot 校准全量状态，line 增量推送；终态后由服务端完成流
   useEffect(() => {
@@ -271,9 +351,42 @@ export function WorkerEditPage() {
   }, [trackedWorkerId, navigate, listPath])
 
   const executor = executors.find((e) => String(e.id) === executorId)
-  const providers = executor?.providersCache ?? []
-  const provider = providers.find((p) => p.id === providerId)
-  const models = provider?.models ?? []
+  const providers = useMemo(
+    () => executor?.providersCache ?? [],
+    [executor],
+  )
+
+  /** 模型与思考等级合并选择器（与「我的 AI」共用 ModelSettingsPicker） */
+  const modelCatalog = useMemo<WorkerDebugModelCatalog>(() => {
+    return {
+      current: {
+        providerId: providerId || '',
+        modelId: modelId || '选择模型',
+        variant: variant || null,
+      },
+      providers: providers.map((provider) => ({
+        id: provider.id,
+        name: provider.name || provider.id,
+        models: provider.models.map((model) => ({
+          id: model.id,
+          name: model.name || model.id,
+          variants: model.variants ?? [],
+        })),
+      })),
+    }
+  }, [providers, providerId, modelId, variant])
+
+  const modelSelection: WorkerDebugModelSelection = {
+    providerId,
+    modelId,
+    variant: variant || null,
+  }
+
+  const applyModelSelection = (selection: WorkerDebugModelSelection) => {
+    setProviderId(selection.providerId)
+    setModelId(selection.modelId)
+    setVariant(selection.variant ?? '')
+  }
 
   const submit = async () => {
     if (saving || initializing) return
@@ -281,21 +394,26 @@ export function WorkerEditPage() {
     setInitError(null)
     setInitStatus('idle')
     setInitLines([])
-    // 初始化必须在机器人选择的执行器上执行，供应商/模型用于创建同步会话
+    // 初始化必须在机器人选择的执行器上执行，默认模型用于创建同步会话
     if (!executorId || !providerId || !modelId) {
-      setError('请先选择执行器、供应商与模型；否则无法初始化工作环境')
+      setError('请先选择执行器与默认模型；否则无法初始化工作环境')
       return
     }
     // 取编辑器当前内容：onChange 有防抖，避免刚输入就保存丢字
     const promptText = promptRef.current?.getMarkdown() ?? prompt
+    // 头像只在用户修改时提交：存量外部头像（如飞书 CDN）不满足 /images/ 校验，
+    // 未修改时省略字段，后端保留原值。
+    const nextAvatar = avatarUrl?.trim() || null
+    const avatarChanged = nextAvatar !== (worker?.avatarUrl?.trim() || null)
     const payload = {
       name,
       intro: intro.trim() || null,
-      avatarUrl: avatarUrl?.trim() || null,
+      ...(avatarChanged ? { avatarUrl: nextAvatar } : {}),
       runtime: 'opencode' as const,
       executorId: executorId ? Number(executorId) : null,
       providerId: providerId || null,
       modelId: modelId || null,
+      variant: variant || null,
       prompt: promptText.trim() || null,
       skills,
       standards,
@@ -330,7 +448,7 @@ export function WorkerEditPage() {
     }
   }
 
-  // 只要有名称就允许点击保存；缺少执行器/供应商/模型时点击后给出明确提示，
+  // 只要有名称就允许点击保存；缺少执行器/默认模型时点击后给出明确提示，
   // 避免按钮静默置灰导致无法判断原因
   const canSave = !!name.trim() && !saving && !initializing
   const busy = saving || initializing
@@ -382,6 +500,7 @@ export function WorkerEditPage() {
         executorId: executorId ? Number(executorId) : null,
         providerId: providerId || null,
         modelId: modelId || null,
+        variant: variant || null,
       })
       setOptimizeLines(snapshot.lines)
       if (snapshot.status === 'running') {
@@ -459,13 +578,38 @@ export function WorkerEditPage() {
   if (loadError) {
     return (
       <div className="flex flex-col gap-4">
-        <PageBreadcrumb
-          items={[
-            { label: '机器人', to: listPath },
-            { label: '编辑' },
-          ]}
-        />
+        <PageBreadcrumb items={breadcrumbItems} />
         <p className="text-sm">加载失败：{loadError}</p>
+      </div>
+    )
+  }
+
+  // 真人机器人由用户系统自动绑定，不提供 AI 执行器配置；可在操作台执行任务。
+  if (worker?.humanUserId) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageBreadcrumb items={breadcrumbItems} />
+        <Card>
+          <CardHeader>
+            <CardTitle>真人机器人</CardTitle>
+            <CardDescription>
+              「{worker.humanUserName ?? worker.name}」绑定该机器人；实际执行人是用户，不需要 opencode 工位、执行器与模型。
+            </CardDescription>
+          </CardHeader>
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-4">
+            <Badge variant="secondary">用户 #{worker.humanUserId}</Badge>
+            <Badge variant="soft">runtime · human</Badge>
+            <Link
+              to="/workbench"
+              className={buttonVariants({ variant: 'primary', size: 'sm' })}
+            >
+              打开操作台
+            </Link>
+            <Button variant="outline" size="sm" onClick={() => navigate(listPath)}>
+              返回列表
+            </Button>
+          </div>
+        </Card>
       </div>
     )
   }
@@ -474,17 +618,14 @@ export function WorkerEditPage() {
     <div className="flex h-full flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <PageBreadcrumb
-            items={[
-              { label: '机器人', to: listPath },
-              { label: initialTitle },
-            ]}
-          />
+          <PageBreadcrumb items={breadcrumbItems} />
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            {isScheduler
-              ? '系统调度机器人：保留历史调度能力，新任务由平台自动匹配分配'
-              : '机器人的上级对机器人的产出结果负责'}
+            {personal
+              ? '这是你在工作台「我的 AI」中实际对话的 AGENT；任务的实际执行仍由真人机器人负责'
+              : isScheduler
+                ? '系统调度机器人：保留历史调度能力，新任务由平台自动匹配分配'
+                : '机器人的上级对机器人的产出结果负责'}
           </p>
           {initStatus !== 'idle' && (
             <InitTicker status={initStatus} lines={initLines} />
@@ -506,6 +647,11 @@ export function WorkerEditPage() {
             : `配置已保存，但工作环境初始化失败：${initError}。可修正后重试保存。`}
         </p>
       )}
+      {worker?.personalAgentUserId && (
+        <p className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm text-foreground-muted">
+          这是用户 #{worker.personalAgentUserId} 的个人 AI AGENT：工作台「我的 AI」直接与它对话，每个任务使用独立会话；保存后会重新初始化 AGENTS.md、技能与规范。
+        </p>
+      )}
 
       {/* 左右两栏：左侧机器人定义 AGENTS.md（撑满剩余高度），右侧基础信息（独立滚动） */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
@@ -517,7 +663,7 @@ export function WorkerEditPage() {
             </CardDescription>
           </CardHeader>
           <div className="relative mx-2 mb-2 min-h-0 flex-1">
-            <div className="absolute inset-0 overflow-auto bg-background-muted">
+            <div className="md-editor-scroll absolute inset-0 bg-background-muted">
               <MarkdownEditor
                 key={editorEpoch}
                 ref={promptRef}
@@ -594,9 +740,11 @@ export function WorkerEditPage() {
 
         <Card className="w-full shrink-0 lg:min-h-0 lg:w-[26rem]">
           <CardHeader className="flex-none">
-            <CardTitle>基础信息</CardTitle>
+            <CardTitle>{personal ? '我的代理配置' : '基础信息'}</CardTitle>
             <CardDescription>
-              名称、简介与任务定义用于平台匹配任务与分配机器人，执行器与模型决定运行位置
+              {personal
+                ? '技能、规范、AGENTS.md 与执行器决定「我的 AI」的对话能力'
+                : '名称、简介与任务定义用于平台匹配任务与分配机器人，执行器、默认模型与思考等级决定运行方式'}
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">
@@ -605,66 +753,95 @@ export function WorkerEditPage() {
                 系统机器人（ID {worker.id}）由代码内置，可在此调整配置与启用状态，但网页不能删除。
               </p>
             )}
-            <WorkerAvatarField value={avatarUrl} onChange={setAvatarUrl} />
-            <div className="flex gap-4">
-              <label className="flex flex-1 flex-col gap-1 text-sm">
-                名称
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={isScheduler ? '如：调度机器人' : '如：前端工程师'}
+            {personal ? (
+              <div className="flex items-center gap-3">
+                <RobotAvatar
+                  name={worker?.name ?? name}
+                  avatarUrl={avatarUrl}
+                  size={40}
                 />
-              </label>
-              <label className="flex w-32 flex-col gap-1 text-sm">
-                启用
-                <Select
-                  value={enabled ? 'on' : 'off'}
-                  onValueChange={(v) => setEnabled(v === 'on')}
-                  items={{ on: '启用', off: '停用' }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="on">启用</SelectItem>
-                    <SelectItem value="off">停用</SelectItem>
-                  </SelectContent>
-                </Select>
-              </label>
-            </div>
-            <label className="flex flex-col gap-1 text-sm">
-              简介
-              <Textarea
-                rows={3}
-                value={intro}
-                onChange={(e) => setIntro(e.target.value)}
-                placeholder="擅长什么、能接什么任务，供调度机器人与外部选择"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              上级
-              <Select
-                value={ownerUserId || 'none'}
-                onValueChange={(v) => setOwnerUserId(v === 'none' ? '' : (v as string))}
-                items={{
-                  none: '未指定',
-                  ...Object.fromEntries(users.map((u) => [String(u.id), u.name])),
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="选择上级" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">未指定</SelectItem>
-                  {users.map((u) => (
-                    <SelectItem key={u.id} value={String(u.id)}>
-                      {u.name}
-                      {u.department ? `（${u.department}）` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground-intense">
+                    {worker?.name ?? name}
+                  </p>
+                  <p className="text-xs text-foreground-muted">
+                    机器人 #{worker?.id ?? '—'} · 工作台「我的 AI」专用
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <WorkerAvatarField
+                  value={avatarUrl}
+                  onChange={setAvatarUrl}
+                />
+                <div className="flex gap-4">
+                  <label className="flex flex-1 flex-col gap-1 text-sm">
+                    名称
+                    <Input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder={
+                        isScheduler ? '如：调度机器人' : '如：前端工程师'
+                      }
+                    />
+                  </label>
+                  <label className="flex w-32 flex-col gap-1 text-sm">
+                    启用
+                    <Select
+                      value={enabled ? 'on' : 'off'}
+                      onValueChange={(v) => setEnabled(v === 'on')}
+                      items={{ on: '启用', off: '停用' }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="on">启用</SelectItem>
+                        <SelectItem value="off">停用</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                </div>
+                <label className="flex flex-col gap-1 text-sm">
+                  简介
+                  <Textarea
+                    rows={3}
+                    value={intro}
+                    onChange={(e) => setIntro(e.target.value)}
+                    placeholder="擅长什么、能接什么任务，供调度机器人与外部选择"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  上级
+                  <Select
+                    value={ownerUserId || 'none'}
+                    onValueChange={(v) =>
+                      setOwnerUserId(v === 'none' ? '' : (v as string))
+                    }
+                    items={{
+                      none: '未指定',
+                      ...Object.fromEntries(
+                        users.map((u) => [String(u.id), u.name]),
+                      ),
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择上级" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">未指定</SelectItem>
+                      {users.map((u) => (
+                        <SelectItem key={u.id} value={String(u.id)}>
+                          {u.name}
+                          {u.department ? `（${u.department}）` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+              </>
+            )}
             {worker?.workdir && (
               <p className="text-xs text-foreground-muted">
                 工位：<code>{worker.workdir}</code>
@@ -694,10 +871,7 @@ export function WorkerEditPage() {
                     setExecutorId(next)
                     setProviderId('')
                     setModelId('')
-                    const exec = executors.find((e) => String(e.id) === next)
-                    if (exec && !exec.providersCache?.length) {
-                      api.syncExecutorProviders(exec.id).catch(() => undefined)
-                    }
+                    setVariant('')
                   }}
                   items={{
                     none: '未选择',
@@ -718,60 +892,28 @@ export function WorkerEditPage() {
                 </Select>
                 {executor && !executor.providersCache?.length && (
                   <span className="text-xs text-foreground-muted">
-                    该执行器还没有供应商缓存，请先到「执行器」页同步
+                    该执行器还没有可用的模型缓存，请稍候或到「执行器」页同步
                   </span>
                 )}
               </label>
-            <div className="flex gap-4">
-              <label className="flex flex-1 flex-col gap-1 text-sm">
-                供应商
-                <Select
-                  value={providerId || 'none'}
-                  onValueChange={(v) => {
-                    setProviderId(v === 'none' ? '' : (v as string))
-                    setModelId('')
-                  }}
-                  items={{
-                    none: '未选择',
-                    ...Object.fromEntries(providers.map((p) => [p.id, p.name ?? p.id])),
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择供应商" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">未选择</SelectItem>
-                    {providers.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name ?? p.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="flex flex-1 flex-col gap-1 text-sm">
-                模型
-                <Select
-                  value={modelId || 'none'}
-                  onValueChange={(v) => setModelId(v === 'none' ? '' : (v as string))}
-                  items={{
-                    none: '未选择',
-                    ...Object.fromEntries(models.map((m) => [m.id, m.name ?? m.id])),
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择模型" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">未选择</SelectItem>
-                    {models.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name ?? m.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
+            <div className="flex flex-col gap-1 text-sm">
+              <span>默认模型</span>
+              <ModelSettingsPicker
+                catalog={modelCatalog}
+                current={modelSelection}
+                onChange={applyModelSelection}
+                busy={busy}
+                disabled={!executor}
+                triggerClassName="w-full justify-between"
+              />
+              <span className="text-xs text-foreground-muted">
+                点击选择模型与思考等级；弹层内支持搜索模型、模型 ID 或供应商
+              </span>
+              {executor && !executor.providersCache?.length && (
+                <span className="text-xs text-foreground-muted">
+                  正在读取该执行器的模型清单…
+                </span>
+              )}
             </div>
           </div>
         </Card>
