@@ -116,7 +116,7 @@ flowchart TD
 ## 当前已实现说明（2026-10-29）
 
 1. 任务执行成功不会自动进入待验收，执行机器人必须调用 `POST /api/tasks/:id/handoff/apply.md`（`X-Worker-Token`）申请验收，同时生成/覆盖交付文档 `/task/{yyyyMMdd}/{task.code}/HANDOFF`。
-2. `handoff/apply.md` 支持可选的结构化交付说明：`delivery`（交付结果、代码仓库/分支、文档清单）、`problems`（问题与解决）、`detours`（弯路）、`lessons`（经验）、`followUps`（遗留建议与待办）、`other`（其它信息）。无 body 的旧调用保持兼容，缺失内容显示明确占位。
+2. `handoff/apply.md` 支持可选的结构化交付说明：`delivery`（交付结果、代码仓库/分支、文档清单）、`problems`（问题与解决）、`detours`（弯路）、`lessons`（经验）、`followUps`（遗留建议与待办）、`other`（其它信息）。无 body 的旧调用保持兼容，缺失内容显示明确占位。工作台真人交付改为单个 Markdown 编辑器并提交 `content` 字段，后端复用同一套小节解析（`splitHandoffSummary`）：有固定小节标题时按标题拆分，没有标题时整段作为交付内容，缺失小节保留明确占位；旧的六字段提交继续兼容。
 3. HANDOFF 与 REVIEW 使用统一目录：`0 任务与责任`、`1 需求说明`（原始需求/分析后需求）、`2 交付内容`（最终交付原文/机器人交付说明）、`3 实现问题与解决`、`4 弯路与经验复盘`、`5 遗留建议与后续待办`、`6 其它需要保留的信息`；REVIEW 末尾附任务统计。
 4. 申请验收时的交付说明与需求方名称随验收事件留存，REVIEW 生成时作为事实上下文复用，避免重新猜测代码分支、文档清单或问题过程。
 5. 需求方通过网页「完成」或 `POST /api/tasks/:id/handoff/accept.md` 验收，通过后异步生成 `REVIEW`；只有任务需求方可以操作。

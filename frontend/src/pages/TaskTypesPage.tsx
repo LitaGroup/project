@@ -40,6 +40,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogDescription,
+  AlertDialogBody,
   AlertDialogFooter,
   AlertDialogClose,
 } from '@appica/ui-react/alert-dialog'
@@ -79,13 +80,25 @@ export function TaskTypesPage() {
   const reload = useCallback(() => {
     api
       .listTaskTypes()
-      .then(setTypes)
+      .then((list) => {
+        setTypes(list)
+        setError(null)
+      })
       .catch((e: Error) => setError(e.message))
   }, [])
 
   useEffect(() => {
     reload()
   }, [reload])
+
+  /** 删除成功后先本地移除（弹窗关闭即看到行消失），再拉取列表核对 */
+  const handleDeleted = useCallback(
+    (id: number) => {
+      setTypes((prev) => (prev ? prev.filter((type) => type.id !== id) : prev))
+      reload()
+    },
+    [reload],
+  )
 
   const filtered = useMemo(() => {
     const query = keyword.trim().toLowerCase()
@@ -189,11 +202,7 @@ export function TaskTypesPage() {
               <TableCell className="text-center">
                 <div className="flex justify-center gap-2">
                   <TypeFormDialog initial={type} onSaved={reload} />
-                  <DeleteTypeButton
-                    type={type}
-                    onDeleted={reload}
-                    onError={setError}
-                  />
+                  <DeleteTypeButton type={type} onDeleted={handleDeleted} />
                 </div>
               </TableCell>
             </TableRow>
@@ -306,10 +315,8 @@ function TypeFormDialog({
           </div>
         </DialogBody>
         <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">
-              取消
-            </Button>
+          <DialogClose render={<Button variant="outline" size="sm" />}>
+            取消
           </DialogClose>
           <Button
             size="sm"
@@ -328,15 +335,38 @@ function TypeFormDialog({
 function DeleteTypeButton({
   type,
   onDeleted,
-  onError,
 }: {
   type: TaskTypeDef
-  onDeleted: () => void
-  onError: (message: string) => void
+  onDeleted: (id: number) => void
 }) {
   const isSystem = SYSTEM_TASK_TYPE_NAMES.has(type.name)
+  const [open, setOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleOpenChange = (next: boolean) => {
+    // 删除请求进行中不允许关闭，避免请求未完成就误以为已成功
+    if (deleting) return
+    setOpen(next)
+    if (!next) setError(null)
+  }
+
+  const confirm = () => {
+    setError(null)
+    setDeleting(true)
+    api
+      .deleteTaskType(type.id)
+      .then(() => {
+        // 成功后再关闭弹窗并移除行，避免请求失败但看起来已删除
+        setOpen(false)
+        onDeleted(type.id)
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setDeleting(false))
+  }
+
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={handleOpenChange}>
       <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>
         删除
       </AlertDialogTrigger>
@@ -349,27 +379,29 @@ function DeleteTypeButton({
               : `确定删除「${type.name}」吗？已被任务、任务定义或机器人任务定义使用的类型无法删除。`}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error && (
+          <AlertDialogBody>
+            <p role="alert" className="text-sm text-error-foreground">
+              删除失败：{error}
+            </p>
+          </AlertDialogBody>
+        )}
         <AlertDialogFooter>
-          <AlertDialogClose>
-            <Button variant="outline" size="sm">
-              取消
-            </Button>
+          <AlertDialogClose
+            disabled={deleting}
+            render={<Button variant="outline" size="sm" />}
+          >
+            取消
           </AlertDialogClose>
           {!isSystem && (
-            <AlertDialogClose>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() =>
-                  api
-                    .deleteTaskType(type.id)
-                    .then(onDeleted)
-                    .catch((e: Error) => onError(e.message))
-                }
-              >
-                确认删除
-              </Button>
-            </AlertDialogClose>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={deleting}
+              onClick={confirm}
+            >
+              {deleting ? '删除中…' : '确认删除'}
+            </Button>
           )}
         </AlertDialogFooter>
       </AlertDialogContent>

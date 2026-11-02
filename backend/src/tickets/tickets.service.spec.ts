@@ -174,12 +174,55 @@ describe('TicketsService', () => {
     ).rejects.toThrow('暂未开放创建');
   });
 
+  it('创建数据工单固定使用 ID=12 定义的首个启用机器人', async () => {
+    configs.findOne.mockResolvedValue({
+      category: '数据工单',
+      defaultTemplateId: 12,
+      allowedTemplateIds: [],
+      enabled: true,
+    });
+    templates.findOne.mockResolvedValue({
+      id: 12,
+      name: '工单-数据工单-调度',
+      type: '工单',
+      agentIds: [1002],
+    });
+    workers.find.mockResolvedValue([worker(1002)]);
+
+    const saved = await service.create(
+      {
+        category: '数据工单',
+        description: '# 数据导出\n\n导出近 7 天数据',
+      },
+      user as never,
+    );
+
+    expect(tasksService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: '工单',
+        templateId: 12,
+        agentId: 1002,
+      }),
+    );
+    expect(saved).toMatchObject({
+      category: '数据工单',
+      assigneeId: 1002,
+      assigneeName: '机器人1002',
+    });
+  });
+
   it('未开放工单类型拒绝创建', async () => {
+    configs.findOne.mockResolvedValue({
+      category: '运维工单',
+      defaultTemplateId: 13,
+      allowedTemplateIds: [],
+      enabled: true,
+    });
     await expect(
       service.create(
         {
-          category: '数据工单',
-          description: '需要数据支持',
+          category: '运维工单',
+          description: '需要运维支持',
         },
         user as never,
       ),

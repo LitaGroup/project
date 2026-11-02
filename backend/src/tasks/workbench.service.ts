@@ -24,7 +24,8 @@ import {
 } from '../workers/personal-agents.service';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
-import type { TaskDeliveryReportInput } from './task-delivery-report';
+import type { WorkbenchHandoffPayload } from './task-delivery-report';
+import { parseWorkbenchHandoff } from './task-delivery-report';
 import { TaskChatService } from './task-chat.service';
 import type { TaskChatQuestionInfo } from './task-chat.types';
 import { TaskCollaborationService } from './task-collaboration.service';
@@ -230,14 +231,15 @@ export class WorkbenchService {
     );
   }
 
-  /** 真人提交结构化交付说明并申请验收 */
+  /** 真人提交交付说明并申请验收（单输入框 Markdown，兼容旧的六字段） */
   applyHandoff(
     user: User,
     taskId: number,
-    report: TaskDeliveryReportInput,
+    input: WorkbenchHandoffPayload,
   ): Promise<Task> {
-    if (!report.delivery?.trim()) {
-      throw new BadRequestException('交付结果 delivery 不能为空');
+    const report = parseWorkbenchHandoff(input);
+    if (!report?.delivery) {
+      throw new BadRequestException('请填写交付内容');
     }
     return this.withAgentWorker(user, taskId, async (worker) => {
       const applied = await this.dispatchService.applyForAcceptance(

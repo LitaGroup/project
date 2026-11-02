@@ -38,6 +38,9 @@ class WorkbenchQuestionDto {
 }
 
 class WorkbenchHandoffDto implements TaskDeliveryReportInput {
+  /** 单输入框 Markdown 全文（可带固定小节标题，也兼容只写一段自由文本） */
+  content?: string | null;
+  /** 以下六个字段保留兼容（AI/旧客户端） */
   delivery?: string | null;
   problems?: string | null;
   detours?: string | null;

@@ -24,7 +24,7 @@ export class TicketConfig {
   @Column({ type: 'simple-json', default: '[]' })
   allowedTemplateIds: number[];
 
-  /** 是否开放创建；当前仅方案工单为 true */
+  /** 是否开放创建；启停由代码常量 ENABLED_TICKET_CATEGORIES 对齐（当前技术工单、数据工单为 true） */
   @Column({ default: false })
   enabled: boolean;
 

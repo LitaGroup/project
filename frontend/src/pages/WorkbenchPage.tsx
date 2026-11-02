@@ -49,7 +49,6 @@ import {
   type TaskChatStreamMessage,
   type TaskEvent,
   type TaskTemplate,
-  type WorkbenchHandoffInput,
   type WorkbenchRole,
   type WorkbenchSummary,
   type WorkbenchTask,
@@ -73,7 +72,10 @@ import {
   ChatComposerFrame,
   ChatSendButton,
 } from '../components/agent-chat/ChatComposer'
-import { MarkdownEditor } from '../components/MarkdownEditor'
+import {
+  MarkdownEditor,
+  type MarkdownEditorHandle,
+} from '../components/MarkdownEditor'
 import { formatDuration, taskDurationMs } from '../lib/duration'
 
 type WorkPanel = 'document' | 'context' | 'log'
@@ -93,6 +95,34 @@ const WORKBENCH_ROLE_LABELS: Record<WorkbenchRole, string> = {
   owner: '我的 AI 执行',
   requester: '我是需求方',
   responsible: '我是执行方',
+}
+
+/** 发起交付的 Markdown 模板：只放结构标题，简单任务可直接删掉标题写一段 */
+const HANDOFF_TEMPLATE = [
+  '## 交付内容',
+  '',
+  '## 实现问题与解决',
+  '',
+  '## 走过的弯路',
+  '',
+  '## 经验总结',
+  '',
+  '## 遗留建议与后续待办',
+  '',
+  '## 其它需要保留的信息',
+  '',
+].join('\n')
+
+/** 去掉 Markdown 标题行与分割线后是否仍有正文（与后端 hasHandoffBody 口径一致） */
+function hasHandoffBody(markdown: string): boolean {
+  return (
+    markdown
+      .split('\n')
+      .filter((line) => !/^\s{0,3}#{1,6}\s/.test(line))
+      .join('\n')
+      .replace(/^\s*(?:-{3,}|\*{3,})\s*$/gm, '')
+      .trim().length > 0
+  )
 }
 
 /** 按“当前机器人最近分配时间”倒序；历史数据缺失时回退更新时间 */
@@ -152,7 +182,8 @@ export function WorkbenchPage() {
   const [docError, setDocError] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogKind>(null)
   const [dialogText, setDialogText] = useState('')
-  const [handoff, setHandoff] = useState<WorkbenchHandoffInput>({})
+  const handoffEditorRef = useRef<MarkdownEditorHandle>(null)
+  const [handoffError, setHandoffError] = useState<string | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
   const [assignWorkerId, setAssignWorkerId] = useState('')
@@ -665,7 +696,13 @@ export function WorkbenchPage() {
       if (dialog === 'refuse') {
         await run(() => api.workbenchRefuse(task.id, dialogText.trim()))
       } else if (dialog === 'handoff') {
-        await run(() => api.workbenchApplyHandoff(task.id, handoff))
+        const content = handoffEditorRef.current?.getMarkdown() ?? ''
+        if (!hasHandoffBody(content)) {
+          setHandoffError('请填写交付内容')
+          return
+        }
+        setHandoffError(null)
+        await run(() => api.workbenchApplyHandoff(task.id, { content }))
       } else if (dialog === 'assign') {
         if (!assignWorkerId) return
         await run(() => api.assignTask(task.id, Number(assignWorkerId)))
@@ -685,21 +722,21 @@ export function WorkbenchPage() {
       }
       setDialog(null)
       setDialogText('')
-      setHandoff({})
+      setHandoffError(null)
       setAssignWorkerId('')
       setSubtaskTemplateId('')
       setSubtaskTitle('')
       setSubtaskInput('')
       setSubtaskOutputSpec('')
-    } catch {
-      // 错误已在 run 中展示
+    } catch (e) {
+      // 错误已在 run 中展示；交付弹窗内同步展示，避免提示被弹窗遮挡
+      if (dialog === 'handoff') setHandoffError((e as Error).message)
     }
   }, [
     task,
     busy,
     dialog,
     dialogText,
-    handoff,
     assignWorkerId,
     subtaskTemplateId,
     subtaskTitle,
@@ -1134,6 +1171,7 @@ export function WorkbenchPage() {
                                   api.workbenchRevokeHandoff(task.id),
                                 )
                               } else {
+                                setHandoffError(null)
                                 setDialog('handoff')
                               }
                             }}
@@ -1288,7 +1326,9 @@ export function WorkbenchPage() {
 
       {/* 操作弹窗：首期统一结构，后续可按任务类型替换中间面板 */}
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
-        <DialogContent>
+        <DialogContent
+          className={dialog === 'handoff' ? 'sm:max-w-2xl' : undefined}
+        >
           <DialogHeader>
             <DialogTitle>
               {dialog === 'refuse'
@@ -1317,31 +1357,23 @@ export function WorkbenchPage() {
 
           {dialog === 'handoff' && (
             <DialogBody>
-              <div className="space-y-3">
-                {(
-                  [
-                    ['delivery', '交付结果（必填）'],
-                    ['problems', '实现问题与解决'],
-                    ['detours', '走过的弯路'],
-                    ['lessons', '经验总结'],
-                    ['followUps', '遗留建议与后续待办'],
-                  ] as Array<[keyof WorkbenchHandoffInput, string]>
-                ).map(([key, label]) => (
-                  <label key={key} className="block space-y-1">
-                    <span className="text-xs text-foreground-muted">{label}</span>
-                    <textarea
-                      value={handoff[key] ?? ''}
-                      rows={key === 'delivery' ? 4 : 3}
-                      onChange={(event) =>
-                        setHandoff((current) => ({
-                          ...current,
-                          [key]: event.target.value,
-                        }))
-                      }
-                      className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-border-strong"
-                    />
-                  </label>
-                ))}
+              <div className="space-y-2">
+                <p className="text-xs leading-relaxed text-foreground-muted">
+                  简单任务写一段交付说明即可；需要沉淀复盘时，在下方小节标题里分别填写。
+                </p>
+                <div className="md-editor-scroll h-[min(420px,55vh)] rounded-[var(--radius-md)] bg-background-muted">
+                  <MarkdownEditor
+                    ref={handoffEditorRef}
+                    value={HANDOFF_TEMPLATE}
+                    compact
+                    appica
+                  />
+                </div>
+                {handoffError && (
+                  <p role="alert" className="text-xs text-error-foreground">
+                    {handoffError}
+                  </p>
+                )}
               </div>
             </DialogBody>
           )}
@@ -1460,7 +1492,6 @@ export function WorkbenchPage() {
               disabled={
                 busy ||
                 (dialog === 'refuse' && !dialogText.trim()) ||
-                (dialog === 'handoff' && !handoff.delivery?.trim()) ||
                 (dialog === 'assign' && !assignWorkerId) ||
                 (dialog === 'subtask' &&
                   (!subtaskTemplateId || !subtaskTitle.trim()))

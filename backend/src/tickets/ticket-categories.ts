@@ -8,6 +8,7 @@ export { TICKET_TASK_TYPE };
 /** 当前已开放创建的工单类型；其余类型只保留配置入口与内置任务定义 */
 export const ENABLED_TICKET_CATEGORIES: ReadonlySet<string> = new Set([
   '技术工单',
+  '数据工单',
 ]);
 
 export interface TicketCategoryDefinition {
@@ -22,13 +23,14 @@ const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   方案工单: '针对方案设计的工单（已关闭创建，历史工单保留查看）',
   技术工单:
     '业务同学向技术同学申请完成某个任务，由调度机器人澄清后转交技术任务定义',
-  数据工单: '数据查询、数据导出、报表设计等申请（暂未开放）',
+  数据工单:
+    '数据查询、数据导出、报表设计等申请，由调度机器人澄清口径后转交数据任务定义',
   运维工单: '线上数据库、NACOS 等操作申请（暂未开放）',
   需求工单: '业务同学向产品同学提出需求申请（暂未开放）',
   BUG反馈: '线上故障反馈工单（暂未开放）',
 };
 
-/** 六类工单与固定默认调度任务定义的唯一映射 */
+/** 六类工单与固定默认调度任务定义的唯一映射；已开放的类型排在前面 */
 export const TICKET_CATEGORIES: TicketCategoryDefinition[] =
   SYSTEM_TICKET_TASK_TEMPLATES.map((template) => ({
     category: template.category,
@@ -36,7 +38,7 @@ export const TICKET_CATEGORIES: TicketCategoryDefinition[] =
     defaultTemplateName: template.name,
     enabled: ENABLED_TICKET_CATEGORIES.has(template.category),
     description: CATEGORY_DESCRIPTIONS[template.category] ?? '',
-  }));
+  })).sort((a, b) => Number(b.enabled) - Number(a.enabled));
 
 export function findTicketCategory(
   category: string | null | undefined,

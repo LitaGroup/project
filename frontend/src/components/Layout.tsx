@@ -129,7 +129,9 @@ const NAV_SECTIONS: NavSection[] = [
     to: '/tickets/tech',
     match: (p) => p.startsWith('/tickets'),
     items: [
+      // 已开放的工单类型排在前面，未开放/已关闭的排在后面
       { to: '/tickets/tech', label: '技术工单', icon: Settings, ready: true },
+      { to: '/tickets/data', label: '数据工单', icon: ChartPie, ready: true },
       {
         to: '/tickets/solution',
         label: '方案工单',
@@ -137,7 +139,6 @@ const NAV_SECTIONS: NavSection[] = [
         ready: false,
         badge: '已关闭',
       },
-      { to: '/tickets/data', label: '数据工单', icon: ChartPie, ready: false },
       { to: '/tickets/ops', label: '运维工单', icon: Cpu, ready: false },
       { to: '/tickets/requirement', label: '需求工单', icon: ClipboardList, ready: false },
       { to: '/tickets/bug', label: 'BUG反馈', icon: Bug, ready: false },
@@ -395,6 +396,10 @@ export function Layout() {
               <DropdownMenuItem onClick={() => navigate('/tickets/tech/new')}>
                 <Settings size={16} />
                 新建技术工单
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate('/tickets/data/new')}>
+                <ChartPie size={16} />
+                新建数据工单
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

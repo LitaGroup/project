@@ -236,6 +236,14 @@ function App() {
             path="/tickets/tech/new"
             element={<TicketCreatePage category="技术工单" />}
           />
+          <Route
+            path="/tickets/data"
+            element={<TicketsPage category="数据工单" />}
+          />
+          <Route
+            path="/tickets/data/new"
+            element={<TicketCreatePage category="数据工单" />}
+          />
           <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
           <Route path="/tickets" element={<Navigate to="/tickets/tech" replace />} />
           <Route path="/apps" element={<AppsPage />} />

@@ -55,3 +55,94 @@ export function normalizeTaskDeliveryReport(
 export function isEmptyTaskDeliveryReport(report: TaskDeliveryReport): boolean {
   return Object.values(report).every((value) => !value);
 }
+
+/** 可识别的小节标题别名 → 结构化字段 */
+const REPORT_SECTION_ALIASES: Record<string, keyof TaskDeliveryReport> = {
+  交付内容: 'delivery',
+  交付物与结论: 'delivery',
+  实现问题与解决: 'problems',
+  问题与解决: 'problems',
+  走过的弯路: 'detours',
+  任务记录与过程复盘: 'detours',
+  经验总结: 'lessons',
+  遗留建议与后续待办: 'followUps',
+  遗留建议: 'followUps',
+  后续待办: 'followUps',
+  其它需要保留的信息: 'other',
+  其他需要保留的信息: 'other',
+};
+
+/** 去掉整体包裹的 Markdown 代码围栏 */
+function stripFence(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/);
+  return (fenced ? fenced[1] : trimmed).trim();
+}
+
+/** 小节缺失时的明确占位：不编造复盘内容（机器人与真人共用） */
+const EMPTY_SECTION = '（未填写，记录中未体现）';
+
+/** 从 Markdown 中提取固定小节；缺失的小节给出明确占位而不是编造 */
+export function splitHandoffSummary(raw: string): TaskDeliveryReport {
+  const text = stripFence(raw);
+  const heading =
+    /^#{2,4}\s*(交付内容|交付物与结论|实现问题与解决|问题与解决|走过的弯路|任务记录与过程复盘|经验总结|遗留建议与后续待办|遗留建议|后续待办|其它需要保留的信息|其他需要保留的信息)\s*$/gm;
+  const matches = [...text.matchAll(heading)];
+  const sections: Partial<Record<keyof TaskDeliveryReport, string>> = {};
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const key = REPORT_SECTION_ALIASES[match[1]];
+    if (!key) continue;
+    const start = (match.index ?? 0) + match[0].length;
+    const end =
+      index + 1 < matches.length
+        ? (matches[index + 1].index ?? text.length)
+        : text.length;
+    sections[key] = text.slice(start, end).trim();
+  }
+  const fallback = text || '（未提供交付说明）';
+  return normalizeTaskDeliveryReport({
+    delivery: sections.delivery || fallback,
+    problems: sections.problems || EMPTY_SECTION,
+    detours: sections.detours || EMPTY_SECTION,
+    lessons: sections.lessons || EMPTY_SECTION,
+    followUps: sections.followUps || EMPTY_SECTION,
+    other: sections.other || EMPTY_SECTION,
+  });
+}
+
+/** 工作台单输入框提交的交付说明（兼容旧的六个字段） */
+export interface WorkbenchHandoffPayload extends TaskDeliveryReportInput {
+  /** Markdown 全文：可带固定小节标题，也可只写一段自由文本 */
+  content?: string | null;
+}
+
+/**
+ * 去掉 Markdown 标题行与分割线后是否仍有正文。
+ * 用于拦截"只有空模板标题"的提交，避免把整份空模板当成交付内容。
+ */
+export function hasHandoffBody(markdown: string): boolean {
+  return (
+    markdown
+      .split('\n')
+      .filter((line) => !/^\s{0,3}#{1,6}\s/.test(line))
+      .join('\n')
+      .replace(/^\s*(?:-{3,}|\*{3,})\s*$/gm, '')
+      .trim().length > 0
+  );
+}
+
+/**
+ * 工作台交付说明解析：优先使用单输入框的 Markdown 全文，
+ * 没有 content 时回退旧的六个字段。返回 null 表示没有有效正文。
+ */
+export function parseWorkbenchHandoff(
+  input: WorkbenchHandoffPayload | null | undefined,
+): TaskDeliveryReport | null {
+  if (typeof input?.content === 'string') {
+    const markdown = input.content.trim();
+    if (!hasHandoffBody(markdown)) return null;
+    return splitHandoffSummary(markdown);
+  }
+  return normalizeTaskDeliveryReport(input);
+}

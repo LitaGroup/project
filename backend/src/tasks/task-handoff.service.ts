@@ -21,6 +21,7 @@ import { renderTaskDocument } from './task-document-format';
 import { TaskDocumentService } from './task-document.service';
 import {
   normalizeTaskDeliveryReport,
+  splitHandoffSummary,
   type TaskDeliveryReport,
 } from './task-delivery-report';
 
@@ -100,63 +101,6 @@ function formatDuration(ms: number): string {
   if (minutes) parts.push(`${minutes} 分钟`);
   if (!days && !hours && !minutes) parts.push(`${seconds} 秒`);
   return parts.join(' ');
-}
-
-function stripFence(text: string): string {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/);
-  return (fenced ? fenced[1] : trimmed).trim();
-}
-
-const REPORT_SECTION_ALIASES: Record<string, keyof TaskDeliveryReport> = {
-  交付内容: 'delivery',
-  交付物与结论: 'delivery',
-  实现问题与解决: 'problems',
-  问题与解决: 'problems',
-  走过的弯路: 'detours',
-  任务记录与过程复盘: 'detours',
-  经验总结: 'lessons',
-  遗留建议与后续待办: 'followUps',
-  遗留建议: 'followUps',
-  后续待办: 'followUps',
-  其它需要保留的信息: 'other',
-  其他需要保留的信息: 'other',
-};
-
-/** 从机器人输出中提取固定小节；缺失的小节给出明确占位而不是编造 */
-export function splitHandoffSummary(raw: string): HandoffSections {
-  const text = stripFence(raw);
-  const heading =
-    /^#{2,4}\s*(交付内容|交付物与结论|实现问题与解决|问题与解决|走过的弯路|任务记录与过程复盘|经验总结|遗留建议与后续待办|遗留建议|后续待办|其它需要保留的信息|其他需要保留的信息)\s*$/gm;
-  const matches = [...text.matchAll(heading)];
-  const sections: Partial<Record<keyof TaskDeliveryReport, string>> = {};
-  for (let index = 0; index < matches.length; index += 1) {
-    const match = matches[index];
-    const key = REPORT_SECTION_ALIASES[match[1]];
-    if (!key) continue;
-    const start = (match.index ?? 0) + match[0].length;
-    const end =
-      index + 1 < matches.length
-        ? (matches[index + 1].index ?? text.length)
-        : text.length;
-    sections[key] = text.slice(start, end).trim();
-  }
-  const fallback = text || '（机器人未输出总结内容）';
-  return normalizeTaskDeliveryReport({
-    delivery: sections.delivery || fallback,
-    problems:
-      sections.problems ||
-      '（机器人未按约定结构单独输出实现问题与解决，记录中未体现）',
-    detours:
-      sections.detours ||
-      '（机器人未按约定结构单独输出弯路复盘，记录中未体现）',
-    lessons:
-      sections.lessons ||
-      '（机器人未按约定结构单独输出经验总结，记录中未体现）',
-    followUps:
-      sections.followUps || '（机器人未按约定结构单独输出遗留建议与后续待办）',
-    other: sections.other || '（机器人未按约定结构单独输出其它需要保留的信息）',
-  });
 }
 
 /** 读取最近一次申请验收时提交的结构化交付说明 */

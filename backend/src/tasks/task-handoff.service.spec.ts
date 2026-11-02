@@ -9,10 +9,8 @@ import type { TaskMessage } from './task-message.entity';
 import type { TaskEvent } from './task-event.entity';
 import type { TaskChatService } from './task-chat.service';
 import type { TaskDocumentService } from './task-document.service';
-import {
-  splitHandoffSummary,
-  TaskHandoffService,
-} from './task-handoff.service';
+import { splitHandoffSummary } from './task-delivery-report';
+import { TaskHandoffService } from './task-handoff.service';
 
 jest.mock('../executors/opencode-run', () => ({
   runOpencodePrompt: jest.fn(),
@@ -377,9 +375,9 @@ describe('splitHandoffSummary', () => {
   it('结构缺失时保留机器人原始输出且不编造其它小节', () => {
     const sections = splitHandoffSummary('机器人自由总结');
     expect(sections.delivery).toBe('机器人自由总结');
-    expect(sections.problems).toContain('未按约定结构');
-    expect(sections.detours).toContain('未按约定结构');
-    expect(sections.lessons).toContain('未按约定结构');
-    expect(sections.followUps).toContain('未按约定结构');
+    expect(sections.problems).toContain('未填写');
+    expect(sections.detours).toContain('未填写');
+    expect(sections.lessons).toContain('未填写');
+    expect(sections.followUps).toContain('未填写');
   });
 });

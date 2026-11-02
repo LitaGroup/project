@@ -1308,15 +1308,8 @@ export interface TaskPackage {
   liveLines?: string[]
 }
 
-/** 工单类型：首期仅方案工单开放创建，其余类型保留配置与内置调度定义 */
+/** 工单类型：当前开放技术工单与数据工单，其余类型保留配置与内置调度定义；已开放的类型排在前面 */
 export const TICKET_CATEGORY_DEFINITIONS = [
-  {
-    category: '方案工单',
-    defaultTemplateId: 10,
-    defaultTemplateName: '工单-方案工单-调度',
-    enabled: false,
-    description: '针对方案设计的工单（已关闭创建，历史工单保留查看）',
-  },
   {
     category: '技术工单',
     defaultTemplateId: 11,
@@ -1328,8 +1321,15 @@ export const TICKET_CATEGORY_DEFINITIONS = [
     category: '数据工单',
     defaultTemplateId: 12,
     defaultTemplateName: '工单-数据工单-调度',
+    enabled: true,
+    description: '数据查询、数据导出、报表设计等申请，由调度机器人澄清口径后转交数据任务定义',
+  },
+  {
+    category: '方案工单',
+    defaultTemplateId: 10,
+    defaultTemplateName: '工单-方案工单-调度',
     enabled: false,
-    description: '数据查询、数据导出、报表设计等申请（暂未开放）',
+    description: '针对方案设计的工单（已关闭创建，历史工单保留查看）',
   },
   {
     category: '运维工单',
@@ -1590,6 +1590,9 @@ export interface WorkbenchSummary {
 
 /** 操作台交付说明（复用 HANDOFF/REVIEW 结构） */
 export interface WorkbenchHandoffInput {
+  /** 单输入框 Markdown 全文（可带固定小节标题，也兼容只写一段自由文本） */
+  content?: string | null
+  /** 以下字段保留兼容 */
   delivery?: string | null
   problems?: string | null
   detours?: string | null
