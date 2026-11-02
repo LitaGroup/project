@@ -1,7 +1,7 @@
 ---
 name: file-upload
 description: "上传任意文件到项目管理平台并返回无需登录即可访问的公共 URL。Use when: 需要分享报告、图片、压缩包、日志、文档或其他生成的文件。"
-version: 1.0.1
+version: 1.0.2
 author: Lita R&D Team
 tags:
   - 文件
@@ -34,17 +34,18 @@ tags:
 
 ## 鉴权
 
-上传接口 `/api/files/upload.md` 使用个人 Agent 访问令牌或公共 Agent 令牌。公共下载地址不需要鉴权。
+上传接口 `/api/files/upload.md` 使用个人 Agent 访问令牌或公共 Agent 令牌。公共下载地址不需要鉴权。令牌环境变量新名为 `LITA_WORK_TOKEN`；过渡期兼容旧名 `LITA_PROJECT_TOKEN`，**新名优先**。
 
 令牌获取顺序：
 
-1. 环境变量 `LITA_PROJECT_TOKEN`
-2. `~/.env` 中的 `LITA_PROJECT_TOKEN`
+1. 环境变量 `LITA_WORK_TOKEN`，未设置时回退 `LITA_PROJECT_TOKEN`
+2. `~/.env` 中的 `LITA_WORK_TOKEN`，未配置时再读 `LITA_PROJECT_TOKEN`
 3. 以上都没有时，请用户登录平台「个人中心 → Agent 访问令牌」复制
 
 ```bash
-# 优先读取进程环境变量，其次读取 ~/.env
-TOKEN="${LITA_PROJECT_TOKEN:-$(grep '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null | cut -d= -f2-)}"
+# 优先读取新变量（进程环境 → ~/.env），都取不到再回退旧变量
+TOKEN="${LITA_WORK_TOKEN:-$(grep '^LITA_WORK_TOKEN=' ~/.env 2>/dev/null | cut -d= -f2-)}"
+TOKEN="${TOKEN:-${LITA_PROJECT_TOKEN:-$(grep '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null | cut -d= -f2-)}}"
 ```
 
 ## 上传文件
@@ -107,7 +108,7 @@ curl -I "http://work.cinta.team/files/20261027/7f7c0f5e-7d9b-4fc3-b4b8-8c780bc8f
 | 状态码 | 原因 | 处理方式 |
 |:---|:---|:---|
 | `400` | 缺少 multipart 字段 `file` | 确认使用 `-F "file=@..."` |
-| `401` | Token 缺失或无效 | 按「鉴权」重新获取并设置 `LITA_PROJECT_TOKEN` |
+| `401` | Token 缺失或无效 | 按「鉴权」重新获取并设置 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 仍可用） |
 | `413` | 文件超过 50 MB | 压缩或拆分文件后重试 |
 | `5xx` | 服务不可用或存储写入失败 | 稍后重试；持续失败时反馈服务端日志 |
 

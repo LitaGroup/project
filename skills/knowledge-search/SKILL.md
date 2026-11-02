@@ -1,7 +1,7 @@
 ---
 name: knowledge-search
 description: 在项目管理平台知识库中搜索、浏览、读取、创建、更新、移动和删除 Markdown 知识，基于 PGVector + 全文混合检索获取带来源引用的 RAG 上下文
-version: 1.2.1
+version: 1.2.2
 author: Lita R&D Team
 tags:
   - 知识库
@@ -32,21 +32,29 @@ tags:
 - 生产环境：`http://work.cinta.team`
 - 两个环境均使用 **http**，不要使用 https
 - **协议规范**：AI 访问本项目平台一律使用 `http://`；如果用户提供的是 https 平台链接（包括设置接口返回的地址），必须先替换成对应的 `http://` 地址再访问（包括本 SKILL.md、接口请求、图片/文件下载链接）
-- 所有 `/api/docs/**/*.md` 地址都要求鉴权，携带个人 Agent 访问令牌：
+- 所有 `/api/docs/**/*.md` 地址都要求鉴权，携带个人 Agent 访问令牌（环境变量 `LITA_WORK_TOKEN`；过渡期兼容旧变量名 `LITA_PROJECT_TOKEN`）：
 
 ```bash
 # 推荐：请求头
-curl -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+curl -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   "{BASE}/api/docs/search.md?q=部署"
 
 # 或 URL 参数
-curl "{BASE}/api/docs/search.md?q=部署&token=$LITA_PROJECT_TOKEN"
+curl "{BASE}/api/docs/search.md?q=部署&token=$LITA_WORK_TOKEN"
 ```
 
-令牌获取顺序：
+令牌获取顺序（新名 `LITA_WORK_TOKEN` 优先，旧名 `LITA_PROJECT_TOKEN` 过渡期仍可用）：
 
-1. 环境变量 `LITA_PROJECT_TOKEN`。
-2. `~/.env` 中的 `LITA_PROJECT_TOKEN`。
+1. 环境变量 `LITA_WORK_TOKEN`，未设置时回退 `LITA_PROJECT_TOKEN`：
+   ```bash
+   echo "${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}"
+   ```
+2. `~/.env` 中的 `LITA_WORK_TOKEN`，未配置时再读 `LITA_PROJECT_TOKEN`：
+   ```bash
+   TOKEN="$(grep '^LITA_WORK_TOKEN=' ~/.env 2>/dev/null | cut -d= -f2-)"
+   [ -n "$TOKEN" ] || TOKEN="$(grep '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null | cut -d= -f2-)"
+   echo "$TOKEN"
+   ```
 3. 请用户打开平台「个人中心 → Agent 访问令牌」复制。
 
 响应均为 `text/markdown`，以 YAML frontmatter 开头。
@@ -66,11 +74,11 @@ GET /api/docs/search.md?q={关键词或问题}[&path={目录}][&page=1][&pageSiz
 
 ```bash
 # 站内
-curl -s -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+curl -s -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   "$BASE/api/docs/search.md?q=登录失败排查&page=1&pageSize=20"
 
 # 限定目录
-curl -s -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+curl -s -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   "$BASE/api/docs/search.md?q=需求评审&path=/project&page=1&pageSize=10"
 ```
 
@@ -85,7 +93,7 @@ GET /api/feishu/read.md?url={URL 编码后的飞书文档链接}
 - 该接口走应用（tenant_access_token）权限，与登录用户无关；适用于已知飞书文档链接时按链接读取。
 
 ```bash
-curl -s -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+curl -s -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   "$BASE/api/feishu/read.md?url=https%3A%2F%2Fxxx.feishu.cn%2Fdocx%2FABC123"
 ```
 

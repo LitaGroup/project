@@ -1,7 +1,7 @@
 ---
 name: project-manage
 description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交
-version: 1.22.0
+version: 1.23.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -50,7 +50,7 @@ tags:
 
 ## 鉴权
 
-所有 `/api/...*.md` 端点要求鉴权。可使用**用户 agent 访问令牌**（`X-Agent-Token` 头或 `?token=` 参数，`LITA_PROJECT_TOKEN`）或**机器人独立令牌**（`X-Worker-Token` 头）；两类令牌均可访问任意 `.md` 端点。用户 Agent 令牌分两类：
+所有 `/api/...*.md` 端点要求鉴权。可使用**用户 agent 访问令牌**（`X-Agent-Token` 头或 `?token=` 参数，环境变量 `LITA_WORK_TOKEN`；过渡期兼容旧变量名 `LITA_PROJECT_TOKEN`）或**机器人独立令牌**（`X-Worker-Token` 头）；两类令牌均可访问任意 `.md` 端点。用户 Agent 令牌分两类：
 
 - **个人令牌**：归属个人，登录网页 → 右上角头像 → 个人中心 → "Agent 访问令牌"可查看、复制与重置，重置后旧令牌立即失效。个人中心另提供「一键设置令牌（Shell）」脚本，可把令牌写入本机配置。
 - **公共 Agent 令牌**：由平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**。同样经 `X-Agent-Token` 头或 `?token=` 参数传递；通过它发起的写操作，操作人统一记录为「公共 Agent」。该令牌未配置时不可用。
@@ -63,28 +63,30 @@ TOKEN=$(cat .opencode/agent-token)
 curl -H "X-Worker-Token: $TOKEN" {BASE}/api/projects/1.md
 ```
 
-机器人工位由平台注入 `.opencode/.env`（权限 600），内含 `LITA_PROJECT_TOKEN`（机器人独立令牌，访问项目平台）与 `LITA_USER_TOKEN`（Lita 用户令牌，供 lita-api 等技能使用）。机器人在工位内调用平台接口前先加载环境变量，之后可直接按通用方式携带令牌（`LITA_PROJECT_TOKEN` 放在 `X-Agent-Token` 时同样识别为机器人身份）：
+机器人工位由平台注入 `.opencode/.env`（权限 600），内含机器人独立令牌（访问项目平台；过渡期按新名 `LITA_WORK_TOKEN` 优先、旧名 `LITA_PROJECT_TOKEN` 兜底，两者同值）与 `LITA_USER_TOKEN`（Lita 用户令牌，供 lita-api 等技能使用）。机器人在工位内调用平台接口前先加载环境变量，再按 `LITA_WORK_TOKEN` → `LITA_PROJECT_TOKEN` 的顺序取令牌，之后可直接按通用方式携带（放在 `X-Agent-Token` 时同样识别为机器人身份）：
 
 ```bash
 set -a; . .opencode/.env; set +a
-curl -H "X-Agent-Token: $LITA_PROJECT_TOKEN" {BASE}/api/projects/1.md
+curl -H "X-Agent-Token: ${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}" {BASE}/api/projects/1.md
 ```
 
 ### 令牌获取顺序（按优先级）
 
-发起请求前，按下述顺序取令牌，取到即用，不要向用户重复索要已存在的令牌：
+发起请求前，按下述顺序取令牌，取到即用，不要向用户重复索要已存在的令牌。令牌环境变量新名为 `LITA_WORK_TOKEN`；过渡期旧名 `LITA_PROJECT_TOKEN` 仍可用，**新名优先**。
 
-1. **环境变量 `LITA_PROJECT_TOKEN`**：先看进程环境是否已有
+1. **环境变量 `LITA_WORK_TOKEN`**（未设置时回退旧的 `LITA_PROJECT_TOKEN`）：先看进程环境是否已有
    ```bash
-   echo "$LITA_PROJECT_TOKEN"
+   echo "${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}"
    ```
-2. **`~/.env` 中的 `LITA_PROJECT_TOKEN`**：读取本机配置文件
+2. **`~/.env` 中的 `LITA_WORK_TOKEN`**（未配置时再读旧的 `LITA_PROJECT_TOKEN`）：读取本机配置文件
    ```bash
-   grep '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null | cut -d= -f2-
+   TOKEN="$(grep '^LITA_WORK_TOKEN=' ~/.env 2>/dev/null | cut -d= -f2-)"
+   [ -n "$TOKEN" ] || TOKEN="$(grep '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null | cut -d= -f2-)"
+   echo "$TOKEN"
    ```
 3. **用户单独配置 / 临时提供**：以上都没有时，请用户登录个人中心复制令牌，或用「一键设置令牌」脚本写入 `~/.env` 后重试：
    ```bash
-   { grep -v '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null; echo 'LITA_PROJECT_TOKEN={TOKEN}'; } > ~/.env.tmp && mv ~/.env.tmp ~/.env
+   { grep -v -E '^LITA_(WORK|PROJECT)_TOKEN=' ~/.env 2>/dev/null; echo 'LITA_WORK_TOKEN={TOKEN}'; } > ~/.env.tmp && mv ~/.env.tmp ~/.env
    ```
 
 ### 携带方式（任选）
@@ -456,15 +458,15 @@ GET /api/docs/detail/project/{projectId}/document/{documentId}.md  # 项目文�
 
 ```bash
 # 创建文章（kind=directory 时创建目录，content 忽略）
-curl -X POST {BASE}/api/docs/nodes/create.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+curl -X POST {BASE}/api/docs/nodes/create.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   -d '{"kind":"article","parentPath":"/guides","name":"deploy","title":"部署说明","content":"# 部署\n\n正文"}'
 
 # 更新正文/标题，或移动/重命名（path 为当前路径，至少再提供一个字段）
-curl -X POST {BASE}/api/docs/nodes/update.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+curl -X POST {BASE}/api/docs/nodes/update.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   -d '{"path":"/guides/deploy","title":"部署说明 v2","parentPath":"/manual","name":"deploy-v2"}'
 
 # 删除文章；非空目录必须 recursive=true
-curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json' -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   -d '{"path":"/guides/old","recursive":true}'
 ```
 
@@ -484,19 +486,19 @@ curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json'
 ```bash
 # 我的任务（按身份收敛：需求方、执行方或负责方；负责方包含自己负责的机器人执行的任务与验收升级接管）
 curl {BASE}/api/tasks.md?scope=mine \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+  -H "X-Agent-Token: $LITA_WORK_TOKEN"
 
 # 支持 q（编号/标题）、status、subStatus、type、rootOnly=true
 curl "{BASE}/api/tasks.md?q=活动&status=进行中" \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+  -H "X-Agent-Token: $LITA_WORK_TOKEN"
 
 # 任务详情（仅需求方/执行方可读）
 curl {BASE}/api/tasks/{taskId}.md \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+  -H "X-Agent-Token: $LITA_WORK_TOKEN"
 
 # 创建根任务（进入等待中-待分配，由平台分配机器人）
 curl -X POST {BASE}/api/tasks/create.md \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+  -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"title":"活动页面开发","description":"实现活动页并自测","input":"需求文档链接","outputSpec":"可访问页面与自测说明","type":"其它","templateId":1001}'
 ```
@@ -596,11 +598,11 @@ curl -X POST {BASE}/api/tasks/{taskId}/handoff/apply.md \
 # 通过：完成，异步生成 REVIEW 复盘文档并销毁执行会话
 # 当前待验收或曾提交过验收申请的未结束任务均可通过（返工回到执行中后也可直接验收）
 curl -X POST {BASE}/api/tasks/{taskId}/handoff/accept.md \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+  -H "X-Agent-Token: $LITA_WORK_TOKEN"
 
 # 返工：feedback 必填；机器人空闲直接执行，忙碌先进入待继续
 curl -X POST {BASE}/api/tasks/{taskId}/handoff/refuse.md \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" -H 'Content-Type: application/json' \
+  -H "X-Agent-Token: $LITA_WORK_TOKEN" -H 'Content-Type: application/json' \
   -d '{"content":"缺少加载状态，请补充"}'
 ```
 
@@ -612,7 +614,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/handoff/refuse.md \
 
 ```bash
 curl -X POST {BASE}/api/tasks/{taskId}/fail.md \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" -H 'Content-Type: application/json' \
+  -H "X-Agent-Token: $LITA_WORK_TOKEN" -H 'Content-Type: application/json' \
   -d '{"reason":"交付不可用且不再继续返工"}'
 ```
 
@@ -644,7 +646,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/ticket-route.md \
 
 ```bash
 curl -X POST {BASE}/api/files/upload.md \
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \
+  -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   -F "file=@./report.pdf"
 ```
 
