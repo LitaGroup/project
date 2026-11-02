@@ -43,11 +43,11 @@ import {
 } from '@appica/icons-react'
 import {
   api,
-  type KnowledgeNode,
   type TaskChatMessage,
   type TaskChatSnapshot,
   type TaskChatStreamMessage,
   type TaskEvent,
+  type TaskHandoffDocument,
   type TaskTemplate,
   type WorkbenchRole,
   type WorkbenchSummary,
@@ -95,34 +95,6 @@ const WORKBENCH_ROLE_LABELS: Record<WorkbenchRole, string> = {
   owner: '我的 AI 执行',
   requester: '我是需求方',
   responsible: '我是执行方',
-}
-
-/** 发起交付的 Markdown 模板：只放结构标题，简单任务可直接删掉标题写一段 */
-const HANDOFF_TEMPLATE = [
-  '## 交付内容',
-  '',
-  '## 实现问题与解决',
-  '',
-  '## 走过的弯路',
-  '',
-  '## 经验总结',
-  '',
-  '## 遗留建议与后续待办',
-  '',
-  '## 其它需要保留的信息',
-  '',
-].join('\n')
-
-/** 去掉 Markdown 标题行与分割线后是否仍有正文（与后端 hasHandoffBody 口径一致） */
-function hasHandoffBody(markdown: string): boolean {
-  return (
-    markdown
-      .split('\n')
-      .filter((line) => !/^\s{0,3}#{1,6}\s/.test(line))
-      .join('\n')
-      .replace(/^\s*(?:-{3,}|\*{3,})\s*$/gm, '')
-      .trim().length > 0
-  )
 }
 
 /** 按“当前机器人最近分配时间”倒序；历史数据缺失时回退更新时间 */
@@ -177,9 +149,11 @@ export function WorkbenchPage() {
   const [agentModelBusy, setAgentModelBusy] = useState(false)
   const [agentModeBusy, setAgentModeBusy] = useState(false)
   const [agentError, setAgentError] = useState<string | null>(null)
-  const [handoffDoc, setHandoffDoc] = useState<KnowledgeNode | null>(null)
+  const [handoffDoc, setHandoffDoc] = useState<TaskHandoffDocument | null>(null)
   const [docLoading, setDocLoading] = useState(false)
   const [docError, setDocError] = useState<string | null>(null)
+  const [handoffEditing, setHandoffEditing] = useState(false)
+  const [handoffSaving, setHandoffSaving] = useState(false)
   const [dialog, setDialog] = useState<DialogKind>(null)
   const [dialogText, setDialogText] = useState('')
   const handoffEditorRef = useRef<MarkdownEditorHandle>(null)
@@ -578,39 +552,47 @@ export function WorkbenchPage() {
     task?.status === '已结束' && task?.subStatus === '完成'
   const delivered = activeChat?.hasAcceptanceApplication ?? false
 
-  /** 最近一次申请验收的交付文档；eventId 变化时触发实时内容刷新 */
-  const latestHandoff = useMemo(() => {
-    for (const event of activeChat?.events ?? []) {
-      const path = event.meta?.handoffPath
-      if (typeof path === 'string' && path.trim()) {
-        return { path, eventId: event.id }
-      }
-    }
-    return null
-  }, [activeChat?.events])
-  const handoffPath = latestHandoff?.path ?? null
-  const handoffEventId = latestHandoff?.eventId ?? null
+  const handoffPath =
+    activeChat?.task.id === selectedId
+      ? activeChat.task.handoffPath
+      : (task?.handoffPath ?? null)
+  const handoffVersion =
+    activeChat?.task.id === selectedId
+      ? activeChat.task.handoffVersion
+      : (task?.handoffVersion ?? 0)
 
   useEffect(() => {
-    if (!selectedId || !handoffPath) {
+    // oxlint-disable-next-line react/set-state-in-effect
+    setHandoffDoc(null)
+    setHandoffEditing(false)
+    setHandoffError(null)
+    setDocError(null)
+  }, [selectedId])
+
+  useEffect(() => {
+    if (!selectedId) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setHandoffDoc(null)
       setDocError(null)
       setDocLoading(false)
       return
     }
+    // 正在编辑时保留本地内容；机器人更新版本不会把用户输入直接冲掉。
+    // 保存时用旧 baseVersion 会得到 409，用户可取消编辑后重新读取最新版本。
+    if (handoffEditing) return
     let alive = true
     setDocLoading(true)
     setDocError(null)
     api
-      .getKnowledgeArticle(handoffPath)
+      .getWorkbenchHandoff(selectedId)
       .then((doc) => {
-        if (alive) setHandoffDoc(doc)
+        if (!alive) return
+        setHandoffDoc(doc)
       })
       .catch((e: Error) => {
-        if (alive) {
-          setHandoffDoc(null)
-          setDocError(e.message)
-        }
+        if (!alive) return
+        setHandoffDoc(null)
+        setDocError(e.message)
       })
       .finally(() => {
         if (alive) setDocLoading(false)
@@ -618,7 +600,7 @@ export function WorkbenchPage() {
     return () => {
       alive = false
     }
-  }, [selectedId, handoffPath, handoffEventId])
+  }, [selectedId, handoffPath, handoffVersion, handoffEditing])
 
   const run = useCallback(
     async (action: () => Promise<unknown>, successText?: string) => {
@@ -640,6 +622,33 @@ export function WorkbenchPage() {
     },
     [loadSummary, loadChat, selectedId],
   )
+
+  const saveHandoff = useCallback(async () => {
+    if (!selectedId || !handoffDoc || handoffSaving) return
+    const content =
+      handoffEditorRef.current?.getMarkdown() ?? handoffDoc.content
+    setHandoffSaving(true)
+    setHandoffError(null)
+    try {
+      const doc = await api.updateWorkbenchHandoff(selectedId, {
+        content,
+        baseVersion: handoffDoc.version,
+      })
+      setHandoffDoc(doc)
+      setHandoffEditing(false)
+      await Promise.all([loadSummary(), loadChat(selectedId)])
+    } catch (e) {
+      setHandoffError((e as Error).message)
+    } finally {
+      setHandoffSaving(false)
+    }
+  }, [
+    selectedId,
+    handoffDoc,
+    handoffSaving,
+    loadSummary,
+    loadChat,
+  ])
 
   const submitMessage = useCallback(
     async (raw: string) => {
@@ -696,13 +705,8 @@ export function WorkbenchPage() {
       if (dialog === 'refuse') {
         await run(() => api.workbenchRefuse(task.id, dialogText.trim()))
       } else if (dialog === 'handoff') {
-        const content = handoffEditorRef.current?.getMarkdown() ?? ''
-        if (!hasHandoffBody(content)) {
-          setHandoffError('请填写交付内容')
-          return
-        }
         setHandoffError(null)
-        await run(() => api.workbenchApplyHandoff(task.id, { content }))
+        await run(() => api.workbenchApplyHandoff(task.id))
       } else if (dialog === 'assign') {
         if (!assignWorkerId) return
         await run(() => api.assignTask(task.id, Number(assignWorkerId)))
@@ -759,18 +763,16 @@ export function WorkbenchPage() {
     [task, run],
   )
 
-  const deliveryContent = handoffDoc?.content?.trim()
+  const deliveryContent = handoffDoc
     ? handoffDoc.content
-    : task?.result?.trim()
-      ? task.result
-      : `# 交付文档\n\n${
-          docLoading ? '正在加载交付文档…' : '暂无交付文档内容。'
-        }`
+    : docLoading
+      ? '正在加载交付文档…'
+      : '> 正在处理中……'
   const deliveryEditorKey = [
     selectedId,
-    handoffPath ?? 'result',
-    handoffDoc?.contentHash ?? handoffDoc?.updatedAt ?? 'empty',
-    handoffEventId ?? 'none',
+    handoffDoc?.path ?? handoffPath ?? 'new',
+    handoffDoc?.version ?? handoffVersion,
+    handoffEditing ? 'edit' : 'view',
   ].join(':')
 
   const finished = task?.status === '已结束'
@@ -955,24 +957,78 @@ export function WorkbenchPage() {
             <EmptyWork />
           ) : workPanel === 'document' ? (
             <div className="flex h-full min-h-0 flex-col">
-              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-1.5 text-[11px] text-foreground-muted">
-                <span className="truncate">
-                  {handoffPath ? `交付文档 · ${handoffPath}` : '当前交付内容'}
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-1.5 text-[11px] text-foreground-muted">
+                <span className="min-w-0 flex-1 truncate">
+                  {handoffDoc
+                    ? `交付文档 · ${handoffDoc.path} · v${handoffDoc.version}`
+                    : '交付文档'}
+                  {handoffDoc?.submittedVersion
+                    ? ` · 已提交 v${handoffDoc.submittedVersion}`
+                    : ''}
                 </span>
                 {docLoading && <span>更新中…</span>}
+                {handoffEditing ? (
+                  <>
+                    <Button
+                      size="sm"
+                      onClick={() => void saveHandoff()}
+                      disabled={handoffSaving}
+                    >
+                      {handoffSaving ? '保存中…' : '保存'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setHandoffEditing(false)
+                        setHandoffError(null)
+                      }}
+                      disabled={handoffSaving}
+                    >
+                      取消
+                    </Button>
+                  </>
+                ) : (
+                  handoffDoc &&
+                  !finished &&
+                  !awaitingReview &&
+                  (isRequester || isAgent) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setHandoffError(null)
+                        setHandoffEditing(true)
+                      }}
+                    >
+                      编辑
+                    </Button>
+                  )
+                )}
               </div>
               <div className="md-editor-scroll min-h-0 flex-1 bg-background">
                 <MarkdownEditor
                   key={deliveryEditorKey}
+                  ref={handoffEditing ? handoffEditorRef : undefined}
                   value={deliveryContent}
-                  readOnly
+                  readOnly={!handoffEditing}
                   compact
                   appica
                 />
               </div>
+              {handoffEditing && (
+                <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-foreground-muted">
+                  文档正文由执行方和需求方共同维护；内容变化后版本号自动递增，需求方修改会通知执行机器人读取最新版本。
+                </p>
+              )}
               {docError && (
                 <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-error-foreground">
                   交付文档加载失败：{docError}
+                </p>
+              )}
+              {handoffError && (
+                <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-error-foreground">
+                  {handoffError}
                 </p>
               )}
             </div>
@@ -1164,7 +1220,9 @@ export function WorkbenchPage() {
                             icon={
                               awaitingReview ? Package2Import : Package2Export
                             }
-                            disabled={busy || !deliveryActive}
+                            disabled={
+                              busy || !deliveryActive || handoffEditing
+                            }
                             onClick={() => {
                               if (awaitingReview) {
                                 void run(() =>
@@ -1357,23 +1415,24 @@ export function WorkbenchPage() {
 
           {dialog === 'handoff' && (
             <DialogBody>
-              <div className="space-y-2">
-                <p className="text-xs leading-relaxed text-foreground-muted">
-                  简单任务写一段交付说明即可；需要沉淀复盘时，在下方小节标题里分别填写。
+              <div className="space-y-2 text-xs leading-relaxed text-foreground-muted">
+                <p>
+                  交付内容以任务交付文档为准，本次申请会锁定当前版本并提交给需求方验收。
                 </p>
-                <div className="md-editor-scroll h-[min(420px,55vh)] rounded-[var(--radius-md)] bg-background-muted">
-                  <MarkdownEditor
-                    ref={handoffEditorRef}
-                    value={HANDOFF_TEMPLATE}
-                    compact
-                    appica
-                  />
-                </div>
-                {handoffError && (
-                  <p role="alert" className="text-xs text-error-foreground">
-                    {handoffError}
+                <p>
+                  当前文档：
+                  {handoffDoc
+                    ? ` ${handoffDoc.path} · v${handoffDoc.version}`
+                    : ' 尚未加载'}
+                </p>
+                {handoffDoc?.content.trim() === '> 正在处理中……' && (
+                  <p role="alert" className="text-error-foreground">
+                    交付文档还没有有效内容，请到左侧「交付文档」面板补充后再申请验收。
                   </p>
                 )}
+                <p>
+                  申请后如需继续修改，请先撤销交付或等待需求方返工。
+                </p>
               </div>
             </DialogBody>
           )}
@@ -1494,7 +1553,10 @@ export function WorkbenchPage() {
                 (dialog === 'refuse' && !dialogText.trim()) ||
                 (dialog === 'assign' && !assignWorkerId) ||
                 (dialog === 'subtask' &&
-                  (!subtaskTemplateId || !subtaskTitle.trim()))
+                  (!subtaskTemplateId || !subtaskTitle.trim())) ||
+                (dialog === 'handoff' &&
+                  (!handoffDoc || !handoffDoc.content.trim() ||
+                    handoffDoc.content.trim() === '> 正在处理中……'))
               }
               onClick={() => void submitDialog()}
             >

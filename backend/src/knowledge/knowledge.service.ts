@@ -439,6 +439,17 @@ export class KnowledgeService {
   }
 
   renderArticleMarkdown(node: KnowledgeNode): string {
+    const content = node.content ?? '';
+    // 任务交付文档由平台维护自己的 Frontmatter（含版本号）：
+    // 已自带 update 时不再重复前置一层，否则 AI 读到的会是两段 Frontmatter。
+    if (
+      node.path.startsWith('/task/') &&
+      /^---\r?\n(?=[\s\S]*?^update:\s*")[\s\S]*?\r?\n---(?:\r?\n|$)/m.test(
+        content,
+      )
+    ) {
+      return content.endsWith('\n') ? content : `${content}\n`;
+    }
     return [
       mdFrontmatter({
         update: node.updatedAt,
@@ -447,7 +458,7 @@ export class KnowledgeService {
         id: node.id,
         source: node.source,
       }),
-      node.content ?? '',
+      content,
       '',
     ].join('\n');
   }

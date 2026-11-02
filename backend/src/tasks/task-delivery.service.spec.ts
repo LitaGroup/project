@@ -64,6 +64,11 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     discardQueuedConversations: jest.Mock;
   };
   let handoffService: { request: jest.Mock };
+  let taskDocuments: {
+    updateHandoff: jest.Mock;
+    readHandoff: jest.Mock;
+    renderHandoffMarkdown: jest.Mock;
+  };
   let service: TaskDeliveryService;
 
   beforeEach(() => {
@@ -137,12 +142,31 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
     };
     handoffService = { request: jest.fn().mockResolvedValue({}) };
+    taskDocuments = {
+      updateHandoff: jest.fn().mockResolvedValue({
+        task: baseTask(),
+        changed: true,
+        document: {
+          path: '/task/20261028/TK-0001/HANDOFF',
+          url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
+          title: 'TK-0001 活动页开发 · 任务交付文档',
+          version: 2,
+          submittedVersion: null,
+          content: '最新正文',
+          updatedAt: '2026-10-28T10:00:00+08:00',
+          updatedBy: '张三',
+        },
+      }),
+      readHandoff: jest.fn(),
+      renderHandoffMarkdown: jest.fn(),
+    };
     service = new TaskDeliveryService(
       tasksRepo as never,
       usersRepo as never,
       workersRepo as never,
       tasksService as never,
       dispatchService as never,
+      taskDocuments as never,
       handoffService as never,
       taskNotify as never,
       {
@@ -185,6 +209,86 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
         report: { delivery: '分支 test', followUps: '补充埋点' },
       },
     );
+  });
+
+  it('需求方编辑交付文档后递增版本并通知 AI 读取最新正文', async () => {
+    const task = baseTask({
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+    });
+    tasksRepo.findOne.mockResolvedValue(task);
+    taskDocuments.updateHandoff.mockResolvedValue({
+      task,
+      changed: true,
+      document: {
+        path: '/task/20261028/TK-0001/HANDOFF',
+        url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
+        title: 'TK-0001 活动页开发 · 任务交付文档',
+        version: 4,
+        submittedVersion: null,
+        content: '需求方补充的交付内容',
+        updatedAt: '2026-10-28T12:00:00+08:00',
+        updatedBy: '张三',
+      },
+    });
+
+    const document = await service.updateHandoffByUser(1, user(), {
+      content: '需求方补充的交付内容',
+      baseVersion: 3,
+      updatedBy: '张三',
+    });
+
+    expect(document.version).toBe(4);
+    expect(dispatchService.addEvent).toHaveBeenCalledWith(
+      1,
+      '操作',
+      '交付文档更新至 v4（人工编辑）',
+      '张三',
+      expect.objectContaining({
+        handoffVersion: 4,
+        handoffUpdateSource: 'user',
+      }),
+    );
+    expect(dispatchService.continueConversation).toHaveBeenCalledWith(
+      1,
+      expect.stringContaining('v4'),
+      '张三',
+      expect.objectContaining({
+        perspective: 'requester',
+        modelContent: expect.stringContaining('/tasks/1/handoff.md') as string,
+      }),
+    );
+  });
+
+  it('交付文档内容未变化时不重复通知机器人', async () => {
+    const task = baseTask({
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+    });
+    tasksRepo.findOne.mockResolvedValue(task);
+    taskDocuments.updateHandoff.mockResolvedValue({
+      task,
+      changed: false,
+      document: {
+        path: '/task/20261028/TK-0001/HANDOFF',
+        url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
+        title: 'TK-0001 活动页开发 · 任务交付文档',
+        version: 3,
+        submittedVersion: null,
+        content: '原内容',
+        updatedAt: '2026-10-28T12:00:00+08:00',
+        updatedBy: '张三',
+      },
+    });
+
+    await service.updateHandoffByUser(1, user(), {
+      content: '原内容',
+      baseVersion: 3,
+      updatedBy: '张三',
+    });
+
+    expect(dispatchService.addEvent).not.toHaveBeenCalled();
+    expect(dispatchService.continueConversation).not.toHaveBeenCalled();
   });
 
   it('非当前执行机器人不能申请验收', async () => {

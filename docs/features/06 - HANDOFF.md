@@ -46,13 +46,13 @@ flowchart TD
 
 
 
-新增任务交付文档：
+任务交付文档（当前实现）：
 
-1. 任务在执行提交验收时，需要提供一个交付文档，交付文档通过 project 的 文档来创建或者更新
-2. 文档的命名格式为：task/deliver/{date}/{task-id}/deliver.md
-3. 文档的标题为：{taskid}-{xxxxxx}-交付文档
-
-交付文档创建完成后，可以申请验收（调用 申请验收的接口来实现）
+1. 任务创建时即创建交付文档，路径固定为 `task/{任务创建日期}/{task-code}/HANDOFF`，初始正文为 `> 正在处理中……`
+2. 执行机器人在任务执行过程中通过 `GET /api/tasks/{taskId}/handoff.md` 读取、`POST /api/tasks/{taskId}/handoff/update.md` 更新正文（完整 `content` 或 `append` + `baseVersion`）
+3. 正文完全由执行机器人根据任务内容、任务定义和实际进展编写，平台不拼接固定章节；需求方也可在工作台直接编辑
+4. 平台在 Frontmatter 维护 `document/task/version/updated_by/update`，每次有效正文变更版本递增；版本冲突返回 409
+5. 申请验收只校验正文非占位并锁定当前版本（`tasks.handoffSubmittedVersion`），待验收期间文档锁定；撤销交付或返工后才能继续编辑
 
 
 
@@ -113,12 +113,13 @@ flowchart TD
 
 ---
 
-## 当前已实现说明（2026-10-29）
+## 当前已实现说明（2026-11-02）
 
-1. 任务执行成功不会自动进入待验收，执行机器人必须调用 `POST /api/tasks/:id/handoff/apply.md`（`X-Worker-Token`）申请验收，同时生成/覆盖交付文档 `/task/{yyyyMMdd}/{task.code}/HANDOFF`。
-2. `handoff/apply.md` 支持可选的结构化交付说明：`delivery`（交付结果、代码仓库/分支、文档清单）、`problems`（问题与解决）、`detours`（弯路）、`lessons`（经验）、`followUps`（遗留建议与待办）、`other`（其它信息）。无 body 的旧调用保持兼容，缺失内容显示明确占位。工作台真人交付改为单个 Markdown 编辑器并提交 `content` 字段，后端复用同一套小节解析（`splitHandoffSummary`）：有固定小节标题时按标题拆分，没有标题时整段作为交付内容，缺失小节保留明确占位；旧的六字段提交继续兼容。
-3. HANDOFF 与 REVIEW 使用统一目录：`0 任务与责任`、`1 需求说明`（原始需求/分析后需求）、`2 交付内容`（最终交付原文/机器人交付说明）、`3 实现问题与解决`、`4 弯路与经验复盘`、`5 遗留建议与后续待办`、`6 其它需要保留的信息`；REVIEW 末尾附任务统计。
-4. 申请验收时的交付说明与需求方名称随验收事件留存，REVIEW 生成时作为事实上下文复用，避免重新猜测代码分支、文档清单或问题过程。
+1. 任务执行成功不会自动进入待验收，执行机器人必须调用 `POST /api/tasks/:id/handoff/apply.md`（`X-Worker-Token`）申请验收；申请不再生成/覆盖 HANDOFF，只校验并锁定任务执行期间已经维护好的交付文档版本。
+2. 交付文档在执行过程中持续维护：AI 通过 `handoff/update.md` 提交完整正文或 `append` 增量，平台校验 `baseVersion` 并维护 Frontmatter 版本号；需求方人工修改后，平台把最新版本通知给 AI 执行机器人（执行中进入会话队列，待反馈/待继续并入恢复提示）。
+3. `handoff/apply.md` 仍兼容旧的结构化交付说明字段：`delivery`、`problems`、`detours`、`lessons`、`followUps`、`other`，但只作为验收事件与 REVIEW 快照，不再决定 HANDOFF 正文。工作台真人交付不再提交 Markdown 内容，直接确认当前文档版本。
+4. `REVIEW` 保留统一目录：`0 任务与责任`、`1 需求说明`、`2 交付内容`、`3 实现问题与解决`、`4 弯路与经验复盘`、`5 遗留建议与后续待办`、`6 其它需要保留的信息`，末尾附任务统计；HANDOFF 章节由执行方自行组织。
+5. 申请验收时的交付说明与需求方名称随验收事件留存，REVIEW 生成时作为事实上下文复用，避免重新猜测代码分支、文档清单或问题过程。
 5. 需求方通过网页「完成」或 `POST /api/tasks/:id/handoff/accept.md` 验收，通过后异步生成 `REVIEW`；只有任务需求方可以操作。
 6. 验收不通过通过网页「验收不通过」或 `POST /api/tasks/:id/reject` 提交反馈，计入 `tasks.acceptRejectCount`。第 1～3 次退回原机器人，第 4 次起转「等待中-待反馈」并记录/通知执行机器人负责人。
 7. 任务负责人提交反馈后重新识别并派发机器人；验收计数与接管快照保留。

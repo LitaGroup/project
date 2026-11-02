@@ -118,6 +118,15 @@ class HandoffApplyDto implements TaskDeliveryReportInput {
   other?: string | null;
 }
 
+/** 执行机器人更新交付文档：完整正文 + 读取时的版本号 */
+class HandoffUpdateDto {
+  /** 完整正文；与 append 二选一 */
+  content?: string;
+  /** 追加到当前正文末尾 */
+  append?: string;
+  baseVersion?: number;
+}
+
 /** AI 技能 task-deliver-reply：需求方通过或拒绝验收 */
 class DeliveryReplyDto implements DeliveryReplyInput {
   /** accept=通过验收；refuse=拒绝并退回执行 */
@@ -391,7 +400,32 @@ export class TasksController {
     return this.collaboration.actionMarkdown('提问已答复', task);
   }
 
-  /** task-handoff-apply：新验收申请地址，复用交付文档与产出逻辑。 */
+  /** 读取任务交付文档（任务全生命周期文档，Frontmatter 含平台维护的版本号）。 */
+  @Get(':id/handoff.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  handoffRead(@Param('id', ParseIntPipe) id: number): Promise<string> {
+    return this.deliveryService.getHandoffMarkdown(id);
+  }
+
+  /** 执行机器人维护交付文档：提交完整正文与 baseVersion。 */
+  @Post(':id/handoff/update.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async handoffUpdate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: HandoffUpdateDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const worker = this.requireWorker(req);
+    await this.deliveryService.updateHandoffByWorker(id, worker, {
+      content: dto.content,
+      append: dto.append,
+      baseVersion: Number(dto.baseVersion),
+      updatedBy: worker.name,
+    });
+    return this.deliveryService.getHandoffMarkdown(id);
+  }
+
+  /** task-handoff-apply：新验收申请地址，交付文档必须已在执行期间维护完成。 */
   @Post(':id/handoff/apply.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')
   handoffApply(

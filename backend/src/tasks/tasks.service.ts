@@ -27,6 +27,7 @@ import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
 import { deriveTaskTitle } from './task-title';
 import { TaskDispatchService } from './task-dispatch.service';
+import { TaskDocumentService } from './task-document.service';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
 import {
   TaskRealtimeEvent,
@@ -125,6 +126,7 @@ export class TasksService {
     private readonly dispatchService: TaskDispatchService,
     private readonly workerInbox: TaskWorkerInboxService,
     private readonly taskRealtime: TaskRealtimeService,
+    private readonly taskDocuments: TaskDocumentService,
   ) {}
 
   /**
@@ -432,6 +434,17 @@ export class TasksService {
       input.operatorName ??
       (await this.operatorName(input.createdById ?? null));
     const saved = await this.tasks.save(task);
+    // 交付文档从任务创建时开始维护；知识库异常不阻断任务创建，后续读取/派发会重试。
+    const handoff = await this.taskDocuments.initializeHandoff(saved);
+    if (handoff) {
+      saved.handoffPath = handoff.path;
+      saved.handoffVersion = handoff.version;
+      saved.handoffSubmittedVersion = handoff.submittedVersion;
+      saved.handoffUpdatedAt = handoff.updatedAt
+        ? new Date(handoff.updatedAt)
+        : null;
+      saved.handoffUpdatedBy = handoff.updatedBy;
+    }
     await this.addEvent(
       saved.id,
       '操作',
@@ -442,6 +455,12 @@ export class TasksService {
         description: saved.description,
         ...(saved.templateId
           ? { templateId: saved.templateId, templateName: saved.templateName }
+          : {}),
+        ...(handoff
+          ? {
+              handoffPath: handoff.path,
+              handoffVersion: handoff.version,
+            }
           : {}),
       },
     );

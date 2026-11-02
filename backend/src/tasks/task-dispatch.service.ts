@@ -42,9 +42,10 @@ import { TaskTemplate } from './task-template.entity';
 import { TaskChatService } from './task-chat.service';
 import type { TaskChatPerspective } from './task-chat.types';
 import { TaskDocumentService } from './task-document.service';
-import type { TaskDocumentResult } from './task-document.service';
+import type { TaskHandoffDocument } from './task-document.service';
 import {
   normalizeTaskDeliveryReport,
+  splitHandoffSummary,
   type TaskDeliveryReportInput,
 } from './task-delivery-report';
 import { TaskNotifyService } from './task-notify.service';
@@ -54,7 +55,7 @@ import { TaskWorkerInboxService } from './task-worker-inbox.service';
 
 export interface TaskAcceptanceApplication {
   task: Task;
-  handoff: TaskDocumentResult;
+  handoff: TaskHandoffDocument;
 }
 
 /** 申请验收的附加信息（均可选，兼容旧版无 body 调用） */
@@ -1475,33 +1476,32 @@ export class TaskDispatchService
     }
     const resultText = await this.collectResult(task);
     const now = new Date();
-    const report = normalizeTaskDeliveryReport(input.report);
-    // 真人没有“最后一轮助手文本”，操作台提交的交付说明即为任务最终产出；
-    // AI 机器人仍优先取会话产出，报告用于 HANDOFF/REVIEW 结构化小节。
+    // 交付文档在任务执行期间已由作者持续维护；申请验收只校验并锁定版本。
+    const handoff = await this.taskDocuments.prepareForAcceptance(task);
+    const submittedReport = normalizeTaskDeliveryReport(input.report);
+    const report = Object.values(submittedReport).some(Boolean)
+      ? submittedReport
+      : splitHandoffSummary(handoff.content);
+    const agentRuntime = task.agentId
+      ? (
+          await this.workers.findOne({
+            where: { id: task.agentId },
+            select: { id: true, runtime: true },
+          })
+        )?.runtime
+      : null;
+    // 真人没有“最后一轮助手文本”，交付文档正文即任务最终产出；
+    // AI 机器人仍优先取会话产出，交付文档正文用于 REVIEW 结构化小节。
     const deliveryResult =
-      task.agentId &&
-      (
-        await this.workers.findOne({
-          where: { id: task.agentId },
-          select: { id: true, runtime: true },
-        })
-      )?.runtime === WorkerRuntime.HUMAN
-        ? report.delivery?.trim() || null
+      agentRuntime === WorkerRuntime.HUMAN
+        ? handoff.content.trim() || null
         : resultText;
-    // 交付文档是验收申请的前置条件：写入失败时任务保持执行中，可修复后重试
-    const handoff = await this.taskDocuments.upsertHandoff({
-      task,
-      result: deliveryResult ?? task.result,
-      worker,
-      appliedAt: now,
-      report,
-      requesterName: input.requesterName ?? null,
-    });
     const updated = await this.tasks.update(
       {
         id: taskId,
         status: TaskStatus.RUNNING,
         subStatus: TaskSubStatus.EXECUTING,
+        handoffVersion: handoff.version,
       },
       {
         status: TaskStatus.WAITING,
@@ -1528,6 +1528,7 @@ export class TaskDispatchService
         deliveryApply: true,
         handoffPath: handoff.path,
         handoffUrl: handoff.url,
+        handoffVersion: handoff.version,
         handoffRequester: input.requesterName ?? null,
         handoffReport: report,
       },
@@ -1535,7 +1536,11 @@ export class TaskDispatchService
     await this.taskChat.finishTask(taskId);
     this.releaseTask(taskId);
     await this.workerInbox.enqueue(saved, 'handoff', {
-      payload: { handoffPath: handoff.path, handoffUrl: handoff.url },
+      payload: {
+        handoffPath: handoff.path,
+        handoffUrl: handoff.url,
+        handoffVersion: handoff.version,
+      },
     });
     await this.taskNotify.notifyTaskRequester(
       saved,
@@ -1566,6 +1571,8 @@ export class TaskDispatchService
       {
         status: TaskStatus.RUNNING,
         subStatus: TaskSubStatus.EXECUTING,
+        // 撤销后旧验收申请失效，清除提交版本；新一次申请验收会重新锁定。
+        handoffSubmittedVersion: null,
         remindCount: 0,
         firstRemindedAt: null,
         lastRemindedAt: null,
@@ -1820,6 +1827,17 @@ export class TaskDispatchService
     const template = task.templateId
       ? await this.taskTemplates.findOne({ where: { id: task.templateId } })
       : null;
+    // 交付文档从任务创建时即存在；派发前补齐历史任务并带出当前版本。
+    const handoff = await this.taskDocuments
+      .ensureHandoff(task)
+      .catch((error: Error) => {
+        this.logger.warn(
+          `任务 ${task.code} 读取交付文档失败：${error.message}`,
+        );
+        return null;
+      });
+    const handoffPath = handoff?.path ?? this.taskDocuments.handoffPath(task);
+    const handoffVersion = handoff?.version ?? task.handoffVersion ?? 0;
     const sections: string[] = [];
     sections.push(
       [
@@ -1879,18 +1897,38 @@ export class TaskDispatchService
     );
     sections.push(
       [
+        '# 交付文档（HANDOFF）',
+        '',
+        `本任务的交付文档路径：\`${handoffPath}\`，当前版本：v${handoffVersion}。`,
+        '文档从任务创建时即存在，正文完全由你根据任务内容、任务定义、输出要求和实际进展编写；平台只维护 Frontmatter 中的版本号和更新时间。',
+        '',
+        '要求：',
+        '1. 开始处理后尽快将「正在处理中」替换为真实交付内容；执行过程中每完成一个重要阶段就更新一次，便于需求方实时查看。',
+        '2. 内容自行组织结构，但必须如实记录当前进展、最终交付物、验证结果、遗留问题和后续建议；代码交付写仓库与分支，文档交付写名称与路径/链接。',
+        '3. 更新时提交完整正文和读取到的当前版本号；平台返回 409 表示有人工修改，必须重新读取文档、保留人工修改后再合并提交。',
+        '4. 不要提交 YAML Frontmatter，平台会自动生成；不要删除或改写需求方已经补充的内容。',
+        '5. 需要快速追加进展时可用 `append` 代替完整 `content`；申请验收前仍应提交完整的最终正文。',
+        '',
+        '```bash',
+        'TOKEN=$(cat .opencode/agent-token)',
+        `curl -sS '${this.apiUrl}/tasks/${task.id}/handoff.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN"',
+        '',
+        `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/handoff/update.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN" \\',
+        '  -H "Content-Type: application/json" \\',
+        `  -d '{"baseVersion":${handoffVersion},"content":"# 任务交付文档\\n\\n## 当前进展\\n\\n..."}'`,
+        '```',
+      ].join('\n'),
+    );
+    sections.push(
+      [
         '# 完成与验收',
         '',
         '完成并自检后，必须主动申请验收；会话结束不会自动进入待验收，未调用申请接口时任务会一直保持「进行中-执行中」。',
         '',
-        '1. 先完成交付物和交付说明，确保最终产出已经写入回复或项目文档。',
-        '2. 整理结构化交付说明，字段均按 Markdown 填写；没有的内容明确写“无”，不得编造：',
-        '   - delivery：最终交付结果；代码交付必须写仓库和分支，文档交付必须写名称及知识库路径/链接；',
-        '   - problems：实现中遇到的问题、解决方式和验证结果；',
-        '   - detours：走过的弯路、返工或失败尝试，没有则写“无”；',
-        '   - lessons：可复用的经验、检查清单和下次改进项；',
-        '   - followUps：遗留问题、使用限制、优化建议和后续待办；',
-        '   - other：其它需要保留的信息。',
+        '1. 先完成交付物，并把最终交付结果、验证结果、遗留事项写入上面的交付文档。',
+        `2. 确认交付文档已经是最终内容（当前读取版本会在更新后变化，以最近一次更新返回的版本为准）。`,
         '3. 在工位目录执行以下命令申请验收（机器人令牌不要写入聊天或文档）：',
         '',
         '```bash',
@@ -1898,15 +1936,12 @@ export class TaskDispatchService
         `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/handoff/apply.md' \\`,
         '  -H "X-Worker-Token: $TOKEN" \\',
         '  -H "Content-Type: application/json" \\',
-        '  -d \'{"delivery":"交付结果、代码仓库/分支、文档清单","problems":"问题与解决","detours":"弯路或验证过程","lessons":"经验总结","followUps":"遗留建议与待办","other":"其它信息"}\'',
+        "  -d '{}'",
         '```',
         '',
-        '4. 申请成功后任务进入「等待中-待验收」，由任务需求方决定通过、返工或失败。',
-        '5. 申请成功后必须在最终回复中向需求方告知以下内容：',
-        '   - 交付内容：完成了什么、具体交付物是什么；',
-        '   - 交付文档链接：使用申请验收接口返回的交付文档链接（原样使用返回的 url，不要自行拼接 .md）；',
-        '   - 其它需要告知的事项：遗留问题、使用限制、后续建议等，没有则写“无”。',
-        '6. 需求方拒绝后，平台会把反馈意见发回当前会话，按反馈修改后再次申请验收。',
+        '4. 申请成功后任务进入「等待中-待验收」，平台锁定当前交付文档版本，由任务需求方决定通过、返工或失败。',
+        '5. 申请成功后必须在最终回复中向需求方告知：交付内容、交付文档链接（使用申请接口返回的链接，原样使用）、遗留事项或后续建议（没有则写“无”）。',
+        '6. 需求方拒绝后，平台会把反馈意见发回当前会话；按反馈修改交付文档和交付物后再次申请验收。',
       ].join('\n'),
     );
     return sections.join('\n\n---\n\n');

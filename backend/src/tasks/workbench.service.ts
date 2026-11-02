@@ -30,6 +30,10 @@ import { TaskChatService } from './task-chat.service';
 import type { TaskChatQuestionInfo } from './task-chat.types';
 import { TaskCollaborationService } from './task-collaboration.service';
 import { TaskDeliveryService } from './task-delivery.service';
+import type {
+  TaskHandoffDocument,
+  TaskHandoffUpdateInput,
+} from './task-document.service';
 import { TaskDispatchService } from './task-dispatch.service';
 import type { TaskActor } from './task-requester';
 import { TasksService } from './tasks.service';
@@ -220,6 +224,57 @@ export class WorkbenchService {
     return this.tasks.findOneOrFail({ where: { id: taskId } });
   }
 
+  /** 工作台读取交付文档；参与者可看，编辑权限在更新时单独校验。 */
+  async getHandoff(user: User, taskId: number): Promise<TaskHandoffDocument> {
+    await this.handoffTaskAccess(user, taskId);
+    return this.deliveryService.getHandoff(taskId);
+  }
+
+  /** 需求方或真人执行者维护交付文档（版本冲突由服务层返回 409）。 */
+  async updateHandoff(
+    user: User,
+    taskId: number,
+    input: TaskHandoffUpdateInput,
+  ): Promise<TaskHandoffDocument> {
+    const { isRequester, isAgent } = await this.handoffTaskAccess(user, taskId);
+    if (!isRequester && !isAgent) {
+      throw new ForbiddenException('仅任务需求方或真人执行方可以编辑交付文档');
+    }
+    return this.deliveryService.updateHandoffByUser(taskId, user, input);
+  }
+
+  /** 工作台可见性：需求方、当前真人执行者、机器人负责人或接管人。 */
+  private async handoffTaskAccess(
+    user: User,
+    taskId: number,
+  ): Promise<{ task: Task; isRequester: boolean; isAgent: boolean }> {
+    const worker = await this.workersService.mustHumanWorker(user.id);
+    const personalAgent = await this.personalAgents.findForUser(user.id);
+    const task = await this.tasks.findOne({ where: { id: taskId } });
+    if (!task) throw new BadRequestException('任务不存在');
+    const isRequester =
+      (task.requesterType === 'worker' &&
+        (task.requesterId === worker.id ||
+          task.requesterId === personalAgent?.id)) ||
+      (task.requesterType === 'user' && task.requesterId === user.id) ||
+      (!task.requesterType && task.createdById === user.id);
+    const isAgent = task.agentId === worker.id;
+    const agent = task.agentId
+      ? await this.workers.findOne({
+          where: { id: task.agentId },
+          select: { id: true, ownerUserId: true },
+        })
+      : null;
+    const isOwner =
+      task.agentId === personalAgent?.id ||
+      agent?.ownerUserId === user.id ||
+      task.ownerTakeoverUserId === user.id;
+    if (!isRequester && !isAgent && !isOwner) {
+      throw new ForbiddenException('无权访问该任务的交付文档');
+    }
+    return { task, isRequester, isAgent };
+  }
+
   /** 真人向需求方提问 */
   askQuestion(
     user: User,
@@ -231,21 +286,21 @@ export class WorkbenchService {
     );
   }
 
-  /** 真人提交交付说明并申请验收（单输入框 Markdown，兼容旧的六字段） */
+  /** 真人申请验收：交付内容以任务交付文档为准，不再随申请弹窗提交。 */
   applyHandoff(
     user: User,
     taskId: number,
-    input: WorkbenchHandoffPayload,
+    input: WorkbenchHandoffPayload = {},
   ): Promise<Task> {
     const report = parseWorkbenchHandoff(input);
-    if (!report?.delivery) {
-      throw new BadRequestException('请填写交付内容');
-    }
     return this.withAgentWorker(user, taskId, async (worker) => {
       const applied = await this.dispatchService.applyForAcceptance(
         taskId,
         worker,
-        { requesterName: user.name ?? worker.name, report },
+        {
+          requesterName: user.name ?? worker.name,
+          report: report ?? undefined,
+        },
       );
       return applied.task;
     });

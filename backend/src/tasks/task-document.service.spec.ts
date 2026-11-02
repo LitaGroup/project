@@ -1,7 +1,7 @@
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
 import type { KnowledgeNode } from '../knowledge/knowledge.types';
 import type { KnowledgeService } from '../knowledge/knowledge.service';
-import type { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
 import { TaskDocumentService } from './task-document.service';
 
@@ -24,13 +24,16 @@ describe('TaskDocumentService 任务文档', () => {
       workPlan: '1. 开发\n2. 自测',
       result: '活动页已上线',
       agentId: 1001,
+      handoffPath: null,
+      handoffVersion: 0,
+      handoffSubmittedVersion: null,
+      handoffUpdatedAt: null,
+      handoffUpdatedBy: null,
       acceptedAt: new Date('2026-10-28T12:00:00+08:00'),
       deliveredAt: new Date('2026-10-28T12:00:00+08:00'),
       createdAt: new Date('2026-10-28T09:00:00+08:00'),
       ...over,
     }) as Task;
-
-  const worker = { id: 1001, name: '前端工程师' } as Worker;
 
   const node = (
     path: string,
@@ -42,7 +45,7 @@ describe('TaskDocumentService 任务文档', () => {
     path,
     parentPath: path.slice(0, path.lastIndexOf('/')),
     name: path.slice(path.lastIndexOf('/') + 1),
-    title: '旧任务总结',
+    title: '任务交付文档',
     content,
     source: 'native',
     sourceDocumentId: null,
@@ -54,7 +57,11 @@ describe('TaskDocumentService 任务文档', () => {
     updatedAt,
   });
 
-  let tasksRepo: { findOne: jest.Mock };
+  let currentTask: Task;
+  let tasksRepo: {
+    findOne: jest.Mock;
+    update: jest.Mock;
+  };
   let templatesRepo: { findOne: jest.Mock };
   let knowledge: {
     isEnabled: boolean;
@@ -69,7 +76,14 @@ describe('TaskDocumentService 任务文档', () => {
   let service: TaskDocumentService;
 
   beforeEach(() => {
-    tasksRepo = { findOne: jest.fn().mockResolvedValue(task()) };
+    currentTask = task();
+    tasksRepo = {
+      findOne: jest.fn(() => Promise.resolve(currentTask)),
+      update: jest.fn((_criteria: unknown, patch: Partial<Task>) => {
+        Object.assign(currentTask, patch);
+        return Promise.resolve({ affected: 1 });
+      }),
+    };
     templatesRepo = {
       findOne: jest.fn().mockResolvedValue({
         id: 11,
@@ -81,8 +95,22 @@ describe('TaskDocumentService 任务文档', () => {
       isEnabled: true,
       disabledMessage: '知识库不可用',
       findNodeByPath: jest.fn().mockResolvedValue(null),
-      createArticleAtPath: jest.fn().mockResolvedValue({}),
-      update: jest.fn().mockResolvedValue({}),
+      createArticleAtPath: jest
+        .fn()
+        .mockImplementation((input: { path: string; content: string }) =>
+          Promise.resolve(node(input.path, input.content)),
+        ),
+      update: jest
+        .fn()
+        .mockImplementation(
+          (id: string, patch: { content?: string; title?: string }) =>
+            Promise.resolve(
+              node(
+                id.startsWith('node:') ? id.slice(5) : id,
+                patch.content ?? '',
+              ),
+            ),
+        ),
       remove: jest.fn().mockResolvedValue(undefined),
       listArticlesByPrefix: jest.fn().mockResolvedValue([]),
       pruneEmptyDirectories: jest.fn().mockResolvedValue(0),
@@ -94,91 +122,161 @@ describe('TaskDocumentService 任务文档', () => {
     );
   });
 
-  it('生成 HANDOFF 交付文档（路径不带 .md 后缀）', async () => {
-    const result = await service.upsertHandoff({
-      task: task(),
-      result: '活动页已上线',
-      worker: { ...worker, ownerName: '王五' },
-      appliedAt: new Date('2026-10-28T15:30:00+08:00'),
-      requesterName: '张三',
-      report: {
-        delivery:
-          '交付活动页；代码仓库 LitaGroup/activity，分支 test；文档 /project/8/document/9',
-        problems: '接口字段缺失，补充后回归通过。',
-        detours: '首次使用了旧接口，切换到 v2。',
-        lessons: '开发前先确认接口版本。',
-        followUps: '后续补充埋点。',
-        other: '测试环境地址见项目文档。',
-      },
-    });
+  it('任务创建时生成 HANDOFF，正文为处理中占位且带版本 Frontmatter', async () => {
+    const result = await service.ensureHandoff(currentTask);
 
     expect(result.path).toBe('/task/20261028/TK-0001/HANDOFF');
     expect(result.url).toBe('/docs/detail/task/20261028/TK-0001/HANDOFF');
+    expect(result.version).toBe(1);
+    expect(result.content).toBe('> 正在处理中……');
     expect(knowledge.createArticleAtPath).toHaveBeenCalledWith(
       expect.objectContaining({
         path: '/task/20261028/TK-0001/HANDOFF',
         title: 'TK-0001 活动页开发 · 任务交付文档',
-        content: expect.stringContaining('活动页已上线') as string,
+        content: expect.stringContaining('version: "1"') as string,
       }),
     );
-    const created = knowledge.createArticleAtPath.mock.calls[0] as [
-      { content: string },
-    ];
-    const content = created[0].content;
-    expect(content).toContain('## 0、任务与责任');
-    expect(content).toContain('| 任务定义 | 前端任务定义 |');
-    expect(content).toContain('| 需求方 | 张三 |');
-    expect(content).toContain('| 机器人负责人 | 王五 |');
-    expect(content).toContain('负责 H5 页面开发与自测');
-    expect(content).toContain('## 1、需求说明');
-    expect(content).toContain('### 原始需求');
-    expect(content).toContain('### 分析后的需求');
-    expect(content).toContain('LitaGroup/activity，分支 test');
-    expect(content).toContain('## 3、实现问题与解决');
-    expect(content).toContain('## 4、弯路与经验复盘');
-    expect(content).toContain('## 5、遗留建议与后续待办');
-    expect(content).toContain('## 6、其它需要保留的信息');
-    expect(content).not.toContain('报告版本');
+    expect(currentTask.handoffPath).toBe('/task/20261028/TK-0001/HANDOFF');
+    expect(currentTask.handoffVersion).toBe(1);
   });
 
-  it('交付说明缺失时保留明确占位且不把分析需求冒充原始需求', async () => {
-    await service.upsertHandoff({
-      task: task({ input: null, description: '开发一个活动页', result: null }),
-      result: null,
-      worker,
-      appliedAt: new Date('2026-10-28T15:30:00+08:00'),
+  it('机器人提交完整正文时平台递增版本并覆盖 Frontmatter', async () => {
+    const path = '/task/20261028/TK-0001/HANDOFF';
+    currentTask = task({
+      handoffPath: path,
+      handoffVersion: 2,
+      handoffUpdatedAt: new Date('2026-10-28T10:00:00+08:00'),
+      handoffUpdatedBy: '前端机器人',
     });
-
-    const created = knowledge.createArticleAtPath.mock.calls[0] as [
-      { content: string },
-    ];
-    const content = created[0].content;
-    expect(content).toContain('原始输入未单独保存');
-    expect(content).toContain('（执行机器人未提交交付说明，记录中未体现）');
-    expect(content).toContain('（未记录实现问题与解决过程）');
-    expect(content).toContain('（无最终交付记录）');
-    expect(content).not.toContain('（暂无）');
-  });
-
-  it('同一天重新申请覆盖同一个 HANDOFF', async () => {
     knowledge.findNodeByPath.mockResolvedValue(
-      node('/task/20261028/TK-0001/HANDOFF'),
+      node(
+        path,
+        '---\nupdate: "2026-10-28 10:00:00"\ndocument: "HANDOFF"\ntask: "TK-0001"\nversion: "2"\n---\n\n旧正文',
+      ),
     );
-    await service.upsertHandoff({
-      task: task(),
-      result: '补充后的交付物',
-      worker,
-      appliedAt: new Date('2026-10-28T16:00:00+08:00'),
+
+    const result = await service.updateHandoff(1, {
+      baseVersion: 2,
+      content: '---\nversion: "99"\n---\n\n# 交付\n\n活动页已完成',
+      updatedBy: '张三',
     });
 
-    expect(knowledge.createArticleAtPath).not.toHaveBeenCalled();
-    expect(knowledge.update).toHaveBeenCalledWith(
-      'node:/task/20261028/TK-0001/HANDOFF',
-      expect.objectContaining({
-        title: 'TK-0001 活动页开发 · 任务交付文档',
-        content: expect.stringContaining('补充后的交付物') as string,
-      }),
+    expect(result.document.version).toBe(3);
+    expect(result.document.content).toBe('# 交付\n\n活动页已完成');
+    expect(result.document.updatedBy).toBe('张三');
+    const updated = knowledge.update.mock.calls[0] as [
+      string,
+      { content: string },
+    ];
+    expect(updated[1].content).toContain('version: "3"');
+    expect(updated[1].content).toContain('updated_by: "张三"');
+    expect(updated[1].content).toContain('活动页已完成');
+    expect(updated[1].content).not.toContain('version: "99"');
+  });
+
+  it('append 模式在保留现有正文的基础上追加进展', async () => {
+    const path = '/task/20261028/TK-0001/HANDOFF';
+    currentTask = task({ handoffPath: path, handoffVersion: 2 });
+    knowledge.findNodeByPath.mockResolvedValue(
+      node(path, '---\nversion: "2"\n---\n\n# 交付\n\n已完成登录页'),
     );
+
+    const result = await service.updateHandoff(1, {
+      append: '## 21:00 更新\n\n联调完成',
+      baseVersion: 2,
+      updatedBy: '机器人',
+    });
+
+    expect(result.document.version).toBe(3);
+    expect(result.document.content).toBe(
+      '# 交付\n\n已完成登录页\n\n## 21:00 更新\n\n联调完成',
+    );
+  });
+
+  it('正文没有变化时不递增版本，也不触发后续通知', async () => {
+    const path = '/task/20261028/TK-0001/HANDOFF';
+    currentTask = task({ handoffPath: path, handoffVersion: 2 });
+    knowledge.findNodeByPath.mockResolvedValue(
+      node(path, '---\nversion: "2"\n---\n\n# 交付\n\n已完成登录页'),
+    );
+
+    const result = await service.updateHandoff(1, {
+      content: '# 交付\n\n已完成登录页',
+      baseVersion: 2,
+      updatedBy: '张三',
+    });
+
+    expect(result.changed).toBe(false);
+    expect(result.document.version).toBe(2);
+    expect(knowledge.update).not.toHaveBeenCalled();
+  });
+
+  it('baseVersion 过期返回冲突，不覆盖别人的修改', async () => {
+    const path = '/task/20261028/TK-0001/HANDOFF';
+    currentTask = task({ handoffPath: path, handoffVersion: 3 });
+    knowledge.findNodeByPath.mockResolvedValue(
+      node(path, '---\nversion: "3"\n---\n\n人工补充内容'),
+    );
+
+    await expect(
+      service.updateHandoff(1, {
+        baseVersion: 2,
+        content: '旧版本覆盖',
+        updatedBy: '机器人',
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(knowledge.update).not.toHaveBeenCalled();
+  });
+
+  it('交付文档仍是处理中占位时不能申请验收', async () => {
+    const path = '/task/20261028/TK-0001/HANDOFF';
+    currentTask = task({ handoffPath: path, handoffVersion: 1 });
+    knowledge.findNodeByPath.mockResolvedValue(
+      node(path, '---\nversion: "1"\n---\n\n> 正在处理中……'),
+    );
+
+    await expect(service.prepareForAcceptance(currentTask)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(currentTask.handoffSubmittedVersion).toBeNull();
+  });
+
+  it('申请验收锁定当前交付文档版本', async () => {
+    const path = '/task/20261028/TK-0001/HANDOFF';
+    currentTask = task({
+      handoffPath: path,
+      handoffVersion: 4,
+      handoffUpdatedAt: new Date('2026-10-28T11:00:00+08:00'),
+    });
+    knowledge.findNodeByPath.mockResolvedValue(
+      node(path, '---\nversion: "4"\n---\n\n最终交付内容'),
+    );
+
+    const result = await service.prepareForAcceptance(currentTask);
+
+    expect(result.submittedVersion).toBe(4);
+    expect(currentTask.handoffSubmittedVersion).toBe(4);
+  });
+
+  it('待验收期间交付文档锁定', async () => {
+    const path = '/task/20261028/TK-0001/HANDOFF';
+    currentTask = task({
+      handoffPath: path,
+      handoffVersion: 2,
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ACCEPT,
+    });
+    knowledge.findNodeByPath.mockResolvedValue(
+      node(path, '---\nversion: "2"\n---\n\n交付内容'),
+    );
+
+    await expect(
+      service.updateHandoff(1, {
+        baseVersion: 2,
+        content: '待验收时修改',
+        updatedBy: '张三',
+      }),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('复盘固定使用验收日期中的 REVIEW', async () => {
@@ -190,6 +288,29 @@ describe('TaskDocumentService 任务文档', () => {
 
     expect(result.path).toBe('/task/20261028/TK-0001/REVIEW');
     expect(service.reviewPath(task())).toBe('/task/20261028/TK-0001/REVIEW');
+  });
+
+  it('旧版本历史任务文档自动登记为当前 HANDOFF', async () => {
+    knowledge.listArticlesByPrefix.mockResolvedValue([
+      node(
+        '/task/20261027/TK-0001/HANDOFF',
+        '旧版平台拼接的交付内容',
+        new Date('2026-10-27T10:00:00+08:00'),
+      ),
+    ]);
+
+    const result = await service.ensureHandoff(currentTask);
+
+    expect(result.path).toBe('/task/20261027/TK-0001/HANDOFF');
+    expect(result.content).toBe('旧版平台拼接的交付内容');
+    expect(result.version).toBe(1);
+    expect(currentTask.handoffPath).toBe('/task/20261027/TK-0001/HANDOFF');
+    expect(knowledge.update).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        content: expect.stringContaining('version: "1"') as string,
+      }),
+    );
   });
 
   it('旧版本文档迁移为最新版本 REVIEW 并清理其他版本', async () => {

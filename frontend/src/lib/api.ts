@@ -1278,6 +1278,14 @@ export interface TaskPackage {
   executorId: number | null
   opencodeSessionId: string | null
   result: string | null
+  /** 任务交付文档知识路径（任务创建时生成） */
+  handoffPath: string | null
+  /** 交付文档当前版本（平台维护） */
+  handoffVersion: number
+  /** 最近一次申请验收锁定的版本 */
+  handoffSubmittedVersion: number | null
+  handoffUpdatedAt: string | null
+  handoffUpdatedBy: string | null
   acceptedAt: string | null
   acceptedBy: string | null
   deliveredAt: string | null
@@ -1588,17 +1596,17 @@ export interface WorkbenchSummary {
   tasks: WorkbenchTask[]
 }
 
-/** 操作台交付说明（复用 HANDOFF/REVIEW 结构） */
-export interface WorkbenchHandoffInput {
-  /** 单输入框 Markdown 全文（可带固定小节标题，也兼容只写一段自由文本） */
-  content?: string | null
-  /** 以下字段保留兼容 */
-  delivery?: string | null
-  problems?: string | null
-  detours?: string | null
-  lessons?: string | null
-  followUps?: string | null
-  other?: string | null
+/** 任务交付文档（正文由作者维护，版本与更新时间由平台维护） */
+export interface TaskHandoffDocument {
+  path: string
+  url: string
+  title: string
+  version: number
+  submittedVersion: number | null
+  /** Markdown 正文，不含平台 Frontmatter */
+  content: string
+  updatedAt: string | null
+  updatedBy: string | null
 }
 
 /** 任务聊天 SSE 推送 */
@@ -2642,10 +2650,20 @@ export const api = {
       `/workbench/tasks/${id}/questions`,
       { method: 'POST', body: JSON.stringify({ questions }) },
     ),
-  workbenchApplyHandoff: (id: number, report: WorkbenchHandoffInput) =>
+  getWorkbenchHandoff: (id: number) =>
+    request<TaskHandoffDocument>(`/workbench/tasks/${id}/handoff`),
+  updateWorkbenchHandoff: (
+    id: number,
+    input: { content: string; baseVersion: number },
+  ) =>
+    request<TaskHandoffDocument>(`/workbench/tasks/${id}/handoff`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  workbenchApplyHandoff: (id: number) =>
     request<TaskPackage>(`/workbench/tasks/${id}/handoff/apply`, {
       method: 'POST',
-      body: JSON.stringify(report),
+      body: JSON.stringify({}),
     }),
   workbenchRevokeHandoff: (id: number) =>
     request<TaskPackage>(`/workbench/tasks/${id}/handoff/revoke`, {

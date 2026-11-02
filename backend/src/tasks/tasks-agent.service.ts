@@ -237,6 +237,9 @@ export class TasksAgentService {
       `- 创建时间：${beijingTime(task.createdAt)}`,
       `- 更新时间：${beijingTime(task.updatedAt)}`,
       task.assignedAt ? `- 分配时间：${beijingTime(task.assignedAt)}` : '',
+      task.handoffPath
+        ? `- 交付文档：[${task.handoffPath}](/api/tasks/${task.id}/handoff.md)（v${task.handoffVersion}${task.handoffSubmittedVersion ? `，已提交 v${task.handoffSubmittedVersion}` : ''}）`
+        : '',
       '',
       '## 任务描述',
       '',
@@ -298,6 +301,8 @@ export class TasksAgentService {
       '- 拒绝邀约：`POST /api/tasks/{id}/refuse.md`',
       '- 提问：`POST /api/tasks/{id}/questions/ask.md`',
       '- 答复：`POST /api/tasks/{id}/questions/{questionId}/answer.md`',
+      '- 交付文档：`GET /api/tasks/{id}/handoff.md`',
+      '- 更新交付文档：`POST /api/tasks/{id}/handoff/update.md`（body 带 `content` 与 `baseVersion`）',
       '- 申请验收：`POST /api/tasks/{id}/handoff/apply.md`',
       '- 验收通过：`POST /api/tasks/{id}/handoff/accept.md`',
       '- 验收返工：`POST /api/tasks/{id}/handoff/refuse.md`',

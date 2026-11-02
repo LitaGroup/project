@@ -85,6 +85,8 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 - 拒绝邀约：\`POST ${base}/tasks/{taskId}/refuse.md\`，body \`{"reason":"...","suggestion":"..."}\`
 - 向需求方提问：\`POST ${base}/tasks/{taskId}/questions/ask.md\`
 - 答复提问：\`POST ${base}/tasks/{taskId}/questions/{questionId}/answer.md\`
+- 交付文档：\`GET ${base}/tasks/{taskId}/handoff.md\`
+- 更新交付文档：\`POST ${base}/tasks/{taskId}/handoff/update.md\`（body 带完整 content 与 baseVersion）
 - 申请验收：\`POST ${base}/tasks/{taskId}/handoff/apply.md\`
 - 验收通过：\`POST ${base}/tasks/{taskId}/handoff/accept.md\`
 - 验收返工：\`POST ${base}/tasks/{taskId}/handoff/refuse.md\`

@@ -155,6 +155,26 @@ export class Task {
   @Column({ type: 'text', nullable: true })
   result: string | null;
 
+  /** 任务交付文档知识路径（任务创建时生成，HANDOFF 全生命周期固定） */
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  handoffPath: string | null;
+
+  /** 交付文档当前版本（平台维护，每次正文变更递增） */
+  @Column({ type: 'int', default: 0 })
+  handoffVersion: number;
+
+  /** 最近一次申请验收锁定的交付文档版本 */
+  @Column({ type: 'int', nullable: true })
+  handoffSubmittedVersion: number | null;
+
+  /** 交付文档最近更新时间 */
+  @Column({ type: 'timestamptz', nullable: true })
+  handoffUpdatedAt: Date | null;
+
+  /** 交付文档最近更新人快照 */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  handoffUpdatedBy: string | null;
+
   /** 责任人验收（→ 内部完成） */
   @Column({ type: 'timestamptz', nullable: true })
   acceptedAt: Date | null;

@@ -16,6 +16,11 @@ import { Task } from './task.entity';
 import type { TaskChatPerspective } from './task-chat.types';
 import type { TaskDeliveryReportInput } from './task-delivery-report';
 import { TaskDispatchService } from './task-dispatch.service';
+import {
+  TaskDocumentService,
+  type TaskHandoffDocument,
+  type TaskHandoffUpdateInput,
+} from './task-document.service';
 import { TaskHandoffService } from './task-handoff.service';
 import { TaskNotifyService } from './task-notify.service';
 import { TasksService } from './tasks.service';
@@ -59,6 +64,7 @@ export class TaskDeliveryService {
     private readonly workers: Repository<Worker>,
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
+    private readonly taskDocuments: TaskDocumentService,
     private readonly taskHandoff: TaskHandoffService,
     private readonly taskNotify: TaskNotifyService,
     private readonly workerInbox: TaskWorkerInboxService,
@@ -101,6 +107,7 @@ export class TaskDeliveryService {
       `- 执行机器人：${worker.name}（${worker.id}）`,
       `- 需求方：${requester ?? '未记录'}`,
       `- 交付文档：[${applied.handoff.path}](${applied.handoff.url})`,
+      `- 交付文档版本：v${applied.handoff.version}`,
       '',
       '## 交付物',
       '',
@@ -235,6 +242,165 @@ export class TaskDeliveryService {
         perspective === 'requester' ? (requesterWorker?.id ?? null) : null,
       perspective,
     });
+  }
+
+  /** 读取任务交付文档（包含平台维护的版本信息） */
+  async getHandoff(taskId: number): Promise<TaskHandoffDocument> {
+    const task = await this.mustFind(taskId);
+    return this.taskDocuments.readHandoff(task);
+  }
+
+  /** AI 读取交付文档：标准 Frontmatter + 作者正文。 */
+  async getHandoffMarkdown(taskId: number): Promise<string> {
+    const task = await this.mustFind(taskId);
+    const document = await this.taskDocuments.readHandoff(task);
+    return this.taskDocuments.renderHandoffMarkdown(task, document);
+  }
+
+  /** 执行机器人维护交付文档：只允许当前执行机器人且任务正在执行。 */
+  async updateHandoffByWorker(
+    taskId: number,
+    worker: Worker,
+    input: TaskHandoffUpdateInput,
+  ): Promise<TaskHandoffDocument> {
+    const task = await this.mustFind(taskId);
+    if (task.agentId !== worker.id) {
+      throw new ForbiddenException(
+        `任务 ${task.code} 的执行机器人不是「${worker.name}」`,
+      );
+    }
+    if (
+      task.status !== TaskStatus.RUNNING ||
+      task.subStatus !== TaskSubStatus.EXECUTING
+    ) {
+      throw new BadRequestException(
+        `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可更新交付文档`,
+      );
+    }
+    const result = await this.taskDocuments.updateHandoff(taskId, {
+      content: input.content,
+      append: input.append,
+      baseVersion: input.baseVersion,
+      updatedBy: input.updatedBy || worker.name,
+    });
+    if (result.changed) {
+      await this.recordHandoffUpdate(
+        result.task,
+        result.document,
+        worker.name,
+        'worker',
+      );
+    }
+    return result.document;
+  }
+
+  /**
+   * 需求方/真人执行者维护交付文档。
+   * 需求方修改后，平台把最新版本通知给 AI 执行机器人。
+   */
+  async updateHandoffByUser(
+    taskId: number,
+    actor: User,
+    input: TaskHandoffUpdateInput,
+  ): Promise<TaskHandoffDocument> {
+    const operator = actor.name ?? '需求方';
+    const result = await this.taskDocuments.updateHandoff(taskId, {
+      content: input.content,
+      append: input.append,
+      baseVersion: input.baseVersion,
+      updatedBy: operator,
+    });
+    if (result.changed) {
+      await this.recordHandoffUpdate(
+        result.task,
+        result.document,
+        operator,
+        'user',
+      );
+      await this.notifyAgentOfHandoffUpdate(
+        result.task,
+        result.document,
+        operator,
+      );
+    }
+    return result.document;
+  }
+
+  private async recordHandoffUpdate(
+    task: Task,
+    document: TaskHandoffDocument,
+    operator: string,
+    source: 'user' | 'worker',
+  ): Promise<void> {
+    await this.dispatchService.addEvent(
+      task.id,
+      '操作',
+      `交付文档更新至 v${document.version}（${source === 'user' ? '人工编辑' : '执行方编辑'}）`,
+      operator,
+      {
+        handoffPath: document.path,
+        handoffVersion: document.version,
+        handoffUpdatedBy: operator,
+        handoffUpdateSource: source,
+      },
+    );
+  }
+
+  /**
+   * 人工修改交付文档后告知执行机器人：
+   * - 执行中：进入当前会话的发送队列，本轮结束后读取最新版本
+   * - 待反馈/待继续：并入下一次恢复提示
+   */
+  private async notifyAgentOfHandoffUpdate(
+    task: Task,
+    document: TaskHandoffDocument,
+    operator: string,
+  ): Promise<void> {
+    if (!task.agentId) return;
+    const agent = await this.workers.findOne({
+      where: { id: task.agentId },
+      select: { id: true, runtime: true },
+    });
+    if (!agent || agent.runtime === WorkerRuntime.HUMAN) return;
+    const url = `${this.apiUrl}/tasks/${task.id}/handoff.md`;
+    const prompt = [
+      `需求方「${operator}」已将任务 ${task.code} 的交付文档更新到 v${document.version}。`,
+      `请先读取 ${url}，以最新正文为准，并保留需求方已经修改的内容。`,
+      '不要用旧版本覆盖人工修改；如无其它要求，继续完成当前任务并按需更新交付文档。',
+    ].join('\n');
+    if (
+      task.status === TaskStatus.RUNNING &&
+      task.subStatus === TaskSubStatus.EXECUTING
+    ) {
+      try {
+        await this.dispatchService.continueConversation(
+          task.id,
+          `需求方更新了交付文档（v${document.version}），请以最新版本为准。`,
+          operator,
+          { modelContent: prompt, perspective: 'requester' },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `任务 ${task.code} 交付文档变更通知机器人失败：${(error as Error).message}`,
+        );
+      }
+      return;
+    }
+    if (
+      task.status === TaskStatus.WAITING &&
+      [TaskSubStatus.PENDING_FEEDBACK, TaskSubStatus.PENDING_RESUME].includes(
+        task.subStatus,
+      )
+    ) {
+      await this.tasks.update(
+        { id: task.id, status: task.status, subStatus: task.subStatus },
+        {
+          resumePrompt: [task.resumePrompt?.trim(), prompt]
+            .filter(Boolean)
+            .join('\n\n'),
+        },
+      );
+    }
   }
 
   /** 验收通过（网页 JSON 接口）：仅任务需求方可操作，异步生成复盘并销毁会话 */

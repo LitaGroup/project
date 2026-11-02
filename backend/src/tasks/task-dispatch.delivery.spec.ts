@@ -40,7 +40,11 @@ describe('TaskDispatchService 显式申请验收', () => {
   };
   let taskNotify: { notifyTaskRequester: jest.Mock };
   let taskRealtime: { lineAppended: jest.Mock; taskChanged: jest.Mock };
-  let taskDocuments: { upsertHandoff: jest.Mock };
+  let taskDocuments: {
+    ensureHandoff: jest.Mock;
+    prepareForAcceptance: jest.Mock;
+    handoffPath: jest.Mock;
+  };
   let service: TaskDispatchService;
 
   beforeEach(() => {
@@ -74,12 +78,20 @@ describe('TaskDispatchService 显式申请验收', () => {
       lineAppended: jest.fn(),
       taskChanged: jest.fn(),
     };
+    const handoff = {
+      path: '/task/20261028/TK-0001/HANDOFF',
+      url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
+      title: 'TK-0001 活动页开发 · 任务交付文档',
+      version: 3,
+      submittedVersion: 3,
+      content: '# 任务交付文档\n\n活动页已完成',
+      updatedAt: '2026-10-28T10:00:00+08:00',
+      updatedBy: '前端工程师',
+    };
     taskDocuments = {
-      upsertHandoff: jest.fn().mockResolvedValue({
-        path: '/task/20261028/TK-0001/HANDOFF',
-        url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
-        title: 'TK-0001 活动页开发 · 任务交付',
-      }),
+      ensureHandoff: jest.fn().mockResolvedValue(handoff),
+      prepareForAcceptance: jest.fn().mockResolvedValue(handoff),
+      handoffPath: jest.fn().mockReturnValue('/task/20261028/TK-0001/HANDOFF'),
     };
     service = new TaskDispatchService(
       tasksRepo as never,
@@ -108,12 +120,13 @@ describe('TaskDispatchService 显式申请验收', () => {
       service as unknown as { buildPrompt(task: Task): Promise<string> }
     ).buildPrompt(baseTask());
 
-    expect(prompt).toContain('交付内容');
+    expect(prompt).toContain('交付文档（HANDOFF）');
+    expect(prompt).toContain('/tasks/1/handoff/update.md');
+    expect(prompt).toContain('当前版本：v3');
     expect(prompt).toContain('交付文档链接');
-    expect(prompt).toContain('其它需要告知的事项');
-    expect(prompt).toContain('结构化交付说明');
-    expect(prompt).toContain('代码交付必须写仓库和分支');
-    expect(prompt).toContain('followUps');
+    expect(prompt).toContain('遗留事项或后续建议');
+    expect(prompt).toContain('代码交付写仓库与分支');
+    expect(prompt).toContain('不要提交 YAML Frontmatter');
     expect(prompt).toContain('Content-Type: application/json');
   });
 
@@ -134,13 +147,9 @@ describe('TaskDispatchService 显式申请验收', () => {
     expect(saved.result).toBe('活动页已完成');
     expect(saved.remindCount).toBe(1);
     expect(applied.handoff.path).toBe('/task/20261028/TK-0001/HANDOFF');
-    expect(taskDocuments.upsertHandoff).toHaveBeenCalledWith(
-      expect.objectContaining({
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        task: expect.objectContaining({ id: 1 }),
-        result: '活动页已完成',
-        worker,
-      }),
+    expect(applied.handoff.version).toBe(3);
+    expect(taskDocuments.prepareForAcceptance).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
     );
     expect(eventsRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -158,7 +167,7 @@ describe('TaskDispatchService 显式申请验收', () => {
     expect(taskChat.finishTask).toHaveBeenCalledWith(1);
   });
 
-  it('申请验收把结构化交付说明与需求方写入交付文档和事件快照', async () => {
+  it('申请验收记录文档版本，旧结构化说明仍作为复盘快照兼容', async () => {
     tasksRepo.findOne.mockResolvedValue(baseTask());
 
     await service.applyForAcceptance(1, worker, {
@@ -173,22 +182,14 @@ describe('TaskDispatchService 显式申请验收', () => {
       },
     });
 
-    expect(taskDocuments.upsertHandoff).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requesterName: '张三',
-        report: expect.objectContaining({
-          delivery: '代码 LitaGroup/activity#test，文档 /project/8/document/9',
-          problems: '接口字段缺失，补充后通过',
-          followUps: '补充埋点',
-        }) as unknown,
-      }),
-    );
+    expect(taskDocuments.prepareForAcceptance).toHaveBeenCalled();
     const savedEvent = (
       eventsRepo.save.mock.calls as Array<[{ meta: Record<string, unknown> }]>
     )[0][0];
     expect(savedEvent.meta).toMatchObject({
       deliveryApply: true,
       handoffRequester: '张三',
+      handoffVersion: 3,
       handoffReport: {
         delivery: '代码 LitaGroup/activity#test，文档 /project/8/document/9',
         lessons: '先确认接口版本',
@@ -207,8 +208,8 @@ describe('TaskDispatchService 显式申请验收', () => {
   it('交付文档写入失败时不进入待验收', async () => {
     const task = baseTask();
     tasksRepo.findOne.mockResolvedValue(task);
-    taskDocuments.upsertHandoff.mockRejectedValue(
-      new Error('知识库不可用，无法生成任务文档'),
+    taskDocuments.prepareForAcceptance.mockRejectedValue(
+      new Error('知识库不可用，无法读取任务文档'),
     );
 
     await expect(service.applyForAcceptance(1, worker)).rejects.toThrow(

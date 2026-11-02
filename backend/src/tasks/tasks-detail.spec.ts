@@ -47,6 +47,7 @@ describe('TasksService 任务详情与对话', () => {
     interrupt: jest.Mock;
     discardQueuedConversations: jest.Mock;
   };
+  let taskDocuments: { initializeHandoff: jest.Mock };
   let service: TasksService;
 
   beforeEach(() => {
@@ -73,6 +74,9 @@ describe('TasksService 任务详情与对话', () => {
       interrupt: jest.fn().mockResolvedValue(baseTask()),
       discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
     };
+    taskDocuments = {
+      initializeHandoff: jest.fn().mockResolvedValue(null),
+    };
     service = new TasksService(
       tasksRepo as never,
       eventsRepo as never,
@@ -89,6 +93,7 @@ describe('TasksService 任务详情与对话', () => {
         enqueue: jest.fn(),
       } as never,
       { taskChanged: jest.fn() } as never,
+      taskDocuments as never,
     );
   });
 
@@ -202,6 +207,48 @@ describe('TasksService 任务详情与对话', () => {
     expect(created.templateId).toBe(3);
     expect(created.templateName).toBe('前端任务定义');
     expect(created.code).toBe('TK-0005');
+    expect(taskDocuments.initializeHandoff).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 5 }),
+    );
+  });
+
+  it('创建任务时返回已生成的交付文档版本', async () => {
+    tasksRepo.save.mockImplementation((task: Task) => {
+      if (!task.id) task.id = 6;
+      return Promise.resolve(task);
+    });
+    taskDocuments.initializeHandoff.mockImplementation((task: Task) => {
+      task.handoffPath = '/task/20261028/TK-0006/HANDOFF';
+      task.handoffVersion = 1;
+      return Promise.resolve({
+        path: task.handoffPath,
+        url: '/docs/detail/task/20261028/TK-0006/HANDOFF',
+        title: 'TK-0006 新任务 · 任务交付文档',
+        version: 1,
+        submittedVersion: null,
+        content: '> 正在处理中……',
+        updatedAt: '2026-10-28T10:00:00+08:00',
+        updatedBy: '系统',
+      });
+    });
+
+    const created = await service.create({
+      description: '新任务描述',
+      createdById: 8,
+    });
+
+    expect(created.handoffPath).toBe('/task/20261028/TK-0006/HANDOFF');
+    expect(created.handoffVersion).toBe(1);
+    expect(dispatchService.addEvent).toHaveBeenCalledWith(
+      6,
+      '操作',
+      expect.any(String),
+      null,
+      expect.objectContaining({
+        handoffPath: '/task/20261028/TK-0006/HANDOFF',
+        handoffVersion: 1,
+      }),
+    );
   });
 
   it('曾申请验收的任务返工后仍可验收', async () => {

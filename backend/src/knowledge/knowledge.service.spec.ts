@@ -122,6 +122,31 @@ describe('KnowledgeService.search', () => {
     expect(node.path).toContain('/task/handoff/');
   });
 
+  it('文章自带 Frontmatter 时不再重复前置平台元信息', () => {
+    const content =
+      '---\nupdate: "2026-11-02 10:00:00"\ndocument: "HANDOFF"\nversion: "3"\n---\n\n# 交付';
+    const markdown = service.renderArticleMarkdown({
+      id: 'n3',
+      kind: 'article',
+      path: '/task/20261102/TK-0001/HANDOFF',
+      parentPath: '/task/20261102/TK-0001',
+      name: 'HANDOFF',
+      title: '任务交付文档',
+      content,
+      source: 'native',
+      sourceDocumentId: null,
+      contentHash: 'h',
+      indexStatus: 'ready',
+      indexError: null,
+      indexAttempts: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    expect(markdown).toBe(`${content}\n`);
+    expect(markdown.match(/^---$/gm)).toHaveLength(2);
+  });
+
   it('pageSize 最大 100，关键词最多 500 字', async () => {
     await expect(
       service.search({ query: '部署', pageSize: 101 }),

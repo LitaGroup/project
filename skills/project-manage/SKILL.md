@@ -553,22 +553,44 @@ curl -X POST {BASE}/api/tasks/{taskId}/questions/{questionId}/answer.md \
 - 提问使用 project 生成的问题 ID，不再依赖 opencode 原生 question；答复后任务进入待继续，LOOP 空闲时恢复
 - 人类需求方使用 `X-Agent-Token`，机器人需求方使用 `X-Worker-Token`；跳过答复用 `{"reject":true}`
 
-### 12.4 task-handoff-apply：执行机器人申请验收
+### 12.4 task-handoff-read / task-handoff-update：维护交付文档
+
+任务创建时就生成 `HANDOFF` 交付文档，执行机器人应在执行过程中持续维护，便于需求方实时查看。
+
+```bash
+# 读取当前正文与 Frontmatter（version 为平台维护的当前版本）
+curl -X GET {BASE}/api/tasks/{taskId}/handoff.md \
+  -H "X-Worker-Token: $TOKEN"
+
+# 提交完整正文；baseVersion 必须是本次读取到的 version
+curl -X POST {BASE}/api/tasks/{taskId}/handoff/update.md \
+  -H "X-Worker-Token: $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"baseVersion":3,"content":"# 任务交付文档\n\n## 当前进展\n\n...\n\n## 最终交付\n\n..."}'
+```
+
+- 只允许执行中的当前机器人更新；正文完全由机器人根据任务内容、任务定义和实际进展编写，平台不拼接固定章节
+- `content` 是完整正文；需要快速追加进展时可用 `append` 代替 `content`
+- 不要提交 YAML Frontmatter，平台会自动写入 `document/task/version/updated_by/update`
+- 开始处理后可先替换“正在处理中”，每个重要阶段更新一次；申请验收前必须是最终内容
+- 返回 `409` 表示需求方或其他人已更新文档，必须重新读取最新正文，保留人工修改后再合并提交
+- 平台维护版本号；需求方人工修改后会收到包含新版本号的通知，按通知读取最新版本并继续
+
+### 12.5 task-handoff-apply：执行机器人申请验收
 
 ```bash
 curl -X POST {BASE}/api/tasks/{taskId}/handoff/apply.md \
   -H "X-Worker-Token: $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"delivery":"交付结果、代码仓库/分支、文档清单","problems":"问题与解决","detours":"走过的弯路","lessons":"经验总结","followUps":"遗留建议与待办","other":"其它信息"}'
+  -d '{}'
 ```
 
-- 只允许执行中的当前机器人；平台先生成/覆盖 `HANDOFF` 交付文档，再保存产出并进入待验收
-- 交付说明六个字段均可选（旧版无 body 调用兼容），但没有的内容应明确写“无”，不得编造；代码交付必须写仓库和分支，文档交付必须写名称及路径/链接
-- 会话成功不会自动申请验收；交付文档写入失败时任务保持执行中
-- 交付文档统一按「任务与责任 / 需求说明 / 交付内容 / 实现问题与解决 / 弯路与经验复盘 / 遗留建议与待办 / 其它」组织；申请验收时的交付说明会随事件留存，验收通过后用于生成 `REVIEW` 复盘
+- 只允许执行中的当前机器人；平台校验交付文档已有有效正文并锁定当前版本，然后进入待验收
+- 申请验收不会重新生成交付文档；待验收期间文档锁定，撤销交付或验收返工后才能继续编辑
+- 会话成功不会自动申请验收；交付文档没有有效内容或写入失败时任务保持执行中
 - 申请成功后必须在最终回复中告知需求方：交付内容、申请接口返回的交付文档链接（原样使用，不要自行拼接 `.md`）、其它需要告知的事项（没有则写“无”）
 
-### 12.5 task-handoff-accept / task-handoff-refuse：需求方验收
+### 12.6 task-handoff-accept / task-handoff-refuse：需求方验收
 
 ```bash
 # 通过：完成，异步生成 REVIEW 复盘文档并销毁执行会话
@@ -586,7 +608,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/handoff/refuse.md \
 - 累计第 1～3 次返工退回原机器人，第 4 次起转执行机器人负责人处理
 - 返工消息会明确携带退回原因，并提示：修改完成后如需继续验收，必须重新调用 `handoff/apply.md`；此前的验收申请已失效，不能视为新一轮交付已申请验收
 
-### 12.6 task-fail：需求方判定失败
+### 12.7 task-fail：需求方判定失败
 
 ```bash
 curl -X POST {BASE}/api/tasks/{taskId}/fail.md \
@@ -597,7 +619,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/fail.md \
 - 仅允许需求方在待验收阶段调用，失败原因必填，任务进入已结束-失败
 - 旧 `deliver/apply.md` 与 `deliver/reply.md` 暂时保留兼容，新机器人统一使用上述 handoff 接口
 
-### 12.7 工单调度：读取上下文并转交任务定义
+### 12.8 工单调度：读取上下文并转交任务定义
 
 工单创建后会生成类型为「工单」的任务，并固定由该工单类型绑定的系统调度定义处理（ID 10-15）。调度机器人负责澄清需求，再把当前任务转交给管理员配置的后续任务定义。
 

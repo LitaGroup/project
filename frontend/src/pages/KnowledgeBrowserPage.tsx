@@ -42,10 +42,16 @@ import {
 } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { MarkdownEditor, type MarkdownEditorHandle } from '../components/MarkdownEditor'
+import { splitFrontmatter } from '../lib/doc-frontmatter'
 
 interface KnowledgeLocation {
   path: string
   directory: boolean
+}
+
+/** 任务交付文档/复盘文档由任务中心维护，知识库只读展示 */
+function isTaskDocumentPath(path: string): boolean {
+  return path === '/task' || path.startsWith('/task/')
 }
 
 /** 从 /docs/detail/... 解析路径；逐段解码并拒绝编码斜杠 */
@@ -172,6 +178,7 @@ function KnowledgeDirectoryView({
   onChanged: () => void
 }) {
   const total = directory.directories.length + directory.articles.length
+  const managedByTaskCenter = isTaskDocumentPath(directory.path)
   return (
     <div className="flex h-full min-h-0 gap-5">
       <aside className="w-56 shrink-0 border-r border-border-strong pr-4">
@@ -213,16 +220,24 @@ function KnowledgeDirectoryView({
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <CreateKnowledgeDialog
-              kind="directory"
-              parentPath={directory.path}
-              onSaved={onChanged}
-            />
-            <CreateKnowledgeDialog
-              kind="article"
-              parentPath={directory.path}
-              onSaved={onChanged}
-            />
+            {managedByTaskCenter ? (
+              <span className="text-xs text-foreground-muted">
+                任务文档由任务中心维护
+              </span>
+            ) : (
+              <>
+                <CreateKnowledgeDialog
+                  kind="directory"
+                  parentPath={directory.path}
+                  onSaved={onChanged}
+                />
+                <CreateKnowledgeDialog
+                  kind="article"
+                  parentPath={directory.path}
+                  onSaved={onChanged}
+                />
+              </>
+            )}
           </div>
         </div>
 
@@ -254,7 +269,13 @@ function KnowledgeDirectoryView({
                   {new Date(node.updatedAt).toLocaleString()}
                 </TableCell>
                 <TableCell className="text-center">
-                  <DeleteKnowledgeButton node={node} onDeleted={onChanged} />
+                  {isTaskDocumentPath(node.path) ? (
+                    <span className="text-xs text-foreground-muted">
+                      任务中心维护
+                    </span>
+                  ) : (
+                    <DeleteKnowledgeButton node={node} onDeleted={onChanged} />
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -277,7 +298,11 @@ function KnowledgeDirectoryView({
                   {new Date(node.updatedAt).toLocaleString()}
                 </TableCell>
                 <TableCell className="text-center">
-                  {node.source === 'native' ? (
+                  {isTaskDocumentPath(node.path) ? (
+                    <span className="text-xs text-foreground-muted">
+                      任务中心维护
+                    </span>
+                  ) : node.source === 'native' ? (
                     <DeleteKnowledgeButton node={node} onDeleted={onChanged} />
                   ) : (
                     <span className="text-xs text-foreground-muted">系统同步</span>
@@ -310,13 +335,19 @@ function KnowledgeArticleView({
   onChanged: () => void
 }) {
   const navigate = useNavigate()
+  const managedByTaskCenter = isTaskDocumentPath(article.path)
+  const editable = article.source === 'native' && !managedByTaskCenter
+  const taskFrontmatter = managedByTaskCenter
+    ? splitFrontmatter(article.content ?? '')
+    : null
   const [title, setTitle] = useState(article.title)
-  const [content, setContent] = useState(article.content ?? '')
+  const [content, setContent] = useState(
+    taskFrontmatter?.body ?? article.content ?? '',
+  )
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const editorRef = useRef<MarkdownEditorHandle>(null)
-  const editable = article.source === 'native'
 
   const save = () => {
     setSaving(true)
@@ -353,7 +384,11 @@ function KnowledgeArticleView({
           <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-xs text-foreground-muted">
             <span>{article.path}</span>
             <Badge variant={editable ? 'soft' : 'secondary'}>
-              {editable ? '知识文章' : '项目文档同步'}
+              {managedByTaskCenter
+                ? '任务文档'
+                : editable
+                  ? '知识文章'
+                  : '项目文档同步'}
             </Badge>
             <span>更新于 {new Date(article.updatedAt).toLocaleString()}</span>
           </div>
@@ -393,6 +428,16 @@ function KnowledgeArticleView({
         </div>
       </div>
       {error && <p className="text-sm">保存失败：{error}</p>}
+      {taskFrontmatter && taskFrontmatter.entries.length > 0 && (
+        <div className="flex flex-wrap gap-x-5 gap-y-1 rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-xs text-foreground-muted">
+          {taskFrontmatter.entries.map((entry) => (
+            <span key={entry.key}>
+              <span className="text-foreground-subtle">{entry.key}：</span>
+              {entry.value}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-background">
         {/* 正文超出一屏时在面板内滚动：外层 overflow-hidden 只负责圆角裁剪 */}
         <div className="md-editor-scroll min-h-0 flex-1">
@@ -411,7 +456,9 @@ function KnowledgeArticleView({
       </div>
       {!editable && (
         <p className="text-sm text-foreground-muted">
-          项目文档正文由文档模块同步，请在原文档中修改；此处只读并参与知识检索。
+          {managedByTaskCenter
+            ? '任务交付/复盘文档由任务中心维护：请在任务工作台编辑交付文档，验收后生成的复盘文档只读。'
+            : '项目文档正文由文档模块同步，请在原文档中修改；此处只读并参与知识检索。'}
         </p>
       )}
     </div>

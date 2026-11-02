@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -47,6 +48,13 @@ class WorkbenchHandoffDto implements TaskDeliveryReportInput {
   lessons?: string | null;
   followUps?: string | null;
   other?: string | null;
+}
+
+class WorkbenchHandoffUpdateDto {
+  /** 完整 Markdown 正文（不含平台维护的 Frontmatter） */
+  content?: string;
+  /** 读取文档时的版本号，用于冲突检测 */
+  baseVersion?: number;
 }
 
 class WorkbenchSubtaskDto {
@@ -311,6 +319,26 @@ export class WorkbenchController {
       id,
       dto.questions ?? [],
     );
+  }
+
+  /** 读取交付文档（正文 + 当前版本） */
+  @Get('tasks/:id/handoff')
+  getHandoff(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number) {
+    return this.workbench.getHandoff(this.requireUser(req), id);
+  }
+
+  /** 需求方/真人执行者更新交付文档 */
+  @Patch('tasks/:id/handoff')
+  updateHandoff(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: WorkbenchHandoffUpdateDto,
+  ) {
+    return this.workbench.updateHandoff(this.requireUser(req), id, {
+      content: dto.content ?? '',
+      baseVersion: Number(dto.baseVersion),
+      updatedBy: this.requireUser(req).name ?? '需求方',
+    });
   }
 
   /** 申请验收 */

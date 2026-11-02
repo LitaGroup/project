@@ -543,7 +543,6 @@ export class TaskHandoffService {
     const endAt = task.acceptedAt ?? task.deliveredAt;
     const definitionName = input.definition.name ?? task.templateName;
     return renderTaskDocument({
-      kind: 'review',
       task,
       path: input.path,
       generatedAt: input.generatedAt,

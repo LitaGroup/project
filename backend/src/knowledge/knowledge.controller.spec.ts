@@ -147,6 +147,21 @@ describe('KnowledgeController routes', () => {
       expect(res.text).toBe('# 已创建');
     });
 
+    it('任务文档禁止从通用知识接口直接修改', async () => {
+      service.getNodeByPath.mockResolvedValue({
+        ...node,
+        path: '/task/20261102/TK-0001/HANDOFF',
+      });
+      await request(app.getHttpServer() as Server)
+        .post('/api/docs/nodes/update.md')
+        .send({
+          path: '/task/20261102/TK-0001/HANDOFF',
+          content: '绕过任务中心直接改版本',
+        })
+        .expect(403);
+      expect(service.update).not.toHaveBeenCalled();
+    });
+
     it('按当前路径更新并支持移动', async () => {
       service.getNodeByPath.mockResolvedValue(node);
       service.update.mockResolvedValue({ ...node, path: '/manual/deploy' });

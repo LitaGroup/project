@@ -9,7 +9,6 @@ export interface TaskDocumentStats {
 }
 
 export interface TaskDocumentRenderInput {
-  kind: 'handoff' | 'review';
   task: Task;
   path: string;
   generatedAt: Date;
@@ -27,7 +26,6 @@ export interface TaskDocumentRenderInput {
   result: string | null;
   /** 机器人提交/总结的交付与复盘内容 */
   report: TaskDeliveryReport;
-  /** REVIEW 专属 */
   acceptedAt?: Date | null;
   acceptedBy?: string | null;
   stats?: TaskDocumentStats;
@@ -49,16 +47,13 @@ function escapeCell(
 }
 
 /**
- * HANDOFF / REVIEW 共用同一信息架构：
+ * REVIEW 复盘文档：
  * 0 任务与责任 → 1 需求说明 → 2 交付内容 → 3 问题与解决
- * → 4 弯路与经验 → 5 遗留建议 → 6 其它；REVIEW 末尾附任务统计。
+ * → 4 弯路与经验 → 5 遗留建议 → 6 其它，末尾附任务统计。
+ * HANDOFF 由执行方在任务期间自行维护，平台不再拼接固定章节。
  */
 export function renderTaskDocument(input: TaskDocumentRenderInput): string {
   const { task, report } = input;
-  const title =
-    input.kind === 'handoff'
-      ? `${task.code} ${task.title} · 任务交付文档`
-      : `${task.code} ${task.title} · 任务复盘`;
   const originalInput = task.input?.trim() || task.description?.trim() || '';
   const originalNote =
     !task.input?.trim() && task.description?.trim()
@@ -67,30 +62,20 @@ export function renderTaskDocument(input: TaskDocumentRenderInput): string {
   const workerLabel = input.workerName
     ? `${input.workerName}${input.workerId ? `（${input.workerId}）` : ''}`
     : '未记录';
-  const responsibilityRows =
-    input.kind === 'handoff'
-      ? [
-          `| 申请验收时间 | ${beijingTime(input.generatedAt)} |`,
-          `| 累计验收不通过 | ${task.acceptRejectCount ?? 0} 次 |`,
-        ]
-      : [
-          `| 验收时间 | ${
-            input.acceptedAt ? beijingTime(input.acceptedAt) : '未记录'
-          } |`,
-          `| 验收人 | ${escapeCell(input.acceptedBy)} |`,
-          `| 累计验收不通过 | ${task.acceptRejectCount ?? 0} 次 |`,
-        ];
+  const responsibilityRows = [
+    `| 验收时间 | ${
+      input.acceptedAt ? beijingTime(input.acceptedAt) : '未记录'
+    } |`,
+    `| 验收人 | ${escapeCell(input.acceptedBy)} |`,
+    `| 累计验收不通过 | ${task.acceptRejectCount ?? 0} 次 |`,
+  ];
 
   const lines = [
-    `# ${title}`,
+    `# ${task.code} ${task.title} · 任务复盘`,
     '',
-    input.kind === 'handoff'
-      ? `> 文档类型：任务交付 ｜ 申请验收时间：${beijingTime(
-          input.generatedAt,
-        )} ｜ 执行机器人：${workerLabel} ｜ 文档路径：\`${input.path}\``
-      : `> 文档类型：任务复盘 ｜ 生成时间：${beijingTime(
-          input.generatedAt,
-        )} ｜ 归档路径：\`${input.path}\``,
+    `> 文档类型：任务复盘 ｜ 生成时间：${beijingTime(
+      input.generatedAt,
+    )} ｜ 归档路径：\`${input.path}\``,
     '',
     '## 0、任务与责任',
     '',
@@ -169,7 +154,7 @@ export function renderTaskDocument(input: TaskDocumentRenderInput): string {
     '',
   ];
 
-  if (input.kind === 'review' && input.stats) {
+  if (input.stats) {
     lines.push(
       '## 附录：任务统计',
       '',

@@ -58,7 +58,8 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 - 待接受 → 已拒绝：任务不匹配自己的职责时，只能在待接受阶段调用 task-refuse，必须填写拒绝理由 reason，并尽量给出发送建议 suggestion（推荐任务定义、任务类型或机器人）。不得接受后再拒绝，也不得把不匹配任务转交他人代替拒绝接口。
 - 执行中 → 待反馈：需要需求方澄清时调用 task-question-ask，由 project 创建和展示提问；不要使用 opencode 原生 question。调用后停止本轮，等待平台恢复。
 - 待反馈 → 待继续 → 执行中：需求方答复后，平台在机器人空闲时恢复原任务会话。
-- 执行中 → 待验收：完成、自检并准备好交付物后调用 task-handoff-apply；会话结束不等于完成，未申请验收会一直保持执行中。
+- 执行中维护交付文档：任务创建时就生成 HANDOFF，执行过程中持续调用 task-handoff-update 写入当前进展和最终交付内容，便于需求方实时查看。
+- 执行中 → 待验收：完成、自检并准备好交付物后调用 task-handoff-apply；申请验收只锁定当前交付文档版本，会话结束不等于完成，未申请验收会一直保持执行中。
 - 待验收 → 完成/待继续或执行中/失败：只能由任务需求方分别调用 task-handoff-accept、task-handoff-refuse 或 task-fail。机器人不得代替需求方验收或判失败。
 
 ### 创建与处理子任务
@@ -83,6 +84,8 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 - task-refuse：POST /api/tasks/{taskId}/refuse.md
 - task-question-ask：POST /api/tasks/{taskId}/questions/ask.md
 - task-question-answer：POST /api/tasks/{taskId}/questions/{questionId}/answer.md
+- task-handoff-read：GET /api/tasks/{taskId}/handoff.md
+- task-handoff-update：POST /api/tasks/{taskId}/handoff/update.md
 - task-handoff-apply：POST /api/tasks/{taskId}/handoff/apply.md
 - task-handoff-accept：POST /api/tasks/{taskId}/handoff/accept.md
 - task-handoff-refuse：POST /api/tasks/{taskId}/handoff/refuse.md
