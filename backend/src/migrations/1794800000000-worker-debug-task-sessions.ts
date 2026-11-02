@@ -1,7 +1,6 @@
 import {
   MigrationInterface,
   QueryRunner,
-  TableColumn,
   TableIndex,
 } from 'typeorm';
 
@@ -18,29 +17,18 @@ export class WorkerDebugTaskSessions1794800000000 implements MigrationInterface 
     if (!table) return;
 
     if (!(await queryRunner.hasColumn('worker_debug_sessions', 'contextKey'))) {
-      await queryRunner.addColumn(
-        'worker_debug_sessions',
-        new TableColumn({
-          name: 'contextKey',
-          type: 'varchar',
-          length: '120',
-          isNullable: false,
-          default: 'debug',
-        }),
+      // 字面量默认值走原生 SQL：TypeORM 的 TableColumn default 按裸 SQL 表达式嵌入，
+      // 纯字符串 'debug' 会生成 DEFAULT debug（列引用），PG 报 cannot use column
+      // reference；函数写法在本版本 addColumn 路径也不被调用。与 17943/17950 同风格。
+      await queryRunner.query(
+        `ALTER TABLE "worker_debug_sessions" ADD COLUMN "contextKey" varchar(120) NOT NULL DEFAULT 'debug'`,
       );
     }
     if (
       !(await queryRunner.hasColumn('worker_debug_sessions', 'activeAgent'))
     ) {
-      await queryRunner.addColumn(
-        'worker_debug_sessions',
-        new TableColumn({
-          name: 'activeAgent',
-          type: 'varchar',
-          length: '20',
-          isNullable: false,
-          default: 'build',
-        }),
+      await queryRunner.query(
+        `ALTER TABLE "worker_debug_sessions" ADD COLUMN "activeAgent" varchar(20) NOT NULL DEFAULT 'build'`,
       );
     }
 
