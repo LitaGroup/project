@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Table,
   TableHeader,
@@ -74,28 +74,52 @@ function validateName(value: string): string | null {
 export function TaskTypesPage() {
   const [types, setTypes] = useState<TaskTypeDef[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
   const [scopeFilter, setScopeFilter] = useState('all')
+  /** 列表请求序号：只采用最后一次请求的结果，避免旧响应把已删除的行写回列表 */
+  const reloadSeq = useRef(0)
 
-  const reload = useCallback(() => {
-    api
-      .listTaskTypes()
-      .then((list) => {
-        setTypes(list)
-        setError(null)
-      })
-      .catch((e: Error) => setError(e.message))
+  /** 拉取服务端列表；失败或响应已过期时返回 null，由调用方决定是否保留本地数据 */
+  const reload = useCallback(async (): Promise<TaskTypeDef[] | null> => {
+    const seq = ++reloadSeq.current
+    try {
+      const list = await api.listTaskTypes()
+      if (seq !== reloadSeq.current) return null
+      setTypes(list)
+      setError(null)
+      return list
+    } catch (e) {
+      if (seq !== reloadSeq.current) return null
+      setError((e as Error).message)
+      return null
+    }
   }, [])
 
   useEffect(() => {
-    reload()
+    void reload()
   }, [reload])
 
-  /** 删除成功后先本地移除（弹窗关闭即看到行消失），再拉取列表核对 */
+  /**
+   * 删除成功后先本地移除，再以服务端列表回查：
+   * 只有回查结果确认该类型不存在才提示删除成功；回查失败或仍有该类型时提示错误，避免假成功。
+   */
   const handleDeleted = useCallback(
-    (id: number) => {
-      setTypes((prev) => (prev ? prev.filter((type) => type.id !== id) : prev))
-      reload()
+    async (deleted: TaskTypeDef) => {
+      setError(null)
+      setNotice(null)
+      setTypes((prev) =>
+        prev ? prev.filter((type) => type.id !== deleted.id) : prev,
+      )
+      const list = await reload()
+      if (!list) return
+      if (list.some((type) => type.id === deleted.id)) {
+        setError(
+          `删除「${deleted.name}」后服务端仍返回该类型，请刷新页面重试`,
+        )
+        return
+      }
+      setNotice(`已删除任务类型「${deleted.name}」`)
     },
     [reload],
   )
@@ -131,7 +155,20 @@ export function TaskTypesPage() {
         </div>
         <TypeFormDialog onSaved={reload} />
       </div>
-      {error && <p className="text-sm">操作失败:{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-error-foreground">
+          操作失败:{error}
+        </p>
+      )}
+      {notice && !error && (
+        <p
+          role="status"
+          aria-live="polite"
+          className="text-sm text-success-foreground"
+        >
+          {notice}
+        </p>
+      )}
 
       <Toolbar aria-label="任务类型筛选">
         <ToolbarInput
@@ -337,7 +374,7 @@ function DeleteTypeButton({
   onDeleted,
 }: {
   type: TaskTypeDef
-  onDeleted: (id: number) => void
+  onDeleted: (type: TaskTypeDef) => void
 }) {
   const isSystem = SYSTEM_TASK_TYPE_NAMES.has(type.name)
   const [open, setOpen] = useState(false)
@@ -359,7 +396,7 @@ function DeleteTypeButton({
       .then(() => {
         // 成功后再关闭弹窗并移除行，避免请求失败但看起来已删除
         setOpen(false)
-        onDeleted(type.id)
+        onDeleted(type)
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setDeleting(false))

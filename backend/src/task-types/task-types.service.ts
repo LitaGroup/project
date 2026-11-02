@@ -184,7 +184,11 @@ export class TaskTypesService implements OnModuleInit {
         `类型「${type.name}」已被机器人任务定义使用，不能删除`,
       );
     }
-    await this.types.remove(type);
+    // 以影响行数确认删除真实生效：避免接口返回 204 但记录仍留在列表中
+    const result = await this.types.delete({ id: type.id });
+    if (result.affected === 0) {
+      throw new NotFoundException(`TaskType ${id} not found`);
+    }
   }
 
   /** 校验类型存在（任务创建/编辑引用时），返回归一化名称；空值原样放行由调用方决定默认值 */

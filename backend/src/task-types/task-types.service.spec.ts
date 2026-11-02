@@ -9,7 +9,7 @@ describe('TaskTypesService', () => {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
-    remove: jest.Mock;
+    delete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let tasksRepo: {
@@ -51,7 +51,7 @@ describe('TaskTypesService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn((v: Partial<TaskType>) => v),
       save: jest.fn((v: TaskType) => Promise.resolve(v)),
-      remove: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
       createQueryBuilder: jest.fn().mockReturnValue(nameQuery),
     };
     renameQuery = {
@@ -251,7 +251,7 @@ describe('TaskTypesService', () => {
       typesRepo.findOne.mockResolvedValue(typeOf({ name: '测试' }));
       tasksRepo.count.mockResolvedValue(3);
       await expect(service.remove(1)).rejects.toThrow('已被 3 个任务使用');
-      expect(typesRepo.remove).not.toHaveBeenCalled();
+      expect(typesRepo.delete).not.toHaveBeenCalled();
     });
 
     it('被机器人任务定义使用时禁止删除', async () => {
@@ -262,11 +262,17 @@ describe('TaskTypesService', () => {
       await expect(service.remove(1)).rejects.toThrow('已被机器人任务定义使用');
     });
 
-    it('未被引用时删除', async () => {
+    it('未被引用时按 ID 删除并确认影响行数', async () => {
       const type = typeOf({ name: '测试' });
       typesRepo.findOne.mockResolvedValue(type);
       await service.remove(1);
-      expect(typesRepo.remove).toHaveBeenCalledWith(type);
+      expect(typesRepo.delete).toHaveBeenCalledWith({ id: type.id });
+    });
+
+    it('删除未命中记录时抛 404，不返回假成功', async () => {
+      typesRepo.findOne.mockResolvedValue(typeOf({ name: '测试' }));
+      typesRepo.delete.mockResolvedValue({ affected: 0 });
+      await expect(service.remove(1)).rejects.toThrow('TaskType 1 not found');
     });
   });
 
