@@ -1,4 +1,9 @@
-import { useCallback, useRef, useState } from 'react'
+import {
+  useCallback,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -164,6 +169,26 @@ export function DebugChat({
 
   const currentModel = modelSelection ?? modelCatalog?.current ?? null
 
+  // Tab 在输入框内切换 Build / Plan（仅配置了模式的「我的 AI」生效）
+  const handleKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key !== 'Tab') return
+      if (
+        event.shiftKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.nativeEvent.isComposing
+      ) {
+        return
+      }
+      if (!mode || !onModeChange || running || modeBusy) return
+      event.preventDefault()
+      void onModeChange(mode === 'build' ? 'plan' : 'build')
+    },
+    [mode, modeBusy, onModeChange, running],
+  )
+
   return (
     <section
       className={
@@ -262,7 +287,7 @@ export function DebugChat({
                         <button
                           key={value}
                           type="button"
-                          title={hint}
+                          title={`${hint}（Tab 切换）`}
                           aria-pressed={mode === value}
                           disabled={running || modeBusy}
                           onClick={() => {
@@ -307,6 +332,8 @@ export function DebugChat({
             >
               <ComposerPrimitive.Input
                 rows={2}
+                submitMode="enter"
+                onKeyDown={handleKeyDown}
                 placeholder={
                   placeholder ??
                   (running

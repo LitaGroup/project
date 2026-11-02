@@ -1362,7 +1362,7 @@ export function WorkbenchPage() {
                     ? 'AI 正在回复…'
                     : task
                       ? `让 AI 处理 ${task.code}，或输入其它指令…`
-                      : '输入指令，Enter 发送，Shift+Enter 换行…'
+                      : '输入指令，Enter 发送，Shift+Enter 换行，Tab 切换 Build/Plan…'
                 }
               />
             ) : agentError ? (
