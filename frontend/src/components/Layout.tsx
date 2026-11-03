@@ -95,6 +95,7 @@ const NAV_SECTIONS: NavSection[] = [
       !p.startsWith('/tasks') &&
       !p.startsWith('/tickets') &&
       !p.startsWith('/docs') &&
+      !p.startsWith('/robots') &&
       !p.startsWith('/workbench'),
     items: [
       { to: '/', label: '概览', icon: LayoutDashboard, ready: true },
@@ -122,6 +123,14 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/tasks', label: '任务概览', icon: ChartPie, ready: true },
       { to: '/tasks/live', label: '工作概览', icon: Activity, ready: true },
     ],
+  },
+  {
+    key: 'robots',
+    label: '机器人',
+    to: '/robots',
+    match: (p) => p.startsWith('/robots'),
+    // 机器人的左侧栏由页面按会话/全部动态渲染，不使用固定导航项
+    items: [],
   },
   {
     key: 'tickets',
@@ -267,6 +276,7 @@ export function Layout() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const isWorkbench = pathname.startsWith('/workbench')
+  const isRobotChat = pathname.startsWith('/robots')
   const isProfile = pathname.startsWith('/profile')
   // 工作台/个人中心不归属任何顶级分区（避免高亮「项目」），个人中心使用独立左侧导航
   const activeSection = isWorkbench
@@ -424,7 +434,7 @@ export function Layout() {
 
       <div className="flex h-[calc(100vh-3.5rem)]">
         {/* 普通页面：左侧 20% 导航，右侧 80% 浅色圆角内容画布 */}
-        {!isWorkbench && activeSection && (
+        {!isWorkbench && !isRobotChat && activeSection && (
           <>
             <aside className="w-[20%] shrink-0 overflow-y-auto bg-background p-3">
               <Navigation orientation="vertical" activeLink={pathname}>
@@ -469,6 +479,13 @@ export function Layout() {
 
         {/* 工作台：页面自身渲染 20% 宽度任务列表（与普通页左侧导航同宽）+ 自适应内容画布 */}
         {isWorkbench && (
+          <main className="h-full w-full min-w-0 text-foreground-intense">
+            <Outlet />
+          </main>
+        )}
+
+        {/* 机器人：页面自身渲染 20% 会话/全部导航 + 80% 聊天画布 */}
+        {isRobotChat && (
           <main className="h-full w-full min-w-0 text-foreground-intense">
             <Outlet />
           </main>

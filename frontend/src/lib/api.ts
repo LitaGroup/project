@@ -878,6 +878,11 @@ function agentPageContextBody(
   }
 }
 
+/** 顶部「机器人」一对一聊天 SSE 地址 */
+export function workerChatStreamUrl(workerId: number): string {
+  return `/api/worker-chats/${workerId}/stream`
+}
+
 /** 我的 AI SSE 地址（工作台/详情页共用） */
 export function workbenchAgentStreamUrl(
   taskId?: number | null,
@@ -1077,6 +1082,13 @@ export interface Worker {
   activeTask: { id: number; code: string; title: string; status: string } | null
   createdAt: string
   updatedAt: string
+}
+
+/** 顶部「机器人」聊天会话摘要 */
+export interface WorkerChatSession {
+  worker: WorkerDebugOption
+  /** 会话创建时间，即首条消息时间 */
+  startedAt: string
 }
 
 /** 可调试 Agent（仅启用、执行器在线且模型配置完整的机器人） */
@@ -2573,6 +2585,45 @@ export const api = {
     request<WorkerInitializeSnapshot>(`/workers/${id}/initialize`),
   /** 工作概览卡片数据（实时状态，前端轮询） */
   listWorkersLive: () => request<Worker[]>('/workers/live'),
+  /** 顶部「机器人」：可对话机器人清单，按名称/简介/ID 联想 */
+  listWorkerChatWorkers: (q?: string) => {
+    const query = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
+    return request<WorkerDebugOption[]>(`/worker-chats/workers${query}`)
+  },
+  /** 顶部「机器人」：当前用户已有会话，按首条消息时间倒序，最多 20 条 */
+  listWorkerChatSessions: () =>
+    request<WorkerChatSession[]>('/worker-chats/sessions'),
+  /** 顶部「机器人」：当前用户与指定机器人的唯一聊天会话 */
+  getWorkerChatSnapshot: (workerId: number) =>
+    request<WorkerDebugSnapshot>(`/worker-chats/${workerId}`),
+  /** 顶部「机器人」：发送文字与附件 */
+  sendWorkerChatMessage: (
+    workerId: number,
+    content: string,
+    files?: WorkerDebugAttachment[],
+  ) =>
+    request<WorkerDebugSnapshot>(`/worker-chats/${workerId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content, files }),
+    }),
+  /** 顶部「机器人」：回答（answers）或跳过（null）提问 */
+  replyWorkerChatQuestion: (
+    workerId: number,
+    questionId: string,
+    answers: string[][] | null,
+  ) =>
+    request<WorkerDebugSnapshot>(
+      `/worker-chats/${workerId}/questions/${encodeURIComponent(questionId)}/reply`,
+      {
+        method: 'POST',
+        body: JSON.stringify(answers ? { answers } : { reject: true }),
+      },
+    ),
+  /** 顶部「机器人」：清空消息并解绑 opencode 会话 */
+  resetWorkerChat: (workerId: number) =>
+    request<WorkerDebugSnapshot>(`/worker-chats/${workerId}/reset`, {
+      method: 'POST',
+    }),
   /** 当前用户与机器人的调试会话快照（含最近一次 todowrite 待办） */
   getWorkerDebugSnapshot: (workerId: number) =>
     request<WorkerDebugSnapshot>(`/workers/${workerId}/debug`),

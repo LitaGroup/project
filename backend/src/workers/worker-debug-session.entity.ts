@@ -10,9 +10,9 @@ import type { OpencodeTodo } from '../executors/opencode-todos';
 import type { WorkerDebugMessage, WorkerDebugMode } from './worker-debug.types';
 
 /**
- * 机器人调试 / 我的 AI 会话绑定：每个「登录用户 × 机器人 × 会话范围」固定一个
- * opencode 会话。contextKey 区分机器人调试（debug）、我的 AI 通用会话
- * （agent:global）与每个任务独立会话（agent:task:{taskId}）。
+ * 机器人调试 / 我的 AI / 顶部机器人聊天会话绑定：每个「登录用户 × 机器人 × 会话范围」
+ * 固定一个 opencode 会话。contextKey 区分顶部机器人聊天（chat）、机器人调试（debug）、
+ * 我的 AI 通用会话（agent:global）与每个任务独立会话（agent:task:{taskId}）。
  * 平台自己存一份消息/待办，重进页面直接展示；opencode 侧只追加新消息。
  * updatedAt 超过 7 天视为过期，清理时删除并下次新建会话。
  */
@@ -36,7 +36,7 @@ export class WorkerDebugSession {
   @Column({ type: 'int' })
   workerId: number;
 
-  /** 会话范围：debug / agent:global / agent:task:{taskId} */
+  /** 会话范围：chat / debug / agent:global / agent:task:{taskId} */
   @Column({ type: 'varchar', length: 120, default: 'debug' })
   contextKey: string;
 

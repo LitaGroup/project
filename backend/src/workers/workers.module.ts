@@ -13,6 +13,8 @@ import { WorkerEnvironmentService } from './worker-environment.service';
 import { WorkerOptimizeService } from './worker-optimize.service';
 import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
 import { WorkerStandardCatalogService } from './worker-standard-catalog.service';
+import { WorkerChatController } from './worker-chat.controller';
+import { WorkerChatService } from './worker-chat.service';
 import { WorkerDebugController } from './worker-debug.controller';
 import { WorkerDebugService } from './worker-debug.service';
 import { PersonalAgentsService } from './personal-agents.service';
@@ -39,6 +41,7 @@ import { WorkersService } from './workers.service';
   ],
   controllers: [
     WorkerDebugController,
+    WorkerChatController,
     WorkersListMarkdownController,
     WorkersMarkdownController,
     WorkersController,
@@ -53,6 +56,7 @@ import { WorkersService } from './workers.service';
     WorkerSkillCatalogService,
     WorkerStandardCatalogService,
     WorkerDebugService,
+    WorkerChatService,
     PersonalAgentsService,
   ],
   exports: [WorkersService, PersonalAgentsService],

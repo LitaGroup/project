@@ -48,6 +48,7 @@ import { TicketCreatePage } from './pages/TicketCreatePage'
 import { TicketDetailPage } from './pages/TicketDetailPage'
 import { TicketConfigPage } from './pages/TicketConfigPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
+import { RobotChatPage } from './pages/RobotChatPage'
 
 /** 路由级登录守卫：未登录一律跳 /login（会话加载中先不渲染，避免登录用户闪跳） */
 function RequireAuth() {
@@ -100,6 +101,8 @@ function App() {
           <Route path="/" element={<OverviewPage />} />
           <Route path="/workbench" element={<WorkbenchPage />} />
           <Route path="/workbench/tasks/:taskId" element={<WorkbenchPage />} />
+          <Route path="/robots" element={<RobotChatPage />} />
+          <Route path="/robots/:workerId" element={<RobotChatPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route
