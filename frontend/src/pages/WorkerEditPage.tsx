@@ -644,7 +644,9 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
         <p className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm">
           {error
             ? `保存失败：${error}`
-            : `配置已保存，但工作环境初始化失败：${initError}。可修正后重试保存。`}
+            : initError?.includes('WORKER_BASE_DIR')
+              ? `配置已保存，但工作环境初始化失败：${initError}。这是平台部署配置问题，请联系管理员配置 WORKER_BASE_DIR 后重试。`
+              : `配置已保存，但工作环境初始化失败：${initError}。可修正后重试保存。`}
         </p>
       )}
       {worker?.personalAgentUserId && (
