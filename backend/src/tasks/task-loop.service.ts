@@ -2,7 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThan, Repository } from 'typeorm';
+import { In, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
 import { Task, TaskMissingItem } from './task.entity';
 import {
@@ -10,16 +10,22 @@ import {
   type TaskAssignmentResult,
 } from './task-assignment.service';
 import { TaskDispatchService } from './task-dispatch.service';
+import { TaskMessage } from './task-message.entity';
 import {
   TaskNotifyService,
   type TaskNotifyResult,
 } from './task-notify.service';
 import {
   mapLegacyTaskStatus,
+  nextInboxRetryDelay,
   nextReminderAction,
+  nextResumeRetryDelay,
+  TASK_INBOX_MAX_ATTEMPTS,
+  TASK_INBOX_STALE_MS,
   TASK_REMIND_TIMEOUT_DAYS,
 } from './task-loop.rules';
 import { TasksService } from './tasks.service';
+import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 import {
   taskInboxPrompt,
   TaskWorkerInboxService,
@@ -27,6 +33,10 @@ import {
 
 const REMIND_BATCH_SIZE = 100;
 const OFFER_RETRY_MS = 30_000;
+const ORPHAN_CHILD_SCAN_MS = 30_000;
+const ORPHAN_CHILD_SCAN_LIMIT = 100;
+const OFFER_STALL_MS = 10 * 60_000;
+const OFFER_STALL_REMIND_MS = 30 * 60_000;
 
 /**
  * 多机器人任务 LOOP（每秒）：
@@ -41,11 +51,21 @@ export class TaskLoopService implements OnApplicationBootstrap {
   private readonly reminding = new Set<number>();
   private readonly offering = new Set<number>();
   private readonly resuming = new Set<number>();
+  private readonly fallbacking = new Set<number>();
+  private readonly offerStalledNotifiedAt = new Map<number, number>();
+  private readonly resumeFailures = new Map<
+    number,
+    { failures: number; nextRetryAt: number }
+  >();
+  private lastOrphanScanAt = 0;
+  private orphanScanCursor = 0;
   private readonly apiUrl: string;
 
   constructor(
     @InjectRepository(Task)
     private readonly tasks: Repository<Task>,
+    @InjectRepository(TaskMessage)
+    private readonly messages: Repository<TaskMessage>,
     private readonly tasksService: TasksService,
     private readonly assignmentService: TaskAssignmentService,
     private readonly dispatchService: TaskDispatchService,
@@ -73,6 +93,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     if (!this.ready || this.running) return;
     this.running = true;
     try {
+      await this.repairOrphanChildEvents();
       await this.queueWorkerInbox();
       await this.assignPending();
       await this.offerPending();
@@ -207,7 +228,9 @@ export class TaskLoopService implements OnApplicationBootstrap {
     });
     const now = Date.now();
     for (const task of pending) {
-      if (this.offering.has(task.id) || !task.agentId) continue;
+      if (!task.agentId) continue;
+      await this.warnOfferStalled(task);
+      if (this.offering.has(task.id)) continue;
       if (task.offerAttemptAt) {
         const attemptedAt = new Date(task.offerAttemptAt).getTime();
         if (now - attemptedAt < OFFER_RETRY_MS) continue;
@@ -255,6 +278,41 @@ export class TaskLoopService implements OnApplicationBootstrap {
     }
   }
 
+  /** 待接受超过阈值仍未接受/拒绝：提醒机器人负责人，不自动接受或改派。 */
+  private async warnOfferStalled(task: Task): Promise<void> {
+    if (!task.assignedAt) return;
+    const assignedAt = new Date(task.assignedAt).getTime();
+    const now = Date.now();
+    if (!Number.isFinite(assignedAt) || now - assignedAt < OFFER_STALL_MS) {
+      return;
+    }
+    const last = this.offerStalledNotifiedAt.get(task.id) ?? 0;
+    if (now - last < OFFER_STALL_REMIND_MS) return;
+    this.offerStalledNotifiedAt.set(task.id, now);
+    const title = `任务长时间未接受：${task.code} ${task.title}`;
+    const description =
+      '任务邀约已发出超过 10 分钟，机器人仍未接受或拒绝。请检查机器人状态、执行器连接与任务定义配置。';
+    const notified = await this.taskNotify.notifyTaskAgentOwner(
+      task,
+      'notice',
+      title,
+      description,
+    );
+    if (!notified.sent) {
+      await this.taskNotify.notifyTaskRequester(
+        task,
+        'notice',
+        title,
+        description,
+      );
+    }
+    await this.tasksService.addEvent(task.id, '系统', description, null, {
+      watchdog: true,
+      reason: 'offer-accept-timeout',
+      assignedAt: new Date(assignedAt).toISOString(),
+    });
+  }
+
   // ===== 待继续：统一恢复队列 =====
 
   private async resumePending(): Promise<void> {
@@ -266,8 +324,11 @@ export class TaskLoopService implements OnApplicationBootstrap {
       order: { id: 'ASC' },
       take: 20,
     });
+    const now = Date.now();
     for (const task of pending) {
       if (this.resuming.has(task.id) || !task.agentId) continue;
+      const retry = this.resumeFailures.get(task.id);
+      if (retry && retry.nextRetryAt > now) continue;
       if (this.dispatchService.taskChatRunning(task.id)) continue;
       if (await this.dispatchService.isWorkerBusy(task.agentId)) continue;
       this.resuming.add(task.id);
@@ -287,7 +348,14 @@ export class TaskLoopService implements OnApplicationBootstrap {
         );
         await this.dispatchService.dispatch(task.id, null, resumePrompt);
         await this.workerInbox.markDelivered(task.id);
+        this.resumeFailures.delete(task.id);
       } catch (e) {
+        const failures = (this.resumeFailures.get(task.id)?.failures ?? 0) + 1;
+        const delay = nextResumeRetryDelay(failures - 1);
+        this.resumeFailures.set(task.id, {
+          failures,
+          nextRetryAt: Date.now() + delay,
+        });
         this.logger.warn(`任务 #${task.id} 恢复失败: ${(e as Error).message}`);
         await this.tasks.update(
           {
@@ -304,9 +372,18 @@ export class TaskLoopService implements OnApplicationBootstrap {
         await this.tasksService.addEvent(
           task.id,
           '系统',
-          `恢复执行失败，任务回到等待中-待继续：${(e as Error).message}`,
+          `恢复执行失败（第 ${failures} 次），任务回到等待中-待继续：${(e as Error).message}`,
           null,
+          { watchdog: true, failures, nextRetryAt: Date.now() + delay },
         );
+        if (failures === TASK_INBOX_MAX_ATTEMPTS) {
+          await this.taskNotify.notifyTaskAgentOwner(
+            task,
+            'notice',
+            `任务恢复失败：${task.code} ${task.title}`,
+            `已连续 ${failures} 次恢复失败，请检查机器人、执行器或会话配置。`,
+          );
+        }
       } finally {
         this.resuming.delete(task.id);
       }
@@ -315,8 +392,61 @@ export class TaskLoopService implements OnApplicationBootstrap {
 
   // ===== 父机器人收件箱 =====
 
+  /**
+   * 修复“子任务已等待人工处理、但收件箱缺失/丢失”的孤儿链路。
+   * 以持久化提问与任务状态为准补建事件，后续由统一收件箱流程唤醒父机器人。
+   */
+  private async repairOrphanChildEvents(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastOrphanScanAt < ORPHAN_CHILD_SCAN_MS) return;
+    this.lastOrphanScanAt = now;
+    const children = await this.tasks.find({
+      where: {
+        id: MoreThan(this.orphanScanCursor),
+        status: TaskStatus.WAITING,
+        subStatus: In([
+          TaskSubStatus.PENDING_FEEDBACK,
+          TaskSubStatus.PENDING_ACCEPT,
+        ]),
+        requesterType: 'worker',
+      },
+      order: { id: 'ASC' },
+      take: ORPHAN_CHILD_SCAN_LIMIT,
+    });
+    for (const child of children) {
+      if (child.subStatus === TaskSubStatus.PENDING_FEEDBACK) {
+        const rows = await this.messages.find({
+          where: { taskId: child.id, kind: 'question' },
+          order: { id: 'DESC' },
+        });
+        const pending = rows.find(
+          (row) => row.question?.state === 'pending' && row.question.id,
+        );
+        if (!pending?.question) continue;
+        await this.workerInbox.enqueue(child, 'question', {
+          referenceId: pending.question.id,
+          payload: { questions: pending.question.questions },
+        });
+        continue;
+      }
+      await this.workerInbox.enqueue(child, 'handoff', {
+        payload: {
+          handoffPath: child.handoffPath,
+          handoffVersion: child.handoffSubmittedVersion,
+        },
+      });
+    }
+    this.orphanScanCursor =
+      children.length < ORPHAN_CHILD_SCAN_LIMIT
+        ? 0
+        : (children[children.length - 1]?.id ?? this.orphanScanCursor);
+  }
+
   private async queueWorkerInbox(): Promise<void> {
-    const entries = await this.workerInbox.listPending();
+    const entries = await this.workerInbox.listActionable(
+      new Date(),
+      TASK_INBOX_STALE_MS,
+    );
     for (const entry of entries) {
       const [parent, child] = await Promise.all([
         this.tasks.findOne({ where: { id: entry.parentTaskId } }),
@@ -331,51 +461,67 @@ export class TaskLoopService implements OnApplicationBootstrap {
         parent.status === TaskStatus.FINISHED ||
         parent.agentId !== entry.workerId
       ) {
-        await this.workerInbox.markDead(entry.id);
-        // 父机器人不可用时把需求方回退给根任务创建人，避免子任务永久卡住。
-        const root =
-          child.rootId && child.rootId !== child.id
-            ? await this.tasks.findOne({ where: { id: child.rootId } })
-            : null;
-        if (root?.createdById) {
-          await this.tasks.update(
-            { id: child.id },
-            { requesterType: 'user', requesterId: root.createdById },
-          );
-          child.requesterType = 'user';
-          child.requesterId = root.createdById;
-          await this.tasksService.addEvent(
-            child.id,
-            '系统',
-            '父任务已结束或无法唤醒，需求方自动回退为根任务创建人',
-            null,
-            { parentTaskId: parent?.id ?? entry.parentTaskId },
-          );
+        if (
+          (entry.kind === 'refused' || entry.kind === 'cancelled') &&
+          child.status === TaskStatus.FINISHED
+        ) {
+          await this.workerInbox.markDead(entry.id);
+          continue;
         }
-        const notified = await this.taskNotify.notifyTaskRequester(
+        await this.fallbackChildToHuman(
           child,
-          'notice',
-          `子任务需要人工介入：${child.code} ${child.title}`,
-          '父任务已结束或需求方机器人已变化，请到任务详情处理提问或验收。',
+          entry.parentTaskId,
+          '父任务已结束或处理机器人已变化',
+          entry.id,
         );
-        if (!notified.sent) {
-          await this.taskNotify.notifyTaskAgentOwner(
+        continue;
+      }
+      if (!this.childEventNeedsAction(entry, child)) {
+        await this.workerInbox.markDone(entry.id);
+        continue;
+      }
+      const attempts = entry.attempts ?? 0;
+      if (attempts >= TASK_INBOX_MAX_ATTEMPTS) {
+        if (entry.kind === 'question' || entry.kind === 'handoff') {
+          await this.fallbackChildToHuman(
             child,
-            'notice',
-            `子任务需要人工介入：${child.code} ${child.title}`,
-            '父任务已结束或需求方机器人已变化，请人工处理子任务。',
+            parent.id,
+            `已连续 ${attempts} 次唤醒父机器人但事件仍未处理`,
+            entry.id,
           );
+        } else {
+          await this.workerInbox.markDead(entry.id);
         }
         continue;
       }
+
       const prompt = taskInboxPrompt(entry, child, this.apiUrl);
       if (
         parent.status === TaskStatus.WAITING &&
         parent.subStatus === TaskSubStatus.PENDING_RESUME
       ) {
         if (parent.resumePrompt?.includes(`事件收件箱 ID：${entry.id}`)) {
-          await this.workerInbox.markQueued(entry.id);
+          // 已写入待继续上下文，正常等待 LOOP 恢复；陈旧过久则计一次失败尝试，
+          // 防止恢复任务永久失败时子任务无限等待。
+          if (entry.status !== 'pending') {
+            await this.deferInboxEntry(
+              entry,
+              parent,
+              child,
+              '父任务长期停留在待继续，恢复尚未成功',
+            );
+          } else {
+            await this.workerInbox.markQueued(entry.id);
+          }
           continue;
+        }
+        if (entry.status !== 'pending') {
+          const reopened = await this.workerInbox.reopen(
+            entry.id,
+            '父任务待继续上下文缺少该事件，重新排队',
+          );
+          if (!reopened) continue;
+          entry.status = 'pending';
         }
         const updated = await this.tasks.update(
           {
@@ -399,6 +545,14 @@ export class TaskLoopService implements OnApplicationBootstrap {
         parent.status === TaskStatus.WAITING &&
         parent.subStatus === TaskSubStatus.PENDING_ACCEPT
       ) {
+        if (entry.status !== 'pending') {
+          const reopened = await this.workerInbox.reopen(
+            entry.id,
+            '父任务验收阶段遗留未消费事件，重新排队',
+          );
+          if (!reopened) continue;
+          entry.status = 'pending';
+        }
         updated = await this.tasks.update(
           {
             id: parent.id,
@@ -421,6 +575,14 @@ export class TaskLoopService implements OnApplicationBootstrap {
         // 机器人实际空闲，可以把子任务事件排入待继续并唤醒。
         // 当前回合仍在输出时保持 pending，避免同一会话并行重入。
         if (this.dispatchService.taskChatRunning(parent.id)) continue;
+        if (entry.status !== 'pending') {
+          const reopened = await this.workerInbox.reopen(
+            entry.id,
+            '父任务回合已结束但事件未被处理，重新排队',
+          );
+          if (!reopened) continue;
+          entry.status = 'pending';
+        }
         updated = await this.tasks.update(
           {
             id: parent.id,
@@ -437,7 +599,14 @@ export class TaskLoopService implements OnApplicationBootstrap {
           },
         );
       } else {
-        // 父任务自己的待反馈/待接受等状态不能被覆盖，事件留到可恢复时处理。
+        // 父任务自身的待分配、待接受、待反馈等状态不能被覆盖；
+        // 记录一次失败尝试并退避，达到阈值后自动把子任务需求方转人工。
+        await this.deferInboxEntry(
+          entry,
+          parent,
+          child,
+          `父任务当前为 ${parent.status}-${parent.subStatus}，暂不能处理子任务事件`,
+        );
         continue;
       }
       if (!updated?.affected) continue;
@@ -449,6 +618,115 @@ export class TaskLoopService implements OnApplicationBootstrap {
         null,
         { childTaskId: child.id, inboxId: entry.id, kind: entry.kind },
       );
+    }
+  }
+
+  /** 子任务事件是否仍需要父机器人通过动作接口处理。 */
+  private childEventNeedsAction(entry: TaskWorkerInbox, child: Task): boolean {
+    if (entry.kind === 'question') {
+      return (
+        child.status === TaskStatus.WAITING &&
+        child.subStatus === TaskSubStatus.PENDING_FEEDBACK
+      );
+    }
+    if (entry.kind === 'handoff') {
+      return (
+        child.status === TaskStatus.WAITING &&
+        child.subStatus === TaskSubStatus.PENDING_ACCEPT
+      );
+    }
+    return true;
+  }
+
+  /** 父任务暂时无法消费事件时按指数退避记录一次失败尝试。 */
+  private async deferInboxEntry(
+    entry: TaskWorkerInbox,
+    parent: Task,
+    child: Task,
+    reason: string,
+  ): Promise<void> {
+    const attempts = entry.attempts ?? 0;
+    const delay = nextInboxRetryDelay(attempts);
+    const nextRetryAt = new Date(Date.now() + delay);
+    await this.workerInbox.defer(entry.id, nextRetryAt, reason);
+    if (attempts > 0) return;
+    await this.tasksService.addEvent(
+      child.id,
+      '系统',
+      `子任务协同事件暂时无法处理：${reason}；平台将在 ${Math.round(delay / 60_000)} 分钟后重试，连续 ${TASK_INBOX_MAX_ATTEMPTS} 次失败将转人工`,
+      null,
+      {
+        watchdog: true,
+        parentTaskId: parent.id,
+        inboxId: entry.id,
+        kind: entry.kind,
+        nextRetryAt: nextRetryAt.toISOString(),
+      },
+    );
+  }
+
+  /** 父机器人链路不可恢复时，把机器人需求方回退为根任务创建人并通知。 */
+  private async fallbackChildToHuman(
+    child: Task,
+    parentTaskId: number,
+    reason: string,
+    inboxId: number,
+  ): Promise<void> {
+    if (this.fallbacking.has(child.id)) return;
+    this.fallbacking.add(child.id);
+    try {
+      const root =
+        child.rootId && child.rootId !== child.id
+          ? await this.tasks.findOne({ where: { id: child.rootId } })
+          : null;
+      const userId = root?.createdById ?? child.createdById ?? null;
+      if (userId) {
+        const updated = await this.tasks.update(
+          {
+            id: child.id,
+            status: child.status,
+            subStatus: child.subStatus,
+            requesterType: 'worker',
+          },
+          { requesterType: 'user', requesterId: userId },
+        );
+        if (!updated.affected) {
+          // 子任务已被正常答复/验收或需求方已变化，不能覆盖最新状态。
+          await this.workerInbox.markDone(inboxId);
+          return;
+        }
+        child.requesterType = 'user';
+        child.requesterId = userId;
+      }
+      await this.tasksService.addEvent(
+        child.id,
+        '系统',
+        `子任务需要人工介入：${reason}，需求方${userId ? '已自动回退为根任务创建人' : '未能回退（未找到创建人）'}`,
+        null,
+        {
+          watchdog: true,
+          parentTaskId,
+          inboxId,
+          reason,
+        },
+      );
+      const notified = await this.taskNotify.notifyTaskRequester(
+        child,
+        'notice',
+        `子任务需要人工介入：${child.code} ${child.title}`,
+        `${reason}，请到任务详情处理提问或验收。`,
+      );
+      if (!notified.sent) {
+        await this.taskNotify.notifyTaskAgentOwner(
+          child,
+          'notice',
+          `子任务需要人工介入：${child.code} ${child.title}`,
+          `${reason}，请人工处理子任务。`,
+        );
+      }
+      await this.workerInbox.markDead(inboxId);
+    } finally {
+      this.fallbacking.delete(child.id);
     }
   }
 

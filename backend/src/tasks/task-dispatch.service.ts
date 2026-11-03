@@ -71,6 +71,14 @@ export interface AcceptanceApplicationInput {
 /** 任务会话绑定保留期：7 天不活跃后解除（执行中任务不清理） */
 const TASK_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
 
+/** 会话已完成但未申请验收：提醒间隔、最大自动唤回次数与升级提醒间隔 */
+const APPLY_REMIND_DELAYS_MS = [2 * 60_000, 10 * 60_000, 30 * 60_000];
+const APPLY_REMIND_MAX_ATTEMPTS = APPLY_REMIND_DELAYS_MS.length;
+const APPLY_ESCALATE_INTERVAL_MS = 30 * 60_000;
+
+/** 执行中任务超过该时间没有状态进展时提醒负责人（只告警，不强杀会话） */
+const EXECUTION_STALL_WARN_MS = 30 * 60_000;
+
 /** 每个任务的实时输出缓冲（行数组 + 变更事件） */
 interface LiveTaskStream {
   lines: string[];
@@ -146,6 +154,15 @@ export class TaskDispatchService
 
   /** 会话已完成但机器人尚未调用验收申请的任务（对账只补一次产出） */
   private readonly finishedAwaitingApply = new Set<number>();
+
+  /** taskId → 未申请验收的催办状态（首次时间/已催办次数/下次时间） */
+  private readonly applyReminders = new Map<
+    number,
+    { firstAt: number; attempts: number; nextAt: number }
+  >();
+
+  /** taskId → 执行中长时间无状态进展的最近告警时间 */
+  private readonly stallNotifiedAt = new Map<number, number>();
 
   /** taskId → 已占用事件流连接的执行器 id（retain/release 配对） */
   private readonly hubRetained = new Map<number, number>();
@@ -1308,20 +1325,11 @@ export class TaskDispatchService
         const error = data.error as
           { type?: string; message?: string } | undefined;
         this.pushLine(taskId, `✗ 执行失败：${error?.message ?? event.type}`);
-        await this.taskChat.failTask(
+        await this.finalizeFailedTurn(
           taskId,
           `执行失败：${[error?.type, error?.message].filter(Boolean).join(' ') || event.type}`,
-        );
-        await this.addEvent(
-          taskId,
-          '系统',
           `会话执行失败：${error?.type ?? ''} ${error?.message ?? ''}`.trim(),
-          null,
         );
-        // 本轮已结束，释放事件流占用并重新排队未处理的子任务事件
-        this.awaitingTurnStart.delete(taskId);
-        this.releaseTask(taskId);
-        await this.requeueInboxAfterTurn(taskId);
         break;
       }
       default:
@@ -1536,6 +1544,8 @@ export class TaskDispatchService
     }
     const saved = await this.mustFind(taskId);
     this.finishedAwaitingApply.add(taskId);
+    this.applyReminders.delete(taskId);
+    this.stallNotifiedAt.delete(taskId);
     this.pushLine(taskId, `✔ 机器人已申请验收，交付文档：${handoff.path}`);
     await this.addEvent(
       taskId,
@@ -1619,6 +1629,96 @@ export class TaskDispatchService
   }
 
   /**
+   * 执行失败统一收尾：无论失败来自 SSE 还是两分钟对账，都必须结束本轮运行态
+   * 并重新排队未被父机器人处理的子任务事件，否则父任务会永久占用机器人。
+   */
+  private async finalizeFailedTurn(
+    taskId: number,
+    content: string,
+    eventContent: string,
+  ): Promise<void> {
+    if (this.failedReconciled.has(taskId)) return;
+    this.failedReconciled.add(taskId);
+    this.awaitingTurnStart.delete(taskId);
+    try {
+      await this.taskChat.failTask(taskId, content);
+      await this.addEvent(taskId, '系统', eventContent, null, {
+        watchdog: true,
+        reason: 'execution-failed',
+      });
+      const task = await this.tasks.findOne({ where: { id: taskId } });
+      if (task) {
+        const notified = await this.taskNotify.notifyTaskAgentOwner(
+          task,
+          'notice',
+          `任务执行失败：${task.code} ${task.title}`,
+          '执行器会话已失败，平台已结束本轮并重新排队子任务事件，请检查机器人输出或人工重新派发。',
+        );
+        if (!notified.sent) {
+          await this.taskNotify.notifyTaskRequester(
+            task,
+            'notice',
+            `任务执行失败：${task.code} ${task.title}`,
+            '执行器会话已失败，请到任务详情检查并决定是否重新派发。',
+          );
+        }
+      }
+    } catch (error) {
+      this.failedReconciled.delete(taskId);
+      throw error;
+    } finally {
+      this.releaseTask(taskId);
+      await this.requeueInboxAfterTurn(taskId);
+    }
+  }
+
+  /**
+   * 执行器会话已不存在（执行器重启/清理）：结束失联的本轮，
+   * 回到待继续并由 LOOP 在机器人空闲时新建会话恢复，避免任务永久卡在执行中。
+   */
+  private async recoverMissingSession(task: {
+    id: number;
+    code?: string;
+  }): Promise<void> {
+    this.awaitingTurnStart.delete(task.id);
+    this.finishedAwaitingApply.delete(task.id);
+    this.failedReconciled.delete(task.id);
+    this.applyReminders.delete(task.id);
+    await this.taskChat.finishTask(task.id, {
+      toolStatus: 'error',
+      toolDetail: '执行器会话已不存在，未收到工具终态事件',
+    });
+    this.releaseTask(task.id);
+    const updated = await this.tasks.update(
+      {
+        id: task.id,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      {
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_RESUME,
+        resumePrompt:
+          '# 会话恢复\n\n执行器会话已不存在，请根据当前任务上下文继续处理；完成后必须调用验收申请接口。',
+        executorId: null,
+        opencodeSessionId: null,
+        remindCount: 0,
+        firstRemindedAt: null,
+        lastRemindedAt: null,
+      },
+    );
+    if (!updated.affected) return;
+    await this.requeueInboxAfterTurn(task.id);
+    await this.addEvent(
+      task.id,
+      '系统',
+      '执行器会话已不存在，任务转入等待中-待继续，将由 LOOP 新建会话恢复',
+      null,
+      { watchdog: true, reason: 'executor-session-missing' },
+    );
+  }
+
+  /**
    * 执行器会话成功：只保存产出并释放事件流，任务保持「进行中-执行中」。
    * 必须由执行机器人显式调用验收申请接口后才进入「等待中-待验收」。
    */
@@ -1682,6 +1782,7 @@ export class TaskDispatchService
     );
     if (!updated.affected) return;
     this.finishedAwaitingApply.add(taskId);
+    this.scheduleApplyReminder(taskId);
     this.pushLine(taskId, '✔ 会话执行完成，等待机器人申请验收');
     await this.addEvent(
       taskId,
@@ -1693,6 +1794,149 @@ export class TaskDispatchService
     await this.taskChat.finishTask(taskId);
   }
 
+  /** 会话成功后开始跟踪“等待申请验收”，提醒过但尚未申请时保留已催办次数。 */
+  private scheduleApplyReminder(taskId: number): void {
+    const now = Date.now();
+    const current = this.applyReminders.get(taskId);
+    const attempts = current?.attempts ?? 0;
+    this.applyReminders.set(taskId, {
+      firstAt: current?.firstAt ?? now,
+      attempts,
+      nextAt:
+        now +
+        APPLY_REMIND_DELAYS_MS[
+          Math.min(attempts, APPLY_REMIND_DELAYS_MS.length - 1)
+        ],
+    });
+  }
+
+  /**
+   * 会话已完成但机器人迟迟不调用验收申请：在前三次由平台重新唤醒并明确要求
+   * 立即申请验收；超过阈值只提醒负责人，不代替机器人申请或验收。
+   */
+  private async remindAcceptanceApply(task: {
+    id: number;
+    code?: string;
+    title?: string;
+    agentId?: number | null;
+  }): Promise<void> {
+    const now = Date.now();
+    const current = this.applyReminders.get(task.id);
+    const state = current ?? {
+      firstAt: now,
+      attempts: 0,
+      nextAt: now + APPLY_REMIND_DELAYS_MS[0],
+    };
+    if (!current) this.applyReminders.set(task.id, state);
+    if (now < state.nextAt) {
+      this.releaseTask(task.id);
+      return;
+    }
+    if (state.attempts < APPLY_REMIND_MAX_ATTEMPTS) {
+      const attempt = state.attempts + 1;
+      state.attempts = attempt;
+      state.nextAt =
+        now +
+        APPLY_REMIND_DELAYS_MS[
+          Math.min(attempt, APPLY_REMIND_DELAYS_MS.length - 1)
+        ];
+      const updated = await this.tasks.update(
+        {
+          id: task.id,
+          status: TaskStatus.RUNNING,
+          subStatus: TaskSubStatus.EXECUTING,
+        },
+        {
+          status: TaskStatus.WAITING,
+          subStatus: TaskSubStatus.PENDING_RESUME,
+          resumePrompt: [
+            '# 验收申请提醒',
+            '',
+            '上一轮会话已经结束，交付文档已保存，但尚未申请验收。',
+            '不要重复执行已完成的工作；请检查交付文档，确认满足要求后立即调用：',
+            `POST ${this.apiUrl}/tasks/${task.id}/handoff/apply.md`,
+          ].join('\n'),
+        },
+      );
+      this.releaseTask(task.id);
+      if (!updated.affected) return;
+      this.finishedAwaitingApply.delete(task.id);
+      this.pushLine(task.id, '↻ 会话已完成但未申请验收，已重新唤醒机器人');
+      await this.addEvent(
+        task.id,
+        '系统',
+        `会话已完成但机器人未申请验收，平台第 ${attempt} 次重新唤醒并提醒调用 handoff/apply`,
+        null,
+        { watchdog: true, reason: 'acceptance-apply-missing', attempt },
+      );
+      return;
+    }
+    state.nextAt = now + APPLY_ESCALATE_INTERVAL_MS;
+    state.attempts += 1;
+    const notified = await this.taskNotify.notifyTaskAgentOwner(
+      task as Task,
+      'notice',
+      `任务未申请验收：${task.code ?? task.id} ${task.title ?? ''}`.trim(),
+      `平台已 ${APPLY_REMIND_MAX_ATTEMPTS} 次重新唤醒机器人，仍未调用验收申请接口，请人工检查机器人会话与交付文档。`,
+    );
+    if (!notified.sent) {
+      await this.taskNotify.notifyTaskRequester(
+        task as Task,
+        'notice',
+        `任务未申请验收：${task.code ?? task.id} ${task.title ?? ''}`.trim(),
+        `机器人会话已完成但未申请验收，请人工检查任务。`,
+      );
+    }
+    await this.addEvent(
+      task.id,
+      '系统',
+      `机器人在 ${APPLY_REMIND_MAX_ATTEMPTS} 次催办后仍未申请验收，已通知负责人人工介入`,
+      null,
+      { watchdog: true, reason: 'acceptance-apply-escalated' },
+    );
+    this.releaseTask(task.id);
+  }
+
+  /** 执行中长时间无状态进展只提醒，不自动中断仍可能正常工作的会话。 */
+  private async warnStalledExecution(task: {
+    id: number;
+    code?: string;
+    title?: string;
+    agentId?: number | null;
+    updatedAt?: Date;
+  }): Promise<void> {
+    const updatedAt = task.updatedAt ? new Date(task.updatedAt).getTime() : 0;
+    if (!updatedAt) return;
+    const now = Date.now();
+    if (now - updatedAt < EXECUTION_STALL_WARN_MS) return;
+    const last = this.stallNotifiedAt.get(task.id) ?? 0;
+    if (now - last < EXECUTION_STALL_WARN_MS) return;
+    this.stallNotifiedAt.set(task.id, now);
+    const title =
+      `任务执行长时间无进展：${task.code ?? task.id} ${task.title ?? ''}`.trim();
+    const description =
+      '任务已持续执行超过 30 分钟且没有状态进展。平台不会自动中断可能仍在工作的会话，请检查执行器、机器人输出或人工中断后重新派发。';
+    const notified = await this.taskNotify.notifyTaskAgentOwner(
+      task as Task,
+      'notice',
+      title,
+      description,
+    );
+    if (!notified.sent) {
+      await this.taskNotify.notifyTaskRequester(
+        task as Task,
+        'notice',
+        title,
+        description,
+      );
+    }
+    await this.addEvent(task.id, '系统', description, null, {
+      watchdog: true,
+      reason: 'execution-no-progress',
+      lastProgressAt: new Date(updatedAt).toISOString(),
+    });
+  }
+
   /**
    * 执行中任务兜底对账（每 2 分钟）：事件流漏收（服务重启/断线期间完成）时，
    * 直接查会话 outcome 补齐产出；不自动申请验收，仍等待机器人显式调用申请接口。
@@ -1701,14 +1945,31 @@ export class TaskDispatchService
   async reconcileExecuting(): Promise<void> {
     const running = await this.tasks.find({
       where: { status: TaskStatus.RUNNING, subStatus: TaskSubStatus.EXECUTING },
-      select: { id: true, executorId: true, opencodeSessionId: true },
+      select: {
+        id: true,
+        code: true,
+        title: true,
+        agentId: true,
+        executorId: true,
+        opencodeSessionId: true,
+        updatedAt: true,
+      },
     });
-    // 已不在执行中的任务（人工改状态/删除等）释放事件流占用
+    // 已不在执行中的任务（人工改状态/删除等）释放事件流占用并清理催办状态
     const runningIds = new Set(running.map((task) => task.id));
     for (const taskId of [...this.hubRetained.keys()]) {
       if (!runningIds.has(taskId) && !this.dispatching.has(taskId)) {
         this.releaseTask(taskId);
       }
+    }
+    for (const taskId of [...this.applyReminders.keys()]) {
+      if (!runningIds.has(taskId)) this.applyReminders.delete(taskId);
+    }
+    for (const taskId of [...this.finishedAwaitingApply]) {
+      if (!runningIds.has(taskId)) this.finishedAwaitingApply.delete(taskId);
+    }
+    for (const taskId of [...this.stallNotifiedAt.keys()]) {
+      if (!runningIds.has(taskId)) this.stallNotifiedAt.delete(taskId);
     }
     for (const task of running) {
       if (!task.executorId || !task.opencodeSessionId) continue;
@@ -1721,13 +1982,14 @@ export class TaskDispatchService
         this.releaseTask(task.id);
         continue;
       }
-      // 会话已完成但机器人尚未申请验收：产出已补齐，不再重复对账
+      // 会话已完成但机器人尚未申请验收：按退避主动催办，超限转人工
       if (this.finishedAwaitingApply.has(task.id)) {
-        this.releaseTask(task.id);
+        await this.remindAcceptanceApply(task);
         continue;
       }
       // 服务重启/断线后恢复订阅（有执行中的任务才保持连接）
       this.retainTask(task.id, executor);
+      await this.warnStalledExecution(task);
       // 补齐漏收的提问（服务重启/断线期间 question.asked 可能丢失）
       await this.syncPendingQuestions(task.id);
       try {
@@ -1752,18 +2014,23 @@ export class TaskDispatchService
           );
           await this.finalizeSuccess(task.id);
         } else if (info.outcome === 'failed') {
-          if (this.failedReconciled.has(task.id)) continue;
-          this.failedReconciled.add(task.id);
-          this.releaseTask(task.id);
           this.pushLine(task.id, '↻ 对账补偿：会话执行失败');
-          await this.addEvent(
+          await this.finalizeFailedTurn(
             task.id,
-            '系统',
-            '对账补偿：会话执行失败（可中断后重新派发）',
-            null,
+            '对账补偿：会话执行失败，可重新派发后继续处理',
+            '对账补偿：会话执行失败（已结束本轮并重新排队未处理的子任务事件）',
           );
         }
       } catch (e) {
+        if (e instanceof OpencodeClientError && e.status === 404) {
+          this.logger.warn(
+            `任务 #${task.id} 的会话已不存在，转入待继续并重建会话`,
+          );
+          await this.recoverMissingSession(task).catch((error: Error) =>
+            this.logger.warn(`任务 #${task.id} 会话恢复失败: ${error.message}`),
+          );
+          continue;
+        }
         this.logger.debug(`任务 #${task.id} 对账失败: ${(e as Error).message}`);
       }
     }

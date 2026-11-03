@@ -33,12 +33,16 @@ describe('TaskDispatchService 显式申请验收', () => {
   };
   let eventsRepo: { create: jest.Mock; save: jest.Mock };
   let taskChat: {
+    failTask: jest.Mock;
     finishTask: jest.Mock;
     isRunning: jest.Mock;
     hasQueuedUserMessages: jest.Mock;
     queuedUserMessages: jest.Mock;
   };
-  let taskNotify: { notifyTaskRequester: jest.Mock };
+  let taskNotify: {
+    notifyTaskRequester: jest.Mock;
+    notifyTaskAgentOwner: jest.Mock;
+  };
   let taskRealtime: { lineAppended: jest.Mock; taskChanged: jest.Mock };
   let workerInbox: {
     enqueue: jest.Mock;
@@ -71,6 +75,7 @@ describe('TaskDispatchService 显式申请验收', () => {
       save: jest.fn().mockResolvedValue(undefined),
     };
     taskChat = {
+      failTask: jest.fn().mockResolvedValue(undefined),
       finishTask: jest.fn().mockResolvedValue(undefined),
       isRunning: jest.fn().mockReturnValue(false),
       hasQueuedUserMessages: jest.fn().mockReturnValue(false),
@@ -78,6 +83,7 @@ describe('TaskDispatchService 显式申请验收', () => {
     };
     taskNotify = {
       notifyTaskRequester: jest.fn().mockResolvedValue({ sent: true }),
+      notifyTaskAgentOwner: jest.fn().mockResolvedValue({ sent: true }),
     };
     taskRealtime = {
       lineAppended: jest.fn(),
@@ -291,6 +297,161 @@ describe('TaskDispatchService 显式申请验收', () => {
     expect(taskChat.finishTask).toHaveBeenCalledWith(1);
     expect(task.subStatus).toBe(TaskSubStatus.PENDING_ACCEPT);
     expect(eventsRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('执行失败统一结束本轮并重排未处理子任务事件', async () => {
+    tasksRepo.findOne.mockResolvedValue(baseTask());
+    const internals = service as unknown as {
+      awaitingTurnStart: Set<number>;
+      finalizeFailedTurn(
+        taskId: number,
+        content: string,
+        eventContent: string,
+      ): Promise<void>;
+    };
+    internals.awaitingTurnStart.add(1);
+
+    await internals.finalizeFailedTurn(
+      1,
+      '执行失败：模型异常',
+      '会话执行失败：模型异常',
+    );
+    await internals.finalizeFailedTurn(1, '重复失败', '重复失败');
+
+    expect(internals.awaitingTurnStart.has(1)).toBe(false);
+    expect(taskChat.failTask).toHaveBeenCalledTimes(1);
+    expect(taskChat.failTask).toHaveBeenCalledWith(1, '执行失败：模型异常');
+    expect(workerInbox.requeueDelivered).toHaveBeenCalledTimes(1);
+    expect(workerInbox.requeueDelivered).toHaveBeenCalledWith(1);
+    expect(eventsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 1,
+        content: '会话执行失败：模型异常',
+      }),
+    );
+  });
+
+  it('会话完成但未申请验收时主动重新唤醒机器人', async () => {
+    const task = baseTask();
+    tasksRepo.findOne.mockResolvedValue(task);
+    const internals = service as unknown as {
+      finishedAwaitingApply: Set<number>;
+      applyReminders: Map<
+        number,
+        { firstAt: number; attempts: number; nextAt: number }
+      >;
+      remindAcceptanceApply(task: Task): Promise<void>;
+    };
+    internals.finishedAwaitingApply.add(1);
+    internals.applyReminders.set(1, {
+      firstAt: Date.now() - 60_000,
+      attempts: 0,
+      nextAt: Date.now() - 1,
+    });
+
+    await internals.remindAcceptanceApply(task);
+
+    expect(internals.finishedAwaitingApply.has(1)).toBe(false);
+    expect(task.status).toBe(TaskStatus.WAITING);
+    expect(task.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
+    expect(task.resumePrompt).toContain('/tasks/1/handoff/apply.md');
+    expect(eventsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('第 1 次重新唤醒') as string,
+        meta: expect.objectContaining({
+          reason: 'acceptance-apply-missing',
+        }) as unknown,
+      }),
+    );
+  });
+
+  it('多次催办仍未申请验收时通知负责人且不代替验收', async () => {
+    const task = baseTask();
+    const internals = service as unknown as {
+      applyReminders: Map<
+        number,
+        { firstAt: number; attempts: number; nextAt: number }
+      >;
+      remindAcceptanceApply(task: Task): Promise<void>;
+    };
+    internals.applyReminders.set(1, {
+      firstAt: Date.now() - 60 * 60_000,
+      attempts: 3,
+      nextAt: Date.now() - 1,
+    });
+
+    await internals.remindAcceptanceApply(task);
+
+    expect(tasksRepo.update).not.toHaveBeenCalled();
+    expect(task.status).toBe(TaskStatus.RUNNING);
+    expect(taskNotify.notifyTaskRequester).not.toHaveBeenCalled();
+    expect(eventsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('仍未申请验收') as string,
+        meta: expect.objectContaining({
+          reason: 'acceptance-apply-escalated',
+        }) as unknown,
+      }),
+    );
+  });
+
+  it('执行中长时间无状态进展时通知负责人但不修改任务状态', async () => {
+    const task = baseTask({
+      updatedAt: new Date(Date.now() - 31 * 60_000),
+    });
+
+    await (
+      service as unknown as {
+        warnStalledExecution(task: Task): Promise<void>;
+      }
+    ).warnStalledExecution(task);
+
+    expect(task.status).toBe(TaskStatus.RUNNING);
+    expect(tasksRepo.update).not.toHaveBeenCalled();
+    expect(taskNotify.notifyTaskAgentOwner).toHaveBeenCalledWith(
+      task,
+      'notice',
+      expect.stringContaining('执行长时间无进展'),
+      expect.stringContaining('不会自动中断'),
+    );
+    expect(eventsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meta: expect.objectContaining({
+          reason: 'execution-no-progress',
+        }) as unknown,
+      }),
+    );
+  });
+
+  it('执行器会话不存在时转待继续并解除旧会话绑定', async () => {
+    const task = baseTask({
+      executorId: 3,
+      opencodeSessionId: 'session-old',
+    });
+    tasksRepo.findOne.mockResolvedValue(task);
+
+    await (
+      service as unknown as {
+        recoverMissingSession(task: Task): Promise<void>;
+      }
+    ).recoverMissingSession(task);
+
+    expect(task.status).toBe(TaskStatus.WAITING);
+    expect(task.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
+    expect(task.executorId).toBeNull();
+    expect(task.opencodeSessionId).toBeNull();
+    expect(task.resumePrompt).toContain('执行器会话已不存在');
+    expect(taskChat.finishTask).toHaveBeenCalledWith(1, {
+      toolStatus: 'error',
+      toolDetail: '执行器会话已不存在，未收到工具终态事件',
+    });
+    expect(workerInbox.requeueDelivered).toHaveBeenCalledWith(1);
+    expect(eventsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 1,
+        meta: expect.objectContaining({ watchdog: true }) as unknown,
+      }),
+    );
   });
 
   it('会话成功只补齐产出，不自动进入待验收', async () => {

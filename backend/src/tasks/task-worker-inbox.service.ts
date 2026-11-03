@@ -10,6 +10,9 @@ import { isWorkerRequester } from './task-requester';
 
 const OPEN_STATUSES = ['pending', 'queued', 'delivered'] as const;
 
+/** 单次扫描最多读取的开放收件箱记录（避免异常堆积拖慢 LOOP） */
+const ACTIONABLE_SCAN_LIMIT = 200;
+
 /** 父子任务机器人事件的持久化收件箱，LOOP 负责把 pending 事件排入父任务。 */
 @Injectable()
 export class TaskWorkerInboxService {
@@ -61,14 +64,87 @@ export class TaskWorkerInboxService {
     });
   }
 
+  /**
+   * LOOP 可处理的开放事件：pending 立即处理；queued/delivered 只在超过
+   * 陈旧阈值后重新纳入，避免父机器人当前回合仍在正常消费时被重复唤醒。
+   * nextRetryAt 未到的记录跳过，由退避策略防止每秒重试。
+   */
+  async listActionable(
+    now = new Date(),
+    staleMs = 60_000,
+    take = 20,
+  ): Promise<TaskWorkerInbox[]> {
+    const rows = await this.inbox.find({
+      where: { status: In([...OPEN_STATUSES]) },
+      order: { id: 'ASC' },
+      take: ACTIONABLE_SCAN_LIMIT,
+    });
+    const staleBefore = now.getTime() - staleMs;
+    return rows
+      .filter((row) => {
+        const retryAt = row.nextRetryAt
+          ? new Date(row.nextRetryAt).getTime()
+          : 0;
+        if (retryAt > now.getTime()) return false;
+        if (row.status === 'pending') return true;
+        const updatedAt = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+        return !Number.isFinite(updatedAt) || updatedAt <= staleBefore;
+      })
+      .slice(0, take);
+  }
+
+  /** 重新打开陈旧事件；仅当仍处于开放状态时生效，避免覆盖并发完成。 */
+  async reopen(id: number, reason: string): Promise<boolean> {
+    const now = new Date();
+    const result = await this.inbox.update(
+      { id, status: In([...OPEN_STATUSES]) },
+      {
+        status: 'pending',
+        deliveredAt: null,
+        nextRetryAt: null,
+        attempts: () => '"attempts" + 1',
+        lastAttemptAt: now,
+        lastError: reason,
+      },
+    );
+    return Boolean(result.affected);
+  }
+
+  /** 暂缓处理并记录一次失败尝试；达到阈值后由 LOOP 转人工。 */
+  async defer(id: number, nextRetryAt: Date, reason: string): Promise<void> {
+    await this.inbox.update(
+      { id, status: In([...OPEN_STATUSES]) },
+      {
+        nextRetryAt,
+        attempts: () => '"attempts" + 1',
+        lastAttemptAt: new Date(),
+        lastError: reason,
+      },
+    );
+  }
+
+  async markDone(id: number): Promise<void> {
+    await this.inbox.update(
+      { id, status: In([...OPEN_STATUSES]) },
+      { status: 'done', processedAt: new Date() },
+    );
+  }
+
   async markQueued(id: number): Promise<void> {
-    await this.inbox.update({ id, status: 'pending' }, { status: 'queued' });
+    await this.inbox.update(
+      { id, status: 'pending' },
+      { status: 'queued', nextRetryAt: null },
+    );
   }
 
   async markDelivered(parentTaskId: number): Promise<void> {
     await this.inbox.update(
       { parentTaskId, status: 'queued' },
-      { status: 'delivered', deliveredAt: new Date() },
+      {
+        status: 'delivered',
+        deliveredAt: new Date(),
+        nextRetryAt: null,
+      },
     );
   }
 
@@ -85,7 +161,14 @@ export class TaskWorkerInboxService {
         kind: In(['question', 'handoff']),
         status: In(['queued', 'delivered']),
       },
-      { status: 'pending', deliveredAt: null },
+      {
+        status: 'pending',
+        deliveredAt: null,
+        nextRetryAt: null,
+        attempts: () => '"attempts" + 1',
+        lastAttemptAt: new Date(),
+        lastError: '父机器人本轮已结束，但事件尚未通过动作接口处理',
+      },
     );
     await this.inbox.update(
       {

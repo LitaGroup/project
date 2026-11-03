@@ -8,10 +8,12 @@ import {
 describe('TaskWorkerInboxService 子任务收件箱', () => {
   const inboxRepo = {
     update: jest.fn().mockResolvedValue({ affected: 1 }),
+    find: jest.fn().mockResolvedValue([]),
   };
 
   beforeEach(() => {
     inboxRepo.update.mockClear();
+    inboxRepo.find.mockClear();
   });
 
   it('会话未消费的事件同时重排 queued 与 delivered', async () => {
@@ -28,7 +30,11 @@ describe('TaskWorkerInboxService 子任务收件箱', () => {
           value: ['queued', 'delivered'],
         }) as unknown,
       }),
-      { status: 'pending', deliveredAt: null },
+      expect.objectContaining({
+        status: 'pending',
+        deliveredAt: null,
+        attempts: expect.any(Function) as unknown,
+      }),
     );
     expect(inboxRepo.update).toHaveBeenNthCalledWith(
       2,
@@ -39,6 +45,62 @@ describe('TaskWorkerInboxService 子任务收件箱', () => {
         }) as unknown,
       }),
       expect.objectContaining({ status: 'done' }),
+    );
+  });
+
+  it('listActionable 立即返回 pending，只返回陈旧的 queued/delivered，并遵守退避', async () => {
+    const now = new Date('2026-11-03T12:00:00+08:00');
+    inboxRepo.find.mockResolvedValue([
+      {
+        id: 1,
+        status: 'pending',
+        updatedAt: now,
+        nextRetryAt: null,
+      },
+      {
+        id: 2,
+        status: 'queued',
+        updatedAt: new Date(now.getTime() - 10 * 60_000),
+        nextRetryAt: null,
+      },
+      {
+        id: 3,
+        status: 'delivered',
+        updatedAt: new Date(now.getTime() - 10 * 60_000),
+        nextRetryAt: null,
+      },
+      {
+        id: 4,
+        status: 'delivered',
+        updatedAt: now,
+        nextRetryAt: null,
+      },
+      {
+        id: 5,
+        status: 'pending',
+        updatedAt: now,
+        nextRetryAt: new Date(now.getTime() + 60_000),
+      },
+    ] as unknown);
+    const service = new TaskWorkerInboxService(inboxRepo as never);
+
+    const rows = await service.listActionable(now, 60_000);
+
+    expect(rows.map((row) => row.id)).toEqual([1, 2, 3]);
+  });
+
+  it('reopen 只更新开放事件并递增尝试次数', async () => {
+    const service = new TaskWorkerInboxService(inboxRepo as never);
+
+    await expect(service.reopen(7, '会话结束未处理')).resolves.toBe(true);
+
+    expect(inboxRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 7 }),
+      expect.objectContaining({
+        status: 'pending',
+        attempts: expect.any(Function) as unknown,
+        lastError: '会话结束未处理',
+      }),
     );
   });
 
@@ -62,7 +124,7 @@ describe('TaskWorkerInboxService 子任务收件箱', () => {
         acceptUrl: 'http://localhost:3100/api/tasks/2/handoff/accept.md',
       },
       status: 'queued',
-    } as TaskWorkerInbox;
+    } as unknown as TaskWorkerInbox;
 
     const prompt = taskInboxPrompt(entry, child, 'http://api.example/api/');
 
@@ -116,7 +178,7 @@ describe('TaskWorkerInboxService 子任务收件箱', () => {
         ],
       },
       status: 'queued',
-    } as TaskWorkerInbox;
+    } as unknown as TaskWorkerInbox;
 
     const prompt = taskInboxPrompt(entry, child, 'http://api.example/api');
 

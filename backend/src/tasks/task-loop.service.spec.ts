@@ -34,6 +34,7 @@ describe('TaskLoopService 多机器人协同', () => {
     }) as Task;
 
   let tasksRepo: { find: jest.Mock; findOne: jest.Mock; update: jest.Mock };
+  let messagesRepo: { find: jest.Mock };
   let tasksService: { addEvent: jest.Mock };
   let assignmentService: { assign: jest.Mock };
   let dispatchService: {
@@ -49,11 +50,15 @@ describe('TaskLoopService 多机器人协同', () => {
     notifyTaskAgentOwner: jest.Mock;
   };
   let inbox: {
-    listPending: jest.Mock;
+    listActionable: jest.Mock;
     markQueued: jest.Mock;
     markDelivered: jest.Mock;
     markDead: jest.Mock;
+    markDone: jest.Mock;
     completeForChild: jest.Mock;
+    reopen: jest.Mock;
+    defer: jest.Mock;
+    enqueue: jest.Mock;
   };
   let service: TaskLoopService;
 
@@ -63,6 +68,7 @@ describe('TaskLoopService 多机器人协同', () => {
       findOne: jest.fn(),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
+    messagesRepo = { find: jest.fn().mockResolvedValue([]) };
     tasksService = { addEvent: jest.fn().mockResolvedValue(undefined) };
     assignmentService = { assign: jest.fn() };
     dispatchService = {
@@ -88,14 +94,19 @@ describe('TaskLoopService 多机器人协同', () => {
         .mockResolvedValue({ sent: true, ownerName: '机器人负责人' }),
     };
     inbox = {
-      listPending: jest.fn().mockResolvedValue([]),
+      listActionable: jest.fn().mockResolvedValue([]),
       markQueued: jest.fn().mockResolvedValue(undefined),
       markDelivered: jest.fn().mockResolvedValue(undefined),
       markDead: jest.fn().mockResolvedValue(undefined),
+      markDone: jest.fn().mockResolvedValue(undefined),
       completeForChild: jest.fn().mockResolvedValue(undefined),
+      reopen: jest.fn().mockResolvedValue(true),
+      defer: jest.fn().mockResolvedValue(undefined),
+      enqueue: jest.fn().mockResolvedValue(null),
     };
     service = new TaskLoopService(
       tasksRepo as never,
+      messagesRepo as never,
       tasksService as never,
       assignmentService as never,
       dispatchService as never,
@@ -176,6 +187,36 @@ describe('TaskLoopService 多机器人协同', () => {
     expect(dispatchService.dispatch).not.toHaveBeenCalled();
   });
 
+  it('待接受超过 10 分钟仍未接受时提醒负责人但不自动接受', async () => {
+    const task = baseTask({
+      subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+      agentId: 1001,
+      assignedAt: new Date(Date.now() - 11 * 60_000),
+    });
+    returnForStatus(TaskSubStatus.PENDING_ACCEPTANCE, task);
+
+    await service.tick();
+
+    expect(dispatchService.offer).toHaveBeenCalledWith(1);
+    expect(taskNotify.notifyTaskAgentOwner).toHaveBeenCalledWith(
+      task,
+      'notice',
+      expect.stringContaining('长时间未接受'),
+      expect.stringContaining('仍未接受或拒绝'),
+    );
+    expect(tasksService.addEvent).toHaveBeenCalledWith(
+      1,
+      '系统',
+      expect.stringContaining('超过 10 分钟'),
+      null,
+      expect.objectContaining({ reason: 'offer-accept-timeout' }),
+    );
+    expect(tasksRepo.update).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: TaskStatus.RUNNING }),
+    );
+  });
+
   it('没有可用机器人时进入待反馈', async () => {
     const task = baseTask();
     returnForStatus(TaskSubStatus.PENDING_ASSIGNMENT, task);
@@ -202,6 +243,49 @@ describe('TaskLoopService 多机器人协同', () => {
         ],
       }),
     );
+  });
+
+  it('子任务待反馈但收件箱缺失时按持久化提问补建事件', async () => {
+    const child = baseTask({
+      id: 2,
+      code: 'TK-0002',
+      parentId: 1,
+      rootId: 1,
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_FEEDBACK,
+      requesterType: 'worker',
+      requesterId: 1001,
+    });
+    tasksRepo.find.mockImplementation(
+      (args?: { where?: { subStatus?: { value?: unknown[] } } }) =>
+        Promise.resolve(
+          args?.where?.subStatus?.value?.includes(
+            TaskSubStatus.PENDING_FEEDBACK,
+          )
+            ? [child]
+            : [],
+        ),
+    );
+    messagesRepo.find.mockResolvedValue([
+      {
+        taskId: 2,
+        kind: 'question',
+        question: {
+          id: 'project-q1',
+          state: 'pending',
+          questions: [{ header: '确认', question: '选择哪个方案？' }],
+        },
+      },
+    ]);
+
+    await service.tick();
+
+    expect(inbox.enqueue).toHaveBeenCalledWith(child, 'question', {
+      referenceId: 'project-q1',
+      payload: {
+        questions: [{ header: '确认', question: '选择哪个方案？' }],
+      },
+    });
   });
 
   it('待继续任务在机器人空闲后恢复并投递父机器人事件', async () => {
@@ -236,7 +320,7 @@ describe('TaskLoopService 多机器人协同', () => {
       kind: 'handoff',
       referenceId: null,
       status: 'pending',
-    } as TaskWorkerInbox;
+    } as unknown as TaskWorkerInbox;
     const parent = baseTask({
       id: 1,
       agentId: 1001,
@@ -251,7 +335,7 @@ describe('TaskLoopService 多机器人协同', () => {
       requesterId: 1001,
       subStatus: TaskSubStatus.PENDING_ACCEPT,
     });
-    inbox.listPending.mockResolvedValue([entry]);
+    inbox.listActionable.mockResolvedValue([entry]);
     tasksRepo.findOne.mockImplementation(
       ({ where }: { where: { id: number } }) =>
         Promise.resolve(where.id === 1 ? parent : child),
@@ -287,7 +371,7 @@ describe('TaskLoopService 多机器人协同', () => {
         acceptUrl: 'http://localhost:3100/api/tasks/2/handoff/accept.md',
       },
       status: 'pending',
-    } as TaskWorkerInbox;
+    } as unknown as TaskWorkerInbox;
     const parent = baseTask({
       id: 1,
       status: TaskStatus.RUNNING,
@@ -303,7 +387,7 @@ describe('TaskLoopService 多机器人协同', () => {
       requesterId: 1001,
       subStatus: TaskSubStatus.PENDING_ACCEPT,
     });
-    inbox.listPending.mockResolvedValue([entry]);
+    inbox.listActionable.mockResolvedValue([entry]);
     tasksRepo.findOne.mockImplementation(
       ({ where }: { where: { id: number } }) =>
         Promise.resolve(where.id === 1 ? parent : child),
@@ -356,7 +440,7 @@ describe('TaskLoopService 多机器人协同', () => {
         ],
       },
       status: 'pending',
-    } as TaskWorkerInbox;
+    } as unknown as TaskWorkerInbox;
     const parent = baseTask({
       id: 1,
       status: TaskStatus.RUNNING,
@@ -371,7 +455,7 @@ describe('TaskLoopService 多机器人协同', () => {
       requesterId: 1001,
       subStatus: TaskSubStatus.PENDING_FEEDBACK,
     });
-    inbox.listPending.mockResolvedValue([entry]);
+    inbox.listActionable.mockResolvedValue([entry]);
     tasksRepo.findOne.mockImplementation(
       ({ where }: { where: { id: number } }) =>
         Promise.resolve(where.id === 1 ? parent : child),
@@ -416,7 +500,7 @@ describe('TaskLoopService 多机器人协同', () => {
       kind: 'handoff',
       referenceId: null,
       status: 'pending',
-    } as TaskWorkerInbox;
+    } as unknown as TaskWorkerInbox;
     const parent = baseTask({
       id: 1,
       status: TaskStatus.RUNNING,
@@ -431,7 +515,7 @@ describe('TaskLoopService 多机器人协同', () => {
       requesterId: 1001,
       subStatus: TaskSubStatus.PENDING_ACCEPT,
     });
-    inbox.listPending.mockResolvedValue([entry]);
+    inbox.listActionable.mockResolvedValue([entry]);
     tasksRepo.findOne.mockImplementation(
       ({ where }: { where: { id: number } }) =>
         Promise.resolve(where.id === 1 ? parent : child),
@@ -444,7 +528,7 @@ describe('TaskLoopService 多机器人协同', () => {
     expect(inbox.markQueued).not.toHaveBeenCalled();
   });
 
-  it('父任务自身待反馈时不被子任务事件改写状态', async () => {
+  it('父任务自身待反馈时不覆盖状态，但记录阻塞并退避重试', async () => {
     const entry = {
       id: 13,
       parentTaskId: 1,
@@ -453,7 +537,7 @@ describe('TaskLoopService 多机器人协同', () => {
       kind: 'handoff',
       referenceId: null,
       status: 'pending',
-    } as TaskWorkerInbox;
+    } as unknown as TaskWorkerInbox;
     const parent = baseTask({
       id: 1,
       status: TaskStatus.WAITING,
@@ -468,7 +552,7 @@ describe('TaskLoopService 多机器人协同', () => {
       requesterId: 1001,
       subStatus: TaskSubStatus.PENDING_ACCEPT,
     });
-    inbox.listPending.mockResolvedValue([entry]);
+    inbox.listActionable.mockResolvedValue([entry]);
     tasksRepo.findOne.mockImplementation(
       ({ where }: { where: { id: number } }) =>
         Promise.resolve(where.id === 1 ? parent : child),
@@ -478,7 +562,70 @@ describe('TaskLoopService 多机器人协同', () => {
 
     expect(tasksRepo.update).not.toHaveBeenCalled();
     expect(inbox.markQueued).not.toHaveBeenCalled();
-    expect(tasksService.addEvent).not.toHaveBeenCalled();
+    expect(inbox.defer).toHaveBeenCalledWith(
+      13,
+      expect.any(Date),
+      expect.stringContaining('父任务当前为 等待中-待反馈'),
+    );
+    expect(tasksService.addEvent).toHaveBeenCalledWith(
+      2,
+      '系统',
+      expect.stringContaining('连续 3 次失败将转人工'),
+      null,
+      expect.objectContaining({ watchdog: true, inboxId: 13 }),
+    );
+  });
+
+  it('连续唤醒父机器人达到阈值后把子任务需求方转人工', async () => {
+    const entry = {
+      id: 15,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'question',
+      referenceId: 'project-q1',
+      attempts: 3,
+      status: 'pending',
+    } as unknown as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      code: 'TK-0002',
+      parentId: 1,
+      rootId: 3,
+      requesterType: 'worker',
+      requesterId: 1001,
+      subStatus: TaskSubStatus.PENDING_FEEDBACK,
+    });
+    const root = baseTask({ id: 3, rootId: 3, createdById: 88 });
+    inbox.listActionable.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(
+          where.id === 1 ? parent : where.id === 2 ? child : root,
+        ),
+    );
+
+    await service.tick();
+
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 2, requesterType: 'worker' }),
+      { requesterType: 'user', requesterId: 88 },
+    );
+    expect(tasksService.addEvent).toHaveBeenCalledWith(
+      2,
+      '系统',
+      expect.stringContaining('已连续 3 次唤醒父机器人'),
+      null,
+      expect.objectContaining({ watchdog: true, inboxId: 15 }),
+    );
+    expect(taskNotify.notifyTaskRequester).toHaveBeenCalled();
+    expect(inbox.markDead).toHaveBeenCalledWith(15);
   });
 
   it('父任务不可用时把子任务需求方回退给根任务创建人', async () => {
@@ -490,7 +637,7 @@ describe('TaskLoopService 多机器人协同', () => {
       kind: 'handoff',
       referenceId: null,
       status: 'pending',
-    } as TaskWorkerInbox;
+    } as unknown as TaskWorkerInbox;
     const child = baseTask({
       id: 2,
       code: 'TK-0002',
@@ -501,7 +648,7 @@ describe('TaskLoopService 多机器人协同', () => {
       subStatus: TaskSubStatus.PENDING_ACCEPT,
     });
     const root = baseTask({ id: 3, rootId: 3, createdById: 8 });
-    inbox.listPending.mockResolvedValue([entry]);
+    inbox.listActionable.mockResolvedValue([entry]);
     tasksRepo.findOne.mockImplementation(
       ({ where }: { where: { id: number } }) =>
         Promise.resolve(where.id === 2 ? child : where.id === 3 ? root : null),
@@ -511,7 +658,7 @@ describe('TaskLoopService 多机器人协同', () => {
 
     expect(inbox.markDead).toHaveBeenCalledWith(10);
     expect(tasksRepo.update).toHaveBeenCalledWith(
-      { id: 2 },
+      expect.objectContaining({ id: 2, requesterType: 'worker' }),
       { requesterType: 'user', requesterId: 8 },
     );
     expect(taskNotify.notifyTaskRequester).toHaveBeenCalledWith(
@@ -520,6 +667,49 @@ describe('TaskLoopService 多机器人协同', () => {
       expect.stringContaining('子任务需要人工介入'),
       expect.any(String),
     );
+  });
+
+  it('回退人工时若子任务已被正常处理则不覆盖最新状态', async () => {
+    const entry = {
+      id: 16,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'question',
+      referenceId: 'project-q1',
+      attempts: 3,
+      status: 'pending',
+    } as unknown as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      code: 'TK-0002',
+      parentId: 1,
+      rootId: 3,
+      requesterType: 'worker',
+      requesterId: 1001,
+      subStatus: TaskSubStatus.PENDING_FEEDBACK,
+    });
+    const root = baseTask({ id: 3, rootId: 3, createdById: 88 });
+    inbox.listActionable.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(
+          where.id === 1 ? parent : where.id === 2 ? child : root,
+        ),
+    );
+    tasksRepo.update.mockResolvedValueOnce({ affected: 0 });
+
+    await service.tick();
+
+    expect(inbox.markDone).toHaveBeenCalledWith(16);
+    expect(inbox.markDead).not.toHaveBeenCalledWith(16);
+    expect(taskNotify.notifyTaskRequester).not.toHaveBeenCalled();
   });
 
   it('验收升级后的待反馈优先提醒执行机器人负责人', async () => {

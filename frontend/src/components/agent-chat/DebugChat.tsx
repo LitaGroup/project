@@ -235,119 +235,122 @@ export function DebugChat({
             </ThreadPrimitive.Messages>
           </ThreadPrimitive.Viewport>
           <ChatComposerDock>
-            <ChatComposerFrame
-              singleLine
-              top={
-                <ChatAttachmentChips
-                  files={attachments}
-                  onRemove={(index) =>
-                    updateAttachments(
-                      attachmentsRef.current.filter((_, item) => item !== index),
-                    )
-                  }
-                />
-              }
-              left={
-                enableAttachments && onUploadFile ? (
-                  <>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={(event) => {
-                        void handleFiles(event.target.files)
-                        event.target.value = ''
-                      }}
-                    />
-                    <ChatActionIcon
-                      label={uploading ? '正在上传文件' : '上传文件'}
-                      icon={Plus}
-                      busy={uploading}
-                      disabled={running}
-                      onClick={() => fileInputRef.current?.click()}
-                    />
-                  </>
-                ) : null
-              }
-              right={
-                <>
-                  {mode && onModeChange && (
-                    <div
-                      className="flex shrink-0 items-center rounded-[var(--radius-md)] border border-border p-0.5 text-[11px]"
-                      role="group"
-                      aria-label="主 Agent 模式"
-                    >
-                      {(
-                        [
-                          ['build', 'Build', '可读取、修改文件并执行命令'],
-                          ['plan', 'Plan', '只分析与规划，不修改文件'],
-                        ] as Array<[WorkerDebugMode, string, string]>
-                      ).map(([value, label, hint]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          title={`${hint}（Tab 切换）`}
-                          aria-pressed={mode === value}
-                          disabled={running || modeBusy}
-                          onClick={() => {
-                            if (mode !== value) void onModeChange(value)
-                          }}
-                          className={`rounded-[var(--radius-sm)] px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                            mode === value
-                              ? 'bg-background-muted font-medium text-foreground-intense'
-                              : 'text-foreground-muted hover:text-foreground-intense'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {currentModel && onModelChange && (
-                    <ModelSettingsPicker
-                      catalog={modelCatalog}
-                      current={currentModel}
-                      onChange={onModelChange}
-                      busy={modelBusy}
-                      disabled={running}
-                      // 面板窄时优先压缩模型名（截断展示），保证整行按钮不换行
-                      triggerClassName="min-w-0 max-w-[240px] flex-[0_1_auto] overflow-hidden"
-                    />
-                  )}
-                  <ComposerPrimitive.Send asChild>
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="primary"
-                      className="shrink-0 rounded-full"
-                      aria-label="发送消息"
-                      disabled={running}
-                    >
-                      <ArrowUp className="size-4" />
-                    </Button>
-                  </ComposerPrimitive.Send>
-                </>
-              }
-            >
-              <ComposerPrimitive.Input
-                rows={2}
-                submitMode="enter"
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  placeholder ??
-                  (running
-                    ? 'AGENT 正在回复…'
-                    : '输入消息，Enter 发送，Shift+Enter 换行…')
+            {/* assistant-ui 的 Enter 发送依赖最近的 form，缺少 Root 时只能点击发送 */}
+            <ComposerPrimitive.Root>
+              <ChatComposerFrame
+                singleLine
+                top={
+                  <ChatAttachmentChips
+                    files={attachments}
+                    onRemove={(index) =>
+                      updateAttachments(
+                        attachmentsRef.current.filter((_, item) => item !== index),
+                      )
+                    }
+                  />
                 }
-                className="max-h-40 min-h-10 w-full flex-1 resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-foreground-muted"
-              />
-            </ChatComposerFrame>
-            {uploadError && (
-              <p className="mt-2 text-[11px] text-error-foreground">
-                附件上传失败：{uploadError}
-              </p>
-            )}
+                left={
+                  enableAttachments && onUploadFile ? (
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        className="hidden"
+                        onChange={(event) => {
+                          void handleFiles(event.target.files)
+                          event.target.value = ''
+                        }}
+                      />
+                      <ChatActionIcon
+                        label={uploading ? '正在上传文件' : '上传文件'}
+                        icon={Plus}
+                        busy={uploading}
+                        disabled={running}
+                        onClick={() => fileInputRef.current?.click()}
+                      />
+                    </>
+                  ) : null
+                }
+                right={
+                  <>
+                    {mode && onModeChange && (
+                      <div
+                        className="flex shrink-0 items-center rounded-[var(--radius-md)] border border-border p-0.5 text-[11px]"
+                        role="group"
+                        aria-label="主 Agent 模式"
+                      >
+                        {(
+                          [
+                            ['build', 'Build', '可读取、修改文件并执行命令'],
+                            ['plan', 'Plan', '只分析与规划，不修改文件'],
+                          ] as Array<[WorkerDebugMode, string, string]>
+                        ).map(([value, label, hint]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            title={`${hint}（Tab 切换）`}
+                            aria-pressed={mode === value}
+                            disabled={running || modeBusy}
+                            onClick={() => {
+                              if (mode !== value) void onModeChange(value)
+                            }}
+                            className={`rounded-[var(--radius-sm)] px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                              mode === value
+                                ? 'bg-background-muted font-medium text-foreground-intense'
+                                : 'text-foreground-muted hover:text-foreground-intense'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {currentModel && onModelChange && (
+                      <ModelSettingsPicker
+                        catalog={modelCatalog}
+                        current={currentModel}
+                        onChange={onModelChange}
+                        busy={modelBusy}
+                        disabled={running}
+                        // 面板窄时优先压缩模型名（截断展示），保证整行按钮不换行
+                        triggerClassName="min-w-0 max-w-[240px] flex-[0_1_auto] overflow-hidden"
+                      />
+                    )}
+                    <ComposerPrimitive.Send asChild>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="primary"
+                        className="shrink-0 rounded-full"
+                        aria-label="发送消息"
+                        disabled={running}
+                      >
+                        <ArrowUp className="size-4" />
+                      </Button>
+                    </ComposerPrimitive.Send>
+                  </>
+                }
+              >
+                <ComposerPrimitive.Input
+                  rows={2}
+                  submitMode="enter"
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    placeholder ??
+                    (running
+                      ? 'AGENT 正在回复…'
+                      : '输入消息，Enter 发送，Shift+Enter 换行…')
+                  }
+                  className="max-h-40 min-h-10 w-full flex-1 resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-foreground-muted"
+                />
+              </ChatComposerFrame>
+              {uploadError && (
+                <p className="mt-2 text-[11px] text-error-foreground">
+                  附件上传失败：{uploadError}
+                </p>
+              )}
+            </ComposerPrimitive.Root>
           </ChatComposerDock>
         </ThreadPrimitive.Root>
       </AssistantRuntimeProvider>

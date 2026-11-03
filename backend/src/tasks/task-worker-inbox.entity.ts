@@ -49,6 +49,22 @@ export class TaskWorkerInbox {
   @Column({ type: 'varchar', length: 20, default: 'pending' })
   status: TaskWorkerInboxStatus;
 
+  /** 已尝试唤醒父机器人的次数；达到阈值后转人工，避免无限循环 */
+  @Column({ type: 'int', default: 0 })
+  attempts: number;
+
+  /** 最近一次尝试唤醒/恢复的时间 */
+  @Column({ type: 'timestamptz', nullable: true })
+  lastAttemptAt: Date | null;
+
+  /** 下次允许重试的时间（退避） */
+  @Column({ type: 'timestamptz', nullable: true })
+  nextRetryAt: Date | null;
+
+  /** 最近一次恢复失败原因 */
+  @Column({ type: 'text', nullable: true })
+  lastError: string | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   deliveredAt: Date | null;
 
