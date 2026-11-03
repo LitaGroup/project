@@ -309,9 +309,13 @@ export class TaskDeliveryService {
         `任务 ${task.code} 的执行机器人不是「${worker.name}」`,
       );
     }
+    const pendingApply =
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_APPLY;
     if (
-      task.status !== TaskStatus.RUNNING ||
-      task.subStatus !== TaskSubStatus.EXECUTING
+      !pendingApply &&
+      (task.status !== TaskStatus.RUNNING ||
+        task.subStatus !== TaskSubStatus.EXECUTING)
     ) {
       throw new BadRequestException(
         `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可更新交付文档`,
@@ -389,7 +393,7 @@ export class TaskDeliveryService {
   /**
    * 人工修改交付文档后告知执行机器人：
    * - 执行中：进入当前会话的发送队列，本轮结束后读取最新版本
-   * - 待反馈/待继续：并入下一次恢复提示
+   * - 待反馈/待继续/待申请验收：并入下一次恢复提示（待申请验收同时转入待继续）
    */
   private async notifyAgentOfHandoffUpdate(
     task: Task,
@@ -428,13 +432,18 @@ export class TaskDeliveryService {
     }
     if (
       task.status === TaskStatus.WAITING &&
-      [TaskSubStatus.PENDING_FEEDBACK, TaskSubStatus.PENDING_RESUME].includes(
-        task.subStatus,
-      )
+      [
+        TaskSubStatus.PENDING_FEEDBACK,
+        TaskSubStatus.PENDING_RESUME,
+        TaskSubStatus.PENDING_APPLY,
+      ].includes(task.subStatus)
     ) {
       await this.tasks.update(
         { id: task.id, status: task.status, subStatus: task.subStatus },
         {
+          ...(task.subStatus === TaskSubStatus.PENDING_APPLY
+            ? { subStatus: TaskSubStatus.PENDING_RESUME }
+            : {}),
           resumePrompt: [task.resumePrompt?.trim(), prompt]
             .filter(Boolean)
             .join('\n\n'),

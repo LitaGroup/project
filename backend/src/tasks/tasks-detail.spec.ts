@@ -134,6 +134,22 @@ describe('TasksService 任务详情与对话', () => {
     expect(saved.resumePrompt).toBeNull();
   });
 
+  it('待申请验收收到补充消息后转入待继续，机器人空闲时恢复', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        subStatus: TaskSubStatus.PENDING_APPLY,
+        resumePrompt: null,
+      }),
+    );
+
+    const saved = await service.supplement(1, '再补一个验收说明', '张三');
+
+    expect(saved.status).toBe(TaskStatus.WAITING);
+    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
+    expect(saved.resumePrompt).toContain('再补一个验收说明');
+    expect(saved.description).toContain('再补一个验收说明');
+  });
+
   it('待继续状态补充消息并入恢复提示，保持待继续', async () => {
     tasksRepo.findOne.mockResolvedValue(
       baseTask({

@@ -72,7 +72,7 @@ export interface WorkerView extends Worker {
   /** 工位路径：生产 {WORKER_BASE_DIR}/worker/{id}，开发 {WORKER_BASE_DIR}/worker-dev/{id}；未配置 WORKER_BASE_DIR 为 null */
   workdir: string | null;
   liveStatus: WorkerLiveStatus;
-  /** 当前活跃任务（执行中/等待派发/待验收中最新一条） */
+  /** 当前占用机器人的活跃任务（执行中/待接受/待反馈等待处理；待申请验收不占用） */
   activeTask: {
     id: number;
     code: string;
@@ -217,7 +217,7 @@ export class WorkersService implements OnApplicationBootstrap {
     return token;
   }
 
-  /** 实时状态：只有进行中任务占用机器人；待验收 > 其他等待 > 空闲。 */
+  /** 实时状态：只有进行中任务占用机器人；待接受/待反馈等待处理 > 空闲。待申请验收/待验收不占用机器人。 */
   private async liveByWorker(
     workers: Worker[],
   ): Promise<Map<number, { status: WorkerLiveStatus; task: Task | null }>> {

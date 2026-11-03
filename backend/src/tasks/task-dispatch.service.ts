@@ -88,7 +88,8 @@ interface LiveTaskStream {
 /**
  * 任务派发执行引擎：机器人（runtime=opencode）在执行器上干活。
  * 链路：mkdir 工位 → 复用/建 opencode 会话（一个任务固定一个会话）→ 发任务输入/输出要求
- * → 订阅执行器事件流（按 sessionId 路由）→ 终态（execution.completed）取最终回复 → 「待验收」+ 通知责任人。
+ * → 订阅执行器事件流（按 sessionId 路由）→ 终态（execution.completed）取最终回复
+ * → 释放机器人并转「待申请验收」→ 机器人申请验收后「待验收」+ 通知责任人。
  * 机器人定义与技能由工位 AGENTS.md / .opencode/skills 提供，不在任务 prompt 中重复注入。
  */
 @Injectable()
@@ -151,9 +152,6 @@ export class TaskDispatchService
 
   /** prompt 已接受但执行器尚未发出首个事件（期间继续输入必须入队，不能再次 prompt） */
   private readonly awaitingTurnStart = new Set<number>();
-
-  /** 会话已完成但机器人尚未调用验收申请的任务（对账只补一次产出） */
-  private readonly finishedAwaitingApply = new Set<number>();
 
   /** taskId → 未申请验收的催办状态（首次时间/已催办次数/下次时间） */
   private readonly applyReminders = new Map<
@@ -250,6 +248,11 @@ export class TaskDispatchService
     return this.tasks.exists({
       where: { agentId: workerId, status: TaskStatus.RUNNING },
     });
+  }
+
+  /** 当前任务是否还有等待投递的用户消息（LOOP 在子任务事件抢占用时应避让）。 */
+  hasQueuedUserMessages(taskId: number): boolean {
+    return this.taskChat.hasQueuedUserMessages(taskId);
   }
 
   /** 是否真人执行机器人 */
@@ -449,7 +452,7 @@ export class TaskDispatchService
 
       // 4. 新一轮清空输出缓冲与去重标记（结果只取本轮文本）
       this.textBuffers.delete(task.id);
-      this.finishedAwaitingApply.delete(task.id);
+      this.applyReminders.delete(task.id);
       this.failedReconciled.delete(task.id);
       this.permissionNotified.delete(task.id);
       this.questionSyncedAt.delete(task.id);
@@ -1520,7 +1523,7 @@ export class TaskDispatchService
 
   /**
    * 机器人主动申请验收：保存本轮产出并把任务推进到「等待中-待验收」。
-   * 仅允许当前绑定的执行机器人调用；会话结束不会自动申请验收。
+   * 允许执行中或已完成本轮、待申请验收的任务调用；会话结束不会自动申请验收。
    */
   async applyForAcceptance(
     taskId: number,
@@ -1533,14 +1536,19 @@ export class TaskDispatchService
         `任务 ${task.code} 的执行机器人不是「${worker.name}」`,
       );
     }
+    const pendingApply =
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_APPLY;
     if (
-      task.status !== TaskStatus.RUNNING ||
-      task.subStatus !== TaskSubStatus.EXECUTING
+      !pendingApply &&
+      (task.status !== TaskStatus.RUNNING ||
+        task.subStatus !== TaskSubStatus.EXECUTING)
     ) {
       throw new BadRequestException(
         `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可申请验收`,
       );
     }
+    const fromLabel = `${task.status}-${task.subStatus}`;
     const resultText = await this.collectResult(task);
     const now = new Date();
     // 交付文档在任务执行期间已由作者持续维护；申请验收只校验并锁定版本。
@@ -1566,8 +1574,15 @@ export class TaskDispatchService
     const updated = await this.tasks.update(
       {
         id: taskId,
-        status: TaskStatus.RUNNING,
-        subStatus: TaskSubStatus.EXECUTING,
+        ...(pendingApply
+          ? {
+              status: TaskStatus.WAITING,
+              subStatus: TaskSubStatus.PENDING_APPLY,
+            }
+          : {
+              status: TaskStatus.RUNNING,
+              subStatus: TaskSubStatus.EXECUTING,
+            }),
         handoffVersion: handoff.version,
       },
       {
@@ -1583,14 +1598,13 @@ export class TaskDispatchService
       throw new BadRequestException('任务状态已变化，请刷新后重试');
     }
     const saved = await this.mustFind(taskId);
-    this.finishedAwaitingApply.add(taskId);
     this.applyReminders.delete(taskId);
     this.stallNotifiedAt.delete(taskId);
     this.pushLine(taskId, `✔ 机器人已申请验收，交付文档：${handoff.path}`);
     await this.addEvent(
       taskId,
       '状态变更',
-      `状态变更：进行中-执行中 → 等待中-待验收（执行机器人申请验收，交付文档：${handoff.path}）`,
+      `状态变更：${fromLabel} → 等待中-待验收（执行机器人申请验收，交付文档：${handoff.path}）`,
       worker.name,
       {
         workerId: worker.id,
@@ -1653,7 +1667,6 @@ export class TaskDispatchService
     if (!updated.affected) {
       throw new BadRequestException('任务状态已变化，请刷新后重试');
     }
-    this.finishedAwaitingApply.delete(taskId);
     this.pushLine(taskId, `↩ ${worker.name} 已撤销交付，任务继续执行`);
     await this.addEvent(
       taskId,
@@ -1721,7 +1734,6 @@ export class TaskDispatchService
     code?: string;
   }): Promise<void> {
     this.awaitingTurnStart.delete(task.id);
-    this.finishedAwaitingApply.delete(task.id);
     this.failedReconciled.delete(task.id);
     this.applyReminders.delete(task.id);
     await this.taskChat.finishTask(task.id, {
@@ -1759,15 +1771,17 @@ export class TaskDispatchService
   }
 
   /**
-   * 执行器会话成功：只保存产出并释放事件流，任务保持「进行中-执行中」。
-   * 必须由执行机器人显式调用验收申请接口后才进入「等待中-待验收」。
+   * 执行器会话成功：保存产出并释放机器人。
+   * 同一任务还有排队消息时保持执行中并继续下一轮；没有排队消息时进入
+   * 「等待中-待申请验收」（不占用机器人），机器人可立即承接其它任务。
+   * 仍必须由执行机器人显式调用验收申请接口后才进入「等待中-待验收」。
    */
   private async finalizeSuccess(taskId: number): Promise<void> {
     this.awaitingTurnStart.delete(taskId);
     try {
       await this.finalizeSuccessTurn(taskId);
     } finally {
-      // 仅当任务仍处于执行中时才会真正发送；待验收/待反馈等状态保持队列不动。
+      // 仅当任务仍处于执行中时才会真正发送；待申请验收/待验收/待反馈等状态保持队列不动。
       this.scheduleQueueDrain(taskId);
     }
   }
@@ -1810,24 +1824,45 @@ export class TaskDispatchService
       await this.taskChat.finishTask(taskId);
       return;
     }
-    if (this.finishedAwaitingApply.has(taskId)) return;
     const resultText = await this.collectResult(task);
+    // 当前任务仍有用户补充：优先把同一任务的消息处理完，避免把同一任务拆成多个并发回合。
+    if (this.taskChat.hasQueuedUserMessages(taskId)) {
+      await this.tasks.update(
+        {
+          id: taskId,
+          status: TaskStatus.RUNNING,
+          subStatus: TaskSubStatus.EXECUTING,
+        },
+        { result: resultText ?? task.result },
+      );
+      await this.taskChat.finishTask(taskId);
+      return;
+    }
     const updated = await this.tasks.update(
       {
         id: taskId,
         status: TaskStatus.RUNNING,
         subStatus: TaskSubStatus.EXECUTING,
       },
-      { result: resultText ?? task.result },
+      {
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_APPLY,
+        result: resultText ?? task.result,
+        remindCount: 0,
+        firstRemindedAt: null,
+        lastRemindedAt: null,
+      },
     );
-    if (!updated.affected) return;
-    this.finishedAwaitingApply.add(taskId);
+    if (!updated.affected) {
+      await this.taskChat.finishTask(taskId);
+      return;
+    }
     this.scheduleApplyReminder(taskId);
-    this.pushLine(taskId, '✔ 会话执行完成，等待机器人申请验收');
+    this.pushLine(taskId, '✔ 会话执行完成，机器人已释放，等待申请验收');
     await this.addEvent(
       taskId,
-      '系统',
-      `执行器会话已完成，任务保持进行中-执行中；等待执行机器人调用 POST ${this.apiUrl}/tasks/${taskId}/handoff/apply.md 申请验收`,
+      '状态变更',
+      `状态变更：进行中-执行中 → 等待中-待申请验收（本轮会话已结束，机器人已释放；等待执行机器人调用 POST ${this.apiUrl}/tasks/${taskId}/handoff/apply.md 申请验收）`,
       null,
       { waitingDeliveryApply: true },
     );
@@ -1858,6 +1893,8 @@ export class TaskDispatchService
     id: number;
     code?: string;
     title?: string;
+    status?: TaskStatus;
+    subStatus?: TaskSubStatus;
     agentId?: number | null;
   }): Promise<void> {
     const now = Date.now();
@@ -1880,12 +1917,21 @@ export class TaskDispatchService
         APPLY_REMIND_DELAYS_MS[
           Math.min(attempt, APPLY_REMIND_DELAYS_MS.length - 1)
         ];
+      const pendingApply =
+        task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_APPLY;
       const updated = await this.tasks.update(
-        {
-          id: task.id,
-          status: TaskStatus.RUNNING,
-          subStatus: TaskSubStatus.EXECUTING,
-        },
+        pendingApply
+          ? {
+              id: task.id,
+              status: TaskStatus.WAITING,
+              subStatus: TaskSubStatus.PENDING_APPLY,
+            }
+          : {
+              id: task.id,
+              status: TaskStatus.RUNNING,
+              subStatus: TaskSubStatus.EXECUTING,
+            },
         {
           status: TaskStatus.WAITING,
           subStatus: TaskSubStatus.PENDING_RESUME,
@@ -1900,7 +1946,6 @@ export class TaskDispatchService
       );
       this.releaseTask(task.id);
       if (!updated.affected) return;
-      this.finishedAwaitingApply.delete(task.id);
       this.pushLine(task.id, '↻ 会话已完成但未申请验收，已重新唤醒机器人');
       await this.addEvent(
         task.id,
@@ -1978,13 +2023,24 @@ export class TaskDispatchService
   }
 
   /**
-   * 执行中任务兜底对账（每 2 分钟）：事件流漏收（服务重启/断线期间完成）时，
-   * 直接查会话 outcome 补齐产出；不自动申请验收，仍等待机器人显式调用申请接口。
+   * 执行中/待申请验收任务兜底对账（每 2 分钟）：
+   * - 执行中：事件流漏收（服务重启/断线期间完成）时查会话 outcome 补齐产出；
+   * - 待申请验收：会话已结束但机器人未申请验收，按退避主动唤回。
+   * 均不自动申请验收，仍等待机器人显式调用申请接口。
    */
   @Cron('20 */2 * * * *')
   async reconcileExecuting(): Promise<void> {
-    const running = await this.tasks.find({
-      where: { status: TaskStatus.RUNNING, subStatus: TaskSubStatus.EXECUTING },
+    const active = await this.tasks.find({
+      where: [
+        {
+          status: TaskStatus.RUNNING,
+          subStatus: TaskSubStatus.EXECUTING,
+        },
+        {
+          status: TaskStatus.WAITING,
+          subStatus: TaskSubStatus.PENDING_APPLY,
+        },
+      ],
       select: {
         id: true,
         code: true,
@@ -2002,23 +2058,38 @@ export class TaskDispatchService
         updatedAt: true,
       },
     });
-    // 已不在执行中的任务（人工改状态/删除等）释放事件流占用并清理催办状态
-    const runningIds = new Set(running.map((task) => task.id));
+    const pendingApply = active.filter(
+      (task) =>
+        task.status === TaskStatus.WAITING &&
+        task.subStatus === TaskSubStatus.PENDING_APPLY,
+    );
+    const executing = active.filter(
+      (task) =>
+        task.status === TaskStatus.RUNNING &&
+        task.subStatus === TaskSubStatus.EXECUTING,
+    );
+    // 已离开活跃状态的任务（人工改状态/删除等）释放事件流占用并清理催办状态
+    const activeIds = new Set(active.map((task) => task.id));
+    const executingIds = new Set(executing.map((task) => task.id));
     for (const taskId of [...this.hubRetained.keys()]) {
-      if (!runningIds.has(taskId) && !this.dispatching.has(taskId)) {
+      if (!activeIds.has(taskId) && !this.dispatching.has(taskId)) {
         this.releaseTask(taskId);
       }
     }
     for (const taskId of [...this.applyReminders.keys()]) {
-      if (!runningIds.has(taskId)) this.applyReminders.delete(taskId);
-    }
-    for (const taskId of [...this.finishedAwaitingApply]) {
-      if (!runningIds.has(taskId)) this.finishedAwaitingApply.delete(taskId);
+      if (!activeIds.has(taskId)) this.applyReminders.delete(taskId);
     }
     for (const taskId of [...this.stallNotifiedAt.keys()]) {
-      if (!runningIds.has(taskId)) this.stallNotifiedAt.delete(taskId);
+      if (!executingIds.has(taskId)) this.stallNotifiedAt.delete(taskId);
     }
-    for (const task of running) {
+    // 待申请验收不占用机器人；服务重启后重建内存催办状态。
+    for (const task of pendingApply) {
+      if (!this.applyReminders.has(task.id)) {
+        this.scheduleApplyReminder(task.id);
+      }
+      await this.remindAcceptanceApply(task);
+    }
+    for (const task of executing) {
       if (!task.executorId || !task.opencodeSessionId) continue;
       const executor = await this.executors.findOne({
         where: { id: task.executorId },
@@ -2027,11 +2098,6 @@ export class TaskDispatchService
       // 已记录失败的任务等待人工处理，不再占用事件流
       if (this.failedReconciled.has(task.id)) {
         this.releaseTask(task.id);
-        continue;
-      }
-      // 会话已完成但机器人尚未申请验收：按退避主动催办，超限转人工
-      if (this.finishedAwaitingApply.has(task.id)) {
-        await this.remindAcceptanceApply(task);
         continue;
       }
       // 服务重启/断线后恢复订阅（有执行中的任务才保持连接）
@@ -2057,7 +2123,7 @@ export class TaskDispatchService
         if (info.outcome === 'succeeded') {
           this.pushLine(
             task.id,
-            '↻ 对账补偿：会话已完成，补齐产出并等待机器人申请验收',
+            '↻ 对账补偿：会话已完成，补齐产出并释放机器人，等待申请验收',
           );
           await this.finalizeSuccess(task.id);
         } else if (info.outcome === 'failed') {
@@ -2291,7 +2357,7 @@ export class TaskDispatchService
       [
         '# 完成与验收',
         '',
-        '完成并自检后，必须主动申请验收；会话结束不会自动进入待验收，未调用申请接口时任务会一直保持「进行中-执行中」。',
+        '完成并自检后，必须主动申请验收；会话结束不会自动进入待验收。本轮答复结束且没有后续排队消息时，平台会释放机器人并把任务转为「等待中-待申请验收」，稍后会重新唤醒你；不要因为已经开始处理其它任务而忘记申请验收。',
         '',
         '1. 先完成交付物，并把最终交付结果、验证结果、遗留事项写入上面的交付文档。',
         `2. 确认交付文档已经是最终内容（当前读取版本会在更新后变化，以最近一次更新返回的版本为准）。`,

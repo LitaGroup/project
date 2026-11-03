@@ -42,6 +42,7 @@ describe('TaskLoopService 多机器人协同', () => {
     offer: jest.Mock;
     isWorkerBusy: jest.Mock;
     taskChatRunning: jest.Mock;
+    hasQueuedUserMessages: jest.Mock;
     claimExecution: jest.Mock;
   };
   let taskNotify: {
@@ -87,6 +88,7 @@ describe('TaskLoopService 多机器人协同', () => {
       offer: jest.fn().mockResolvedValue(undefined),
       isWorkerBusy: jest.fn().mockResolvedValue(false),
       taskChatRunning: jest.fn().mockReturnValue(false),
+      hasQueuedUserMessages: jest.fn().mockReturnValue(false),
       claimExecution: jest.fn().mockResolvedValue(
         baseTask({
           status: TaskStatus.RUNNING,
@@ -464,6 +466,54 @@ describe('TaskLoopService 多机器人协同', () => {
       null,
       expect.objectContaining({ childTaskId: 2, inboxId: 11 }),
     );
+  });
+
+  it('待申请验收的父任务收到子任务事件后转入待继续', async () => {
+    const entry = {
+      id: 12,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'handoff',
+      referenceId: null,
+      status: 'pending',
+    } as unknown as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_APPLY,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      code: 'TK-0002',
+      parentId: 1,
+      rootId: 1,
+      requesterType: 'worker',
+      requesterId: 1001,
+      subStatus: TaskSubStatus.PENDING_ACCEPT,
+    });
+    inbox.listActionable.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(where.id === 1 ? parent : child),
+    );
+
+    await service.tick();
+
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      {
+        id: 1,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_APPLY,
+      },
+      expect.objectContaining({
+        subStatus: TaskSubStatus.PENDING_RESUME,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        resumePrompt: expect.stringContaining('子任务协同事件'),
+      }),
+    );
+    expect(inbox.markQueued).toHaveBeenCalledWith(12);
   });
 
   it('执行中父任务会收到子任务提问正文和完整答复地址', async () => {

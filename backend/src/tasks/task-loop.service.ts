@@ -49,6 +49,7 @@ const ROOT_MESSAGE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
  * 多机器人任务 LOOP（每秒）：
  * 待分配→分配；待接受→任务邀约；待继续→机器人空闲后恢复；
  * 机器人需求方收件箱→父任务待继续 / 根任务需求方一次性回复；
+ * 待申请验收不占用机器人，收到补充消息或子任务事件时转待继续；
  * 待反馈/待验收仅提醒，不占用机器人。
  */
 @Injectable()
@@ -640,6 +641,32 @@ export class TaskLoopService implements OnApplicationBootstrap {
       let updated: { affected?: number | null } | null = null;
       if (
         parent.status === TaskStatus.WAITING &&
+        parent.subStatus === TaskSubStatus.PENDING_APPLY
+      ) {
+        if (entry.status !== 'pending') {
+          const reopened = await this.workerInbox.reopen(
+            entry.id,
+            '父任务待申请验收时收到子任务事件，重新排队',
+          );
+          if (!reopened) continue;
+          entry.status = 'pending';
+        }
+        updated = await this.tasks.update(
+          {
+            id: parent.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_APPLY,
+          },
+          {
+            subStatus: TaskSubStatus.PENDING_RESUME,
+            resumePrompt: prompt,
+            remindCount: 0,
+            firstRemindedAt: null,
+            lastRemindedAt: null,
+          },
+        );
+      } else if (
+        parent.status === TaskStatus.WAITING &&
         parent.subStatus === TaskSubStatus.PENDING_ACCEPT
       ) {
         if (entry.status !== 'pending') {
@@ -668,10 +695,15 @@ export class TaskLoopService implements OnApplicationBootstrap {
         parent.status === TaskStatus.RUNNING &&
         parent.subStatus === TaskSubStatus.EXECUTING
       ) {
-        // 会话已结束但任务仍停在执行中（等待机器人申请验收）时，
-        // 机器人实际空闲，可以把子任务事件排入待继续并唤醒。
-        // 当前回合仍在输出时保持 pending，避免同一会话并行重入。
-        if (this.dispatchService.taskChatRunning(parent.id)) continue;
+        // 会话已结束但任务仍停在执行中（历史/竞态兜底）时，机器人实际空闲，
+        // 可以把子任务事件排入待继续并唤醒；当前回合仍在输出或还有本任务
+        // 排队消息时保持 pending，优先把当前任务自己的消息处理完。
+        if (
+          this.dispatchService.taskChatRunning(parent.id) ||
+          this.dispatchService.hasQueuedUserMessages(parent.id)
+        ) {
+          continue;
+        }
         if (entry.status !== 'pending') {
           const reopened = await this.workerInbox.reopen(
             entry.id,

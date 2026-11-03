@@ -356,18 +356,19 @@ describe('TaskDispatchService 显式申请验收', () => {
     );
   });
 
-  it('会话完成但未申请验收时主动重新唤醒机器人', async () => {
-    const task = baseTask();
+  it('会话完成但未申请验收时从待申请验收主动重新唤醒机器人', async () => {
+    const task = baseTask({
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_APPLY,
+    });
     tasksRepo.findOne.mockResolvedValue(task);
     const internals = service as unknown as {
-      finishedAwaitingApply: Set<number>;
       applyReminders: Map<
         number,
         { firstAt: number; attempts: number; nextAt: number }
       >;
       remindAcceptanceApply(task: Task): Promise<void>;
     };
-    internals.finishedAwaitingApply.add(1);
     internals.applyReminders.set(1, {
       firstAt: Date.now() - 60_000,
       attempts: 0,
@@ -376,10 +377,19 @@ describe('TaskDispatchService 显式申请验收', () => {
 
     await internals.remindAcceptanceApply(task);
 
-    expect(internals.finishedAwaitingApply.has(1)).toBe(false);
     expect(task.status).toBe(TaskStatus.WAITING);
     expect(task.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
     expect(task.resumePrompt).toContain('/tasks/1/handoff/apply.md');
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      {
+        id: 1,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_APPLY,
+      },
+      expect.objectContaining({
+        subStatus: TaskSubStatus.PENDING_RESUME,
+      }),
+    );
     expect(eventsRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining('第 1 次重新唤醒') as string,
@@ -479,7 +489,7 @@ describe('TaskDispatchService 显式申请验收', () => {
     );
   });
 
-  it('会话成功只补齐产出，不自动进入待验收', async () => {
+  it('会话成功只补齐产出并释放机器人，不自动进入待验收', async () => {
     const task = baseTask();
     tasksRepo.findOne.mockResolvedValue(task);
 
@@ -489,14 +499,58 @@ describe('TaskDispatchService 显式申请验收', () => {
       }
     ).finalizeSuccess(1);
 
-    expect(task.status).toBe(TaskStatus.RUNNING);
-    expect(task.subStatus).toBe(TaskSubStatus.EXECUTING);
+    expect(task.status).toBe(TaskStatus.WAITING);
+    expect(task.subStatus).toBe(TaskSubStatus.PENDING_APPLY);
+    expect(taskChat.finishTask).toHaveBeenCalledWith(1);
     expect(eventsRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 1,
-        content: expect.stringContaining('等待执行机器人调用') as string,
+        content: expect.stringContaining('待申请验收') as string,
+        meta: expect.objectContaining({
+          waitingDeliveryApply: true,
+        }) as unknown,
       }),
     );
     expect(taskNotify.notifyTaskRequester).not.toHaveBeenCalled();
+  });
+
+  it('本轮仍有同一任务的排队消息时保持执行中，优先处理队列', async () => {
+    const task = baseTask();
+    tasksRepo.findOne.mockResolvedValue(task);
+    taskChat.hasQueuedUserMessages.mockReturnValue(true);
+
+    await (
+      service as unknown as {
+        finalizeSuccess(taskId: number): Promise<void>;
+      }
+    ).finalizeSuccess(1);
+
+    expect(task.status).toBe(TaskStatus.RUNNING);
+    expect(task.subStatus).toBe(TaskSubStatus.EXECUTING);
+    expect(taskChat.finishTask).toHaveBeenCalledWith(1);
+    expect(eventsRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('待申请验收任务仍可由执行机器人申请验收', async () => {
+    const task = baseTask({
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_APPLY,
+    });
+    tasksRepo.findOne.mockResolvedValue(task);
+
+    const applied = await service.applyForAcceptance(1, worker);
+
+    expect(applied.task.status).toBe(TaskStatus.WAITING);
+    expect(applied.task.subStatus).toBe(TaskSubStatus.PENDING_ACCEPT);
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 1,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_APPLY,
+      }),
+      expect.objectContaining({
+        subStatus: TaskSubStatus.PENDING_ACCEPT,
+      }),
+    );
   });
 });

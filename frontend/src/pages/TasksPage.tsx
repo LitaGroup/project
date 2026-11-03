@@ -105,8 +105,8 @@ const BOARD_COLUMNS: BoardColumn[] = [
   {
     key: 'waiting',
     title: '等待中的任务',
-    hint: '待分配 / 待接受 / 待反馈 / 待继续',
-    subStatuses: ['待分配', '待接受', '待反馈', '待继续'],
+    hint: '待分配 / 待接受 / 待反馈 / 待继续 / 待申请验收',
+    subStatuses: ['待分配', '待接受', '待反馈', '待继续', '待申请验收'],
     iconClass: 'bg-warning-soft text-warning-foreground',
     countClass: 'bg-warning-soft text-warning-foreground',
     accentClass: 'bg-warning-emphasis',

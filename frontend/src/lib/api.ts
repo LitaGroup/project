@@ -952,12 +952,13 @@ export interface TaskTypeDef {
 export const TASK_STATUSES = ['等待中', '进行中', '已结束'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
-/** 任务子状态：与主状态严格对应（等待中：待分配/待接受/待反馈/待继续/待验收；进行中：执行中；已结束：完成/已拒绝/失败/取消） */
+/** 任务子状态：与主状态严格对应（等待中：待分配/待接受/待反馈/待继续/待申请验收/待验收；进行中：执行中；已结束：完成/已拒绝/失败/取消） */
 export const TASK_SUB_STATUSES = [
   '待分配',
   '待接受',
   '待反馈',
   '待继续',
+  '待申请验收',
   '待验收',
   '执行中',
   '完成',
@@ -1310,7 +1311,7 @@ export interface TaskPackage {
   /** 最近一次分配时间（操作台按此倒序；可能为空） */
   assignedAt: string | null
   status: TaskStatus
-  /** 子状态：待分配 / 待接受 / 待反馈 / 待继续 / 待验收 / 执行中 / 完成 / 已拒绝 / 失败 / 取消 */
+  /** 子状态：待分配 / 待接受 / 待反馈 / 待继续 / 待申请验收 / 待验收 / 执行中 / 完成 / 已拒绝 / 失败 / 取消 */
   subStatus: TaskSubStatus
   /** 需求方类型：user=人类用户（历史）/ worker=真人机器人 */
   requesterType: 'user' | 'worker' | null
@@ -1426,6 +1427,7 @@ export type TicketStatus =
   | '待接受'
   | '待反馈'
   | '待继续'
+  | '待申请验收'
   | '待验收'
   | '处理中'
   | '已完成'

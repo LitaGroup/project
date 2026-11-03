@@ -833,6 +833,7 @@ export class TasksService {
         TaskSubStatus.PENDING_ACCEPTANCE,
         TaskSubStatus.PENDING_FEEDBACK,
         TaskSubStatus.PENDING_RESUME,
+        TaskSubStatus.PENDING_APPLY,
       ].includes(task.subStatus);
     if (usesIdentify) {
       return this.supplement(id, text, operator, options);
@@ -864,6 +865,7 @@ export class TasksService {
         TaskSubStatus.PENDING_ACCEPTANCE,
         TaskSubStatus.PENDING_FEEDBACK,
         TaskSubStatus.PENDING_RESUME,
+        TaskSubStatus.PENDING_APPLY,
       ].includes(task.subStatus);
     if (!allowed) {
       throw new BadRequestException(
@@ -883,8 +885,13 @@ export class TasksService {
         ? TaskSubStatus.PENDING_RESUME
         : TaskSubStatus.PENDING_ASSIGNMENT;
       task.resumePrompt = task.agentId ? `# 需求方补充反馈\n\n${text}` : null;
-    } else if (previousSubStatus === TaskSubStatus.PENDING_RESUME) {
-      // 已在待继续排队：补充消息并入恢复提示，机器人恢复时一并读取。
+    } else if (
+      previousSubStatus === TaskSubStatus.PENDING_RESUME ||
+      previousSubStatus === TaskSubStatus.PENDING_APPLY
+    ) {
+      // 已在等待机器人继续：补充消息并入恢复提示，机器人恢复时一并读取。
+      // 待申请验收收到新消息时转为待继续，机器人空闲后立即恢复原任务。
+      task.subStatus = TaskSubStatus.PENDING_RESUME;
       task.resumePrompt = [
         task.resumePrompt?.trim(),
         `# 需求方补充消息\n\n${text}`,

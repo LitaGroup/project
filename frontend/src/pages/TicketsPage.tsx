@@ -34,6 +34,7 @@ const TICKET_STATUSES: TicketStatus[] = [
   '待接受',
   '待反馈',
   '待继续',
+  '待申请验收',
   '待验收',
   '处理中',
   '已完成',

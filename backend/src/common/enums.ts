@@ -231,7 +231,7 @@ export enum TaskStatus {
 
 /**
  * 任务子状态（与主状态严格对应）：
- * - 等待中：待分配 / 待接受 / 待反馈 / 待继续 / 待验收
+ * - 等待中：待分配 / 待接受 / 待反馈 / 待继续 / 待申请验收 / 待验收
  * - 进行中：执行中
  * - 已结束：完成 / 已拒绝 / 失败 / 取消
  *
@@ -242,6 +242,8 @@ export enum TaskSubStatus {
   PENDING_ACCEPTANCE = '待接受',
   PENDING_FEEDBACK = '待反馈',
   PENDING_RESUME = '待继续',
+  /** 本轮会话已结束、机器人已释放，但执行机器人尚未申请验收（不占用机器人） */
+  PENDING_APPLY = '待申请验收',
   PENDING_ACCEPT = '待验收',
   EXECUTING = '执行中',
   COMPLETED = '完成',

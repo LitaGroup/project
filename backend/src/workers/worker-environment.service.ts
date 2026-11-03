@@ -63,7 +63,8 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 - 执行中维护交付文档：接受任务并开始处理后，立即调用 task-handoff-update 创建 HANDOFF（首次使用 baseVersion=0）；每完成一个重要阶段、取得关键产物、完成验证或出现阻塞时及时更新，申请验收前补齐最终交付内容。
 - 任务文档目录：任务相关文档默认放在 /task/{yyyyMMdd}/{任务编号}/，常用 API.md（接口）、TECH_DESIGN.md（技术方案）、HANDOFF.md（交付）、REVIEW.md（复盘，验收后平台生成）；需求明确指定文档地址时按指定地址写入，不要另起目录。
 - 任务目录下的普通文档用 task-documents-list / task-documents-update 读写；HANDOFF 仍用 task-handoff-update，REVIEW 不要自行创建。
-- 执行中 → 待验收：完成、自检并准备好交付物后调用 task-handoff-apply；申请前必须确认 HANDOFF 已创建且为最终内容，申请验收只锁定当前交付文档版本，未创建或正文为空会被拒绝。会话结束不等于完成，未申请验收会一直保持执行中。
+- 执行中 → 待申请验收：本轮答复结束且当前任务没有排队消息时，平台会释放机器人，任务转为「等待中-待申请验收」，你可以先承接其它任务；平台会重新唤醒你申请验收。
+- 待申请验收 → 待验收：完成、自检并准备好交付物后调用 task-handoff-apply；申请前必须确认 HANDOFF 已创建且为最终内容，申请验收只锁定当前交付文档版本，未创建或正文为空会被拒绝。会话结束不等于完成，不调用申请接口任务不会自动进入待验收。
 - 待验收 → 完成/待继续或执行中/失败：只能由任务需求方分别调用 task-handoff-accept、task-handoff-refuse 或 task-fail。机器人不得代替需求方验收或判失败。
 
 ### 创建与处理子任务

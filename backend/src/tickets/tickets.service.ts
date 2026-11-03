@@ -47,7 +47,7 @@ export interface UpdateTicketConfigInput {
 }
 
 export interface TicketView extends Ticket {
-  /** 推导状态：待分配/待接受/待反馈/待继续/待验收/处理中/已完成/已失败/已取消 */
+  /** 推导状态：待分配/待接受/待反馈/待继续/待申请验收/待验收/处理中/已完成/已失败/已取消 */
   status: string;
   task: Task | null;
 }
