@@ -234,7 +234,10 @@ export class TaskNotifyService {
         ? `${this.appUrl}/workbench/tasks/${task.id}`
         : `${this.appUrl}/tasks/${task.id}`;
 
-    const statusLabel = `${task.status}-${task.subStatus}`;
+    // 部分调用方只查了任务的部分字段（如对账兜底只取 id/code/title），
+    // 缺状态时不要拼出 "undefined-undefined"。
+    const statusLabel =
+      [task.status, task.subStatus].filter(Boolean).join('-') || '未知';
     try {
       await this.feishuService.sendUserCard(receiver.openId, {
         config: { wide_screen_mode: true },

@@ -121,6 +121,46 @@ describe('TaskNotifyService 飞书任务通知', () => {
     expect(sentCardActionText(feishuService.sendUserCard)).toBe('打开工作台');
   });
 
+  it('负责人通知正文包含任务状态', async () => {
+    workers.findOne.mockResolvedValueOnce({
+      id: 1001,
+      name: '前端工程师',
+      ownerName: '王五',
+    });
+    workersService.ownerOpenId.mockResolvedValueOnce('ou_owner');
+
+    await service.notifyTaskAgentOwner(
+      baseTask({ subStatus: TaskSubStatus.PENDING_RESUME }),
+      'notice',
+      '任务未申请验收：TK-0042 活动页开发',
+      '平台已 3 次重新唤醒机器人。',
+    );
+
+    expect(sentCardText(feishuService.sendUserCard)).toContain(
+      '**状态**：等待中-待继续',
+    );
+  });
+
+  it('任务字段不完整时不渲染 undefined 状态', async () => {
+    workers.findOne.mockResolvedValueOnce({
+      id: 1001,
+      name: '前端工程师',
+      ownerName: '王五',
+    });
+    workersService.ownerOpenId.mockResolvedValueOnce('ou_owner');
+
+    await service.notifyTaskAgentOwner(
+      baseTask({ status: undefined, subStatus: undefined }),
+      'notice',
+      '任务未申请验收：TK-0042 活动页开发',
+      '平台已 3 次重新唤醒机器人。',
+    );
+
+    const text = sentCardText(feishuService.sendUserCard);
+    expect(text).toContain('**状态**：未知');
+    expect(text).not.toContain('undefined');
+  });
+
   it('AI 执行机器人不发送真人任务通知', async () => {
     workers.findOne.mockResolvedValueOnce({
       id: 1001,
@@ -147,6 +187,20 @@ function sentCardUrl(sendUserCard: jest.Mock): string | undefined {
 
 function sentCardActionText(sendUserCard: jest.Mock): string | undefined {
   return sentCardAction(sendUserCard)?.text?.content;
+}
+
+function sentCardText(sendUserCard: jest.Mock): string {
+  const call = sendUserCard.mock.calls[0] as
+    [string, Record<string, unknown>] | undefined;
+  if (!call) return '';
+  const elements = call[1].elements as
+    Array<{ tag?: string; text?: { content?: string } }> | undefined;
+  return (
+    elements
+      ?.filter((element) => element.tag === 'div')
+      .map((element) => element.text?.content ?? '')
+      .join('\n') ?? ''
+  );
 }
 
 function sentCardAction(
