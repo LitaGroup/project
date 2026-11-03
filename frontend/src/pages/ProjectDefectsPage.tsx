@@ -55,6 +55,7 @@ export function ProjectDefectsPage() {
   const [defects, setDefects] = useState<Defect[] | null>(null)
   const [projectName, setProjectName] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
+  const [releaseFilter, setReleaseFilter] = useState('')
   const [platformFilter, setPlatformFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
@@ -76,8 +77,14 @@ export function ProjectDefectsPage() {
   }, [projectId, reload])
 
   const q = keyword.trim().toLowerCase()
+  const releaseKeyword = releaseFilter.trim().replace(/^#/, '')
+  const releaseIdFilter =
+    releaseKeyword === '' ? null : Number(releaseKeyword)
   const filtered = (defects ?? []).filter(
     (d) =>
+      (releaseIdFilter === null ||
+        (Number.isInteger(releaseIdFilter) &&
+          d.releaseId === releaseIdFilter)) &&
       (!q ||
         d.expected.toLowerCase().includes(q) ||
         d.actual.toLowerCase().includes(q)) &&
@@ -101,6 +108,9 @@ export function ProjectDefectsPage() {
   // Markdown 视图：本项目缺陷清单带当前筛选参数（'all'/空串不传；.md 端点无 platform 参数）
   const mdQuery = [
     `projectId=${projectId}`,
+    releaseIdFilter !== null &&
+      Number.isInteger(releaseIdFilter) &&
+      `releaseId=${releaseIdFilter}`,
     statusFilter !== 'all' && `status=${encodeURIComponent(statusFilter)}`,
     priorityFilter !== 'all' &&
       `priority=${encodeURIComponent(priorityFilter)}`,
@@ -149,6 +159,19 @@ export function ProjectDefectsPage() {
               onChange={(e) => setKeyword(e.target.value)}
               onClear={() => setKeyword('')}
               aria-label="搜索预期或实际描述"
+            />
+          }
+        />
+        <ToolbarInput
+          className="w-32"
+          render={
+            <Input
+              placeholder="提测 ID"
+              clearable
+              value={releaseFilter}
+              onChange={(e) => setReleaseFilter(e.target.value)}
+              onClear={() => setReleaseFilter('')}
+              aria-label="按提测 ID 筛选"
             />
           }
         />
@@ -223,6 +246,7 @@ export function ProjectDefectsPage() {
         <TableHeader>
           <TableRow>
             <TableHead>预期功能描述</TableHead>
+            <TableHead className="w-24 text-center">提测 ID</TableHead>
             <TableHead className="w-24 text-center">端</TableHead>
             <TableHead className="w-24 text-center">优先级</TableHead>
             <TableHead className="w-24 text-center">状态</TableHead>
@@ -241,6 +265,9 @@ export function ProjectDefectsPage() {
                   {d.expected}
                 </Link>
               </TableCell>
+              <TableCell className="text-center">
+                {d.releaseId ? `#${d.releaseId}` : '—'}
+              </TableCell>
               <TableCell className="text-center">{d.platform ?? '—'}</TableCell>
               <TableCell className="text-center">
                 <DefectPriorityBadge priority={d.priority} />
@@ -258,7 +285,7 @@ export function ProjectDefectsPage() {
           ))}
           {defects !== null && filtered.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6}>
+              <TableCell colSpan={7}>
                 {defects.length === 0
                   ? '本项目暂无缺陷，点击"新建缺陷"创建'
                   : '无符合筛选条件的缺陷'}

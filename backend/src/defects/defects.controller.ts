@@ -33,6 +33,8 @@ class CreateDefectDto {
   images?: string[];
   /** 用例脚本：相对脚本根目录的 .test.ts 路径 */
   testScript?: string;
+  /** 关联提测 ID；不传时按项目最新有效提测自动关联，null 表示明确不关联 */
+  releaseId?: number | null;
 }
 
 class UpdateDefectDto {
@@ -50,6 +52,8 @@ class UpdateDefectDto {
   images?: string[];
   /** 用例脚本：相对脚本根目录的 .test.ts 路径，空串清除 */
   testScript?: string;
+  /** 关联提测 ID；null 清除关联，不传保持不变 */
+  releaseId?: number | null;
   /** 变更内容：状态变更时并入状态记录，否则单独记一条内容变更记录（可空） */
   changeContent?: string;
   /** 本次变更的备注信息（写入变更记录） */
@@ -77,15 +81,25 @@ function defectActor(req: AuthedRequest): DefectCreateActor {
   return { user: req.user, worker: req.worker };
 }
 
+/** 可选数字查询参数：空串视为未传（非法值交给 service 校验并返回 400）。 */
+function optionalNumber(value?: string): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  return Number(value);
+}
+
 @Controller('defects')
 export class DefectsController {
   constructor(private readonly defectsService: DefectsService) {}
 
-  /** 缺陷列表：传 projectId 按项目过滤，不传返回全部（全局列表页用）。不含大字段 */
+  /** 缺陷列表：可按项目 / 提测 ID 过滤，不传返回全部（全局列表页用）。不含大字段 */
   @Get()
-  findByProject(@Query('projectId') projectId?: string): Promise<Defect[]> {
+  findByProject(
+    @Query('projectId') projectId?: string,
+    @Query('releaseId') releaseId?: string,
+  ): Promise<Defect[]> {
     return this.defectsService.findByProject(
-      projectId === undefined ? undefined : Number(projectId),
+      optionalNumber(projectId),
+      optionalNumber(releaseId),
     );
   }
 
@@ -236,12 +250,14 @@ export class DefectsMarkdownController {
   @Header('Content-Type', 'text/markdown; charset=utf-8')
   listMarkdown(
     @Query('projectId') projectId?: string,
+    @Query('releaseId') releaseId?: string,
     @Query('status') status?: string,
     @Query('priority') priority?: string,
     @Query('q') q?: string,
   ): Promise<string> {
     return this.defectsService.listMarkdown({
-      projectId: projectId === undefined ? undefined : Number(projectId),
+      projectId: optionalNumber(projectId),
+      releaseId: optionalNumber(releaseId),
       status,
       priority,
       q,

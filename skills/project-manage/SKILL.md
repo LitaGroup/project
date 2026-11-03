@@ -310,7 +310,7 @@ Content-Type: application/json
 - 仅 `testers` 必填：**至少 1 人且须为用户系统内用户**（即登录过本平台的飞书用户），不存在返回 400 并列出无效姓名
 - `content`（提测内容 Markdown）/ `urls`（访问地址数组）/ `branches`（代码分支）均可空；提测时间由后端按当前时间生成；操作人取令牌对应用户（机器人令牌时为机器人名称）
 - 机器人提测时平台自动记录 `workerId`，并默认关联该机器人当前执行中的任务为 `sourceTaskId`；也可在 body 传 `taskId` 显式指定来源任务（须为该机器人执行的任务）
-- **提测后的缺陷派单**：先取项目最新一条提测，仅当它处于「待冒烟 / 进行中 / 未通过」时，新缺陷会自动关联该提测，并创建一个处理任务指派给原提测机器人；任务需求方优先为缺陷创建人（或其真人机器人），最新提测已通过、人工提测、机器人停用时不派单（不回退到更早的提测）
+- **提测后的缺陷派单**：先取项目最新一条提测，仅当它处于「待冒烟 / 进行中 / 未通过」时，新缺陷会自动关联该提测，并创建一个处理任务指派给原提测机器人；任务需求方优先为缺陷创建人（或其真人机器人），最新提测已通过、人工提测、机器人停用时不派单（不回退到更早的提测）。新建缺陷时显式传 `releaseId`（含 `null`）则以选择为准，不再自动关联/派单
 - 响应为 text/markdown：提测结果（项目/状态/人员/地址/分支/内容）+ 项目详情与提测记录清单地址；通知发送失败仅告警，不影响提测
 
 #### 8.2 查询提测记录（清单）
@@ -336,15 +336,15 @@ Content-Type: application/json
 
 ### 9. 缺陷（Markdown）
 
-缺陷归属项目，**仅平台内维护**（接口/人工创建，不与飞书同步）。属性：端 / 优先级（高/中/低）/ 预期功能描述 / 实际结果描述 / 图片（多张）/ 用例脚本 / 状态（开放 / 修复 / 关闭）。
+缺陷归属项目，**仅平台内维护**（接口/人工创建，不与飞书同步）。属性：端 / 优先级（高/中/低）/ 预期功能描述 / 实际结果描述 / 图片（多张）/ 用例脚本 / 提测 ID / 状态（开放 / 修复 / 关闭）。
 
 #### 9.1 查询缺陷（清单）
 
 ```
-GET /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|中|低][&q=关键词]
+GET /api/defects.md?projectId={id}[&releaseId={提测ID}][&status=开放|修复|关闭][&priority=高|中|低][&q=关键词]
 ```
 
-- 返回 Markdown 表格：`ID | 预期 | 端 | 状态 | 优先级 | 项目`；`projectId` 可选（不传返回全部项目），`q` 模糊匹配 预期 + 实际，`status`/`priority` 按枚举筛选（可组合）
+- 返回 Markdown 表格：`ID | 提测 ID | 预期 | 端 | 状态 | 优先级 | 项目`；`projectId` 可选（不传返回全部项目），`releaseId` 按提测 ID 精确查询，`q` 模糊匹配 预期 + 实际，`status`/`priority` 按枚举筛选（可组合）
 - 表格的 `ID` 列即详情链接，直接点开 `GET /api/defects/{defectId}.md` 查看单条
 
 #### 9.2 获取缺陷详情
@@ -353,8 +353,8 @@ GET /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|�
 GET /api/defects/{defectId}.md
 ```
 
-- 返回：元信息（ID/项目/状态/端/优先级/用例/来源提测/处理任务/创建·修复·验证·更新时间）+ 预期功能描述 + 实际结果描述 + 图片（`/images/...` 链接）+ 变更记录表（时间/状态/来源/操作人/变更内容/备注）+ "AI 操作"小节（各端点示例）
-- 机器人提测后的新缺陷若触发自动派单，详情会展示来源提测 ID 与处理任务链接；派单失败原因也会写入变更记录（来源 `自动`）
+- 返回：元信息（ID/项目/状态/端/优先级/用例/提测 ID/处理任务/创建·修复·验证·更新时间）+ 预期功能描述 + 实际结果描述 + 图片（`/images/...` 链接）+ 变更记录表（时间/状态/来源/操作人/变更内容/备注）+ "AI 操作"小节（各端点示例）
+- 缺陷详情会展示提测 ID 与处理任务链接；机器人提测后的新缺陷若触发自动派单，派单失败原因会写入变更记录（来源 `自动`）
 - 图片为 `/images/...` 相对链接，拼基础地址即可访问
 
 #### 9.3 编辑缺陷（创建 / 更新 / 状态变更 / 变更记录 / 删除）
@@ -362,11 +362,11 @@ GET /api/defects/{defectId}.md
 写入类操作均返回 Markdown 结果：
 
 ```bash
-# 新建（expected/actual 必填；platform 前端|后端|APP端|未知；priority 高|中|低；images 传上传接口返回的 /images/... 数组；testScript 可选）
+# 新建（expected/actual 必填；platform 前端|后端|APP端|未知；priority 高|中|低；images 传上传接口返回的 /images/... 数组；testScript/releaseId 可选）
 curl -X POST {BASE}/api/defects/create.md -H 'Content-Type: application/json' \
-  -d '{"projectId": 123, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高", "images": ["/images/uploads/20261014/xxx.png"], "testScript": "xxx/xxx.test.ts"}'
+  -d '{"projectId": 123, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高", "images": ["/images/uploads/20261014/xxx.png"], "testScript": "xxx/xxx.test.ts", "releaseId": 45}'
 
-# 更新字段（可改 platform/priority/status/expected/actual/images/testScript；changeContent/changeRemark 写入变更记录）
+# 更新字段（可改 platform/priority/status/expected/actual/images/testScript/releaseId；changeContent/changeRemark 写入变更记录；releaseId 传 null 清除关联）
 curl -X POST {BASE}/api/defects/{defectId}/update.md -H 'Content-Type: application/json' \
   -d '{"priority": "高", "actual": "新的实际结果", "changeContent": "补充信息", "changeRemark": "原因"}'
 

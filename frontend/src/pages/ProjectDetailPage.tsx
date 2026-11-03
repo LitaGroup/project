@@ -2409,6 +2409,7 @@ function DefectsPanel({
         <TableHeader>
           <TableRow>
             <TableHead>预期功能描述</TableHead>
+            <TableHead className="w-24 text-center">提测 ID</TableHead>
             <TableHead className="w-24 text-center">端</TableHead>
             <TableHead className="w-24 text-center">优先级</TableHead>
             <TableHead className="w-24 text-center">状态</TableHead>
@@ -2426,6 +2427,9 @@ function DefectsPanel({
                 >
                   {d.expected}
                 </Link>
+              </TableCell>
+              <TableCell className="text-center">
+                {d.releaseId ? `#${d.releaseId}` : '—'}
               </TableCell>
               <TableCell className="text-center">{d.platform ?? '—'}</TableCell>
               <TableCell className="text-center">
@@ -2452,7 +2456,7 @@ function DefectsPanel({
           ))}
           {defects.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6}>
+              <TableCell colSpan={7}>
                 {allDefects.length === 0
                   ? '暂无缺陷，点击「新建缺陷」创建'
                   : quickFilter === 'all'
@@ -2462,7 +2466,7 @@ function DefectsPanel({
             </TableRow>
           )}
           <CountRow
-            colSpan={6}
+            colSpan={7}
             total={filteredDefects.length}
             displayed={defects.length}
           />

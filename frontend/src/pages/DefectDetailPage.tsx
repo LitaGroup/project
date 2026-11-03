@@ -42,6 +42,7 @@ import {
   type DefectChangeRecord,
   type DefectPriority,
   type DefectStatus,
+  type ProjectRelease,
   type ProjectTest,
   type TestRun,
 } from '../lib/api'
@@ -463,12 +464,10 @@ export function DefectDetailPage() {
               <dt>验证时间</dt>
               <dd>{formatTime(defect.verifiedAt)}</dd>
             </div>
-            {defect.releaseId && (
-              <div className="flex justify-between">
-                <dt>来源提测</dt>
-                <dd>#{defect.releaseId}</dd>
-              </div>
-            )}
+            <div className="flex justify-between">
+              <dt>提测 ID</dt>
+              <dd>{defect.releaseId ? `#${defect.releaseId}` : '—'}</dd>
+            </div>
             {defect.followupTaskId && (
               <div className="flex justify-between">
                 <dt>处理任务</dt>
@@ -689,6 +688,8 @@ function EditContentDialog({
   const [images, setImages] = useState<string[]>([])
   const [testScript, setTestScript] = useState('')
   const [tests, setTests] = useState<ProjectTest[]>([])
+  const [releaseId, setReleaseId] = useState<number | null>(null)
+  const [releases, setReleases] = useState<ProjectRelease[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -701,11 +702,16 @@ function EditContentDialog({
       setActual(defect.actual)
       setImages(defect.images ?? [])
       setTestScript(defect.testScript ?? '')
+      setReleaseId(defect.releaseId)
       setError(null)
       api
         .listTests(defect.projectId)
         .then(setTests)
         .catch(() => setTests([]))
+      api
+        .listReleases(defect.projectId)
+        .then(setReleases)
+        .catch(() => setReleases([]))
     }
   }
 
@@ -728,6 +734,7 @@ function EditContentDialog({
         actual,
         images,
         testScript,
+        releaseId,
       })
       .then(() => {
         setOpen(false)
@@ -735,6 +742,16 @@ function EditContentDialog({
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setSaving(false))
+  }
+
+  const releaseItems = {
+    none: '不关联提测',
+    ...Object.fromEntries(
+      releases.map((r) => [
+        String(r.id),
+        `#${r.id} · ${r.status} · ${new Date(r.createdAt).toLocaleString()} · ${r.operator ?? '—'}`,
+      ]),
+    ),
   }
 
   return (
@@ -805,6 +822,27 @@ function EditContentDialog({
                 onChange={(e) => setActual(e.target.value)}
                 rows={3}
               />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              提测 ID（可留空）
+              <Select
+                value={releaseId === null ? 'none' : String(releaseId)}
+                onValueChange={(v) =>
+                  setReleaseId(v === 'none' ? null : Number(v))
+                }
+                items={releaseItems}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择提测" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.keys(releaseItems).map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {releaseItems[key as keyof typeof releaseItems]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </label>
             <DefectImagesField value={images} onChange={setImages} />
             <label className="flex flex-col gap-1 text-sm">

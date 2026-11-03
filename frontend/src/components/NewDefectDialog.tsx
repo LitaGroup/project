@@ -33,6 +33,7 @@ import {
   type Defect,
   type DefectPriority,
   type Project,
+  type ProjectRelease,
   type ProjectTest,
 } from '../lib/api'
 import { DefectImagesField } from './DefectImagesField'
@@ -68,6 +69,9 @@ export function NewDefectDialog({
   const [images, setImages] = useState<string[]>([])
   const [testScript, setTestScript] = useState('')
   const [tests, setTests] = useState<ProjectTest[]>([])
+  // auto=交给平台关联最新有效提测；none=显式不关联；其他值为指定提测 ID
+  const [releaseSelection, setReleaseSelection] = useState('auto')
+  const [releases, setReleases] = useState<ProjectRelease[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -81,17 +85,27 @@ export function NewDefectDialog({
       setActual(preset?.actual ?? '')
       setImages([])
       setTestScript(preset?.testScript ?? '')
+      setReleaseSelection('auto')
       setError(null)
     }
   }
 
-  // 加载所选项目已登记的测试，供用例脚本联想
+  // 加载所选项目已登记的测试与提测记录（用例联想 / 提测关联）
   useEffect(() => {
-    if (!open || projectId === null) return
+    if (!open || projectId === null) {
+      setTests([])
+      setReleases([])
+      return
+    }
+    setReleaseSelection('auto')
     api
       .listTests(projectId)
       .then(setTests)
       .catch(() => setTests([]))
+    api
+      .listReleases(projectId)
+      .then(setReleases)
+      .catch(() => setReleases([]))
   }, [open, projectId])
 
   const submit = () => {
@@ -118,6 +132,12 @@ export function NewDefectDialog({
         priority: priority as DefectPriority,
         images: images.length > 0 ? images : undefined,
         testScript,
+        releaseId:
+          releaseSelection === 'auto'
+            ? undefined
+            : releaseSelection === 'none'
+              ? null
+              : Number(releaseSelection),
       })
       .then((d) => {
         setOpen(false)
@@ -125,6 +145,17 @@ export function NewDefectDialog({
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setSaving(false))
+  }
+
+  const releaseItems = {
+    auto: '自动关联（项目最新有效提测）',
+    none: '不关联提测',
+    ...Object.fromEntries(
+      releases.map((r) => [
+        String(r.id),
+        `#${r.id} · ${r.status} · ${new Date(r.createdAt).toLocaleString()} · ${r.operator ?? '—'}`,
+      ]),
+    ),
   }
 
   return (
@@ -219,6 +250,28 @@ export function NewDefectDialog({
                 rows={3}
                 placeholder="实际表现与差异…"
               />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              提测 ID（表明缺陷与哪次提测相关，可留空）
+              <Select
+                value={releaseSelection}
+                onValueChange={(v) => setReleaseSelection(v as string)}
+                items={releaseItems}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择提测" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.keys(releaseItems).map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {releaseItems[key as keyof typeof releaseItems]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-foreground-muted">
+                默认自动关联项目最新有效提测；选择「不关联」或指定提测后，平台不再自动派发缺陷处理任务。
+              </span>
             </label>
             <DefectImagesField value={images} onChange={setImages} />
             <label className="flex flex-col gap-1 text-sm">

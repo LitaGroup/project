@@ -33,6 +33,8 @@ describe('DefectsService 机器人提测缺陷派单', () => {
   const user = { id: 9, name: '测试张三' } as User;
 
   let defectsSave: jest.Mock;
+  let defectsFind: jest.Mock;
+  let defectsFindOne: jest.Mock;
   let recordsSave: jest.Mock;
   let releaseFindOne: jest.Mock;
   let workerFindOne: jest.Mock;
@@ -53,6 +55,8 @@ describe('DefectsService 机器人提测缺陷派单', () => {
       };
       return Promise.resolve(defectRow);
     });
+    defectsFind = jest.fn().mockResolvedValue([]);
+    defectsFindOne = jest.fn();
     let recordId = 0;
     recordsSave = jest.fn((value: Record<string, unknown>) =>
       Promise.resolve({
@@ -85,8 +89,8 @@ describe('DefectsService 机器人提测缺陷派单', () => {
       {
         create: (value: Record<string, unknown>) => value,
         save: defectsSave,
-        findOne: jest.fn(),
-        find: jest.fn(),
+        findOne: defectsFindOne,
+        find: defectsFind,
         delete: jest.fn(),
         remove: jest.fn(),
       } as never,
@@ -107,7 +111,7 @@ describe('DefectsService 机器人提测缺陷派单', () => {
     );
   });
 
-  const createDefect = () =>
+  const createDefect = (extra: Record<string, unknown> = {}) =>
     service.create(
       {
         projectId: 3,
@@ -115,6 +119,7 @@ describe('DefectsService 机器人提测缺陷派单', () => {
         actual: '登录按钮无响应',
         platform: '前端',
         priority: '高',
+        ...extra,
       },
       '录入',
       '测试张三',
@@ -210,5 +215,75 @@ describe('DefectsService 机器人提测缺陷派单', () => {
     expect(defect.status).toBe(DefectStatus.OPEN);
     expect(lastAutoRecord().source).toBe('自动');
     expect(lastAutoRecord().content).toContain('task insert failed');
+  });
+
+  it('显式关联提测时以选择的提测为准，且不自动派单', async () => {
+    const defect = await createDefect({ releaseId: 5 });
+
+    expect(releaseFindOne).toHaveBeenCalledWith({
+      where: { id: 5, projectId: 3 },
+      select: { id: true },
+    });
+    expect(defect.releaseId).toBe(5);
+    expect(taskCreate).not.toHaveBeenCalled();
+  });
+
+  it('显式传 null 时跳过最新提测自动关联与派单', async () => {
+    const defect = await createDefect({ releaseId: null });
+
+    expect(defect.releaseId).toBeNull();
+    expect(releaseFindOne).not.toHaveBeenCalled();
+    expect(taskCreate).not.toHaveBeenCalled();
+  });
+
+  it('显式关联不存在或跨项目提测时拒绝创建', async () => {
+    releaseFindOne.mockResolvedValue(null);
+
+    await expect(createDefect({ releaseId: 99 })).rejects.toThrow(
+      '提测记录 #99 不存在或不属于该项目',
+    );
+    expect(defectsSave).not.toHaveBeenCalled();
+  });
+
+  it('按提测 ID 查询缺陷', async () => {
+    await service.findByProject(3, 5);
+
+    expect(defectsFind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { projectId: 3, releaseId: 5 },
+      }),
+    );
+  });
+
+  it('按非法提测 ID 查询时返回参数错误', async () => {
+    await expect(service.findByProject(undefined, 0)).rejects.toThrow(
+      '提测 ID 必须是正整数',
+    );
+    expect(defectsFind).not.toHaveBeenCalled();
+  });
+
+  it('更新缺陷可清除提测关联', async () => {
+    defectsFindOne.mockResolvedValue({
+      id: 21,
+      projectId: 3,
+      releaseId: 5,
+      status: DefectStatus.OPEN,
+      platform: null,
+      priority: '中',
+      expected: '登录按钮点击后进入首页',
+      actual: '登录按钮无响应',
+      images: null,
+      testScript: null,
+    });
+
+    const defect = await service.update(
+      21,
+      { releaseId: null },
+      '录入',
+      '测试张三',
+    );
+
+    expect(defect.releaseId).toBeNull();
+    expect(releaseFindOne).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,6 @@
 import { AlertCircle } from '@appica/icons-react'
 import type { TaskChatQuestion, TaskPackage } from '../../lib/api'
 import { formatDuration } from '../../lib/duration'
-import { ChatMarkdown } from '../ChatMarkdown'
 import { QuestionCard } from '../QuestionCard'
 
 interface TaskInfoPanelProps {
@@ -77,10 +76,6 @@ export function TaskInfoPanel({
             )}
           </dl>
         </section>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <DetailField title="工作计划" value={task.workPlan} />
-        </div>
 
         {task.missingItems && task.missingItems.length > 0 && (
           <div className="rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-xs text-warning-foreground">
@@ -163,23 +158,3 @@ function InfoItem({ label, value }: { label: string; value: string }) {
   )
 }
 
-function DetailField({
-  title,
-  value,
-}: {
-  title: string
-  value: string | null | undefined
-}) {
-  return (
-    <section className="min-w-0">
-      <h3 className="mb-1 text-xs font-medium text-foreground-muted">{title}</h3>
-      <div className="min-h-16 rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm text-foreground-emphasis">
-        {value?.trim() ? (
-          <ChatMarkdown text={value} />
-        ) : (
-          <span className="text-xs text-foreground-subtle">未填写</span>
-        )}
-      </div>
-    </section>
-  )
-}

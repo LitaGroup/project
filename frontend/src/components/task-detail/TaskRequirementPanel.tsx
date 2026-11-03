@@ -57,15 +57,11 @@ function formatDateTime(value: string | null | undefined) {
 export function TaskRequirementPanel({ task }: { task: TaskPackage }) {
   const originalRequirement = nonEmpty(task.input, task.description)
   const organizedRequirement = nonEmpty(task.content)
-  const deliveryExpectation = nonEmpty(task.outputSpec)
   const links = extractRequirementLinks([
     task.input,
     task.description,
     task.content,
-    task.outputSpec,
-    task.workPlan,
   ])
-  const completedAt = formatDateTime(task.acceptedAt ?? task.deliveredAt)
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
@@ -148,28 +144,6 @@ export function TaskRequirementPanel({ task }: { task: TaskPackage }) {
             value={organizedRequirement}
             emphasized
           />
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <RequirementSection
-              title="交付预期"
-              emptyText="暂未记录交付预期"
-              value={deliveryExpectation}
-            />
-
-            <section className="min-w-0">
-              <SectionTitle title="完成时间预期" />
-              <div className="min-h-20 rounded-[var(--radius-md)] bg-background-muted px-3 py-2.5 text-sm text-foreground-emphasis">
-                <p className="text-foreground-subtle">
-                  当前任务未单独记录预期完成时间，请参考整理后的需求与交付预期中的时间说明。
-                </p>
-                {completedAt && (
-                  <p className="mt-2 text-xs text-foreground-muted">
-                    实际完成时间：{completedAt}
-                  </p>
-                )}
-              </div>
-            </section>
-          </div>
         </div>
       </div>
     </section>

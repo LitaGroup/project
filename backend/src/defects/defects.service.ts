@@ -7,7 +7,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as path from 'path';
-import { FindOptionsSelect, In, IsNull, Repository } from 'typeorm';
+import {
+  FindOptionsSelect,
+  FindOptionsWhere,
+  In,
+  IsNull,
+  Repository,
+} from 'typeorm';
 import {
   DefectPriority,
   DefectStatus,
@@ -67,6 +73,8 @@ export interface CreateDefectInput {
   images?: string[];
   /** 用例脚本：相对脚本根目录的 .test.ts 路径 */
   testScript?: string;
+  /** 关联提测 ID；不传时沿用自动关联最新有效提测，null 表示明确不关联 */
+  releaseId?: number | null;
 }
 
 /** 变更记录来源：录入（前端表单）/ AI（.md 接口）/ 自动（测试运行、提测缺陷派单等） */
@@ -81,6 +89,8 @@ export interface UpdateDefectInput {
   /** 图片：/images/... 路径数组，全量覆盖（空数组清除） */
   images?: string[];
   testScript?: string;
+  /** 关联提测 ID；null 清除关联，不传保持不变 */
+  releaseId?: number | null;
   /** 变更内容：状态变更并入状态记录，否则单独记一条内容变更记录（可空） */
   changeContent?: string;
   /** 本次变更的备注信息 */
@@ -162,10 +172,22 @@ export class DefectsService implements OnModuleInit {
     );
   }
 
-  /** 按项目列出缺陷；不传 projectId 时返回全部（全局列表页用）。不含大字段 */
-  findByProject(projectId?: number): Promise<Defect[]> {
+  /**
+   * 按项目 / 提测 ID 列出缺陷；均不传时返回全部（全局列表页用）。不含大字段。
+   * releaseId 精确匹配，可与 projectId 组合。
+   */
+  async findByProject(
+    projectId?: number,
+    releaseId?: number,
+  ): Promise<Defect[]> {
+    const where: FindOptionsWhere<Defect> = {};
+    if (projectId !== undefined) where.projectId = projectId;
+    if (releaseId !== undefined) {
+      this.assertReleaseId(releaseId);
+      where.releaseId = releaseId;
+    }
     return this.defects.find({
-      where: projectId === undefined ? {} : { projectId },
+      where,
       order: { updatedAt: 'DESC' },
       select: DEFECT_LIST_SELECT,
     });
@@ -316,7 +338,7 @@ export class DefectsService implements OnModuleInit {
       `- ID：${defect.id}`,
       `- 项目：${project ? `${project.name}（${defect.projectId}）` : defect.projectId}`,
       `- 状态：${defect.status}`,
-      defect.releaseId ? `- 来源提测：#${defect.releaseId}` : null,
+      `- 提测 ID：${defect.releaseId ? `#${defect.releaseId}` : '—'}`,
       defect.followupTaskId
         ? `- 处理任务：${followupTask?.code ?? `#${defect.followupTaskId}`}（\`GET /api/tasks/${defect.followupTaskId}.md\`）`
         : null,
@@ -383,11 +405,12 @@ export class DefectsService implements OnModuleInit {
   /** Markdown 视图（GET /api/defects.md）：缺陷清单，供 AI 跨项目检索 */
   async listMarkdown(filter: {
     projectId?: number;
+    releaseId?: number;
     status?: string;
     priority?: string;
     q?: string;
   }): Promise<string> {
-    const all = await this.findByProject(filter.projectId);
+    const all = await this.findByProject(filter.projectId, filter.releaseId);
     const q = filter.q?.trim().toLowerCase();
     const rows = all.filter(
       (d) =>
@@ -398,22 +421,28 @@ export class DefectsService implements OnModuleInit {
           d.actual.toLowerCase().includes(q)),
     );
     const names = await this.projectNames(rows.map((d) => d.projectId));
+    const scope = [
+      filter.projectId ? `项目 ${filter.projectId}` : null,
+      filter.releaseId ? `提测 #${filter.releaseId}` : null,
+    ]
+      .filter((v): v is string => v !== null)
+      .join('，');
     const lines = [
       mdFrontmatter({ title: '缺陷清单' }),
       '# 缺陷清单',
       '',
-      `- 共 ${rows.length} 条${filter.projectId ? `（项目 ${filter.projectId}）` : ''}`,
+      `- 共 ${rows.length} 条${scope ? `（${scope}）` : ''}`,
       '',
-      '| ID | 预期 | 端 | 状态 | 优先级 | 项目 |',
-      '| --- | --- | --- | --- | --- | --- |',
+      '| ID | 提测 ID | 预期 | 端 | 状态 | 优先级 | 项目 |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
     ];
     for (const d of rows) {
       lines.push(
-        `| [${d.id}](/api/defects/${d.id}.md) | ${escapeCell(defectLabel(d.expected))} | ${d.platform ?? '-'} | ${d.status} | ${d.priority} | ${escapeCell(names.get(d.projectId) ?? `#${d.projectId}`)} |`,
+        `| [${d.id}](/api/defects/${d.id}.md) | ${d.releaseId ? `#${d.releaseId}` : '-'} | ${escapeCell(defectLabel(d.expected))} | ${d.platform ?? '-'} | ${d.status} | ${d.priority} | ${escapeCell(names.get(d.projectId) ?? `#${d.projectId}`)} |`,
       );
     }
     if (rows.length === 0) {
-      lines.push('| - | （无匹配缺陷） | - | - | - | - |');
+      lines.push('| - | - | （无匹配缺陷） | - | - | - | - |');
     }
     lines.push(
       '',
@@ -424,7 +453,7 @@ export class DefectsService implements OnModuleInit {
       '## AI 操作',
       '',
       '```bash',
-      'curl -X POST /api/defects/create.md -H \'Content-Type: application/json\' -d \'{"projectId": 123, "expected": "预期功能描述", "actual": "实际结果描述", "platform": "前端", "priority": "高"}\'  # 新建（platform 可选：前端/后端/APP端/未知；priority 可选：高/中/低；images 传 /images/... 数组，testScript 可选）',
+      'curl -X POST /api/defects/create.md -H \'Content-Type: application/json\' -d \'{"projectId": 123, "expected": "预期功能描述", "actual": "实际结果描述", "platform": "前端", "priority": "高", "releaseId": 45}\'  # 新建（platform 可选：前端/后端/APP端/未知；priority 可选：高/中/低；images 传 /images/... 数组；testScript/releaseId 可选）',
       'curl -X POST /api/defects/{id}/status.md -H \'Content-Type: application/json\' -d \'{"status": "修复", "remark": "备注"}\'  # 状态变更（开放/修复/关闭），自动记录',
       'curl -X POST /api/defects/{id}/records.md -H \'Content-Type: application/json\' -d \'{"content": "变更内容", "remark": "备注"}\'  # 追加变更记录',
       'curl -X POST /api/defects/{id}/delete.md  # 删除',
@@ -487,7 +516,7 @@ export class DefectsService implements OnModuleInit {
       `- 预期：${defectLabel(defect.expected)}`,
       `- 状态：${defect.status}`,
       `- 项目：${defect.projectId}`,
-      defect.releaseId ? `- 来源提测：#${defect.releaseId}` : null,
+      `- 提测 ID：${defect.releaseId ? `#${defect.releaseId}` : '—'}`,
       defect.followupTaskId
         ? `- 处理任务：#${defect.followupTaskId}（GET /api/tasks/${defect.followupTaskId}.md）`
         : null,
@@ -528,6 +557,12 @@ export class DefectsService implements OnModuleInit {
     });
     if (!project)
       throw new NotFoundException(`Project ${input.projectId} not found`);
+    // 显式传 releaseId（含 null）时以用户选择为准，不再走“最新有效提测”自动关联与派单；
+    // 完全不传时保留原有自动关联逻辑。
+    const explicitRelease = input.releaseId !== undefined;
+    const releaseId = explicitRelease
+      ? await this.resolveReleaseId(input.releaseId ?? null, input.projectId)
+      : null;
     const saved = await this.defects.save(
       this.defects.create({
         projectId: input.projectId,
@@ -550,7 +585,7 @@ export class DefectsService implements OnModuleInit {
           input.testScript !== undefined
             ? this.normalizeTestScript(input.testScript)
             : null,
-        releaseId: null,
+        releaseId,
         followupTaskId: null,
       }),
     );
@@ -559,7 +594,9 @@ export class DefectsService implements OnModuleInit {
       source: recordSource,
       operator,
     });
-    return this.dispatchFollowupTask(saved, project, operator, actor);
+    return explicitRelease
+      ? saved
+      : this.dispatchFollowupTask(saved, project, operator, actor);
   }
 
   /**
@@ -614,6 +651,12 @@ export class DefectsService implements OnModuleInit {
     if (input.testScript !== undefined) {
       defect.testScript = this.normalizeTestScript(input.testScript);
     }
+    if (input.releaseId !== undefined) {
+      defect.releaseId = await this.resolveReleaseId(
+        input.releaseId,
+        defect.projectId,
+      );
+    }
     const saved = await this.defects.save(defect);
     const changeContent = input.changeContent?.trim();
     const changeRemark = input.changeRemark?.trim();
@@ -666,6 +709,30 @@ export class DefectsService implements OnModuleInit {
   }
 
   // ---- 内部 ----
+
+  /** 提测 ID 必须是正整数（查询与写入共用）。 */
+  private assertReleaseId(value: number): void {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new BadRequestException('提测 ID 必须是正整数');
+    }
+  }
+
+  /** 校验提测存在且属于缺陷所在项目；null 表示明确清除关联。 */
+  private async resolveReleaseId(
+    value: number | null,
+    projectId: number,
+  ): Promise<number | null> {
+    if (value === null) return null;
+    this.assertReleaseId(value);
+    const release = await this.releases.findOne({
+      where: { id: value, projectId },
+      select: { id: true },
+    });
+    if (!release) {
+      throw new BadRequestException(`提测记录 #${value} 不存在或不属于该项目`);
+    }
+    return release.id;
+  }
 
   /**
    * 机器人提测后的新缺陷闭环：

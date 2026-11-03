@@ -2150,11 +2150,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ packageId, platform }),
     }),
-  /** 缺陷列表：传 projectId 按项目过滤，不传返回全部。不含 description/images */
-  listDefects: (projectId?: number) =>
-    request<Defect[]>(
-      `/defects${projectId === undefined ? '' : `?projectId=${projectId}`}`,
-    ),
+  /** 缺陷列表：可按项目 / 提测 ID 过滤，不传返回全部。不含大字段 */
+  listDefects: (projectId?: number, releaseId?: number) => {
+    const query = [
+      projectId !== undefined && `projectId=${projectId}`,
+      releaseId !== undefined && `releaseId=${releaseId}`,
+    ]
+      .filter(Boolean)
+      .join('&')
+    return request<Defect[]>(`/defects${query ? `?${query}` : ''}`)
+  },
   getDefect: (id: number) => request<Defect>(`/defects/${id}`),
   /** 缺陷变更记录列表（倒序） */
   listDefectRecords: (id: number) =>
@@ -2174,6 +2179,8 @@ export const api = {
     priority?: DefectPriority
     images?: string[]
     testScript?: string
+    /** 关联提测 ID；不传走自动关联，null 表示明确不关联 */
+    releaseId?: number | null
   }) =>
     request<Defect>('/defects', {
       method: 'POST',
@@ -2190,6 +2197,8 @@ export const api = {
       actual: string
       images: string[]
       testScript: string
+      /** 关联提测 ID；null 清除关联 */
+      releaseId: number | null
       /** 变更内容：状态变更时并入状态记录，否则单独记一条内容变更记录 */
       changeContent: string
       /** 本次变更的备注信息（写入变更记录） */

@@ -3,6 +3,12 @@ import type { TaskEvent } from '../../lib/api'
 
 /** 任务详情「事件」Tab：完整任务事件时间线（SSE 刷新由父页面驱动）。 */
 export function TaskEventsPanel({ events }: { events: TaskEvent[] }) {
+  const sortedEvents = [...events].sort(
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() ||
+      a.id - b.id,
+  )
+
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
@@ -10,16 +16,16 @@ export function TaskEventsPanel({ events }: { events: TaskEvent[] }) {
           任务事件
         </h2>
         <span className="text-xs text-foreground-muted">
-          {events.length} 条
+          {sortedEvents.length} 条
         </span>
       </header>
-      {events.length === 0 ? (
+      {sortedEvents.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-4 text-center text-sm text-foreground-muted">
           暂无任务事件
         </div>
       ) : (
         <ol className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
-          {events.map((event) => (
+          {sortedEvents.map((event) => (
             <li key={event.id} className="relative flex gap-3 pb-5 last:pb-0">
               <span className="relative mt-1 flex shrink-0 flex-col items-center">
                 <span className="size-2 rounded-full bg-border-strong" />
