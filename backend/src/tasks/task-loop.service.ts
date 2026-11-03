@@ -336,6 +336,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
         'notice',
         title,
         description,
+        { fallbackToRequesterOwner: true },
       );
     }
     await this.tasksService.addEvent(task.id, '系统', description, null, {
@@ -897,6 +898,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
         'notice',
         `子任务需要人工介入：${child.code} ${child.title}`,
         `${reason}，请到任务详情处理提问或验收。`,
+        { fallbackToRequesterOwner: true },
       );
       if (!notified.sent) {
         await this.taskNotify.notifyTaskAgentOwner(
@@ -1005,6 +1007,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
             kind,
             title,
             description,
+            { fallbackToRequesterOwner: true },
           );
         }
       } else {

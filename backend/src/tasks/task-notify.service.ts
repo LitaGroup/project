@@ -18,11 +18,20 @@ export interface TaskNotifyResult {
   ownerName?: string;
 }
 
+export interface TaskRequesterNotifyOptions {
+  /**
+   * 普通 AI 机器人需求方没有绑定用户时，是否回退通知其负责人。
+   * 仅用于自动处理失败、人工介入等升级场景；正常待验收/待反馈不打扰负责人。
+   */
+  fallbackToRequesterOwner?: boolean;
+}
+
 /**
  * 任务通知：
  * - 待反馈优先通知历史调度机器人负责人，其次处理机器人负责人；
- * - 待验收优先通知任务需求方（任务创建人，子任务回退根任务创建人），
- *   无有效需求方时回退机器人负责人。
+ * - 待验收通知真实需求方（人、真人机器人绑定用户或个人 AGENT 主人）；
+ *   普通 AI 机器人需求方由收件箱/自动验收驱动，正常通知不打扰其负责人；
+ * - 未找到有效需求方时回退执行机器人负责人，避免异常提醒完全丢失。
  */
 @Injectable()
 export class TaskNotifyService {
@@ -63,13 +72,15 @@ export class TaskNotifyService {
 
   /**
    * 需求方通知：优先任务创建用户，子任务回退根任务创建用户。
-   * 未找到有效用户时回退机器人负责人，避免待验收提醒完全丢失。
+   * 真人机器人需求方通知其绑定用户；普通 AI 机器人需求方由收件箱与自动验收驱动，
+   * 正常通知不打扰负责人，只有显式的人工兜底场景才回退通知其负责人。
    */
   async notifyTaskRequester(
     task: Task,
     kind: TaskNotifyKind,
     title: string,
     description: string,
+    options?: TaskRequesterNotifyOptions,
   ): Promise<TaskNotifyResult> {
     // 真人机器人需求方仍由其绑定用户在操作台处理；AI 机器人需求方由收件箱和 LOOP 唤醒。
     if (task.requesterType === 'worker' && task.requesterId) {
@@ -90,9 +101,9 @@ export class TaskNotifyService {
           ? requesterWorker.humanUserId
           : (requesterWorker?.personalAgentUserId ?? null);
       if (!boundUserId) {
-        // 普通 AI 机器人需求方没有绑定用户：回退通知机器人负责人，
-        // 保证自动验收未推进时至少有人工兜底入口。
-        if (requesterWorker) {
+        // 普通 AI 机器人需求方没有绑定用户，默认不发飞书；
+        // 仅自动验收/自动回复失败等升级场景回退通知负责人，且不能标成需求方。
+        if (options?.fallbackToRequesterOwner && requesterWorker) {
           const openId = await this.workersService.ownerOpenId(requesterWorker);
           if (openId) {
             return this.sendCard(
@@ -104,7 +115,7 @@ export class TaskNotifyService {
               kind,
               title,
               description,
-              '需求方',
+              '负责人',
             );
           }
         }

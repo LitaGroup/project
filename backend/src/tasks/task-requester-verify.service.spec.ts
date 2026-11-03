@@ -168,6 +168,7 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
       'notice',
       expect.stringContaining('任务待验收'),
       expect.stringContaining('连续 3 次自动验收未推进'),
+      { fallbackToRequesterOwner: true },
     );
     expect(service.canVerify(53)).toBe(false);
   });

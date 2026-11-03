@@ -1713,6 +1713,7 @@ export class TaskDispatchService
             'notice',
             `任务执行失败：${task.code} ${task.title}`,
             '执行器会话已失败，请到任务详情检查并决定是否重新派发。',
+            { fallbackToRequesterOwner: true },
           );
         }
       }
@@ -1970,6 +1971,7 @@ export class TaskDispatchService
         'notice',
         `任务未申请验收：${task.code ?? task.id} ${task.title ?? ''}`.trim(),
         `机器人会话已完成但未申请验收，请人工检查任务。`,
+        { fallbackToRequesterOwner: true },
       );
     }
     await this.addEvent(
@@ -2013,6 +2015,7 @@ export class TaskDispatchService
         'notice',
         title,
         description,
+        { fallbackToRequesterOwner: true },
       );
     }
     await this.addEvent(task.id, '系统', description, null, {

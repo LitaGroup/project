@@ -267,6 +267,7 @@ export class TaskRequesterVerifyService {
         'notice',
         `任务待验收：${task.code} ${task.title}`,
         `需求方机器人「${worker.name}」连续 ${count} 次自动验收未推进，已转负责人人工处理`,
+        { fallbackToRequesterOwner: true },
       );
     }
   }
@@ -300,6 +301,7 @@ export class TaskRequesterVerifyService {
         'notice',
         `任务待验收：${task.code} ${task.title}`,
         `需求方机器人「${worker.name}」连续 ${count} 次自动验收失败，已转负责人人工处理`,
+        { fallbackToRequesterOwner: true },
       );
     }
   }

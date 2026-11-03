@@ -241,6 +241,7 @@ describe('TaskQuestionAutoAnswerService 父机器人自动答复', () => {
       'notice',
       expect.stringContaining('任务等待回答'),
       expect.stringContaining('父任务机器人自动答复失败'),
+      { fallbackToRequesterOwner: true },
     );
   });
 

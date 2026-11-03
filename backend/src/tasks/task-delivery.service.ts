@@ -671,6 +671,7 @@ export class TaskDeliveryService {
         'feedback',
         notifyTitle,
         notifyDescription,
+        { fallbackToRequesterOwner: true },
       );
     }
     return saved;

@@ -201,6 +201,7 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
       'notice',
       expect.stringContaining('任务消息待回复'),
       expect.stringContaining('连续 3 次'),
+      { fallbackToRequesterOwner: true },
     );
   });
 

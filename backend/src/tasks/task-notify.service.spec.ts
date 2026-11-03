@@ -179,6 +179,69 @@ describe('TaskNotifyService 飞书任务通知', () => {
     ).resolves.toEqual({ sent: false });
     expect(feishuService.sendUserCard).not.toHaveBeenCalled();
   });
+
+  it('普通 AI 机器人需求方不向负责人发送正常待验收通知', async () => {
+    workers.findOne.mockResolvedValueOnce({
+      id: 1002,
+      name: '技术-后端架构师',
+      runtime: WorkerRuntime.OPENCODE,
+      humanUserId: null,
+      personalAgentUserId: null,
+      ownerUserId: 9,
+      ownerName: '胡峰',
+    });
+
+    await expect(
+      service.notifyTaskRequester(
+        baseTask({
+          requesterType: 'worker',
+          requesterId: 1002,
+          agentId: 1035,
+        }),
+        'accept',
+        '任务待验收：TK-0054 咱们APP的主要业务是什么',
+        '执行机器人已提交验收申请。',
+      ),
+    ).resolves.toEqual({ sent: false });
+
+    expect(workersService.ownerOpenId).not.toHaveBeenCalled();
+    expect(feishuService.sendUserCard).not.toHaveBeenCalled();
+  });
+
+  it('AI 需求方人工兜底时通知负责人且不标记为需求方', async () => {
+    workers.findOne.mockResolvedValueOnce({
+      id: 1002,
+      name: '技术-后端架构师',
+      runtime: WorkerRuntime.OPENCODE,
+      humanUserId: null,
+      personalAgentUserId: null,
+      ownerUserId: 9,
+      ownerName: '胡峰',
+    });
+    workersService.ownerOpenId.mockResolvedValueOnce('ou_owner');
+
+    await expect(
+      service.notifyTaskRequester(
+        baseTask({
+          requesterType: 'worker',
+          requesterId: 1002,
+          agentId: 1035,
+        }),
+        'notice',
+        '任务待验收：TK-0054 咱们APP的主要业务是什么',
+        '需求方机器人连续 3 次自动验收失败，已转负责人人工处理。',
+        { fallbackToRequesterOwner: true },
+      ),
+    ).resolves.toEqual({ sent: true, ownerName: '胡峰' });
+
+    expect(feishuService.sendUserCard).toHaveBeenCalledWith(
+      'ou_owner',
+      expect.any(Object),
+    );
+    const text = sentCardText(feishuService.sendUserCard);
+    expect(text).toContain('**负责人**：胡峰');
+    expect(text).not.toContain('**需求方**：胡峰');
+  });
 });
 
 function sentCardUrl(sendUserCard: jest.Mock): string | undefined {

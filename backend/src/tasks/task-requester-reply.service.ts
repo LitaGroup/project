@@ -349,6 +349,7 @@ export class TaskRequesterReplyService {
         'notice',
         `任务消息待回复：${task.code} ${task.title}`,
         `需求方机器人${workerLabel}连续 ${count} 次未能回复执行方消息，已转负责人人工处理。`,
+        { fallbackToRequesterOwner: true },
       );
       return;
     }

@@ -973,6 +973,7 @@ describe('TaskLoopService 多机器人协同', () => {
       'notice',
       expect.stringContaining('子任务需要人工介入'),
       expect.any(String),
+      { fallbackToRequesterOwner: true },
     );
   });
 
