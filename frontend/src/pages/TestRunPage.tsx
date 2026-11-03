@@ -16,6 +16,7 @@ import {
   type ProjectTest,
   type TestRun,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import {
   RunDetailView,
@@ -119,7 +120,7 @@ export function TestRunPage() {
   useEffect(() => {
     if (selectedRunId === null) return
     let finished = false
-    const es = new EventSource(`/api/tests/runs/${selectedRunId}/stream`)
+    const es = visibleEventSource(`/api/tests/runs/${selectedRunId}/stream`)
     es.onmessage = (e: MessageEvent<string>) => {
       const r = JSON.parse(e.data) as TestRun
       setRunData(r)

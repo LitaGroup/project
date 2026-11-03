@@ -29,7 +29,9 @@ import {
   HandoffDocumentStatus,
   TaskMarkdownDocumentView,
 } from '../components/task-detail/TaskMarkdownDocumentView'
+import type { MarkdownEditorHandle } from '../components/MarkdownEditor'
 import { formatDuration, taskDurationMs } from '../lib/duration'
+import { visibleEventSource } from '../lib/event-source'
 
 type ConnectionState = 'connecting' | 'live' | 'reconnecting'
 type TaskContentTab =
@@ -59,17 +61,29 @@ export function TaskPackageDetailPage() {
   return <TaskDetailView taskId={Number(id)} />
 }
 
-/** 可复用的任务详情主体：工单详情页在同一任务对话外补充工单面包屑与状态徽标 */
+/**
+ * 可复用的任务详情主体：工单详情页补充工单面包屑与状态徽标；
+ * 工作台隐藏任务面包屑，并开放「交付」Tab 的 HANDOFF 创建/编辑。
+ */
 export function TaskDetailView({
   taskId,
   breadcrumb,
   title,
   extraBadges,
+  hideBreadcrumb = false,
+  handoffEditable = false,
+  onTaskChange,
 }: {
   taskId: number
   breadcrumb?: Crumb[]
   title?: string
   extraBadges?: ReactNode
+  /** 嵌入工作台时隐藏面包屑（工作台保留自己的左侧任务列表） */
+  hideBreadcrumb?: boolean
+  /** 工作台模式：需求方/执行方可在「交付」Tab 创建与编辑交付文档 */
+  handoffEditable?: boolean
+  /** 任务或文档刷新后通知外部，用于同步工作台左侧任务列表 */
+  onTaskChange?: () => void | Promise<void>
 }) {
   const [task, setTask] = useState<TaskPackage | null>(null)
   const [workbenchTask, setWorkbenchTask] = useState<WorkbenchTask | null>(null)
@@ -97,6 +111,13 @@ export function TaskDetailView({
   const [docsError, setDocsError] = useState<string | null>(null)
   /** 文档写入（交付/复盘/普通文档）后由任务 SSE 递增，驱动只读预览刷新 */
   const [docsRevision, setDocsRevision] = useState(0)
+  const [handoffEditing, setHandoffEditing] = useState(false)
+  const [handoffSaving, setHandoffSaving] = useState(false)
+  const [handoffError, setHandoffError] = useState<string | null>(null)
+  const handoffEditorRef = useRef<MarkdownEditorHandle>(null)
+  /** 文档刷新时保留正在编辑的本地版本，避免远端版本变化重挂载编辑器 */
+  const handoffEditingRef = useRef(false)
+  const onTaskChangeRef = useRef(onTaskChange)
 
   const loadSeq = useRef(0)
   /** 首次快照请求是否已返回（用于与 SSE ready 对齐，避免重复加载） */
@@ -109,8 +130,11 @@ export function TaskDetailView({
       if (seq !== loadSeq.current) return
       setTask(data.task)
       setPipeline(data.pipeline)
-      setMessages(data.messages)
-      setQueuedMessages(data.queuedMessages)
+      // 后端已按当前任务返回消息；这里再按 taskId 收敛一次，避免旧服务或异常数据串任务
+      setMessages(data.messages.filter((message) => message.taskId === taskId))
+      setQueuedMessages(
+        data.queuedMessages.filter((message) => message.taskId === taskId),
+      )
       setHasAcceptanceApplication(data.hasAcceptanceApplication)
       setRequesterName(data.requesterName)
       setAgentOwnerName(data.agentOwnerName)
@@ -131,6 +155,24 @@ export function TaskDetailView({
   useEffect(() => {
     loadRef.current = load
   }, [load])
+
+  useEffect(() => {
+    onTaskChangeRef.current = onTaskChange
+  }, [onTaskChange])
+
+  useEffect(() => {
+    handoffEditingRef.current = handoffEditing
+  }, [handoffEditing])
+
+  useEffect(() => {
+    // 切换任务时退出交付文档编辑，避免把上一个任务的正文带到新任务
+    // oxlint-disable-next-line react/set-state-in-effect
+    setHandoffEditing(false)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setHandoffSaving(false)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setHandoffError(null)
+  }, [taskId])
 
   /** 当前用户在该任务中的工作台角色；加载失败时降级为仅「我的 AI」 */
   const roleSeq = useRef(0)
@@ -175,7 +217,9 @@ export function TaskDetailView({
         api.listTaskDocuments(taskId),
       ])
       if (seq !== docsSeq.current) return
-      setHandoffDoc(handoff)
+      setHandoffDoc((current) =>
+        handoffEditingRef.current && current ? current : handoff,
+      )
       setReviewDoc(review)
       setDocuments(documentList)
       setDocsError(null)
@@ -192,14 +236,55 @@ export function TaskDetailView({
     void loadTaskDocuments()
   }, [loadTaskDocuments, docsRevision])
 
-  /** 右侧任务协作操作后同步刷新任务、角色与文档 */
+  /** 右侧任务协作操作后同步刷新任务、角色与文档，并通知工作台刷新任务列表 */
   const refreshTaskPanel = useCallback(async () => {
     await Promise.all([
       loadRef.current(),
       loadWorkbenchTaskRef.current(),
       loadTaskDocuments(),
     ])
+    await onTaskChangeRef.current?.()
   }, [loadTaskDocuments])
+
+  /** 工作台维护交付文档：保存时以读取到的版本为基准，版本冲突由后端返回 409 */
+  const saveHandoff = useCallback(async () => {
+    if (
+      !handoffEditable ||
+      !handoffEditing ||
+      handoffSaving ||
+      !handoffDoc ||
+      task?.id !== taskId
+    ) {
+      return
+    }
+    setHandoffSaving(true)
+    setHandoffError(null)
+    try {
+      const content =
+        handoffEditorRef.current?.getMarkdown() ?? handoffDoc.content
+      const document = await api.updateWorkbenchHandoff(taskId, {
+        content,
+        baseVersion: handoffDoc.version,
+      })
+      setHandoffDoc(document)
+      setHandoffEditing(false)
+      await Promise.all([loadRef.current(), loadWorkbenchTaskRef.current()])
+      // 编辑态引用会在下一次渲染后更新，此处触发文档重读以同步文档 Tab 与状态
+      setDocsRevision((value) => value + 1)
+      await onTaskChangeRef.current?.()
+    } catch (error) {
+      setHandoffError((error as Error).message)
+    } finally {
+      setHandoffSaving(false)
+    }
+  }, [handoffEditable, handoffEditing, handoffSaving, handoffDoc, task, taskId])
+
+  const cancelHandoffEditing = useCallback(() => {
+    setHandoffEditing(false)
+    setHandoffError(null)
+    // 取消编辑后重读一次交付文档，丢弃编辑期间可能到达的远端更新
+    setDocsRevision((value) => value + 1)
+  }, [])
 
   // 持续时间展示：未结束任务定时刷新
   useEffect(() => {
@@ -211,7 +296,7 @@ export function TaskDetailView({
   useEffect(() => {
     let closed = false
     let refreshTimer: number | undefined
-    const source = new EventSource(`/api/tasks/${taskId}/chat/stream`)
+    const source = visibleEventSource(`/api/tasks/${taskId}/chat/stream`)
 
     source.onopen = () => {
       if (!closed) setConnection('live')
@@ -236,9 +321,11 @@ export function TaskDetailView({
           }
           break
         case 'message.upsert':
+          if (data.message.taskId !== taskId) break
           setMessages((current) => upsertMessage(current, data.message))
           break
         case 'queue.upsert':
+          if (data.message.taskId !== taskId) break
           setQueuedMessages((current) => {
             const index = current.findIndex(
               (item) => item.id === data.message.id,
@@ -337,6 +424,15 @@ export function TaskDetailView({
           workbenchAction: workbenchTask.workbenchAction,
         }
       : null
+  const canEditHandoff = Boolean(
+    handoffEditable &&
+      interactiveTask &&
+      currentTask &&
+      currentTask.status !== '已结束' &&
+      currentTask.subStatus !== '待验收' &&
+      (interactiveTask.workbenchRoles.includes('requester') ||
+        interactiveTask.workbenchRoles.includes('agent')),
+  )
   const interactiveChat: TaskChatSnapshot | null = currentTask
     ? {
         task: currentTask,
@@ -372,7 +468,7 @@ export function TaskDetailView({
   }
   // 首屏骨架：立即渲染页面结构（面包屑/标题/左右面板占位），快照返回后就地填充
   if (!currentTask) {
-    return <TaskDetailSkeleton />
+    return <TaskDetailSkeleton hideBreadcrumb={hideBreadcrumb} />
   }
 
   const durationMs = taskDurationMs(currentTask, now)
@@ -402,6 +498,7 @@ export function TaskDetailView({
           task={interactiveTask}
           chat={interactiveChat}
           handoffDoc={handoffDoc}
+          handoffEditing={handoffEditing}
           onRefresh={refreshTaskPanel}
           agent={
             <DetailAgentPanel
@@ -419,14 +516,16 @@ export function TaskDetailView({
       }
     >
       <div className="flex h-full min-h-0 flex-col gap-4">
-        <PageBreadcrumb
-          items={
-            breadcrumb ?? [
-              { label: '任务', to: '/tasks/list' },
-              { label: currentTask.title },
-            ]
-          }
-        />
+        {!hideBreadcrumb && (
+          <PageBreadcrumb
+            items={
+              breadcrumb ?? [
+                { label: '任务', to: '/tasks/list' },
+                { label: currentTask.title },
+              ]
+            }
+          />
+        )}
 
         <header className="shrink-0">
           <div className="min-w-0">
@@ -499,6 +598,55 @@ export function TaskDetailView({
             {contentTab === 'handoff' && (
               <TaskMarkdownDocumentView
                 title="交付文档"
+                actions={
+                  handoffEditing ? (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={() => void saveHandoff()}
+                        disabled={handoffSaving}
+                      >
+                        {handoffSaving ? '保存中…' : '保存'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={cancelHandoffEditing}
+                        disabled={handoffSaving}
+                      >
+                        取消
+                      </Button>
+                    </>
+                  ) : canEditHandoff ? (
+                    handoffDoc ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setHandoffError(null)
+                          setHandoffEditing(true)
+                        }}
+                      >
+                        {handoffDoc.exists ? '编辑' : '创建'}
+                      </Button>
+                    ) : null
+                  ) : docsLoading && !handoffDoc ? (
+                    <span>更新中…</span>
+                  ) : null
+                }
+                notice={
+                  handoffError ? (
+                    <p role="alert" className="text-error-foreground">
+                      保存交付文档失败：{handoffError}
+                    </p>
+                  ) : handoffEditing ? (
+                    <p className="text-foreground-muted">
+                      {handoffDoc?.exists
+                        ? '文档正文由执行方和需求方共同维护；内容变化后版本号自动递增，需求方修改会通知执行机器人读取最新版本。'
+                        : '保存后创建交付文档 v1；执行方应在开始处理后立即创建，并随任务进展持续更新。'}
+                    </p>
+                  ) : null
+                }
                 footer={
                   <HandoffDocumentStatus
                     path={handoffDoc?.path}
@@ -508,7 +656,13 @@ export function TaskDetailView({
                     loading={docsLoading && !handoffDoc}
                   />
                 }
-                content={handoffPlaceholder ? undefined : handoffDoc?.content}
+                content={
+                  handoffEditing
+                    ? handoffDoc?.content
+                    : handoffPlaceholder
+                      ? undefined
+                      : handoffDoc?.content
+                }
                 loading={docsLoading && !handoffDoc}
                 error={!handoffDoc ? docsError : null}
                 emptyText={
@@ -519,6 +673,8 @@ export function TaskDetailView({
                       : '暂无交付文档'
                 }
                 contentKey={handoffDoc?.version}
+                editing={handoffEditing}
+                editorRef={handoffEditorRef}
               />
             )}
 
@@ -620,7 +776,11 @@ function upsertStage(
  * 首屏骨架：镜像真实页面布局（面包屑 + 标题区 + 六个正文 Tab + 右侧 AI），
  * 快照返回后就地填充，避免整页空白等待与明显布局跳动。
  */
-function TaskDetailSkeleton() {
+function TaskDetailSkeleton({
+  hideBreadcrumb = false,
+}: {
+  hideBreadcrumb?: boolean
+}) {
   return (
     <DetailPageLayout
       aiLabel="任务协作"
@@ -639,9 +799,11 @@ function TaskDetailSkeleton() {
       }
     >
       <div className="flex h-full min-h-0 flex-col gap-4">
-        <PageBreadcrumb
-          items={[{ label: '任务', to: '/tasks/list' }, { label: '加载中' }]}
-        />
+        {!hideBreadcrumb && (
+          <PageBreadcrumb
+            items={[{ label: '任务', to: '/tasks/list' }, { label: '加载中' }]}
+          />
+        )}
         <header className="shrink-0 space-y-2">
           <div className="flex items-center gap-2">
             <Skeleton className="h-7 w-72 max-w-full" />

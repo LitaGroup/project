@@ -38,6 +38,8 @@ interface InternalChatMessage extends TaskChatMessage {
 
 interface InternalStreamEvent {
   rootTaskId: number;
+  /** 事件所属任务：消息与队列只推送给当前任务，避免串入父子任务会话 */
+  taskId: number;
   event: TaskChatStreamMessage;
 }
 
@@ -121,11 +123,12 @@ export class TaskChatService implements OnModuleDestroy {
     this.subject.complete();
   }
 
-  /** 任务详情页初始快照：当前任务 + 根任务 PIPELINE + 聊天消息 */
+  /** 任务详情页初始快照：当前任务消息 + 根任务 PIPELINE */
   async snapshot(taskId: number): Promise<TaskChatSnapshot> {
     const task = await this.findTask(taskId);
     const rootTask = await this.findTask(task.rootId || task.id);
     const rootId = rootTask.id;
+    // PIPELINE 保留整棵任务树，但会话消息只属于当前任务，避免子任务对话串入主任务
     const pipelineTasks = await this.tasks.find({
       where: [{ id: rootId }, { rootId }],
       order: { sortOrder: 'ASC', id: 'ASC' },
@@ -135,63 +138,72 @@ export class TaskChatService implements OnModuleDestroy {
     }
     const pipeline = await this.stagesOf(pipelineTasks);
     const stageByTask = new Map(pipeline.map((item) => [item.task.id, item]));
-    const ids = pipelineTasks.map((item) => item.id);
     const [taskEvents, persistedMessages] = await Promise.all([
-      ids.length > 0
-        ? this.events.find({
-            where: { taskId: In(ids) },
-            order: { id: 'ASC' },
-          })
-        : Promise.resolve([] as TaskEvent[]),
-      ids.length > 0
-        ? this.messages.find({
-            where: { taskId: In(ids) },
-            order: { id: 'ASC' },
-          })
-        : Promise.resolve([] as TaskMessage[]),
+      this.events.find({
+        where: { taskId: task.id },
+        order: { id: 'ASC' },
+      }),
+      this.messages.find({
+        where: { taskId: task.id },
+        order: { id: 'ASC' },
+      }),
     ]);
-    const persistedByTask = new Map<number, TaskMessage[]>();
-    for (const message of persistedMessages) {
-      const list = persistedByTask.get(message.taskId) ?? [];
-      list.push(message);
-      persistedByTask.set(message.taskId, list);
-    }
+    const stage =
+      stageByTask.get(task.id) ??
+      ({
+        task,
+        agent: null,
+        scheduler: null,
+      } satisfies TaskPipelineStage);
 
     const entries: SortedMessage[] = [];
     let seq = 0;
-    let rootHasUserMessage = false;
+    let hasUserMessage = false;
 
-    for (const item of pipelineTasks) {
-      const stage = stageByTask.get(item.id) ?? {
-        task: item,
-        agent: null,
-        scheduler: null,
-      };
-      const taskEventList = taskEvents.filter(
-        (event) => event.taskId === item.id,
-      );
-      for (const event of taskEventList) {
-        const message = this.eventMessage(stage, event, rootId);
-        if (!message) continue;
-        if (message.role === 'user' && item.id === rootId) {
-          rootHasUserMessage = true;
-        }
-        entries.push({
-          message,
-          at: new Date(message.createdAt).getTime(),
-          seq: seq++,
+    for (const event of taskEvents) {
+      const message = this.eventMessage(stage, event, rootId);
+      if (!message) continue;
+      if (message.role === 'user') hasUserMessage = true;
+      entries.push({
+        message,
+        at: new Date(message.createdAt).getTime(),
+        seq: seq++,
+      });
+    }
+
+    // 已展示的机器人文本消息（按时间序）：只统计机器人回复本体（kind=message），
+    // 事件还原出的调度消息与问答卡片不参与最终产出的去重比对
+    const assistantTexts: DisplayedAssistantText[] = [];
+    const persistedKeys = new Set(
+      persistedMessages.map((row) => row.messageKey),
+    );
+    for (const row of persistedMessages) {
+      const message = this.persistedMessage(row);
+      entries.push({
+        message,
+        at: new Date(message.createdAt).getTime(),
+        seq: seq++,
+      });
+      if (
+        message.role === 'assistant' &&
+        message.kind === 'message' &&
+        message.content.trim()
+      ) {
+        assistantTexts.push({
+          id: message.id,
+          content: message.content.trim(),
         });
       }
+    }
 
-      // 已展示的机器人文本消息（按时间序）：只统计机器人回复本体（kind=message），
-      // 事件还原出的调度消息与问答卡片不参与最终产出的去重比对
-      const assistantTexts: DisplayedAssistantText[] = [];
-      const persisted = persistedByTask.get(item.id) ?? [];
-      const persistedKeys = new Set(persisted.map((row) => row.messageKey));
-      for (const row of persisted) {
-        const message = this.persistedMessage(row);
+    // 尚未落库的进程内实时消息并入快照（刷新页面不丢当前对话）
+    const liveMessages = this.live.get(task.id);
+    if (liveMessages) {
+      for (const message of liveMessages.values()) {
+        if (persistedKeys.has(message.id)) continue;
+        if (!this.liveMessageVisible(task, message)) continue;
         entries.push({
-          message,
+          message: this.toPublic(message),
           at: new Date(message.createdAt).getTime(),
           seq: seq++,
         });
@@ -206,57 +218,37 @@ export class TaskChatService implements OnModuleDestroy {
           });
         }
       }
+    }
 
-      // 尚未落库的进程内实时消息并入快照（刷新页面不丢当前对话）
-      const liveMessages = this.live.get(item.id);
-      if (liveMessages) {
-        for (const message of liveMessages.values()) {
-          if (persistedKeys.has(message.id)) continue;
-          if (!this.liveMessageVisible(item, message)) continue;
-          entries.push({
-            message: this.toPublic(message),
-            at: new Date(message.createdAt).getTime(),
-            seq: seq++,
-          });
-          if (
-            message.role === 'assistant' &&
-            message.kind === 'message' &&
-            message.content.trim()
-          ) {
-            assistantTexts.push({
-              id: message.id,
-              content: message.content.trim(),
-            });
-          }
-        }
-      }
-
-      if (item.result?.trim()) {
-        const result = item.result.trim();
-        // 最终产出可能就是已展示的机器人回复（单条相同，或末尾多条按 \n\n 顺序拼接）：
-        // 完全覆盖时不再生成 result 消息；仅前缀覆盖（执行收尾时尾部增量只进了
-        // result、未落到聊天消息）则折叠为一条完整 result 消息，避免同一段答复展示两遍
-        const covered = this.resultCoveredCount(result, assistantTexts);
-        if (covered > 0) {
-          const coveredRows = assistantTexts.slice(-covered);
-          if (coveredRows.map((row) => row.content).join('\n\n') === result) {
-            continue;
-          }
+    if (task.result?.trim()) {
+      const result = task.result.trim();
+      // 最终产出可能就是已展示的机器人回复（单条相同，或末尾多条按 \n\n 顺序拼接）：
+      // 完全覆盖时不再生成 result 消息；仅前缀覆盖（执行收尾时尾部增量只进了
+      // result、未落到聊天消息）则折叠为一条完整 result 消息，避免同一段答复展示两遍
+      const covered = this.resultCoveredCount(result, assistantTexts);
+      let fullyCovered = false;
+      if (covered > 0) {
+        const coveredRows = assistantTexts.slice(-covered);
+        fullyCovered =
+          coveredRows.map((row) => row.content).join('\n\n') === result;
+        if (!fullyCovered) {
           const coveredIds = new Set(coveredRows.map((row) => row.id));
           for (let i = entries.length - 1; i >= 0; i -= 1) {
             if (coveredIds.has(entries[i].message.id)) entries.splice(i, 1);
           }
         }
+      }
+      if (!fullyCovered) {
         const createdAt = (
-          item.deliveredAt ??
-          item.acceptedAt ??
-          item.updatedAt ??
+          task.deliveredAt ??
+          task.acceptedAt ??
+          task.updatedAt ??
           new Date()
         ).toISOString();
         entries.push({
           message: {
-            id: `result:${item.id}`,
-            taskId: item.id,
+            id: `result:${task.id}`,
+            taskId: task.id,
             role: 'assistant',
             sender: stage.agent ?? stage.scheduler ?? this.systemSender(),
             content: result,
@@ -270,28 +262,40 @@ export class TaskChatService implements OnModuleDestroy {
       }
     }
 
-    // 没有创建 / 反馈事件的历史任务：用当前描述兜底一条用户消息
-    if (!rootHasUserMessage && rootTask.id === rootId) {
-      const content = rootTask.description?.trim() || rootTask.title;
+    // 没有创建 / 反馈事件的历史任务：用当前任务描述兜底一条需求方消息。
+    // 子任务按自身 requester 展示，避免错误显示成父任务创建人。
+    if (!hasUserMessage) {
+      const content = task.description?.trim() || task.title;
       if (content) {
         entries.push({
           message: {
-            id: `initial:${rootTask.id}`,
-            taskId: rootTask.id,
+            id: `initial:${task.id}`,
+            taskId: task.id,
             role: 'user',
             perspective: 'requester',
-            sender: await this.userSenderForTask(rootTask),
+            sender: await this.requesterSenderForTask(task),
             content,
-            createdAt: rootTask.createdAt.toISOString(),
+            createdAt: task.createdAt.toISOString(),
             status: 'complete',
             kind: 'message',
           },
-          at: rootTask.createdAt.getTime(),
+          at: task.createdAt.getTime(),
           seq: seq++,
         });
       }
     }
 
+    return this.toSnapshot(task, rootTask, pipeline, entries, taskEvents);
+  }
+
+  /** 组装快照尾部：排序消息 + 当前任务状态信息 */
+  private async toSnapshot(
+    task: Task,
+    rootTask: Task,
+    pipeline: TaskPipelineStage[],
+    entries: SortedMessage[],
+    taskEvents: TaskEvent[],
+  ): Promise<TaskChatSnapshot> {
     entries.sort((a, b) => a.at - b.at || a.seq - b.seq);
     const requesterType =
       task.requesterType ?? (task.createdById ? 'user' : null);
@@ -328,8 +332,7 @@ export class TaskChatService implements OnModuleDestroy {
           select: { id: true, ownerName: true },
         })
       : null;
-    const currentEvents = taskEvents
-      .filter((event) => event.taskId === task.id)
+    const currentEvents = [...taskEvents]
       .sort((a, b) => b.id - a.id)
       .slice(0, 200);
     return {
@@ -337,15 +340,13 @@ export class TaskChatService implements OnModuleDestroy {
       rootTask,
       pipeline,
       messages: entries.map((item) => item.message),
-      queuedMessages: this.queuedUserMessages(taskId),
+      queuedMessages: this.queuedUserMessages(task.id),
       requesterName: requester?.name ?? null,
       agentOwnerName: agent?.ownerName ?? null,
       interventionCount: currentEvents.filter(
         (event) => event.meta?.intervention === true,
       ).length,
-      hasAcceptanceApplication: this.hasActiveAcceptanceApplication(
-        taskEvents.filter((event) => event.taskId === task.id),
-      ),
+      hasAcceptanceApplication: this.hasActiveAcceptanceApplication(taskEvents),
       events: currentEvents,
     };
   }
@@ -377,7 +378,17 @@ export class TaskChatService implements OnModuleDestroy {
           if (closed) return;
           send({ type: 'ready', at: Date.now() });
           chatSub = this.subject
-            .pipe(filter((item) => item.rootTaskId === rootId))
+            .pipe(
+              filter((item) => {
+                const taskScoped =
+                  item.event.type === 'message.upsert' ||
+                  item.event.type === 'queue.upsert' ||
+                  item.event.type === 'queue.delete';
+                return taskScoped
+                  ? item.taskId === taskId
+                  : item.rootTaskId === rootId;
+              }),
+            )
             .subscribe({
               next: (item) => send(item.event),
               error: (error: Error) => {
@@ -589,6 +600,7 @@ export class TaskChatService implements OnModuleDestroy {
     const rootTaskId = await this.rootIdOf(message.taskId);
     this.subject.next({
       rootTaskId,
+      taskId: message.taskId,
       event: {
         type: 'queue.upsert',
         message: { ...message, sender: { ...message.sender } },
@@ -604,6 +616,7 @@ export class TaskChatService implements OnModuleDestroy {
     const rootTaskId = await this.rootIdOf(taskId);
     this.subject.next({
       rootTaskId,
+      taskId,
       event: { type: 'queue.delete', ids, at: Date.now() },
     });
   }
@@ -1057,6 +1070,7 @@ export class TaskChatService implements OnModuleDestroy {
     const rootTaskId = await this.rootIdOf(taskId);
     this.subject.next({
       rootTaskId,
+      taskId,
       event: { type: 'refresh', at: Date.now() },
     });
   }
@@ -1223,10 +1237,18 @@ export class TaskChatService implements OnModuleDestroy {
     return this.systemSender();
   }
 
-  private async userSenderForTask(task: Task): Promise<TaskChatSender> {
-    if (task.createdById) {
+  /** 当前任务需求方发送方：子任务机器人需求方不能被显示成父任务创建人 */
+  private async requesterSenderForTask(task: Task): Promise<TaskChatSender> {
+    const requesterType =
+      task.requesterType ?? (task.createdById ? 'user' : null);
+    const requesterId = task.requesterId ?? task.createdById;
+    if (requesterType === 'worker' && requesterId) {
+      const sender = await this.workerSender(requesterId);
+      if (sender) return { ...sender, roleLabel: '需求方' };
+    }
+    if (requesterType === 'user' && requesterId) {
       const user = await this.users.findOne({
-        where: { id: task.createdById },
+        where: { id: requesterId },
         select: { id: true, name: true },
       });
       if (user?.name) return this.userSender(user.name);
@@ -1342,6 +1364,7 @@ export class TaskChatService implements OnModuleDestroy {
     if (!rootTaskId) return;
     this.subject.next({
       rootTaskId,
+      taskId: message.taskId,
       event: {
         type: 'message.upsert',
         message: this.toPublic(message),

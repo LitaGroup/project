@@ -12,6 +12,7 @@ import {
   type WorkerDebugModelSelection,
   type WorkerDebugSnapshot,
 } from '../../lib/api'
+import { visibleEventSource } from '../../lib/event-source'
 import { DebugChat } from '../agent-chat/DebugChat'
 
 interface DetailAgentPanelProps {
@@ -92,7 +93,7 @@ export function DetailAgentPanel({
       .catch((e: Error) => {
         if (!closed) setError(e.message)
       })
-    const source = new EventSource(workbenchAgentStreamUrl(taskId, context))
+    const source = visibleEventSource(workbenchAgentStreamUrl(taskId, context))
     source.onopen = () => {
       if (!closed) setError(null)
     }

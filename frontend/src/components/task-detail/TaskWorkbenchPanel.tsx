@@ -144,6 +144,21 @@ export function TaskWorkbenchPanel({
 
   const activeChat =
     chat && task && chat.task.id === task.id ? chat : null
+  // 协作面板只消费当前任务的消息；父/子任务即使被快照聚合也不能串到同一身份视角
+  const activeMessages = useMemo(
+    () =>
+      activeChat?.messages.filter(
+        (message) => message.taskId === activeChat.task.id,
+      ) ?? [],
+    [activeChat],
+  )
+  const activeQueuedMessages = useMemo(
+    () =>
+      activeChat?.queuedMessages.filter(
+        (message) => message.taskId === activeChat.task.id,
+      ) ?? [],
+    [activeChat],
+  )
   const executing = task?.subStatus === '执行中'
   const awaitingAcceptance = task?.subStatus === '待接受'
   const awaitingReview = task?.subStatus === '待验收'
@@ -269,7 +284,7 @@ export function TaskWorkbenchPanel({
   }, [draft, task, busy, submitMessage])
 
   const runtime = useExternalStoreRuntime<TaskChatMessage>({
-    messages: activeChat?.messages ?? [],
+    messages: activeMessages,
     convertMessage: toTaskChatThreadMessage,
     onNew: async (message: AppendMessage) => {
       const text = message.content
@@ -354,7 +369,7 @@ export function TaskWorkbenchPanel({
   return (
     <>
       <section
-        className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background ${
+        className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background ${
           className ?? ''
         }`}
       >
@@ -397,7 +412,7 @@ export function TaskWorkbenchPanel({
             <AssistantRuntimeProvider runtime={runtime}>
               <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
                 <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 py-4">
-                  {!task || !activeChat?.messages.length ? (
+                  {!task || activeMessages.length === 0 ? (
                     <EmptyChat hasTask={Boolean(task)} />
                   ) : null}
                   <ThreadPrimitive.Messages>
@@ -425,7 +440,7 @@ export function TaskWorkbenchPanel({
 
             <ChatComposerDock>
               <TaskChatQueuedMessages
-                messages={activeChat?.queuedMessages ?? []}
+                messages={activeQueuedMessages}
                 className="mb-2"
               />
               <ChatComposerFrame

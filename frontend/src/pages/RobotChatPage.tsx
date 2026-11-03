@@ -22,6 +22,7 @@ import {
   type WorkerDebugOption,
   type WorkerDebugSnapshot,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 import { DebugChat } from '../components/agent-chat/DebugChat'
 
@@ -93,7 +94,7 @@ export function RobotChatPage() {
         if (seq === loadSeq.current) setSessionError(error.message)
       })
 
-    const source = new EventSource(workerChatStreamUrl(selectedId))
+    const source = visibleEventSource(workerChatStreamUrl(selectedId))
     source.onopen = () => {
       if (seq === loadSeq.current) {
         setSessionError((current) =>

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   Accordion,
   AccordionContent,
@@ -7,37 +7,16 @@ import {
   AccordionTrigger,
 } from '@appica/ui-react/accordion'
 import { Badge } from '@appica/ui-react/badge'
-import { Button } from '@appica/ui-react/button'
 import { Wrench } from '@appica/icons-react'
 import {
   api,
-  type TaskChatSnapshot,
-  type TaskChatStreamMessage,
-  type TaskEvent,
-  type TaskHandoffDocument,
-  type WorkbenchRole,
   type WorkbenchSummary,
   type WorkbenchTask,
 } from '../lib/api'
-import { MarkdownViewer } from '../components/MarkdownViewer'
-import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel'
-import { HandoffDocumentStatus } from '../components/task-detail/TaskMarkdownDocumentView'
-import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
-import {
-  MarkdownEditor,
-  type MarkdownEditorHandle,
-} from '../components/MarkdownEditor'
 import { formatDuration, taskDurationMs } from '../lib/duration'
+import { TaskDetailView } from './TaskPackageDetailPage'
 
-type WorkPanel = 'document' | 'context' | 'log'
 type TaskGroupKey = 'in-progress' | 'waiting' | 'completed'
-
-/** 工作台角色展示文案 */
-const WORKBENCH_ROLE_LABELS: Record<WorkbenchRole, string> = {
-  agent: '我执行',
-  requester: '我是需求方',
-  responsible: '我是执行方',
-}
 
 /** 按“当前机器人最近分配时间”倒序；历史数据缺失时回退更新时间 */
 function assignedAtDesc(a: WorkbenchTask, b: WorkbenchTask): number {
@@ -52,18 +31,7 @@ function groupKeyOf(task: WorkbenchTask): TaskGroupKey {
   return 'completed'
 }
 
-function upsertQueuedMessage(
-  current: TaskChatSnapshot['queuedMessages'],
-  message: TaskChatSnapshot['queuedMessages'][number],
-): TaskChatSnapshot['queuedMessages'] {
-  const index = current.findIndex((item) => item.id === message.id)
-  if (index < 0) return [...current, message]
-  const next = current.slice()
-  next[index] = message
-  return next
-}
-
-/** 操作台：左任务栏 + 中聊天交互 + 右任务详情。真人以绑定机器人身份执行任务。 */
+/** 操作台：左侧任务列表 + 右侧复用任务中心的任务详情主体。 */
 export function WorkbenchPage() {
   const { taskId } = useParams<{ taskId?: string }>()
   const navigate = useNavigate()
@@ -71,20 +39,9 @@ export function WorkbenchPage() {
   const [selectedId, setSelectedId] = useState<number | null>(
     taskId ? Number(taskId) : null,
   )
-  const [chat, setChat] = useState<TaskChatSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
-  const [workPanel, setWorkPanel] = useState<WorkPanel>('document')
-  const [handoffDoc, setHandoffDoc] = useState<TaskHandoffDocument | null>(null)
-  const [docLoading, setDocLoading] = useState(false)
-  const [docError, setDocError] = useState<string | null>(null)
-  const [handoffEditing, setHandoffEditing] = useState(false)
-  const [handoffSaving, setHandoffSaving] = useState(false)
-  const handoffEditorRef = useRef<MarkdownEditorHandle>(null)
-  const [handoffError, setHandoffError] = useState<string | null>(null)
-
-  const chatSeq = useRef(0)
 
   const loadSummary = useCallback(async () => {
     try {
@@ -104,28 +61,8 @@ export function WorkbenchPage() {
     }
   }, [])
 
-  const loadChat = useCallback(async (id: number) => {
-    const seq = ++chatSeq.current
-    try {
-      const data = await api.getTaskChat(id)
-      if (seq === chatSeq.current) setChat(data)
-    } catch (e) {
-      if (seq === chatSeq.current) setError((e as Error).message)
-    }
-  }, [])
-
-  const task = useMemo<WorkbenchTask | null>(() => {
-    if (!summary || !selectedId) return null
-    return summary.tasks.find((item) => item.id === selectedId) ?? null
-  }, [summary, selectedId])
-
-  const isAgent = Boolean(task?.workbenchRoles.includes('agent'))
-  const isResponsible = Boolean(task?.workbenchRoles.includes('responsible'))
-  const isRequester = Boolean(task?.workbenchRoles.includes('requester'))
-  const finished = task?.status === '已结束'
-  const awaitingReview = task?.subStatus === '待验收'
-
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     void loadSummary()
   }, [loadSummary])
 
@@ -140,93 +77,6 @@ export function WorkbenchPage() {
     return () => window.clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    if (!selectedId) {
-      setChat(null)
-      return
-    }
-    void loadChat(selectedId)
-    let closed = false
-    const source = new EventSource(`/api/tasks/${selectedId}/chat/stream`)
-    source.onmessage = (event: MessageEvent<string>) => {
-      if (closed) return
-      let data: TaskChatStreamMessage
-      try {
-        data = JSON.parse(event.data) as TaskChatStreamMessage
-      } catch {
-        return
-      }
-      switch (data.type) {
-        case 'message.upsert':
-          setChat((current) => {
-            if (!current) return current
-            const exists = current.messages.some(
-              (item) => item.id === data.message.id,
-            )
-            return {
-              ...current,
-              messages: exists
-                ? current.messages.map((item) =>
-                    item.id === data.message.id ? data.message : item,
-                  )
-                : [...current.messages, data.message].sort(
-                    (a, b) =>
-                      new Date(a.createdAt).getTime() -
-                      new Date(b.createdAt).getTime(),
-                  ),
-            }
-          })
-          break
-        case 'queue.upsert':
-          if (data.message.taskId === selectedId) {
-            setChat((current) =>
-              current
-                ? {
-                    ...current,
-                    queuedMessages: upsertQueuedMessage(
-                      current.queuedMessages,
-                      data.message,
-                    ),
-                  }
-                : current,
-            )
-          }
-          break
-        case 'queue.delete':
-          setChat((current) =>
-            current
-              ? {
-                  ...current,
-                  queuedMessages: current.queuedMessages.filter(
-                    (item) => !data.ids.includes(item.id),
-                  ),
-                }
-              : current,
-          )
-          break
-        case 'refresh':
-          void loadChat(selectedId)
-          break
-        default:
-          // ready / ping 仅用于连接保活
-          break
-      }
-    }
-    source.onerror = () => {
-      // EventSource 会自动重连；重连后 refresh 补齐快照
-    }
-    return () => {
-      closed = true
-      source.close()
-    }
-  }, [selectedId, loadChat])
-
-  /** 只使用与当前任务匹配的快照，避免切换任务瞬间短暂展示上一个任务的对话 */
-  const activeChat = useMemo(
-    () => (chat && task && chat.task.id === task.id ? chat : null),
-    [chat, task],
-  )
-
   const selectTask = useCallback(
     (id: number) => {
       setSelectedId(id)
@@ -235,7 +85,7 @@ export function WorkbenchPage() {
     [navigate],
   )
 
-  const activeTasks = summary?.tasks ?? []
+  const activeTasks = useMemo(() => summary?.tasks ?? [], [summary])
 
   const taskGroups = useMemo(
     () => [
@@ -264,121 +114,16 @@ export function WorkbenchPage() {
     [activeTasks],
   )
 
-  const handoffPath =
-    activeChat?.task.id === selectedId
-      ? activeChat.task.handoffPath
-      : (task?.handoffPath ?? null)
-  const handoffVersion =
-    activeChat?.task.id === selectedId
-      ? activeChat.task.handoffVersion
-      : (task?.handoffVersion ?? 0)
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect
-    setHandoffDoc(null)
-    setHandoffEditing(false)
-    setHandoffError(null)
-    setDocError(null)
-  }, [selectedId])
-
-  useEffect(() => {
-    if (!selectedId) {
-      // oxlint-disable-next-line react/set-state-in-effect
-      setHandoffDoc(null)
-      setDocError(null)
-      setDocLoading(false)
-      return
-    }
-    // 正在编辑时保留本地内容；机器人更新版本不会把用户输入直接冲掉。
-    // 保存时用旧 baseVersion 会得到 409，用户可取消编辑后重新读取最新版本。
-    if (handoffEditing) return
-    let alive = true
-    setDocLoading(true)
-    setDocError(null)
-    api
-      .getWorkbenchHandoff(selectedId)
-      .then((doc) => {
-        if (!alive) return
-        setHandoffDoc(doc)
-      })
-      .catch((e: Error) => {
-        if (!alive) return
-        setHandoffDoc(null)
-        setDocError(e.message)
-      })
-      .finally(() => {
-        if (alive) setDocLoading(false)
-      })
-    return () => {
-      alive = false
-    }
-  }, [selectedId, handoffPath, handoffVersion, handoffEditing])
-
-  /** 任务协作操作完成后刷新任务角色、任务快照与当前对话 */
-  const refreshTask = useCallback(async () => {
-    await Promise.all([
-      loadSummary(),
-      selectedId ? loadChat(selectedId) : Promise.resolve(),
-    ])
-  }, [loadSummary, loadChat, selectedId])
-
-  const saveHandoff = useCallback(async () => {
-    if (!selectedId || !handoffDoc || handoffSaving) return
-    const content =
-      handoffEditorRef.current?.getMarkdown() ?? handoffDoc.content
-    setHandoffSaving(true)
-    setHandoffError(null)
-    try {
-      const doc = await api.updateWorkbenchHandoff(selectedId, {
-        content,
-        baseVersion: handoffDoc.version,
-      })
-      setHandoffDoc(doc)
-      setHandoffEditing(false)
-      await Promise.all([loadSummary(), loadChat(selectedId)])
-    } catch (e) {
-      setHandoffError((e as Error).message)
-    } finally {
-      setHandoffSaving(false)
-    }
-  }, [
-    selectedId,
-    handoffDoc,
-    handoffSaving,
-    loadSummary,
-    loadChat,
-  ])
-
-  const deliveryContent = handoffDoc?.exists
-    ? handoffDoc.content
-    : docLoading
-      ? '正在加载交付文档…'
-      : ''
-  // MarkdownEditor 是非受控组件，只在挂载时读取 value。加载前与加载后的
-  // path/version 相同（均来自任务快照），必须把文档就绪状态并入 key，
-  // 否则编辑器会一直停留在「正在加载交付文档…」。
-  const deliveryDocState = handoffDoc
-    ? `doc-${handoffDoc.version}`
-    : docLoading
-      ? 'loading'
-      : 'empty'
-  const deliveryEditorKey = [
-    selectedId,
-    handoffDoc?.path ?? handoffPath ?? 'new',
-    deliveryDocState,
-    handoffEditing ? 'edit' : 'view',
-  ].join(':')
-
   if (loading && !summary) {
     return (
       <div className="flex h-full bg-background">
-        <div className="h-full w-[20%] shrink-0" />
+        <div className="h-full w-[20%] shrink-0 border-r border-border p-3">
+          <div className="h-full animate-pulse rounded-[var(--radius-lg)] bg-background-muted" />
+        </div>
         <div className="h-full min-w-0 flex-1 p-3">
-          <div className="h-full rounded-[var(--radius-lg)] bg-background-muted p-3">
-            <div className="grid h-full grid-cols-[62fr_38fr] gap-3">
-              <div className="animate-pulse rounded-[var(--radius-lg)] bg-background" />
-              <div className="animate-pulse rounded-[var(--radius-lg)] bg-background" />
-            </div>
+          <div className="grid h-full grid-cols-[62fr_38fr] gap-3">
+            <div className="animate-pulse rounded-[var(--radius-lg)] bg-background-muted" />
+            <div className="animate-pulse rounded-[var(--radius-lg)] bg-background-muted" />
           </div>
         </div>
       </div>
@@ -398,6 +143,11 @@ export function WorkbenchPage() {
               {activeTasks.length}
             </Badge>
           </div>
+          {error && (
+            <p role="alert" className="mt-2 text-xs text-error-foreground">
+              {error}
+            </p>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
@@ -474,224 +224,20 @@ export function WorkbenchPage() {
         </div>
       </aside>
 
-      {/* 右侧自适应：浅色圆角内容画布，内部分 工作内容 + AI 交互 */}
+      {/* 右侧：任务详情正文与协作面板与任务中心完全复用 */}
       <main className="h-full min-w-0 flex-1 p-3">
         <div className="h-full min-h-0 rounded-[var(--radius-lg)] bg-background-muted p-3">
-          <div className="grid h-full min-h-0 grid-cols-[62fr_38fr] gap-3">
-            {/* 工作内容 */}
-            <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] bg-background">
-        <header className="shrink-0 border-b border-border px-3 py-2.5">
-          {task ? (
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <h2 className="truncate text-sm font-semibold text-foreground-intense">
-                  {task.code} {task.title}
-                </h2>
-                {task.workbenchAction && (
-                  <Badge variant="warning" size="sm">
-                    {task.workbenchAction}
-                  </Badge>
-                )}
-                {isResponsible && (
-                  <Badge variant="soft" size="sm">
-                    我是执行方
-                  </Badge>
-                )}
-              </div>
-            </div>
+          {selectedId ? (
+            <TaskDetailView
+              key={selectedId}
+              taskId={selectedId}
+              hideBreadcrumb
+              handoffEditable
+              onTaskChange={loadSummary}
+            />
           ) : (
-            <h2 className="text-sm font-semibold text-foreground-intense">
-              选择任务
-            </h2>
-          )}
-          <div className="mt-2 flex items-center gap-1">
-            {(
-              [
-                ['document', '交付文档'],
-                ['context', '任务上下文'],
-                ['log', '日志'],
-              ] as Array<[WorkPanel, string]>
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setWorkPanel(key)}
-                className={`rounded-[var(--radius-md)] px-2.5 py-1 text-xs ${
-                  workPanel === key
-                    ? 'bg-background-muted font-medium text-foreground-intense'
-                    : 'text-foreground-muted hover:text-foreground-intense'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {error && (
-            <p role="alert" className="mt-2 text-xs text-error-foreground">
-              {error}
-            </p>
-          )}
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {!task ? (
             <EmptyWork />
-          ) : workPanel === 'document' ? (
-            <div className="relative flex h-full min-h-0 flex-col">
-              {(docLoading ||
-                handoffEditing ||
-                Boolean(
-                  handoffDoc &&
-                    !finished &&
-                    !awaitingReview &&
-                    (isRequester || isAgent),
-                )) && (
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-border px-4 py-1.5 text-[11px] text-foreground-muted">
-                  {docLoading && <span>更新中…</span>}
-                  {handoffEditing ? (
-                    <>
-                      <Button
-                        size="sm"
-                        onClick={() => void saveHandoff()}
-                        disabled={handoffSaving}
-                      >
-                        {handoffSaving ? '保存中…' : '保存'}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setHandoffEditing(false)
-                          setHandoffError(null)
-                        }}
-                        disabled={handoffSaving}
-                      >
-                        取消
-                      </Button>
-                    </>
-                  ) : (
-                    handoffDoc &&
-                    !finished &&
-                    !awaitingReview &&
-                    (isRequester || isAgent) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setHandoffError(null)
-                          setHandoffEditing(true)
-                        }}
-                      >
-                        {handoffDoc.exists ? '编辑' : '创建'}
-                      </Button>
-                    )
-                  )}
-                </div>
-              )}
-              <div className="md-editor-scroll min-h-0 flex-1 bg-background">
-                <MarkdownEditor
-                  key={deliveryEditorKey}
-                  ref={handoffEditing ? handoffEditorRef : undefined}
-                  value={deliveryContent}
-                  readOnly={!handoffEditing}
-                  compact
-                  appica
-                />
-              </div>
-              {handoffEditing && (
-                <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-foreground-muted">
-                  {handoffDoc?.exists
-                    ? '文档正文由执行方和需求方共同维护；内容变化后版本号自动递增，需求方修改会通知执行机器人读取最新版本。'
-                    : '保存后创建交付文档 v1；执行方应在开始处理后立即创建，并随任务进展持续更新。'}
-                </p>
-              )}
-              {!handoffEditing && handoffDoc && !handoffDoc.exists && (
-                <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-foreground-muted">
-                  执行方尚未创建交付文档；开始处理后应立即创建，并随任务进展持续更新。
-                </p>
-              )}
-              {docError && (
-                <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-error-foreground">
-                  交付文档加载失败：{docError}
-                </p>
-              )}
-              {handoffError && (
-                <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-error-foreground">
-                  {handoffError}
-                </p>
-              )}
-              <HandoffDocumentStatus
-                path={handoffDoc?.path ?? handoffPath}
-                version={handoffDoc?.version ?? handoffVersion}
-                updatedAt={handoffDoc?.updatedAt}
-                exists={handoffDoc?.exists}
-                loading={docLoading && !handoffDoc}
-              />
-            </div>
-          ) : workPanel === 'context' ? (
-            <div className="h-full space-y-4 overflow-y-auto p-3 text-sm">
-              <Info title="类型" value={task.type} />
-              <Info title="任务定义" value={task.templateName ?? '未设置'} />
-              <Info
-                title="角色"
-                value={
-                  task.workbenchRoles
-                    .map((role) => WORKBENCH_ROLE_LABELS[role])
-                    .join(' / ') || '—'
-                }
-              />
-              <Info title="状态" value={`${task.status}-${task.subStatus}`} />
-              <MarkdownSection title="任务描述" value={task.description} />
-              <MarkdownSection title="任务输入" value={task.input} />
-              <MarkdownSection title="需求内容" value={task.content} />
-              <MarkdownSection title="输出要求" value={task.outputSpec} />
-              <MarkdownSection title="工作计划" value={task.workPlan} />
-              {(task.missingItems ?? []).length > 0 && (
-                <Section title="待反馈事项">
-                  {(task.missingItems ?? [])
-                    .map((item) => `${item.item}${item.reason ? `：${item.reason}` : ''}`)
-                    .join('\n')}
-                </Section>
-              )}
-            </div>
-          ) : (
-            <div className="h-full overflow-y-auto p-3">
-              <EventLog events={activeChat?.events ?? []} />
-            </div>
           )}
-        </div>
-      </section>
-
-      <TaskWorkbenchPanel
-        task={task}
-        chat={chat}
-        handoffDoc={handoffDoc}
-        handoffEditing={handoffEditing}
-        onRefresh={refreshTask}
-        agent={
-          <DetailAgentPanel
-            taskId={selectedId}
-            embedded
-            emptyTitle={
-              task ? `${task.code} 的独立 AI 会话` : '和你的 AI 开始对话'
-            }
-            emptyHint={
-              task
-                ? '当前任务的对话与其它任务相互隔离；让 AI 查询、创建或推进任务'
-                : '让 AI 查询、创建或推进任务；它会通过平台技能操作并汇报结果'
-            }
-            placeholder={
-              task
-                ? `让 AI 处理 ${task.code}，或输入其它指令…`
-                : '输入指令，Enter 发送，Shift+Enter 换行…'
-            }
-            onRunFinished={() => {
-              void refreshTask()
-            }}
-          />
-        }
-      />
-          </div>
         </div>
       </main>
     </div>
@@ -706,77 +252,5 @@ function EmptyWork() {
       </span>
       <p>选择任务后查看工作内容</p>
     </div>
-  )
-}
-
-function Info({ title, value }: { title: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-xs text-foreground-subtle">{title}</dt>
-      <dd className="mt-0.5 font-medium text-foreground-emphasis">{value}</dd>
-    </div>
-  )
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string
-  children: string
-}) {
-  return (
-    <div>
-      <h4 className="mb-1 text-xs font-medium text-foreground-muted">{title}</h4>
-      <div className="whitespace-pre-wrap break-words rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-xs leading-relaxed text-foreground-emphasis">
-        {children}
-      </div>
-    </div>
-  )
-}
-
-/** 任务上下文里的 Markdown 字段：与任务详情共用聊天 Markdown 排版，支持 Mermaid */
-function MarkdownSection({
-  title,
-  value,
-}: {
-  title: string
-  value: string | null | undefined
-}) {
-  const text = value?.trim()
-  return (
-    <div>
-      <h4 className="mb-1 text-xs font-medium text-foreground-muted">{title}</h4>
-      <div className="break-words rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-xs leading-relaxed text-foreground-emphasis">
-        {text ? (
-          <MarkdownViewer text={text} className="workbench-markdown" />
-        ) : (
-          <span className="text-foreground-subtle">（暂无）</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function EventLog({ events }: { events: TaskEvent[] }) {  if (events.length === 0) {
-    return <p className="text-sm text-foreground-muted">暂无任务事件</p>
-  }
-  return (
-    <ol className="space-y-3">
-      {events.map((event) => (
-        <li key={event.id} className="rounded-[var(--radius-md)] border border-border p-3">
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-foreground-muted">
-            <Badge variant="soft" size="sm">
-              {event.type}
-            </Badge>
-            {event.operator && <span>{event.operator}</span>}
-            <span>{new Date(event.createdAt).toLocaleString()}</span>
-          </div>
-          <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground-emphasis">
-            {event.content}
-          </p>
-        </li>
-      ))}
-    </ol>
   )
 }

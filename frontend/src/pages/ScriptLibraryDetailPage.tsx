@@ -9,6 +9,7 @@ import {
   type ScriptLibraryRun,
   type ScriptLibraryScriptDetail,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import {
   RunDetailView,
@@ -110,7 +111,7 @@ export function ScriptLibraryDetailPage() {
   useEffect(() => {
     if (selectedRunId === null) return
     let finished = false
-    const es = new EventSource(`/api/script-library/runs/${selectedRunId}/stream`)
+    const es = visibleEventSource(`/api/script-library/runs/${selectedRunId}/stream`)
     es.onmessage = (e: MessageEvent<string>) => {
       const r = JSON.parse(e.data) as ScriptLibraryRun
       setRunData(r)

@@ -35,6 +35,7 @@ import {
   type TaskSubStatus,
   type Worker,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { TaskStatusBadge } from '../components/StatusBadge'
 import {
   boardCardTransition,
@@ -204,7 +205,7 @@ export function TasksPage() {
   // EventSource 断线会自动重连，重连后重新收到快照，无需定时兜底。
   useEffect(() => {
     let closed = false
-    const source = new EventSource('/api/tasks/stream')
+    const source = visibleEventSource('/api/tasks/stream')
 
     source.onmessage = (event: MessageEvent<string>) => {
       if (closed) return

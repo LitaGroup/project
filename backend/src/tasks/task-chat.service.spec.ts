@@ -1,7 +1,12 @@
+import { Subject } from 'rxjs';
 import type { Repository } from 'typeorm';
 import { Task } from './task.entity';
 import { TaskChatService } from './task-chat.service';
-import type { TaskChatQuestionInfo } from './task-chat.types';
+import type {
+  TaskChatMessage,
+  TaskChatQuestionInfo,
+  TaskChatStreamMessage,
+} from './task-chat.types';
 
 describe('TaskChatService 提问卡片', () => {
   const question: TaskChatQuestionInfo = {
@@ -543,6 +548,216 @@ describe('TaskChatService snapshot 最终产出去重', () => {
         tools: [expect.objectContaining({ status: 'success' })],
       }),
     );
+  });
+});
+
+describe('TaskChatService 任务会话隔离', () => {
+  const now = new Date('2026-10-27T10:00:00Z');
+  const parent = {
+    id: 34,
+    rootId: null,
+    parentId: null,
+    agentId: null,
+    schedulerId: null,
+    createdById: 8,
+    requesterType: 'user' as const,
+    requesterId: 8,
+    result: null,
+    description: '主任务需求',
+    title: '主任务',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const child = {
+    ...parent,
+    id: 35,
+    rootId: 34,
+    parentId: 34,
+    requesterType: 'worker' as const,
+    requesterId: 101,
+    description: '子任务需求',
+    title: '子任务',
+  };
+  const tasks = [parent, child];
+  const worker = {
+    id: 101,
+    name: '父机器人',
+    role: '工作者',
+    runtime: 'opencode',
+    personalAgentUserId: null,
+    ownerName: null,
+    avatarUrl: null,
+  };
+
+  function messageRow(taskId: number, content: string) {
+    return {
+      taskId,
+      messageKey: `chat:${taskId}:m1`,
+      role: 'assistant',
+      sender: { id: `worker:${taskId}`, name: '机器人', kind: 'worker' },
+      content,
+      reasoning: null,
+      status: 'complete',
+      kind: 'message',
+      tools: null,
+      question: null,
+      meta: null,
+      createdAt: new Date(now.getTime() + 60_000),
+      updatedAt: now,
+    };
+  }
+
+  function createService() {
+    return new TaskChatService(
+      {
+        findOne: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { id: number } }) =>
+            Promise.resolve(tasks.find((task) => task.id === where.id) ?? null),
+          ),
+        find: jest.fn().mockResolvedValue(tasks),
+      } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      {
+        find: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { taskId: number } }) =>
+            Promise.resolve([
+              messageRow(
+                where.taskId,
+                where.taskId === 34 ? '主任务回复' : '子任务回复',
+              ),
+            ]),
+          ),
+      } as never,
+      {
+        find: jest.fn().mockResolvedValue([]),
+        findOne: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { id: number } }) =>
+            Promise.resolve(where.id === 101 ? worker : null),
+          ),
+      } as never,
+      {
+        findOne: jest
+          .fn()
+          .mockImplementation(({ where }: { where: { id: number } }) =>
+            Promise.resolve(
+              where.id === 8 ? { id: 8, name: '任务创建人' } : null,
+            ),
+          ),
+      } as never,
+      { events$: new Subject<unknown>() } as never,
+    );
+  }
+
+  it('父子任务快照只包含各自会话，PIPELINE 仍保留整棵树', async () => {
+    const service = createService();
+
+    const parentSnapshot = await service.snapshot(34);
+    const childSnapshot = await service.snapshot(35);
+
+    expect(parentSnapshot.pipeline.map((stage) => stage.task.id)).toEqual([
+      34, 35,
+    ]);
+    expect(parentSnapshot.messages.every((item) => item.taskId === 34)).toBe(
+      true,
+    );
+    expect(parentSnapshot.messages.map((item) => item.content)).toEqual([
+      '主任务需求',
+      '主任务回复',
+    ]);
+
+    expect(childSnapshot.messages.every((item) => item.taskId === 35)).toBe(
+      true,
+    );
+    expect(childSnapshot.messages.map((item) => item.content)).toEqual([
+      '子任务需求',
+      '子任务回复',
+    ]);
+    expect(childSnapshot.messages[0].sender).toMatchObject({
+      workerId: 101,
+      name: '父机器人',
+      roleLabel: '需求方',
+    });
+  });
+
+  it('实时消息与队列只推送给所属任务，阶段刷新仍按任务树推送', async () => {
+    const service = createService();
+    const subject = (service as unknown as { subject: Subject<unknown> })
+      .subject;
+    const received: TaskChatStreamMessage[] = [];
+    const subscription = service.stream(35).subscribe((event) => {
+      received.push(event.data as unknown as TaskChatStreamMessage);
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const chatMessage = (taskId: number): TaskChatMessage => ({
+      id: `chat:${taskId}:m2`,
+      taskId,
+      role: 'assistant',
+      sender: { id: 'worker:101', name: '父机器人', kind: 'worker' },
+      content: `task ${taskId}`,
+      createdAt: now.toISOString(),
+      status: 'complete',
+      kind: 'message',
+    });
+    subject.next({
+      rootTaskId: 34,
+      taskId: 34,
+      event: {
+        type: 'message.upsert',
+        message: chatMessage(34),
+        at: Date.now(),
+      },
+    });
+    subject.next({
+      rootTaskId: 34,
+      taskId: 35,
+      event: {
+        type: 'message.upsert',
+        message: chatMessage(35),
+        at: Date.now(),
+      },
+    });
+    subject.next({
+      rootTaskId: 34,
+      taskId: 34,
+      event: { type: 'queue.delete', ids: ['queue:34'], at: Date.now() },
+    });
+    subject.next({
+      rootTaskId: 34,
+      taskId: 35,
+      event: { type: 'queue.delete', ids: ['queue:35'], at: Date.now() },
+    });
+    subject.next({
+      rootTaskId: 34,
+      taskId: 34,
+      event: { type: 'refresh', at: Date.now() },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(
+      received
+        .filter(
+          (
+            event,
+          ): event is Extract<
+            TaskChatStreamMessage,
+            { type: 'message.upsert' }
+          > => event.type === 'message.upsert',
+        )
+        .map((event) => event.message.taskId),
+    ).toEqual([35]);
+    expect(
+      received.filter((event) => event.type === 'queue.delete'),
+    ).toMatchObject([{ type: 'queue.delete', ids: ['queue:35'] }]);
+    expect(received.filter((event) => event.type === 'refresh')).toHaveLength(
+      1,
+    );
+
+    subscription.unsubscribe();
+    service.onModuleDestroy();
   });
 });
 

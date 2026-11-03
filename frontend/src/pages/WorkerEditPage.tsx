@@ -46,6 +46,7 @@ import {
   type WorkerStandard,
   type WorkerStandardCatalogItem,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { ModelSettingsPicker } from '../components/agent-chat/ModelSettingsPicker'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
@@ -290,7 +291,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   // 初始化进度 SSE：snapshot 校准全量状态，line 增量推送；终态后由服务端完成流
   useEffect(() => {
     if (trackedWorkerId === null) return
-    const source = new EventSource(
+    const source = visibleEventSource(
       `/api/workers/${trackedWorkerId}/initialize/stream`,
     )
     source.onmessage = (event: MessageEvent<string>) => {
@@ -521,7 +522,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   // 优化进度 SSE：snapshot 校准全量状态，line 增量推送；终态后由服务端完成流
   useEffect(() => {
     if (!optimizeRunId) return
-    const source = new EventSource(
+    const source = visibleEventSource(
       `/api/workers/optimize-prompt/${encodeURIComponent(optimizeRunId)}/stream`,
     )
     source.onmessage = (event: MessageEvent<string>) => {

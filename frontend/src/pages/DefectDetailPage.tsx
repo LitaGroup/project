@@ -45,6 +45,7 @@ import {
   type ProjectTest,
   type TestRun,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { DefectStatusBadge, DefectPriorityBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
@@ -201,7 +202,7 @@ export function DefectDetailPage() {
     let finished = false
     // 本次订阅期间是否出现过活跃状态：初始加载即已结束的历史运行不弹确认窗
     let sawActive = false
-    const es = new EventSource(`/api/tests/runs/${runId}/stream`)
+    const es = visibleEventSource(`/api/tests/runs/${runId}/stream`)
     es.onmessage = (e: MessageEvent<string>) => {
       const r = JSON.parse(e.data) as TestRun
       setRun(r)

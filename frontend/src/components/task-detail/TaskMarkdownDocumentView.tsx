@@ -1,7 +1,16 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+  type Ref,
+} from 'react'
 import { Link } from 'react-router-dom'
 import { knowledgeWebPath } from '../../lib/api'
-import { MarkdownEditor } from '../MarkdownEditor'
+import {
+  MarkdownEditor,
+  type MarkdownEditorHandle,
+} from '../MarkdownEditor'
 
 /** MarkdownEditor 是非受控组件：内容一旦变化必须换 key 重新挂载，避免继续显示旧正文。 */
 function contentFingerprint(content: string): string {
@@ -17,14 +26,22 @@ interface TaskMarkdownDocumentViewProps {
   title: string
   subtitle?: ReactNode
   meta?: ReactNode
+  /** 标题栏右侧操作（如交付文档编辑/保存） */
+  actions?: ReactNode
+  /** 标题栏下方的提示或报错区域 */
+  notice?: ReactNode
   /** 悬浮在底部的内容（如交付文档状态） */
   footer?: ReactNode
   content: string | null | undefined
   loading?: boolean
   error?: string | null
   emptyText: string
-  /** 内容版本 key：变化时重新挂载只读编辑器 */
+  /** 内容版本 key：变化时重新挂载编辑器 */
   contentKey?: string | number | null
+  /** 编辑模式：即使正文为空也渲染编辑器 */
+  editing?: boolean
+  /** 编辑模式下的编辑器 ref，保存前取实时正文 */
+  editorRef?: Ref<MarkdownEditorHandle>
 }
 
 interface HandoffDocumentStatusProps {
@@ -108,22 +125,29 @@ export function HandoffDocumentStatus({
   )
 }
 
-/** 任务详情中交付/复盘/任务文档的只读 Markdown 阅读区。 */
+/** 任务详情中交付/复盘/任务文档的 Markdown 阅读区；工作台交付 Tab 可切换为编辑态。 */
 export function TaskMarkdownDocumentView({
   title,
   subtitle,
   meta,
+  actions,
+  notice,
   footer,
   content,
   loading = false,
   error,
   emptyText,
   contentKey,
+  editing = false,
+  editorRef,
 }: TaskMarkdownDocumentViewProps) {
   const hasContent = Boolean(content?.trim())
   const editorKey = useMemo(
-    () => `${contentKey ?? ''}:${contentFingerprint(content ?? '')}`,
-    [content, contentKey],
+    () =>
+      `${contentKey ?? ''}:${contentFingerprint(content ?? '')}:${
+        editing ? 'edit' : 'read'
+      }`,
+    [content, contentKey, editing],
   )
   return (
     <section className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
@@ -138,12 +162,19 @@ export function TaskMarkdownDocumentView({
             </div>
           )}
         </div>
-        {meta && (
+        {(meta || actions) && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs text-foreground-muted">
             {meta}
+            {actions}
           </div>
         )}
       </header>
+
+      {notice && (
+        <div className="shrink-0 border-b border-border px-4 py-2 text-xs">
+          {notice}
+        </div>
+      )}
 
       {error && (
         <p
@@ -154,13 +185,20 @@ export function TaskMarkdownDocumentView({
         </p>
       )}
 
-      {!hasContent ? (
+      {!hasContent && !editing ? (
         <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-foreground-muted">
           {loading ? '正在加载文档…' : error ? '暂时无法展示文档' : emptyText}
         </div>
       ) : (
         <div className="md-editor-scroll min-h-0 flex-1">
-          <MarkdownEditor key={editorKey} value={content ?? ''} readOnly />
+          <MarkdownEditor
+            key={editorKey}
+            ref={editing ? editorRef : undefined}
+            value={content ?? ''}
+            readOnly={!editing}
+            compact={editing}
+            appica={editing}
+          />
         </div>
       )}
       {footer}
