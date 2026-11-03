@@ -8,13 +8,14 @@ import {
 } from '@appica/ui-react/card'
 import { Button } from '@appica/ui-react/button'
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@appica/ui-react/select'
-import { api, type TaskTemplate, type TaskTypeDef } from '../lib/api'
+  Autocomplete,
+  AutocompleteInput,
+  AutocompleteContent,
+  AutocompleteEmpty,
+  AutocompleteList,
+  AutocompleteItem,
+} from '@appica/ui-react/autocomplete'
+import { api, type TaskTemplate, type Worker } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import {
   MarkdownEditor,
@@ -22,64 +23,88 @@ import {
 } from '../components/MarkdownEditor'
 
 /**
- * 新建任务（独立页面）：填写任务描述（Markdown），右侧可选任务类型与任务定义。
- * 创建后进入等待分配，由平台按任务定义/类型匹配处理机器人；
- * 无法匹配时归入「未知任务」，交给系统未知任务定义（ID=6）的处理机器人接管。
+ * 新建任务（独立页面）：填写任务描述（Markdown），右侧可选任务定义与执行机器人。
+ * 选择任务定义时若执行机器人未手动指定，自动从该定义的启用机器人中随机带入；
+ * 机器人留空时由平台按任务定义自动分配，无法匹配时归入「未知任务」。
  */
 export function TaskCreatePage() {
   const navigate = useNavigate()
   const [description, setDescription] = useState('')
-  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([])
   const [templates, setTemplates] = useState<TaskTemplate[]>([])
-  const [taskType, setTaskType] = useState('')
-  const [templateId, setTemplateId] = useState('')
+  const [workers, setWorkers] = useState<Worker[]>([])
+  const [templateName, setTemplateName] = useState('')
+  const [agentName, setAgentName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const descriptionRef = useRef<MarkdownEditorHandle>(null)
+  // 记录上一次由任务定义自动填入的机器人；手动选择/清空后置空
+  const autoAgentIdRef = useRef<number | null>(null)
 
   useEffect(() => {
-    api.listTaskTypes().then(setTaskTypes).catch(() => undefined)
-    api.listTaskTemplates().then(setTemplates).catch(() => undefined)
+    // 同时加载，避免先选任务定义时机器人清单尚未就绪导致无法自动带入
+    Promise.allSettled([
+      api.listTaskTemplates(),
+      api.listWorkers({ role: '工作者' }),
+    ]).then(([templateResult, workerResult]) => {
+      if (templateResult.status === 'fulfilled') {
+        setTemplates(templateResult.value)
+      }
+      if (workerResult.status === 'fulfilled') {
+        setWorkers(
+          workerResult.value.filter((worker) => worker.enabled),
+        )
+      }
+    })
   }, [])
 
-  const typeItems = useMemo(
-    () => Object.fromEntries(taskTypes.map((type) => [type.name, type.name])),
-    [taskTypes],
+  const templateOptions = useMemo(
+    () => templates.map((template) => template.name),
+    [templates],
   )
-  // 任务类型筛选任务定义；未选类型时展示全部定义
-  const filteredTemplates = useMemo(
-    () =>
-      taskType
-        ? templates.filter((template) => template.type === taskType)
-        : templates,
-    [templates, taskType],
-  )
-  const templateItems = useMemo(
-    () =>
-      Object.fromEntries(
-        filteredTemplates.map((template) => [
-          String(template.id),
-          template.name,
-        ]),
-      ),
-    [filteredTemplates],
+  const workerOptions = useMemo(
+    () => workers.map((worker) => worker.name),
+    [workers],
   )
 
-  /** 切换任务类型：原选中的任务定义不属于新类型时清除 */
-  const changeType = (value: string | null) => {
-    const next = value ?? ''
-    setTaskType(next)
-    if (!templateId) return
-    const template = templates.find((item) => String(item.id) === templateId)
-    if (!next || template?.type !== next) setTemplateId('')
-  }
-
-  /** 选择任务定义：仅带出对应的任务类型，不填充任务描述 */
+  /**
+   * 任务定义支持输入搜索，匹配到完整名称时视为已选择：
+   * - 执行机器人为空或仍是上次自动填入值时，从定义的启用机器人中随机选一个；
+   * - 手动选择过机器人时保持手动值；
+   * - 清除定义时只清除自动填入的机器人，保留手动选择。
+   */
   const changeTemplate = (value: string | null) => {
     const next = value ?? ''
-    setTemplateId(next)
-    const template = templates.find((item) => String(item.id) === next)
-    if (template) setTaskType(template.type)
+    setTemplateName(next)
+    const currentAgent = workers.find(
+      (worker) => worker.name === agentName.trim(),
+    )
+    const isAutoAgent =
+      autoAgentIdRef.current !== null &&
+      currentAgent?.id === autoAgentIdRef.current
+    const template = templates.find((item) => item.name === next.trim())
+    if (!template) {
+      autoAgentIdRef.current = null
+      if (isAutoAgent) setAgentName('')
+      return
+    }
+    if (agentName.trim() && !isAutoAgent) return
+    const candidates = [...new Set(template.agentIds)]
+      .map((id) => workers.find((worker) => worker.id === id))
+      .filter((worker): worker is Worker => Boolean(worker))
+    if (candidates.length === 0) {
+      autoAgentIdRef.current = null
+      if (isAutoAgent) setAgentName('')
+      return
+    }
+    const selected = candidates[Math.floor(Math.random() * candidates.length)]
+    autoAgentIdRef.current = selected.id
+    setAgentName(selected.name)
+  }
+
+  /** 手动选择/清空执行机器人：之后切换任务定义不再覆盖该值 */
+  const changeAgent = (value: string | null) => {
+    autoAgentIdRef.current = null
+    setAgentName(value ?? '')
   }
 
   const submit = () => {
@@ -90,13 +115,27 @@ export function TaskCreatePage() {
       setError('请填写任务描述')
       return
     }
+    const selectedTemplate = templates.find(
+      (template) => template.name === templateName.trim(),
+    )
+    const selectedAgent = workers.find(
+      (worker) => worker.name === agentName.trim(),
+    )
+    if (templateName.trim() && !selectedTemplate) {
+      setError('请从联想结果中选择任务定义，或清空该项')
+      return
+    }
+    if (agentName.trim() && !selectedAgent) {
+      setError('请从联想结果中选择执行机器人，或清空该项')
+      return
+    }
     setSaving(true)
     api
       .createTaskPackage({
         description: markdown,
-        // 留空不传；平台无法匹配时自动归入「未知任务」
-        type: taskType || undefined,
-        templateId: templateId ? Number(templateId) : null,
+        templateId: selectedTemplate?.id ?? null,
+        // 留空由平台按任务定义自动分配；仍无法匹配时归入「未知任务」
+        agentId: selectedAgent?.id ?? null,
       })
       .then(() => navigate('/tasks/list'))
       .catch((e: Error) => setError(`创建失败：${e.message}`))
@@ -115,7 +154,7 @@ export function TaskCreatePage() {
           />
           <h1 className="mt-2 text-2xl font-semibold">新建任务</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            填写任务描述即可；创建后进入等待分配，平台会按任务定义和类型匹配处理机器人，无法匹配时自动归入「未知任务」
+            填写任务描述即可；可指定任务定义与执行机器人，执行机器人留空时由平台自动分配，无法匹配时归入「未知任务」
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -164,56 +203,64 @@ export function TaskCreatePage() {
           <CardHeader className="flex-none">
             <CardTitle>基础信息</CardTitle>
             <CardDescription>
-              任务类型与任务定义均可留空，无法匹配时自动进入未知任务
+              任务定义与执行机器人都可留空；留空时由平台自动分配
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">
             <label className="flex flex-col gap-1 text-sm">
-              任务类型
-              <Select
-                value={taskType || null}
-                onValueChange={(value) =>
-                  changeType((value as string | null) ?? '')
-                }
-                items={typeItems}
+              任务定义
+              <Autocomplete
+                items={templateOptions}
+                value={templateName}
+                onValueChange={(value) => changeTemplate(value as string)}
+                clearable
+                openOnInputClick
               >
-                <SelectTrigger className="w-full" clearable>
-                  <SelectValue placeholder="不指定，由平台自动匹配" />
-                </SelectTrigger>
-                <SelectContent>
-                  {taskTypes.map((type) => (
-                    <SelectItem key={type.name} value={type.name}>
-                      {type.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <AutocompleteInput
+                  placeholder="搜索任务定义名称，可留空"
+                  aria-label="任务定义"
+                />
+                <AutocompleteContent>
+                  <AutocompleteEmpty>未找到匹配的任务定义</AutocompleteEmpty>
+                  <AutocompleteList>
+                    {(item: string) => (
+                      <AutocompleteItem key={item} value={item}>
+                        {item}
+                      </AutocompleteItem>
+                    )}
+                  </AutocompleteList>
+                </AutocompleteContent>
+              </Autocomplete>
               <span className="text-xs text-foreground-muted">
-                可留空；无法匹配任务定义/类型时归入未知任务
+                可留空；输入名称搜索，选中后自动带入该定义配置的执行机器人
               </span>
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              任务定义
-              <Select
-                value={templateId || null}
-                onValueChange={(value) =>
-                  changeTemplate((value as string | null) ?? '')
-                }
-                items={templateItems}
+              执行机器人
+              <Autocomplete
+                items={workerOptions}
+                value={agentName}
+                onValueChange={(value) => changeAgent(value as string)}
+                clearable
+                openOnInputClick
               >
-                <SelectTrigger className="w-full" clearable>
-                  <SelectValue placeholder="不指定" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filteredTemplates.map((template) => (
-                    <SelectItem key={template.id} value={String(template.id)}>
-                      {template.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <AutocompleteInput
+                  placeholder="搜索机器人名称，留空自动分配"
+                  aria-label="执行机器人"
+                />
+                <AutocompleteContent>
+                  <AutocompleteEmpty>未找到匹配的机器人</AutocompleteEmpty>
+                  <AutocompleteList>
+                    {(item: string) => (
+                      <AutocompleteItem key={item} value={item}>
+                        {item}
+                      </AutocompleteItem>
+                    )}
+                  </AutocompleteList>
+                </AutocompleteContent>
+              </Autocomplete>
               <span className="text-xs text-foreground-muted">
-                可留空；选中后仅带出该定义的任务类型，不填充任务描述
+                可搜索、手动更改或留空；留空后由后台自动分配
               </span>
             </label>
           </div>
