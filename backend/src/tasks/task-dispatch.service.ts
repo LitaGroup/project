@@ -831,7 +831,19 @@ export class TaskDispatchService
     // 人工「暂停」保留队列；取消、改派等内部中断直接丢弃不再发送的消息。
     if (!intervention) await this.taskChat.discardQueuedUserMessages(taskId);
     this.releaseTask(taskId);
+    await this.requeueInboxAfterTurn(taskId);
     return this.mustFind(taskId);
+  }
+
+  /** 回合非正常结束或未消费事件时重新排队，保证父机器人后续仍能被唤醒。 */
+  private async requeueInboxAfterTurn(taskId: number): Promise<void> {
+    try {
+      await this.workerInbox.requeueDelivered(taskId);
+    } catch (error) {
+      this.logger.warn(
+        `任务 #${taskId} 收件箱事件重新排队失败: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -1085,7 +1097,12 @@ export class TaskDispatchService
 
   /** LOOP 恢复/邀约前判断上一轮会话是否仍在输出，避免同会话重入。 */
   taskChatRunning(taskId: number): boolean {
-    return this.taskChat.isRunning(taskId) || this.dispatching.has(taskId);
+    return (
+      this.taskChat.isRunning(taskId) ||
+      this.dispatching.has(taskId) ||
+      this.awaitingTurnStart.has(taskId) ||
+      this.queueDraining.has(taskId)
+    );
   }
 
   /** 任务详情附带的实时输出行（历史页/详情兜底） */
@@ -1301,8 +1318,10 @@ export class TaskDispatchService
           `会话执行失败：${error?.type ?? ''} ${error?.message ?? ''}`.trim(),
           null,
         );
-        // 本轮已结束，释放事件流占用（等待重派发/取消）
+        // 本轮已结束，释放事件流占用并重新排队未处理的子任务事件
+        this.awaitingTurnStart.delete(taskId);
         this.releaseTask(taskId);
+        await this.requeueInboxAfterTurn(taskId);
         break;
       }
       default:
@@ -1540,6 +1559,9 @@ export class TaskDispatchService
         handoffPath: handoff.path,
         handoffUrl: handoff.url,
         handoffVersion: handoff.version,
+        acceptUrl: `${this.apiUrl}/tasks/${taskId}/handoff/accept.md`,
+        refuseUrl: `${this.apiUrl}/tasks/${taskId}/handoff/refuse.md`,
+        failUrl: `${this.apiUrl}/tasks/${taskId}/fail.md`,
       },
     });
     await this.taskNotify.notifyTaskRequester(
@@ -1614,7 +1636,7 @@ export class TaskDispatchService
     const task = await this.mustFind(taskId);
     this.releaseTask(taskId);
     // 父机器人未通过动作接口处理的子任务事件，在会话结束后重新排队。
-    await this.workerInbox.requeueDelivered(taskId);
+    await this.requeueInboxAfterTurn(taskId);
     if (
       task.status === TaskStatus.WAITING &&
       task.subStatus === TaskSubStatus.PENDING_FEEDBACK
@@ -1882,7 +1904,7 @@ export class TaskDispatchService
         '  -d \'{"templateId":1,"title":"子任务标题","input":"输入","outputSpec":"交付要求"}\'',
         '```',
         '',
-        '你是子任务的需求方。子任务提问、待验收或被拒绝时，平台会把事件送入当前父任务；请使用对应的需求方接口处理。',
+        '你是子任务的需求方。子任务提问、待验收或被拒绝时，平台会把事件送入当前父任务；必须读取事件并按提示调用需求方接口处理，子任务完成验收前不要申请父任务验收。',
         '',
         '执行中需要需求方澄清时，必须调用 project 提问接口，不使用 opencode 原生提问；调用后停止本轮，等待平台恢复：',
         '',

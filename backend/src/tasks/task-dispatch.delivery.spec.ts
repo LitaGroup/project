@@ -40,6 +40,10 @@ describe('TaskDispatchService 显式申请验收', () => {
   };
   let taskNotify: { notifyTaskRequester: jest.Mock };
   let taskRealtime: { lineAppended: jest.Mock; taskChanged: jest.Mock };
+  let workerInbox: {
+    enqueue: jest.Mock;
+    requeueDelivered: jest.Mock;
+  };
   let taskDocuments: {
     ensureHandoff: jest.Mock;
     prepareForAcceptance: jest.Mock;
@@ -79,6 +83,10 @@ describe('TaskDispatchService 显式申请验收', () => {
       lineAppended: jest.fn(),
       taskChanged: jest.fn(),
     };
+    workerInbox = {
+      enqueue: jest.fn().mockResolvedValue(null),
+      requeueDelivered: jest.fn().mockResolvedValue(undefined),
+    };
     const handoff = {
       path: '/task/20261028/TK-0001/HANDOFF',
       url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
@@ -108,10 +116,7 @@ describe('TaskDispatchService 显式申请验收', () => {
       taskChat as never,
       taskDocuments as never,
       { start: jest.fn() } as never,
-      {
-        enqueue: jest.fn().mockResolvedValue(null),
-        requeueDelivered: jest.fn().mockResolvedValue(undefined),
-      } as never,
+      workerInbox as never,
       { transaction: jest.fn() } as never,
       { get: jest.fn() } as never,
     );
@@ -169,7 +174,32 @@ describe('TaskDispatchService 显式申请验收', () => {
       expect.stringContaining('任务待验收'),
       expect.stringContaining('HANDOFF'),
     );
+    expect(workerInbox.enqueue).toHaveBeenCalledWith(
+      saved,
+      'handoff',
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          handoffUrl: '/docs/detail/task/20261028/TK-0001/HANDOFF',
+          handoffVersion: 3,
+          acceptUrl: 'http://localhost:3100/api/tasks/1/handoff/accept.md',
+          refuseUrl: 'http://localhost:3100/api/tasks/1/handoff/refuse.md',
+          failUrl: 'http://localhost:3100/api/tasks/1/fail.md',
+        }) as Record<string, unknown>,
+      }),
+    );
     expect(taskChat.finishTask).toHaveBeenCalledWith(1);
+  });
+
+  it('人工中断时重新排队未处理的子任务事件', async () => {
+    tasksRepo.findOne.mockResolvedValue(baseTask());
+
+    await service.interrupt(1, '张三');
+
+    expect(workerInbox.requeueDelivered).toHaveBeenCalledWith(1);
+    expect(taskChat.finishTask).toHaveBeenCalledWith(1, {
+      toolStatus: 'error',
+      toolDetail: '会话已中断，未收到工具终态事件',
+    });
   });
 
   it('申请验收记录文档版本，旧结构化说明仍作为复盘快照兼容', async () => {

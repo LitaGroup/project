@@ -1,0 +1,136 @@
+import type { Task } from './task.entity';
+import type { TaskWorkerInbox } from './task-worker-inbox.entity';
+import {
+  TaskWorkerInboxService,
+  taskInboxPrompt,
+} from './task-worker-inbox.service';
+
+describe('TaskWorkerInboxService 子任务收件箱', () => {
+  const inboxRepo = {
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
+  };
+
+  beforeEach(() => {
+    inboxRepo.update.mockClear();
+  });
+
+  it('会话未消费的事件同时重排 queued 与 delivered', async () => {
+    const service = new TaskWorkerInboxService(inboxRepo as never);
+
+    await service.requeueDelivered(1);
+
+    expect(inboxRepo.update).toHaveBeenCalledTimes(2);
+    expect(inboxRepo.update).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        parentTaskId: 1,
+        status: expect.objectContaining({
+          value: ['queued', 'delivered'],
+        }) as unknown,
+      }),
+      { status: 'pending', deliveredAt: null },
+    );
+    expect(inboxRepo.update).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        parentTaskId: 1,
+        status: expect.objectContaining({
+          value: ['queued', 'delivered'],
+        }) as unknown,
+      }),
+      expect.objectContaining({ status: 'done' }),
+    );
+  });
+
+  it('验收事件提示词直接给出交付文档与验收接口', () => {
+    const child = {
+      id: 2,
+      code: 'TK-0002',
+      title: '子任务',
+      status: '等待中',
+      subStatus: '待验收',
+    } as Task;
+    const entry = {
+      id: 9,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'handoff',
+      referenceId: null,
+      payload: {
+        handoffUrl: '/docs/detail/task/20261103/TK-0002/HANDOFF',
+        acceptUrl: 'http://localhost:3100/api/tasks/2/handoff/accept.md',
+      },
+      status: 'queued',
+    } as TaskWorkerInbox;
+
+    const prompt = taskInboxPrompt(entry, child, 'http://api.example/api/');
+
+    expect(prompt).toContain('事件收件箱 ID：9');
+    expect(prompt).toContain('GET http://api.example/api/tasks/2/handoff.md');
+    expect(prompt).toContain('/docs/detail/task/20261103/TK-0002/HANDOFF');
+    expect(prompt).toContain(
+      'http://api.example/api/tasks/2/handoff/accept.md',
+    );
+    expect(prompt).toContain(
+      'http://api.example/api/tasks/2/handoff/refuse.md',
+    );
+    expect(prompt).toContain('http://api.example/api/tasks/2/fail.md');
+    expect(prompt).toContain('.opencode/agent-token');
+    expect(prompt).toContain('不能只回复消息');
+  });
+
+  it('提问事件提示词携带问题正文、选项和完整答复接口', () => {
+    const child = {
+      id: 2,
+      code: 'TK-0002',
+      title: '子任务',
+      status: '等待中',
+      subStatus: '待反馈',
+    } as Task;
+    const entry = {
+      id: 10,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'question',
+      referenceId: 'project-q1',
+      payload: {
+        questions: [
+          {
+            header: '方案确认',
+            question: '使用哪个活动方案？',
+            options: [
+              { label: 'A 方案', description: '成本优先' },
+              { label: 'B 方案', description: '体验优先' },
+            ],
+            multiple: false,
+            custom: false,
+          },
+          {
+            header: '上线时间',
+            question: '计划什么时候上线？',
+            multiple: false,
+            custom: true,
+          },
+        ],
+      },
+      status: 'queued',
+    } as TaskWorkerInbox;
+
+    const prompt = taskInboxPrompt(entry, child, 'http://api.example/api');
+
+    expect(prompt).toContain('只回复消息不会解除');
+    expect(prompt).toContain('GET http://api.example/api/tasks/2.md');
+    expect(prompt).toContain('1. 方案确认');
+    expect(prompt).toContain('使用哪个活动方案？');
+    expect(prompt).toContain('A 方案（成本优先） / B 方案（体验优先）');
+    expect(prompt).toContain('仅限选项');
+    expect(prompt).toContain('2. 上线时间');
+    expect(prompt).toContain('计划什么时候上线？');
+    expect(prompt).toContain(
+      'http://api.example/api/tasks/2/questions/project-q1/answer.md',
+    );
+    expect(prompt).toContain('{"answers":[["答案"],["答案"]]}');
+  });
+});
