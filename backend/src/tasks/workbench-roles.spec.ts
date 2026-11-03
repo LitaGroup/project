@@ -23,7 +23,7 @@ function roles(patch: Partial<Parameters<typeof deriveWorkbenchRoles>[0]>) {
     {
       humanWorker: { id: HUMAN_WORKER_ID },
       personalAgentId: PERSONAL_AGENT_ID,
-      ownedWorkerIds: [OWNED_WORKER_ID, PERSONAL_AGENT_ID],
+      ownedWorkerIds: [OWNED_WORKER_ID],
     },
   );
 }
@@ -59,14 +59,23 @@ describe('deriveWorkbenchRoles', () => {
     ).toEqual(['agent']);
   });
 
-  it('我的个人 AGENT 执行且我是需求方时保留双身份', () => {
+  it('历史任务需求方是个人 AGENT 时仍识别为需求方', () => {
     expect(
       roles({
         requesterType: 'worker',
         requesterId: PERSONAL_AGENT_ID,
+      }),
+    ).toEqual(['requester']);
+  });
+
+  it('个人 AGENT 不再作为执行方产生角色', () => {
+    expect(
+      roles({
+        requesterType: 'user',
+        requesterId: 2,
         agentId: PERSONAL_AGENT_ID,
       }),
-    ).toEqual(['owner', 'requester']);
+    ).toEqual([]);
   });
 
   it('验收升级接管且我不是需求方时标记为负责人', () => {

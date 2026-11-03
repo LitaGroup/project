@@ -123,13 +123,29 @@ describe('TaskDocumentService 任务文档', () => {
     );
   });
 
-  it('任务创建时生成 HANDOFF，正文为处理中占位且带版本 Frontmatter', async () => {
-    const result = await service.ensureHandoff(currentTask);
+  it('读取未创建的 HANDOFF 只返回空状态，不自动生成', async () => {
+    const result = await service.readHandoff(currentTask);
 
+    expect(result.exists).toBe(false);
     expect(result.path).toBe('/task/20261028/TK-0001/HANDOFF');
     expect(result.url).toBe('/docs/detail/task/20261028/TK-0001/HANDOFF');
-    expect(result.version).toBe(1);
-    expect(result.content).toBe('> 正在处理中……');
+    expect(result.version).toBe(0);
+    expect(result.content).toBe('');
+    expect(knowledge.createArticleAtPath).not.toHaveBeenCalled();
+    expect(currentTask.handoffPath).toBeNull();
+    expect(currentTask.handoffVersion).toBe(0);
+  });
+
+  it('首次显式写入使用 baseVersion=0 创建 HANDOFF v1', async () => {
+    const result = await service.updateHandoff(1, {
+      baseVersion: 0,
+      content: '# 任务交付文档\n\n## 当前进展\n\n开始处理',
+      updatedBy: '执行机器人',
+    });
+
+    expect(result.document.exists).toBe(true);
+    expect(result.document.version).toBe(1);
+    expect(result.document.content).toContain('开始处理');
     expect(knowledge.createArticleAtPath).toHaveBeenCalledWith(
       expect.objectContaining({
         path: '/task/20261028/TK-0001/HANDOFF',
@@ -139,6 +155,17 @@ describe('TaskDocumentService 任务文档', () => {
     );
     expect(currentTask.handoffPath).toBe('/task/20261028/TK-0001/HANDOFF');
     expect(currentTask.handoffVersion).toBe(1);
+  });
+
+  it('未创建 HANDOFF 时使用非零 baseVersion 返回冲突', async () => {
+    await expect(
+      service.updateHandoff(1, {
+        baseVersion: 1,
+        content: '# 交付',
+        updatedBy: '执行机器人',
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(knowledge.createArticleAtPath).not.toHaveBeenCalled();
   });
 
   it('机器人提交完整正文时平台递增版本并覆盖 Frontmatter', async () => {
@@ -229,6 +256,14 @@ describe('TaskDocumentService 任务文档', () => {
     expect(knowledge.update).not.toHaveBeenCalled();
   });
 
+  it('交付文档尚未创建时不能申请验收', async () => {
+    await expect(service.prepareForAcceptance(currentTask)).rejects.toThrow(
+      '交付文档尚未创建',
+    );
+    expect(currentTask.handoffSubmittedVersion).toBeNull();
+    expect(knowledge.createArticleAtPath).not.toHaveBeenCalled();
+  });
+
   it('交付文档仍是处理中占位时不能申请验收', async () => {
     const path = '/task/20261028/TK-0001/HANDOFF';
     currentTask = task({ handoffPath: path, handoffVersion: 1 });
@@ -300,8 +335,9 @@ describe('TaskDocumentService 任务文档', () => {
       ),
     ]);
 
-    const result = await service.ensureHandoff(currentTask);
+    const result = await service.readHandoff(currentTask);
 
+    expect(result.exists).toBe(true);
     expect(result.path).toBe('/task/20261027/TK-0001/HANDOFF');
     expect(result.content).toBe('旧版平台拼接的交付内容');
     expect(result.version).toBe(1);
@@ -455,8 +491,9 @@ describe('TaskDocumentService 任务文档', () => {
       }),
     );
 
-    const document = await service.ensureHandoff(currentTask);
+    const document = await service.readHandoff(currentTask);
 
+    expect(document.exists).toBe(true);
     expect(document.path).toBe('/task/20261027/TK-0001/HANDOFF');
     expect(document.content).toBe('# 实际交付\n\n真实内容');
     expect(currentTask.handoffPath).toBe('/task/20261027/TK-0001/HANDOFF');

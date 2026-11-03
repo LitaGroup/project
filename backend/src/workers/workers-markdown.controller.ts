@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Header,
   HttpCode,
@@ -8,10 +9,16 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
-import { WorkerRole, WorkerRuntime } from '../common/enums';
+import type { AuthedRequest } from '../auth/auth.guard';
+import { UserRole, WorkerRole, WorkerRuntime } from '../common/enums';
 import { Worker } from './worker.entity';
-import { CreateWorkerInput, UpdateWorkerInput } from './workers.service';
+import {
+  CreateWorkerInput,
+  UpdateWorkerInput,
+  WorkersService,
+} from './workers.service';
 import { WorkersMarkdownService } from './workers-markdown.service';
 
 class CreateWorkerMarkdownDto implements CreateWorkerInput {
@@ -65,11 +72,27 @@ export class WorkersListMarkdownController {
 /** 机器人 Agent CRUD：详情与写操作 */
 @Controller('workers')
 export class WorkersMarkdownController {
-  constructor(private readonly markdown: WorkersMarkdownService) {}
+  constructor(
+    private readonly markdown: WorkersMarkdownService,
+    private readonly workersService: WorkersService,
+  ) {}
 
   @Get(':id.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')
-  findOne(@Param('id', ParseIntPipe) id: number): Promise<string> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const worker = await this.workersService.findOne(id);
+    // 个人 AGENT 只用于「我的 AI」与个人中心配置：仅本人、管理员或自身机器人令牌可读
+    if (
+      worker.personalAgentUserId &&
+      req.user?.role !== UserRole.ADMIN &&
+      req.worker?.id !== id &&
+      worker.personalAgentUserId !== req.user?.id
+    ) {
+      throw new ForbiddenException('无权访问该个人 AGENT');
+    }
     return this.markdown.findOneMarkdown(id);
   }
 

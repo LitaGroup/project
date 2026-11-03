@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import {
   TaskStatus,
   TaskSubStatus,
@@ -143,11 +143,12 @@ export class WorkersService implements OnApplicationBootstrap {
     return `${this.workerBaseDir.replace(/\/+$/, '')}/${this.workerDirSegment}/${id}`;
   }
 
-  /** 列表（role 筛选），附实时状态与工位路径 */
+  /** 列表（role 筛选），附实时状态与工位路径；个人 AGENT 不进入对外机器人清单 */
   async findAll(filter?: { role?: WorkerRole }): Promise<WorkerView[]> {
     const workers = await this.workers.find({
       where: {
         ...(filter?.role ? { role: filter.role } : {}),
+        personalAgentUserId: IsNull(),
       },
       order: { id: 'ASC' },
     });
@@ -179,6 +180,23 @@ export class WorkersService implements OnApplicationBootstrap {
       .where('worker.agentToken = :token', { token })
       .andWhere('worker.enabled = true')
       .getOne();
+  }
+
+  /**
+   * 确保机器人用于访问平台的工作令牌并返回明文。
+   * 普通机器人使用自身独立令牌；个人 AGENT 使用其主人真人机器人的令牌，
+   * 保证「我的 AI」以该用户真人机器人的身份访问平台。
+   */
+  async ensureWorkToken(workerId: number): Promise<string> {
+    const worker = await this.workers.findOne({
+      where: { id: workerId },
+      select: { id: true, personalAgentUserId: true },
+    });
+    if (worker?.personalAgentUserId) {
+      const human = await this.findByHumanUserId(worker.personalAgentUserId);
+      if (human) return this.ensureAgentToken(human.id);
+    }
+    return this.ensureAgentToken(workerId);
   }
 
   /**

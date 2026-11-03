@@ -125,14 +125,6 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    key: 'robots',
-    label: '机器人',
-    to: '/robots',
-    match: (p) => p.startsWith('/robots'),
-    // 机器人的左侧栏由页面按会话/全部动态渲染，不使用固定导航项
-    items: [],
-  },
-  {
     key: 'tickets',
     label: '工单',
     to: '/tickets/tech',
@@ -278,8 +270,8 @@ export function Layout() {
   const isWorkbench = pathname.startsWith('/workbench')
   const isRobotChat = pathname.startsWith('/robots')
   const isProfile = pathname.startsWith('/profile')
-  // 工作台/个人中心不归属任何顶级分区（避免高亮「项目」），个人中心使用独立左侧导航
-  const activeSection = isWorkbench
+  // 工作台/机器人/个人中心不归属任何顶级分区（避免高亮「项目」），个人中心使用独立左侧导航
+  const activeSection = isWorkbench || isRobotChat
     ? undefined
     : isProfile
       ? PROFILE_SECTION
@@ -413,6 +405,17 @@ export function Layout() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <Link
+            to="/robots"
+            aria-current={isRobotChat ? 'page' : undefined}
+            className={`rounded-[var(--radius-md)] px-3 py-1.5 text-sm ${
+              isRobotChat
+                ? 'bg-background-muted font-medium text-foreground-intense'
+                : 'text-foreground-muted hover:text-foreground-intense'
+            }`}
+          >
+            机器人
+          </Link>
           <Link
             to="/workbench"
             aria-current={isWorkbench ? 'page' : undefined}

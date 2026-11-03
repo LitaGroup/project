@@ -132,12 +132,18 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     expect(prompt).toContain('不得把令牌写入聊天、交付物或文档');
   });
 
-  it('AGENTS.md 说明 Lita 用户令牌的位置与加载方式', async () => {
+  it('AGENTS.md 说明 Lita 用户令牌的位置、加载方式与最高优先级', async () => {
     const prompt = await buildService()['buildPrompt'](worker);
     expect(prompt).toContain('.opencode/.env');
     expect(prompt).toContain('LITA_USER_TOKEN');
+    expect(prompt).toContain('LITA_WORK_TOKEN');
     expect(prompt).toContain('LITA_PROJECT_TOKEN');
     expect(prompt).toContain('set -a; . .opencode/.env; set +a');
+    expect(prompt).toContain('lita-project（lita-work）');
+    expect(prompt).toContain('环境变量优先级（硬性）');
+    expect(prompt).toContain('优先级最高');
+    expect(prompt).toContain('高于当前进程环境变量和执行器宿主 `~/.env`');
+    expect(prompt).toContain('同名变量必须以 `.opencode/.env` 为准');
   });
 
   it('规范清单为空时只清理旧受管文件，不要求清空 docs', async () => {
@@ -177,7 +183,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       { findOne: executorsFindOne } as never,
       {
         workdirOf: () => '/tmp/runtime/worker/1001',
-        ensureAgentToken: () => Promise.resolve('test-worker-token'),
+        ensureWorkToken: () => Promise.resolve('test-worker-token'),
       } as never,
       {
         resolveManagedFiles: () =>
@@ -211,12 +217,12 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
   });
 
   it('初始化时把机器人独立令牌写入工位 agent-token 与 .env，并限制为 600 权限', async () => {
-    const ensureAgentToken = jest.fn().mockResolvedValue('worker-token-123');
+    const ensureWorkToken = jest.fn().mockResolvedValue('worker-token-123');
     const shell = jest.fn().mockResolvedValue(undefined);
     const service = new WorkerEnvironmentService(
       {} as never,
       {} as never,
-      { ensureAgentToken } as never,
+      { ensureWorkToken } as never,
       {} as never,
       {} as never,
       { get: () => 'test-lita-token' } as never,
@@ -226,7 +232,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       1001,
       '/tmp/runtime/worker/1001',
     );
-    expect(ensureAgentToken).toHaveBeenCalledWith(1001);
+    expect(ensureWorkToken).toHaveBeenCalledWith(1001);
     expect(shell).toHaveBeenCalledTimes(1);
     const command = shellCommand(shell);
     // 机器人身份令牌文件（兼容旧协议）
@@ -234,13 +240,15 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       "printf '%s' 'worker-token-123' > '/tmp/runtime/worker/1001/.opencode/agent-token' && " +
         "chmod 600 '/tmp/runtime/worker/1001/.opencode/agent-token'",
     );
-    // .opencode/.env 同步注入 LITA_PROJECT_TOKEN，供 SKILL 统一读取
+    // .opencode/.env 同步注入新名与兼容旧名，供 SKILL 统一读取
+    expect(command).toContain(
+      "grep -v '^LITA_WORK_TOKEN=' '/tmp/runtime/worker/1001/.opencode/.env' 2>/dev/null",
+    );
     expect(command).toContain(
       "grep -v '^LITA_PROJECT_TOKEN=' '/tmp/runtime/worker/1001/.opencode/.env' 2>/dev/null",
     );
-    expect(command).toContain(
-      "printf '%s\\n' 'LITA_PROJECT_TOKEN=worker-token-123'",
-    );
+    expect(command).toContain("'LITA_WORK_TOKEN=worker-token-123'");
+    expect(command).toContain("'LITA_PROJECT_TOKEN=worker-token-123'");
     expect(command).toContain(
       "chmod 600 '/tmp/runtime/worker/1001/.opencode/.env.tmp' && " +
         "mv '/tmp/runtime/worker/1001/.opencode/.env.tmp' '/tmp/runtime/worker/1001/.opencode/.env'",
@@ -283,6 +291,31 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       2,
       expect.stringContaining('$HOME/.env'),
     );
+  });
+
+  it('同时配置时优先使用 WORKER_LITA_USER_TOKEN 注入工位', async () => {
+    const shell = jest.fn().mockResolvedValue(undefined);
+    const service = new WorkerEnvironmentService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        get: jest.fn((key: string) => {
+          if (key === 'WORKER_LITA_USER_TOKEN') return 'worker-user-token';
+          if (key === 'LITA_USER_TOKEN') return 'platform-user-token';
+          return undefined;
+        }),
+      } as never,
+    );
+    await service['writeLitaUserToken'](
+      { shell } as never,
+      '/tmp/runtime/worker/1001',
+    );
+    const command = shellCommand(shell);
+    expect(command).toContain("'LITA_USER_TOKEN=worker-user-token'");
+    expect(command).not.toContain('platform-user-token');
   });
 
   it('未配置专用令牌时回退 LITA_USER_TOKEN，都未配置则跳过', async () => {

@@ -15,7 +15,7 @@ import { Task } from './task.entity';
 import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskChatService } from './task-chat.service';
-import type { TaskChatQuestionInfo } from './task-chat.types';
+import type { TaskChatQuestionInfo, TaskChatSender } from './task-chat.types';
 import { TaskDeliveryService } from './task-delivery.service';
 import { TaskDispatchService } from './task-dispatch.service';
 import { TaskNotifyService } from './task-notify.service';
@@ -437,6 +437,53 @@ export class TaskCollaborationService {
     );
     await this.workerInbox.completeForChild(taskId, 'question', questionId);
     return saved;
+  }
+
+  /** task-message-reply：机器人/用户需求方在子任务对话中回复执行方消息。 */
+  async replyMessage(
+    taskId: number,
+    actor: TaskActor,
+    content: string,
+  ): Promise<Task> {
+    const task = await this.mustFind(taskId);
+    assertTaskRequester(task, actor);
+    if (task.status === TaskStatus.FINISHED) {
+      throw new BadRequestException('任务已结束，不能回复消息');
+    }
+    const text = content.trim();
+    if (!text) throw new BadRequestException('消息内容不能为空');
+    const sender: TaskChatSender =
+      actor.type === 'worker'
+        ? {
+            id: `worker:${actor.worker.id}`,
+            name: actor.worker.name,
+            kind: 'worker',
+            workerId: actor.worker.id,
+            roleLabel: '需求方',
+            avatarUrl: actor.worker.avatarUrl,
+          }
+        : {
+            id: `user:${actor.user.name ?? actor.user.id}`,
+            name: actor.user.name ?? `用户#${actor.user.id}`,
+            kind: 'user',
+            roleLabel: '需求方',
+          };
+    await this.taskChat.postRequesterMessage(taskId, text, sender);
+    await this.tasksService.addEvent(
+      taskId,
+      '操作',
+      '需求方回复执行方消息',
+      actorName(actor),
+      {
+        perspective: 'requester',
+        requesterMessage: true,
+        actorType: actor.type,
+        actorWorkerId: actor.type === 'worker' ? actor.worker.id : null,
+      },
+    );
+    // 只完成已投递的消息事件；父机器人处理期间新到的消息留待下一轮唤醒。
+    await this.workerInbox.completeDeliveredForChild(taskId, 'message');
+    return this.mustFind(taskId);
   }
 
   /** task-fail：仅需求方在待验收阶段判定失败。 */

@@ -1,4 +1,6 @@
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { knowledgeWebPath } from '../../lib/api'
 import { MarkdownEditor } from '../MarkdownEditor'
 
 /** MarkdownEditor 是非受控组件：内容一旦变化必须换 key 重新挂载，避免继续显示旧正文。 */
@@ -15,6 +17,8 @@ interface TaskMarkdownDocumentViewProps {
   title: string
   subtitle?: ReactNode
   meta?: ReactNode
+  /** 悬浮在底部的内容（如交付文档状态） */
+  footer?: ReactNode
   content: string | null | undefined
   loading?: boolean
   error?: string | null
@@ -23,11 +27,93 @@ interface TaskMarkdownDocumentViewProps {
   contentKey?: string | number | null
 }
 
+interface HandoffDocumentStatusProps {
+  path?: string | null
+  version?: number | null
+  updatedAt?: string | null
+  exists?: boolean
+  loading?: boolean
+}
+
+const RELATIVE_TIME_LIMIT_MS = 7 * 24 * 60 * 60 * 1000
+
+/** 超过 7 天时按本地时区展示为 YYYY-MM-DD HH:mm:ss。 */
+function formatAbsoluteTime(date: Date): string {
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/** 7 天内展示相对时间，超过 7 天展示绝对时间。 */
+function formatUpdatedAt(value: string | null | undefined, now: number): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const elapsed = Math.max(0, now - date.getTime())
+  if (elapsed >= RELATIVE_TIME_LIMIT_MS) {
+    return `${formatAbsoluteTime(date)}更新`
+  }
+
+  const totalSeconds = Math.floor(elapsed / 1000)
+  if (totalSeconds < 60) return `${totalSeconds}秒前更新`
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (totalMinutes < 60) return `${totalMinutes}分${seconds}秒前更新`
+  const hours = Math.floor(totalMinutes / 60)
+  if (hours < 24) return `${hours}小时${totalMinutes % 60}分前更新`
+  const days = Math.floor(hours / 24)
+  return `${days}天${hours % 24}小时前更新`
+}
+
+/** 交付文档底部悬浮状态：气泡悬浮在右下角。 */
+export function HandoffDocumentStatus({
+  path,
+  version,
+  updatedAt,
+  exists = false,
+  loading = false,
+}: HandoffDocumentStatusProps) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!updatedAt) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [updatedAt])
+
+  const updatedLabel = formatUpdatedAt(updatedAt, now)
+  const detail = loading
+    ? '加载中…'
+    : exists
+      ? `v${version ?? 0}${updatedLabel ? ` · ${updatedLabel}` : ''}`
+      : path
+        ? '尚未创建'
+        : null
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-end px-3">
+      <span className="pointer-events-none min-w-0 max-w-full truncate rounded-full bg-background-muted px-3 py-1.5 text-[11px] text-foreground-muted shadow-md">
+        {path ? (
+          <Link
+            to={knowledgeWebPath(path)}
+            title="查看交付文档"
+            className="pointer-events-auto hover:text-foreground-intense hover:underline"
+          >
+            交付文档
+          </Link>
+        ) : (
+          '交付文档'
+        )}
+        {detail ? ` · ${detail}` : null}
+      </span>
+    </div>
+  )
+}
+
 /** 任务详情中交付/复盘/任务文档的只读 Markdown 阅读区。 */
 export function TaskMarkdownDocumentView({
   title,
   subtitle,
   meta,
+  footer,
   content,
   loading = false,
   error,
@@ -40,7 +126,7 @@ export function TaskMarkdownDocumentView({
     [content, contentKey],
   )
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <section className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground-intense">
@@ -77,6 +163,7 @@ export function TaskMarkdownDocumentView({
           <MarkdownEditor key={editorKey} value={content ?? ''} readOnly />
         </div>
       )}
+      {footer}
     </section>
   )
 }

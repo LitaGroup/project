@@ -195,4 +195,52 @@ describe('TaskWorkerInboxService 子任务收件箱', () => {
     );
     expect(prompt).toContain('{"answers":[["答案"],["答案"]]}');
   });
+
+  it('执行方消息事件提示词携带正文与需求方回复接口', () => {
+    const child = {
+      id: 2,
+      code: 'TK-0002',
+      title: '子任务',
+      status: '进行中',
+      subStatus: '执行中',
+    } as Task;
+    const entry = {
+      id: 12,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'message',
+      referenceId: 'chat:2:assistant:1',
+      payload: { content: '需求方请确认这个方案是否可以' },
+      status: 'queued',
+    } as unknown as TaskWorkerInbox;
+
+    const prompt = taskInboxPrompt(entry, child, 'http://api.example/api/');
+
+    expect(prompt).toContain('事件：message');
+    expect(prompt).toContain('需求方请确认这个方案是否可以');
+    expect(prompt).toContain('GET http://api.example/api/tasks/2.md');
+    expect(prompt).toContain(
+      'http://api.example/api/tasks/2/messages/reply.md',
+    );
+    expect(prompt).toContain('"content":"回复内容"');
+    expect(prompt).toContain('.opencode/agent-token');
+  });
+
+  it('需求方回复后只完成已投递的消息事件，保留处理期间新到的消息', async () => {
+    const service = new TaskWorkerInboxService(inboxRepo as never);
+
+    await service.completeDeliveredForChild(2, 'message');
+
+    expect(inboxRepo.update).toHaveBeenCalledWith(
+      {
+        childTaskId: 2,
+        kind: 'message',
+        status: expect.objectContaining({
+          value: ['queued', 'delivered'],
+        }) as unknown,
+      },
+      expect.objectContaining({ status: 'done' }),
+    );
+  });
 });

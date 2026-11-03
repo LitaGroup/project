@@ -297,25 +297,37 @@ export class TaskChatService implements OnModuleDestroy {
       task.requesterType ?? (task.createdById ? 'user' : null);
     const requesterId =
       task.requesterId ?? task.createdById ?? rootTask.createdById;
-    const [requester, agent] = await Promise.all([
-      requesterId && requesterType
-        ? requesterType === 'worker'
-          ? this.workers.findOne({
-              where: { id: requesterId },
-              select: { id: true, name: true },
-            })
-          : this.users.findOne({
-              where: { id: requesterId },
-              select: { id: true, name: true },
-            })
-        : Promise.resolve(null),
-      task.agentId
-        ? this.workers.findOne({
-            where: { id: task.agentId },
-            select: { id: true, ownerName: true },
+    // 历史任务需求方是个人 AGENT 时，对外显示其主人姓名（个人 AGENT 不再作为任务身份）
+    const requesterWorker =
+      requesterId && requesterType === 'worker'
+        ? await this.workers.findOne({
+            where: { id: requesterId },
+            select: {
+              id: true,
+              name: true,
+              ownerName: true,
+              personalAgentUserId: true,
+            },
           })
-        : Promise.resolve(null),
-    ]);
+        : null;
+    const requester: { name: string } | null = requesterWorker
+      ? {
+          name: requesterWorker.personalAgentUserId
+            ? (requesterWorker.ownerName ?? requesterWorker.name)
+            : requesterWorker.name,
+        }
+      : requesterId && requesterType === 'user'
+        ? await this.users.findOne({
+            where: { id: requesterId },
+            select: { id: true, name: true },
+          })
+        : null;
+    const agent = task.agentId
+      ? await this.workers.findOne({
+          where: { id: task.agentId },
+          select: { id: true, ownerName: true },
+        })
+      : null;
     const currentEvents = taskEvents
       .filter((event) => event.taskId === task.id)
       .sort((a, b) => b.id - a.id)
@@ -915,6 +927,39 @@ export class TaskChatService implements OnModuleDestroy {
     return this.toPublic(message);
   }
 
+  /**
+   * 需求方（人或机器人）在任务对话中回复消息：
+   * 落库为需求方气泡并实时推送，不改任务状态机。
+   */
+  async postRequesterMessage(
+    taskId: number,
+    content: string,
+    sender: TaskChatSender,
+    options?: { messageId?: string },
+  ): Promise<TaskChatMessage> {
+    const text = content.trim();
+    if (!text) throw new BadRequestException('消息内容不能为空');
+    const rootTaskId = await this.rootIdOf(taskId);
+    const message: InternalChatMessage = {
+      id:
+        options?.messageId ??
+        `chat:${taskId}:requester:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+      taskId,
+      rootTaskId,
+      role: 'user',
+      perspective: 'requester',
+      sender,
+      content: text,
+      createdAt: new Date().toISOString(),
+      status: 'complete',
+      kind: 'message',
+    };
+    this.store(message);
+    this.broadcastMessage(message);
+    void this.persistMessage(message);
+    return this.toPublic(message);
+  }
+
   /** 记录一条机器人错误/提示消息 */
   async note(taskId: number, content: string): Promise<void> {
     if (!content.trim()) return;
@@ -1150,10 +1195,12 @@ export class TaskChatService implements OnModuleDestroy {
 
   private workerToSender(worker: Worker): TaskChatSender {
     const scheduler = worker.role === WorkerRole.SCHEDULER;
-    const human = worker.runtime === WorkerRuntime.HUMAN;
+    // 历史任务里的个人 AGENT 对外显示为主人的真人机器人身份
+    const personal = Boolean(worker.personalAgentUserId);
+    const human = worker.runtime === WorkerRuntime.HUMAN || personal;
     return {
       id: `${scheduler ? 'scheduler' : 'worker'}:${worker.id}`,
-      name: worker.name,
+      name: personal ? (worker.ownerName ?? worker.name) : worker.name,
       kind: scheduler ? 'scheduler' : 'worker',
       workerId: worker.id,
       roleLabel: scheduler ? '调度器' : human ? '真人机器人' : '机器人',

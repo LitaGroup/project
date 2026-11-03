@@ -49,7 +49,7 @@ describe('TaskDispatchService 显式申请验收', () => {
     requeueDelivered: jest.Mock;
   };
   let taskDocuments: {
-    ensureHandoff: jest.Mock;
+    readHandoff: jest.Mock;
     prepareForAcceptance: jest.Mock;
     handoffPath: jest.Mock;
     taskDirectory: jest.Mock;
@@ -94,6 +94,7 @@ describe('TaskDispatchService 显式申请验收', () => {
       requeueDelivered: jest.fn().mockResolvedValue(undefined),
     };
     const handoff = {
+      exists: true,
       path: '/task/20261028/TK-0001/HANDOFF',
       url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
       title: 'TK-0001 活动页开发 · 任务交付文档',
@@ -104,7 +105,7 @@ describe('TaskDispatchService 显式申请验收', () => {
       updatedBy: '前端工程师',
     };
     taskDocuments = {
-      ensureHandoff: jest.fn().mockResolvedValue(handoff),
+      readHandoff: jest.fn().mockResolvedValue(handoff),
       prepareForAcceptance: jest.fn().mockResolvedValue(handoff),
       handoffPath: jest.fn().mockReturnValue('/task/20261028/TK-0001/HANDOFF'),
       taskDirectory: jest.fn().mockReturnValue('/task/20261028/TK-0001'),
@@ -139,11 +140,35 @@ describe('TaskDispatchService 显式申请验收', () => {
     expect(prompt).toContain('交付文档（HANDOFF）');
     expect(prompt).toContain('/tasks/1/handoff/update.md');
     expect(prompt).toContain('当前版本：v3');
+    expect(prompt).toContain('立即创建并写入 HANDOFF');
+    expect(prompt).toContain('每完成一个重要阶段');
     expect(prompt).toContain('交付文档链接');
     expect(prompt).toContain('遗留事项或后续建议');
     expect(prompt).toContain('代码交付写仓库与分支');
     expect(prompt).toContain('不要提交 YAML Frontmatter');
     expect(prompt).toContain('Content-Type: application/json');
+  });
+
+  it('HANDOFF 未创建时派发指令要求先以 baseVersion=0 创建', async () => {
+    taskDocuments.readHandoff.mockResolvedValue({
+      exists: false,
+      path: '/task/20261028/TK-0001/HANDOFF',
+      url: '/docs/detail/task/20261028/TK-0001/HANDOFF',
+      title: 'TK-0001 活动页开发 · 任务交付文档',
+      version: 0,
+      submittedVersion: null,
+      content: '',
+      updatedAt: null,
+      updatedBy: null,
+    });
+
+    const prompt = await (
+      service as unknown as { buildPrompt(task: Task): Promise<string> }
+    ).buildPrompt(baseTask());
+
+    expect(prompt).toContain('文档尚未创建');
+    expect(prompt).toContain('baseVersion=0');
+    expect(prompt).toContain('接受任务并开始处理后，立即创建并写入 HANDOFF');
   });
 
   it('申请验收保存本轮产出并推进到等待中-待验收', async () => {

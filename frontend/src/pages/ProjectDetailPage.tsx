@@ -112,6 +112,7 @@ import {
   RunTestButton,
 } from '../components/TestActionButtons'
 import { NewDefectDialog } from '../components/NewDefectDialog'
+import { MarkdownViewer } from '../components/MarkdownViewer'
 import {
   MarkdownEditor,
   type MarkdownEditorHandle,
@@ -1176,10 +1177,27 @@ function EditDescriptionDialog({
   return (
     <>
       <EditableValue
-        className="block w-full whitespace-pre-wrap"
+        className="block w-full text-sm"
         onClick={() => handleOpenChange(true)}
       >
-        {project.description ?? '暂无描述'}
+        {project.description?.trim() ? (
+          // 链接自行处理点击，避免同时打开项目描述编辑弹窗
+          <span
+            className="block"
+            onClick={(event) => {
+              if (
+                event.target instanceof Element &&
+                event.target.closest('a')
+              ) {
+                event.stopPropagation()
+              }
+            }}
+          >
+            <MarkdownViewer text={project.description} />
+          </span>
+        ) : (
+          '暂无描述'
+        )}
       </EditableValue>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent>
@@ -4055,7 +4073,13 @@ function ReleasesSection({
                 )}
                 <div className="flex flex-col gap-1">
                   <dt className="text-foreground-muted">提测内容</dt>
-                  <dd className="whitespace-pre-wrap">{selected.content || '—'}</dd>
+                  <dd className="min-w-0">
+                    {selected.content?.trim() ? (
+                      <MarkdownViewer text={selected.content} />
+                    ) : (
+                      '—'
+                    )}
+                  </dd>
                 </div>
               </dl>
             </DialogBody>

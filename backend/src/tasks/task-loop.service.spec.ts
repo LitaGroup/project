@@ -48,6 +48,7 @@ describe('TaskLoopService 多机器人协同', () => {
     notifyTaskOwner: jest.Mock;
     notifyTaskRequester: jest.Mock;
     notifyTaskAgentOwner: jest.Mock;
+    notifyTaskHumanAssignee: jest.Mock;
   };
   let inbox: {
     listActionable: jest.Mock;
@@ -59,6 +60,11 @@ describe('TaskLoopService 多机器人协同', () => {
     reopen: jest.Mock;
     defer: jest.Mock;
     enqueue: jest.Mock;
+  };
+  let requesterVerify: {
+    isActive: jest.Mock;
+    canVerify: jest.Mock;
+    verify: jest.Mock;
   };
   let service: TaskLoopService;
 
@@ -92,6 +98,9 @@ describe('TaskLoopService 多机器人协同', () => {
       notifyTaskAgentOwner: jest
         .fn()
         .mockResolvedValue({ sent: true, ownerName: '机器人负责人' }),
+      notifyTaskHumanAssignee: jest
+        .fn()
+        .mockResolvedValue({ sent: true, ownerName: '真人执行人' }),
     };
     inbox = {
       listActionable: jest.fn().mockResolvedValue([]),
@@ -104,6 +113,11 @@ describe('TaskLoopService 多机器人协同', () => {
       defer: jest.fn().mockResolvedValue(undefined),
       enqueue: jest.fn().mockResolvedValue(null),
     };
+    requesterVerify = {
+      isActive: jest.fn().mockReturnValue(false),
+      canVerify: jest.fn().mockReturnValue(true),
+      verify: jest.fn().mockResolvedValue(false),
+    };
     service = new TaskLoopService(
       tasksRepo as never,
       messagesRepo as never,
@@ -112,6 +126,7 @@ describe('TaskLoopService 多机器人协同', () => {
       dispatchService as never,
       taskNotify as never,
       inbox as never,
+      requesterVerify as never,
       {
         get: jest.fn().mockReturnValue('http://api.example/api'),
       } as never,
@@ -185,6 +200,26 @@ describe('TaskLoopService 多机器人协同', () => {
 
     expect(dispatchService.offer).toHaveBeenCalledWith(1);
     expect(dispatchService.dispatch).not.toHaveBeenCalled();
+    expect(taskNotify.notifyTaskHumanAssignee).toHaveBeenCalledWith(
+      task,
+      'notice',
+      expect.stringContaining('新任务待处理'),
+      expect.stringContaining('工作台'),
+    );
+  });
+
+  it('待接受邀约重试时不重复通知真人执行人', async () => {
+    const task = baseTask({
+      subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+      agentId: 1001,
+      offerAttemptAt: new Date(Date.now() - 60_000),
+    });
+    returnForStatus(TaskSubStatus.PENDING_ACCEPTANCE, task);
+
+    await service.tick();
+
+    expect(dispatchService.offer).toHaveBeenCalledWith(1);
+    expect(taskNotify.notifyTaskHumanAssignee).not.toHaveBeenCalled();
   });
 
   it('待接受超过 10 分钟仍未接受时提醒负责人但不自动接受', async () => {
@@ -489,6 +524,146 @@ describe('TaskLoopService 多机器人协同', () => {
     );
     expect(resumePrompt).toContain('只回复消息不会解除');
     expect(inbox.markQueued).toHaveBeenCalledWith(14);
+  });
+
+  it('执行中父任务收到子任务执行方消息后注入回复接口并唤醒父机器人', async () => {
+    const entry = {
+      id: 18,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'message',
+      referenceId: 'chat:2:assistant:1',
+      payload: { content: '需求方请确认这个方案是否可以' },
+      status: 'pending',
+    } as unknown as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      code: 'TK-0002',
+      parentId: 1,
+      rootId: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 2002,
+      requesterType: 'worker',
+      requesterId: 1001,
+    });
+    inbox.listActionable.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(where.id === 1 ? parent : child),
+    );
+
+    await service.tick();
+
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      {
+        id: 1,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      expect.objectContaining({
+        subStatus: TaskSubStatus.PENDING_RESUME,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        resumePrompt: expect.stringContaining('需求方请确认这个方案是否可以'),
+      }),
+    );
+    expect(inbox.markQueued).toHaveBeenCalledWith(18);
+  });
+
+  it('子任务提交验收后执行方消息仍会唤醒机器人需求方', async () => {
+    const entry = {
+      id: 20,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'message',
+      referenceId: 'chat:2:assistant:3',
+      payload: { content: '交付后补充说明' },
+      status: 'pending',
+    } as unknown as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      code: 'TK-0002',
+      parentId: 1,
+      rootId: 1,
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ACCEPT,
+      requesterType: 'worker',
+      requesterId: 1001,
+    });
+    inbox.listActionable.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(where.id === 1 ? parent : child),
+    );
+
+    await service.tick();
+
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      {
+        id: 1,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      expect.objectContaining({
+        subStatus: TaskSubStatus.PENDING_RESUME,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        resumePrompt: expect.stringContaining('交付后补充说明'),
+      }),
+    );
+    expect(inbox.markQueued).toHaveBeenCalledWith(20);
+  });
+
+  it('子任务已结束时不再唤醒父机器人回复历史消息', async () => {
+    const entry = {
+      id: 19,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'message',
+      referenceId: 'chat:2:assistant:2',
+      payload: { content: '已结束任务的消息' },
+      status: 'pending',
+    } as unknown as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      code: 'TK-0002',
+      parentId: 1,
+      rootId: 1,
+      status: TaskStatus.FINISHED,
+      subStatus: TaskSubStatus.COMPLETED,
+      requesterType: 'worker',
+      requesterId: 1001,
+    });
+    inbox.listActionable.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(where.id === 1 ? parent : child),
+    );
+
+    await service.tick();
+
+    expect(inbox.markDone).toHaveBeenCalledWith(19);
+    expect(inbox.markQueued).not.toHaveBeenCalledWith(19);
   });
 
   it('执行中的父任务当前回合仍在输出时不注入子任务事件', async () => {

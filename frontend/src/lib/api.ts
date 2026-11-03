@@ -1194,15 +1194,10 @@ export interface WorkerDebugTodo {
 }
 
 /** 调试对话快照；同一用户 + 机器人固定绑定一个 sessionId，7 天不活跃才重置 */
-/** opencode 主 Agent 模式：build=可修改执行，plan=只分析规划 */
-export type WorkerDebugMode = 'build' | 'plan'
-
 export interface WorkerDebugSnapshot {
   worker: WorkerDebugOption
   /** 当前选择/生效的模型与思考等级 */
   model: WorkerDebugModelSelection
-  /** 当前主 Agent 模式（build / plan） */
-  mode: WorkerDebugMode
   sessionId: string | null
   status: 'idle' | 'running'
   messages: WorkerDebugMessage[]
@@ -1309,7 +1304,7 @@ export interface TaskPackage {
   status: TaskStatus
   /** 子状态：待分配 / 待接受 / 待反馈 / 待继续 / 待验收 / 执行中 / 完成 / 已拒绝 / 失败 / 取消 */
   subStatus: TaskSubStatus
-  /** 需求方类型：user=人类用户 / worker=父任务机器人 */
+  /** 需求方类型：user=人类用户（历史）/ worker=真人机器人 */
   requesterType: 'user' | 'worker' | null
   /** 需求方 id（users.id 或 workers.id，与 requesterType 联合解释） */
   requesterId: number | null
@@ -1330,7 +1325,7 @@ export interface TaskPackage {
   executorId: number | null
   opencodeSessionId: string | null
   result: string | null
-  /** 任务交付文档知识路径（任务创建时生成） */
+  /** 任务交付文档知识路径（执行方首次显式创建后登记） */
   handoffPath: string | null
   /** 交付文档当前版本（平台维护） */
   handoffVersion: number
@@ -1607,8 +1602,8 @@ export interface TaskChatSnapshot {
   events: TaskEvent[]
 }
 
-/** 工作台角色：我执行 / 我的 AGENT 执行 / 我是需求方 / 我是执行方 */
-export type WorkbenchRole = 'agent' | 'owner' | 'requester' | 'responsible'
+/** 工作台角色：我执行 / 我是需求方 / 我是执行方 */
+export type WorkbenchRole = 'agent' | 'requester' | 'responsible'
 
 /** 操作台任务：任务本体 + 当前用户角色与下一步动作 */
 export interface WorkbenchTask extends TaskPackage {
@@ -1663,6 +1658,8 @@ export interface WorkbenchSummary {
 
 /** 任务交付文档（正文由作者维护，版本与更新时间由平台维护） */
 export interface TaskHandoffDocument {
+  /** 文档是否已由执行方/需求方显式创建 */
+  exists: boolean
   path: string
   url: string
   title: string
@@ -2771,6 +2768,9 @@ export const api = {
   getTaskPackage: (id: number) => request<TaskPackage>(`/tasks/${id}`),
   /** 操作台：绑定机器人 + 我执行/待我处理的任务 */
   getWorkbench: () => request<WorkbenchSummary>('/workbench'),
+  /** 单个任务在当前用户视角下的工作台角色 */
+  getWorkbenchTask: (id: number) =>
+    request<WorkbenchTask>(`/workbench/tasks/${id}`),
   workbenchAccept: (id: number) =>
     request<TaskPackage>(`/workbench/tasks/${id}/accept`, { method: 'POST' }),
   workbenchRefuse: (id: number, reason: string, suggestion?: string) =>
@@ -2909,20 +2909,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({
         ...input,
-        taskId: taskId ?? null,
-        ...agentPageContextBody(context),
-      }),
-    }),
-  /** 我的 AGENT：切换 build / plan 模式（返回最新快照） */
-  setWorkbenchAgentMode: (
-    mode: WorkerDebugMode,
-    taskId?: number | null,
-    context?: AgentPageContext | null,
-  ) =>
-    request<WorkerDebugSnapshot>('/workbench/agent/mode', {
-      method: 'POST',
-      body: JSON.stringify({
-        mode,
         taskId: taskId ?? null,
         ...agentPageContextBody(context),
       }),

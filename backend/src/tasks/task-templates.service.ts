@@ -322,7 +322,15 @@ export class TaskTemplatesService implements OnModuleInit {
     );
     if (ids.length === 0) return new Map();
     const workers = await this.workers.find({ where: { id: In(ids) } });
-    return new Map(workers.map((worker) => [worker.id, worker.name]));
+    return new Map(
+      workers.map((worker) => [
+        worker.id,
+        // 存量定义若仍引用个人 AGENT，展示时统一用其主人姓名
+        worker.personalAgentUserId
+          ? (worker.ownerName ?? worker.name)
+          : worker.name,
+      ]),
+    );
   }
 
   private agentLabel(
@@ -420,12 +428,13 @@ export class TaskTemplatesService implements OnModuleInit {
     }
   }
 
-  /** 处理机器人须存在、启用且为工作者（调度机器人不承接任务），并去重 */
+  /** 处理机器人须存在、启用且为工作者（调度机器人/个人 AGENT 不承接任务），并去重 */
   private async normalizeAgents(
     agentIds: number[] | null | undefined,
   ): Promise<number[]> {
     if (!agentIds || agentIds.length === 0) return [];
     const unique = [...new Set(agentIds)];
+    const kept: number[] = [];
     for (const agentId of unique) {
       if (!Number.isInteger(agentId) || agentId < 1) {
         throw new BadRequestException('处理机器人 ID 必须为正整数');
@@ -436,7 +445,11 @@ export class TaskTemplatesService implements OnModuleInit {
       if (worker.role === WorkerRole.SCHEDULER) {
         throw new BadRequestException('调度机器人不承接任务，请选择工作者');
       }
+      // 个人 AGENT 只承载「我的 AI」对话：存量引用在保存时静默剔除，
+      // 避免它出现在任务定义等对外场景。
+      if (worker.personalAgentUserId) continue;
+      kept.push(agentId);
     }
-    return unique;
+    return kept;
   }
 }

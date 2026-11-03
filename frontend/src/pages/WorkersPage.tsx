@@ -289,11 +289,6 @@ export function WorkersPage() {
                       真人
                     </Badge>
                   )}
-                  {w.personalAgentUserId && (
-                    <Badge variant="secondary" size="sm">
-                      个人 AGENT
-                    </Badge>
-                  )}
                 </p>
                 {w.intro && (
                   <p
@@ -338,13 +333,9 @@ export function WorkersPage() {
                   >
                     {w.humanUserId ? '查看' : '编辑'}
                   </Link>
-                  {w.system || w.humanUserId || w.personalAgentUserId ? (
+                  {w.system || w.humanUserId ? (
                     <span className="self-center text-xs text-foreground-muted">
-                      {w.system
-                        ? '系统内置'
-                        : w.humanUserId
-                          ? '用户绑定'
-                          : '个人 AGENT'}
+                      {w.system ? '系统内置' : '用户绑定'}
                     </span>
                   ) : (
                     <DeleteWorkerButton worker={w} onDeleted={reload} />

@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Viewer } from '@bytemd/react'
-import gfm from '@bytemd/plugin-gfm'
-import 'bytemd/dist/index.css'
-import 'github-markdown-css/github-markdown.css'
 import {
   Card,
   CardHeader,
@@ -52,6 +48,7 @@ import {
 import { DefectStatusBadge, DefectPriorityBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
+import { MarkdownViewer } from '../components/MarkdownViewer'
 import { Terminal } from '../components/Terminal'
 import { DefectImagesField } from '../components/DefectImagesField'
 
@@ -86,8 +83,6 @@ function formatDuration(run: TestRun, now: number): string {
 function formatTime(value: string | null): string {
   return value ? new Date(value).toLocaleString() : '—'
 }
-
-const plugins = [gfm()]
 
 /** 明细文本内联：折行折叠为空格，避免破坏 Markdown 结构 */
 function inline(value: string): string {
@@ -325,9 +320,9 @@ export function DefectDetailPage() {
                     {showRaw ? '隐藏原始输出' : '显示原始输出'}
                   </button>
                 </div>
-                <div className="markdown-body px-6 py-4 text-sm">
+                <div className="px-6 py-4 text-sm">
                   {runMarkdown ? (
-                    <Viewer value={runMarkdown} plugins={plugins} />
+                    <MarkdownViewer text={runMarkdown} />
                   ) : (
                     <p className="text-foreground-muted">
                       （本次运行未产生文本描述，可查看原始输出）

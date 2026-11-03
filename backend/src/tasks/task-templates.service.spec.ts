@@ -1,4 +1,5 @@
 import { Repository } from 'typeorm';
+import { WorkerRole } from '../common/enums';
 import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskTemplatesService } from './task-templates.service';
@@ -24,6 +25,7 @@ describe('TaskTemplatesService', () => {
   };
   const workers = {
     find: jest.fn(),
+    findOne: jest.fn(),
   };
   let service: TaskTemplatesService;
 
@@ -112,6 +114,39 @@ describe('TaskTemplatesService', () => {
     await service.remove(5);
 
     expect(follows.delete).toHaveBeenCalledWith({ templateId: 5 });
+  });
+
+  it('保存任务定义时剔除个人 AGENT 处理机器人', async () => {
+    templates.findOne.mockResolvedValue(null);
+    taskTypes.assertExists.mockResolvedValue('其它');
+    templates.save.mockImplementation((value: TaskTemplate) =>
+      Promise.resolve({ ...value, id: 1001 }),
+    );
+    workers.findOne.mockImplementation(({ where }: { where: { id: number } }) =>
+      Promise.resolve(
+        where.id === 2001
+          ? {
+              id: 2001,
+              name: '张三的AGENT',
+              enabled: true,
+              role: WorkerRole.WORKER,
+              personalAgentUserId: 7,
+            }
+          : {
+              id: 2002,
+              name: '机器人',
+              enabled: true,
+              role: WorkerRole.WORKER,
+              personalAgentUserId: null,
+            },
+      ),
+    );
+
+    await service.create({ name: '新定义', agentIds: [2001, 2002] });
+
+    expect(templates.create).toHaveBeenCalledWith(
+      expect.objectContaining({ agentIds: [2002] }),
+    );
   });
 
   describe('Agent Markdown', () => {

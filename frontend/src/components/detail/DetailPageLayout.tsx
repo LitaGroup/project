@@ -35,6 +35,8 @@ interface DetailPageLayoutProps {
    * 窄屏自动收为右下角浮动入口 + 全屏 AI 抽屉，避免压缩正文。
    */
   ai?: ReactNode
+  /** 窄屏浮动入口与抽屉标题；默认「我的 AI」 */
+  aiLabel?: string
   className?: string
 }
 
@@ -48,6 +50,7 @@ interface DetailPageLayoutProps {
 export function DetailPageLayout({
   children,
   ai,
+  aiLabel = '我的 AI',
   className,
 }: DetailPageLayoutProps) {
   const wide = useWideLayout(WIDE_QUERY)
@@ -85,7 +88,7 @@ export function DetailPageLayout({
         onClick={() => setDrawerOpen(true)}
       >
         <Sparkles className="size-4" />
-        我的 AI
+        {aiLabel}
       </Button>
       <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DialogContent
@@ -93,7 +96,7 @@ export function DetailPageLayout({
           className="flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col gap-0 overflow-hidden p-0"
         >
           <DialogHeader className="sr-only">
-            <DialogTitle>我的 AI</DialogTitle>
+            <DialogTitle>{aiLabel}</DialogTitle>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {drawerOpen ? ai : null}

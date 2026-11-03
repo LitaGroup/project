@@ -68,6 +68,16 @@ describe('TaskAssignmentService', () => {
     });
   });
 
+  it('任务分配查询排除个人 AGENT', async () => {
+    await service.assign(task());
+
+    const calls = workers.find.mock.calls as unknown[][];
+    const query = calls[0][0] as { where: Record<string, unknown> };
+    const filter = query.where.personalAgentUserId;
+    expect(filter).toBeDefined();
+    expect(filter).not.toBeNull();
+  });
+
   it('未选定义时按任务类型匹配同类型任务定义', async () => {
     templates.find.mockResolvedValue([
       {

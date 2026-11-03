@@ -149,7 +149,7 @@ export class TaskWorkerInboxService {
   }
 
   /**
-   * 父会话结束但未处理的事件：提问/验收需要显式动作，重新排队；
+   * 父会话结束但未处理的事件：提问/验收/消息需要显式动作，重新排队；
    * 拒绝/取消提醒不要求固定动作，直接视为处理完成。
    * 同时覆盖 queued（已写入 resumePrompt 但尚未投递）与 delivered（已投递但会话异常结束），
    * 避免会话失败、人工中断或进程重启后事件永久滞留。
@@ -158,7 +158,7 @@ export class TaskWorkerInboxService {
     await this.inbox.update(
       {
         parentTaskId,
-        kind: In(['question', 'handoff']),
+        kind: In(['question', 'handoff', 'message']),
         status: In(['queued', 'delivered']),
       },
       {
@@ -192,6 +192,20 @@ export class TaskWorkerInboxService {
         ...(referenceId ? { referenceId } : {}),
         status: In([...OPEN_STATUSES]),
       },
+      { status: 'done', processedAt: new Date() },
+    );
+  }
+
+  /**
+   * 需求方回复消息后完成「已投递」的消息事件。
+   * 父机器人处理期间新到的 pending 消息保留，等待下一轮唤醒再回复。
+   */
+  async completeDeliveredForChild(
+    childTaskId: number,
+    kind: TaskWorkerInboxKind,
+  ): Promise<void> {
+    await this.inbox.update(
+      { childTaskId, kind, status: In(['queued', 'delivered']) },
       { status: 'done', processedAt: new Date() },
     );
   }
@@ -279,6 +293,7 @@ export function taskInboxPrompt(
   const failUrl = endpoint(`/tasks/${child.id}/fail.md`);
   const detailUrl = endpoint(`/tasks/${child.id}.md`);
   const handoffReadUrl = endpoint(`/tasks/${child.id}/handoff.md`);
+  const replyUrl = endpoint(`/tasks/${child.id}/messages/reply.md`);
   const answerUrl = endpoint(
     `/tasks/${child.id}/questions/${encodeURIComponent(
       entry.referenceId ?? '',
@@ -344,9 +359,29 @@ export function taskInboxPrompt(
             '',
             '验收前必须确认交付物满足子任务输出要求；通过后该子任务即结束。',
           ].join('\n')
-        : entry.kind === 'refused'
-          ? `子机器人拒绝承接。理由：${child.refusalReason ?? '未填写'}；分发建议：${child.dispatchSuggestion ?? '无'}。请决定是否创建新的子任务。`
-          : '子任务已取消，请评估对父任务的影响并继续处理。';
+        : entry.kind === 'message'
+          ? [
+              '子任务执行方发来一条消息，请以需求方身份阅读并回复。处理后必须调用回复接口（不能只回复本条提示）：',
+              `- 子任务详情：GET ${detailUrl}`,
+              '',
+              '**消息正文**',
+              '',
+              payloadText(payload, 'content') ??
+                '（事件未携带消息正文，请先读取子任务详情与对话记录。）',
+              '',
+              '```bash',
+              'TOKEN=$(cat .opencode/agent-token)',
+              `curl -sS -X POST '${replyUrl}' \\`,
+              '  -H "X-Worker-Token: $TOKEN" \\',
+              '  -H "Content-Type: application/json" \\',
+              `  -d '{"content":"回复内容"}'`,
+              '```',
+              '',
+              '回复会立即出现在子任务对话中供执行方继续跟进；如无需补充，也要说明处理结论。',
+            ].join('\n')
+          : entry.kind === 'refused'
+            ? `子机器人拒绝承接。理由：${child.refusalReason ?? '未填写'}；分发建议：${child.dispatchSuggestion ?? '无'}。请决定是否创建新的子任务。`
+            : '子任务已取消，请评估对父任务的影响并继续处理。';
   return [
     '# 子任务协同事件',
     '',

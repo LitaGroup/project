@@ -9,7 +9,7 @@ import {
 
 /** 需要父任务机器人处理的子任务事件类型。 */
 export type TaskWorkerInboxKind =
-  'question' | 'handoff' | 'refused' | 'cancelled';
+  'question' | 'handoff' | 'message' | 'refused' | 'cancelled';
 
 /** pending=待排队；queued=已写入待继续上下文；delivered=已发给父机器人；done/dead=结束 */
 export type TaskWorkerInboxStatus =

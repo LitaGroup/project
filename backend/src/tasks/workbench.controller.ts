@@ -17,16 +17,13 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import type { TaskDeliveryReportInput } from './task-delivery-report';
 import type { TaskChatQuestionInfo } from './task-chat.types';
 import type { PersonalAgentInfo } from '../workers/personal-agents.service';
-import { normalizeDebugMode } from '../workers/worker-debug.service';
-import type {
-  WorkerDebugMode,
-  WorkerDebugSnapshot,
-} from '../workers/worker-debug.types';
+import type { WorkerDebugSnapshot } from '../workers/worker-debug.types';
 import {
   normalizeAgentPageContext,
   WorkbenchService,
   WorkbenchSummary,
   type AgentPageContext,
+  type WorkbenchTask,
 } from './workbench.service';
 import { Task } from './task.entity';
 
@@ -112,11 +109,6 @@ class WorkbenchAgentModelDto extends WorkbenchAgentPageContextDto {
   providerId?: string;
   modelId?: string;
   variant?: string | null;
-  taskId?: number | null;
-}
-
-class WorkbenchAgentModeDto extends WorkbenchAgentPageContextDto {
-  mode?: string;
   taskId?: number | null;
 }
 
@@ -249,21 +241,6 @@ export class WorkbenchController {
     );
   }
 
-  /** 我的 AGENT：切换主 Agent 模式（build / plan） */
-  @Post('agent/mode')
-  agentSetMode(
-    @Req() req: AuthedRequest,
-    @Body() dto: WorkbenchAgentModeDto,
-  ): Promise<WorkerDebugSnapshot> {
-    const mode: WorkerDebugMode = normalizeDebugMode(dto.mode);
-    return this.workbench.agentSetMode(
-      this.requireUser(req),
-      mode,
-      parseTaskId(dto.taskId),
-      parsePageContext(dto),
-    );
-  }
-
   /** 我的 AGENT 中断当前轮次 */
   @Post('agent/interrupt')
   agentInterrupt(
@@ -304,6 +281,15 @@ export class WorkbenchController {
       parseTaskId(dto?.taskId),
       parsePageContext(dto),
     );
+  }
+
+  /** 单个任务在当前用户视角下的工作台角色（详情页复用身份对话） */
+  @Get('tasks/:id')
+  taskDetail(
+    @Req() req: AuthedRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<WorkbenchTask> {
+    return this.workbench.taskDetail(this.requireUser(req), id);
   }
 
   /** 接受任务 */

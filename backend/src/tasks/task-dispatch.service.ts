@@ -360,7 +360,7 @@ export class TaskDispatchService
       throw new NotFoundException('未配置 WORKER_BASE_DIR，无法确定工位目录');
     }
     // 机器人独立令牌只在工位文件与数据库中出现（初始化/派发时幂等写入），不进入任务 Prompt/聊天/日志
-    const workerToken = await this.workersService.ensureAgentToken(worker.id);
+    const workerToken = await this.workersService.ensureWorkToken(worker.id);
     const client = new OpencodeClient(executor);
     this.dispatching.add(task.id);
     try {
@@ -368,7 +368,10 @@ export class TaskDispatchService
       await client.shell(
         `mkdir -p '${workdir}' '${workdir}/.opencode' && ` +
           `${agentTokenShell(workdir, workerToken)} && ` +
-          workerEnvShell(workdir, { LITA_PROJECT_TOKEN: workerToken }),
+          workerEnvShell(workdir, {
+            LITA_WORK_TOKEN: workerToken,
+            LITA_PROJECT_TOKEN: workerToken,
+          }),
       );
 
       // 2. 固定绑定：一个任务只对应一个 opencode 会话。
@@ -531,6 +534,44 @@ export class TaskDispatchService
       throw error;
     } finally {
       this.dispatching.delete(task.id);
+    }
+  }
+
+  /**
+   * 执行方消息通知机器人需求方：子任务需求方为 AI 机器人时进入父机器人收件箱，
+   * 由 LOOP 在父机器人空闲时唤醒它读取消息并回复。
+   * 根任务、真人需求方与个人 AGENT 需求方不进收件箱（真人走工作台/提醒）。
+   */
+  async notifyRequesterWorkerMessage(
+    task: Task,
+    content: string,
+    referenceId?: string | null,
+  ): Promise<void> {
+    try {
+      if (!task.parentId) return;
+      if (task.requesterType !== 'worker' || !task.requesterId) return;
+      const requester = await this.workers.findOne({
+        where: { id: task.requesterId },
+        select: { id: true, runtime: true, personalAgentUserId: true },
+      });
+      if (!requester) return;
+      if (
+        requester.runtime === WorkerRuntime.HUMAN ||
+        requester.personalAgentUserId
+      ) {
+        return;
+      }
+      const text = content.trim();
+      if (!text) return;
+      await this.workerInbox.enqueue(task, 'message', {
+        referenceId: referenceId ?? null,
+        payload: { content: text },
+      });
+    } catch (error) {
+      // 收件箱写入失败不影响执行方消息本身的落库与推送。
+      this.logger.warn(
+        `任务 #${task.id} 执行方消息通知需求方机器人失败: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -2116,9 +2157,9 @@ export class TaskDispatchService
     const template = task.templateId
       ? await this.taskTemplates.findOne({ where: { id: task.templateId } })
       : null;
-    // 交付文档从任务创建时即存在；派发前补齐历史任务并带出当前版本。
+    // 只读取已有交付文档；不存在时不创建，由执行方开始处理后显式写入。
     const handoff = await this.taskDocuments
-      .ensureHandoff(task)
+      .readHandoff(task)
       .catch((error: Error) => {
         this.logger.warn(
           `任务 ${task.code} 读取交付文档失败：${error.message}`,
@@ -2126,7 +2167,7 @@ export class TaskDispatchService
         return null;
       });
     const handoffPath = handoff?.path ?? this.taskDocuments.handoffPath(task);
-    const handoffVersion = handoff?.version ?? task.handoffVersion ?? 0;
+    const handoffVersion = handoff?.version ?? 0;
     const sections: string[] = [];
     sections.push(
       [
@@ -2213,15 +2254,20 @@ export class TaskDispatchService
       [
         '# 交付文档（HANDOFF）',
         '',
-        `本任务的交付文档：\`${handoffPath}\`（即 \`HANDOFF.md\`），当前版本：v${handoffVersion}。`,
-        '文档从任务创建时即存在，正文完全由你根据任务内容、任务定义、输出要求和实际进展编写；平台只维护 Frontmatter 中的版本号和更新时间。',
+        `本任务的交付文档：\`${handoffPath}\`（即 \`HANDOFF.md\`）。`,
+        handoff?.exists
+          ? `文档已存在，当前版本：v${handoffVersion}。`
+          : '文档尚未创建，首次写入必须使用 `baseVersion=0`。',
+        '正文完全由你根据任务内容、任务定义、输出要求和实际进展编写；平台只维护 Frontmatter 中的版本号和更新时间。',
         '',
         '要求：',
-        '1. 开始处理后尽快将「正在处理中」替换为真实交付内容；执行过程中每完成一个重要阶段就更新一次，便于需求方实时查看。',
-        '2. 内容自行组织结构，但必须如实记录当前进展、最终交付物、验证结果、遗留问题和后续建议；代码交付写仓库与分支，文档交付写名称与路径/链接。',
-        '3. 更新时提交完整正文和读取到的当前版本号；平台返回 409 表示有人工修改，必须重新读取文档、保留人工修改后再合并提交。',
-        '4. 不要提交 YAML Frontmatter，平台会自动生成；不要删除或改写需求方已经补充的内容。',
-        '5. 需要快速追加进展时可用 `append` 代替完整 `content`；申请验收前仍应提交完整的最终正文。',
+        '1. 接受任务并开始处理后，立即创建并写入 HANDOFF，不要等到任务完成才一次性补写；先写任务理解、交付目标和当前计划。',
+        '2. 执行过程中及时更新：每完成一个重要阶段、取得关键产物、完成验证或出现阻塞时都更新一次，便于需求方实时查看。',
+        '3. 提问或暂停前、恢复执行后、申请验收前都要确认 HANDOFF 是最新状态；申请验收前必须形成完整的最终交付内容。',
+        '4. 内容自行组织结构，但必须如实记录当前进展、最终交付物、验证结果、遗留问题和后续建议；代码交付写仓库与分支，文档交付写名称与路径/链接。',
+        '5. 更新时提交完整正文和读取到的当前版本号；首次创建使用 `baseVersion=0`，平台返回 409 表示已被更新，必须重新读取、保留人工修改后再合并提交。',
+        '6. 不要提交 YAML Frontmatter，平台会自动生成；不要删除或改写需求方已经补充的内容。',
+        '7. 需要快速追加进展时可用 `append` 代替完整 `content`；申请验收前仍应提交完整的最终正文。',
         '',
         '```bash',
         'TOKEN=$(cat .opencode/agent-token)',
@@ -2231,7 +2277,7 @@ export class TaskDispatchService
         `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/handoff/update.md' \\`,
         '  -H "X-Worker-Token: $TOKEN" \\',
         '  -H "Content-Type: application/json" \\',
-        `  -d '{"baseVersion":${handoffVersion},"content":"# 任务交付文档\\n\\n## 当前进展\\n\\n..."}'`,
+        `  -d '{"baseVersion":${handoff?.exists ? handoffVersion : 0},"content":"# 任务交付文档\\n\\n## 当前进展\\n\\n..."}'`,
         '```',
       ].join('\n'),
     );

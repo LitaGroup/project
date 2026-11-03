@@ -1,8 +1,4 @@
-import {
-  MigrationInterface,
-  QueryRunner,
-  TableIndex,
-} from 'typeorm';
+import { MigrationInterface, QueryRunner, TableIndex } from 'typeorm';
 
 /**
  * 我的 AI 会话隔离 + Build/Plan 模式：

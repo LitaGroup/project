@@ -161,11 +161,35 @@ export class TicketsService implements OnModuleInit {
         })
       : [];
     const taskById = new Map(tasks.map((task) => [task.id, task]));
+    // 历史工单的处理机器人若是个人 AGENT，对外统一显示其主人姓名
+    const agentIds = [...new Set(rows.map((row) => row.assigneeId))];
+    const agents = agentIds.length
+      ? await this.workers.find({
+          where: { id: In(agentIds) },
+          select: {
+            id: true,
+            name: true,
+            ownerName: true,
+            personalAgentUserId: true,
+          },
+        })
+      : [];
+    const agentById = new Map(agents.map((agent) => [agent.id, agent]));
     const status = params.status?.trim();
     return rows
       .map((ticket) => {
         const task = taskById.get(ticket.taskId) ?? null;
-        return { ...ticket, task, status: deriveTicketStatus(task) };
+        const agent = agentById.get(ticket.assigneeId);
+        const assigneeName =
+          agent?.personalAgentUserId && agent.ownerName
+            ? agent.ownerName
+            : ticket.assigneeName;
+        return {
+          ...ticket,
+          assigneeName,
+          task,
+          status: deriveTicketStatus(task),
+        };
       })
       .filter((ticket) => !status || ticket.status === status);
   }
@@ -187,11 +211,21 @@ export class TicketsService implements OnModuleInit {
       this.tasks.findOne({ where: { id: ticket.taskId } }),
       this.configView(ticket.category),
     ]);
+    // 历史工单的处理机器人若是个人 AGENT，对外统一显示其主人姓名
+    const assignee = await this.workers.findOne({
+      where: { id: ticket.assigneeId },
+      select: { id: true, ownerName: true, personalAgentUserId: true },
+    });
+    const assigneeName =
+      assignee?.personalAgentUserId && assignee.ownerName
+        ? assignee.ownerName
+        : ticket.assigneeName;
     const allowedTemplates = await this.templates.find({
       where: { id: In(config.allowedTemplateIds) },
     });
     return {
       ...ticket,
+      assigneeName,
       task,
       status: deriveTicketStatus(task),
       config,
@@ -427,7 +461,14 @@ export class TicketsService implements OnModuleInit {
     const byId = new Map(rows.map((worker) => [worker.id, worker]));
     for (const id of ids) {
       const worker = byId.get(id);
-      if (worker?.enabled && worker.role === WorkerRole.WORKER) return worker;
+      // 个人 AGENT 只承载「我的 AI」对话，不承接任务/工单
+      if (
+        worker?.enabled &&
+        worker.role === WorkerRole.WORKER &&
+        !worker.personalAgentUserId
+      ) {
+        return worker;
+      }
     }
     return null;
   }
@@ -532,6 +573,15 @@ export class TicketsService implements OnModuleInit {
       ].join('\n');
     }
     const config = await this.mustFindConfig(ticket.category);
+    // 历史工单的处理机器人若是个人 AGENT，对外统一显示其主人姓名
+    const assignee = await this.workers.findOne({
+      where: { id: ticket.assigneeId },
+      select: { id: true, ownerName: true, personalAgentUserId: true },
+    });
+    const assigneeName =
+      assignee?.personalAgentUserId && assignee.ownerName
+        ? assignee.ownerName
+        : ticket.assigneeName;
     const templates = config.allowedTemplateIds?.length
       ? await this.templates.find({
           where: { id: In(config.allowedTemplateIds) },
@@ -548,7 +598,7 @@ export class TicketsService implements OnModuleInit {
       '',
       `- 编号：${ticket.code}`,
       `- 类型：${ticket.category}`,
-      `- 处理机器人：${ticket.assigneeName}（由工单绑定任务定义自动分配）`,
+      `- 处理机器人：${assigneeName}（由工单绑定任务定义自动分配）`,
       `- 创建人：${ticket.createdByName}`,
       `- 创建时间：${beijingTime(ticket.createdAt)}`,
       `- 关联任务：${task.code}（${task.status}-${task.subStatus}）`,

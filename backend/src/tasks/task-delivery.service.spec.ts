@@ -4,6 +4,7 @@ import type { User } from '../auth/user.entity';
 import type { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
 import { TaskDeliveryService } from './task-delivery.service';
+import { workerRequesterActor } from './task-requester';
 
 describe('TaskDeliveryService 验收 Agent 接口', () => {
   const baseTask = (over: Partial<Task> = {}): Task =>
@@ -62,7 +63,9 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     addEvent: jest.Mock;
     destroyAcceptedSession: jest.Mock;
     discardQueuedConversations: jest.Mock;
+    notifyRequesterWorkerMessage: jest.Mock;
   };
+  let taskChat: { postAssistantMessage: jest.Mock };
   let handoffService: { request: jest.Mock };
   let workerInbox: { completeForChild: jest.Mock };
   let taskDocuments: {
@@ -141,6 +144,12 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       addEvent: jest.fn().mockResolvedValue(undefined),
       destroyAcceptedSession: jest.fn().mockResolvedValue(undefined),
       discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
+      notifyRequesterWorkerMessage: jest.fn().mockResolvedValue(undefined),
+    };
+    taskChat = {
+      postAssistantMessage: jest
+        .fn()
+        .mockResolvedValue({ id: 'chat:1:assistant:1' }),
     };
     handoffService = { request: jest.fn().mockResolvedValue({}) };
     workerInbox = {
@@ -170,6 +179,7 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       workersRepo as never,
       tasksService as never,
       dispatchService as never,
+      taskChat as never,
       taskDocuments as never,
       handoffService as never,
       taskNotify as never,
@@ -341,6 +351,23 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     expect(workerInbox.completeForChild).not.toHaveBeenCalled();
   });
 
+  it('历史个人 AGENT 需求方由主人的真人机器人验收，操作人记录为真人', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({ requesterType: 'worker', requesterId: 1036 }),
+    );
+
+    await service.acceptHandoff(
+      1,
+      workerRequesterActor(worker({ id: 1001, name: '张三', humanUserId: 8 }), {
+        id: 1036,
+        personalAgentUserId: 8,
+      }),
+    );
+
+    expect(tasksService.accept).toHaveBeenCalledWith(1, '张三');
+    expect(workerInbox.completeForChild).toHaveBeenCalledWith(1, 'handoff');
+  });
+
   it('非需求方不能处理验收反馈', async () => {
     tasksRepo.findOne.mockResolvedValue(baseTask());
     await expect(
@@ -484,6 +511,69 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       'acceptRejectCount',
       1,
     );
+  });
+
+  it('待验收期间真人执行方仍可发送执行消息并通知机器人需求方', async () => {
+    const task = baseTask({
+      requesterType: 'worker',
+      requesterId: 2002,
+      parentId: 9,
+    });
+    tasksRepo.findOne.mockResolvedValue(task);
+    workersRepo.findOne.mockImplementation(
+      ({ where }: { where: { humanUserId?: number } }) =>
+        Promise.resolve(
+          where.humanUserId === 8
+            ? { id: 1001, name: '张三', runtime: 'human' }
+            : null,
+        ),
+    );
+
+    const saved = await service.sendMessage(
+      1,
+      user(),
+      '交付后补充说明',
+      'responsible',
+    );
+
+    expect(taskChat.postAssistantMessage).toHaveBeenCalledWith(
+      1,
+      '交付后补充说明',
+      expect.objectContaining({
+        meta: expect.objectContaining({
+          humanWorkerMessage: true,
+          workerId: 1001,
+          perspective: 'responsible',
+        }) as unknown,
+      }) as unknown,
+    );
+    expect(dispatchService.addEvent).toHaveBeenCalledWith(
+      1,
+      '操作',
+      '真人机器人在操作台回复',
+      '张三',
+      { humanWorker: true },
+    );
+    expect(dispatchService.notifyRequesterWorkerMessage).toHaveBeenCalledWith(
+      task,
+      '交付后补充说明',
+      'chat:1:assistant:1',
+    );
+    expect(dispatchService.continueConversation).not.toHaveBeenCalled();
+    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_ACCEPT);
+  });
+
+  it('已结束任务不能发送消息', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        status: TaskStatus.FINISHED,
+        subStatus: TaskSubStatus.COMPLETED,
+      }),
+    );
+
+    await expect(
+      service.sendMessage(1, user(), '结束后消息', 'responsible'),
+    ).rejects.toThrow('已结束，不能继续发送消息');
   });
 
   it('非法 action 返回 400', async () => {

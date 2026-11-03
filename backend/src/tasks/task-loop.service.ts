@@ -25,6 +25,7 @@ import {
   TASK_REMIND_TIMEOUT_DAYS,
 } from './task-loop.rules';
 import { TasksService } from './tasks.service';
+import { TaskRequesterVerifyService } from './task-requester-verify.service';
 import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 import {
   taskInboxPrompt,
@@ -37,6 +38,8 @@ const ORPHAN_CHILD_SCAN_MS = 30_000;
 const ORPHAN_CHILD_SCAN_LIMIT = 100;
 const OFFER_STALL_MS = 10 * 60_000;
 const OFFER_STALL_REMIND_MS = 30 * 60_000;
+/** 根任务机器人需求方自动验收扫描间隔 */
+const REQUESTER_VERIFY_SCAN_MS = 30_000;
 
 /**
  * 多机器人任务 LOOP（每秒）：
@@ -59,6 +62,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
   >();
   private lastOrphanScanAt = 0;
   private orphanScanCursor = 0;
+  private lastRequesterVerifyScanAt = 0;
   private readonly apiUrl: string;
 
   constructor(
@@ -71,6 +75,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     private readonly dispatchService: TaskDispatchService,
     private readonly taskNotify: TaskNotifyService,
     private readonly workerInbox: TaskWorkerInboxService,
+    private readonly requesterVerify: TaskRequesterVerifyService,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -95,6 +100,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     try {
       await this.repairOrphanChildEvents();
       await this.queueWorkerInbox();
+      await this.queueRootRequesterVerification();
       await this.assignPending();
       await this.offerPending();
       await this.resumePending();
@@ -231,6 +237,8 @@ export class TaskLoopService implements OnApplicationBootstrap {
       if (!task.agentId) continue;
       await this.warnOfferStalled(task);
       if (this.offering.has(task.id)) continue;
+      // 必须在下面原子写入 offerAttemptAt 之前判断，避免把首次邀约误判为重试。
+      const firstOffer = !task.offerAttemptAt;
       if (task.offerAttemptAt) {
         const attemptedAt = new Date(task.offerAttemptAt).getTime();
         if (now - attemptedAt < OFFER_RETRY_MS) continue;
@@ -258,8 +266,10 @@ export class TaskLoopService implements OnApplicationBootstrap {
       );
       if (!claimed.affected) continue;
       this.offering.add(task.id);
+      let offered = false;
       try {
         await this.dispatchService.offer(task.id);
+        offered = true;
       } catch (e) {
         this.logger.warn(`任务 #${task.id} 邀约失败: ${(e as Error).message}`);
         await this.tasks.update(
@@ -274,6 +284,19 @@ export class TaskLoopService implements OnApplicationBootstrap {
         );
       } finally {
         this.offering.delete(task.id);
+      }
+      if (!offered || !firstOffer) continue;
+      try {
+        await this.taskNotify.notifyTaskHumanAssignee(
+          task,
+          'notice',
+          `新任务待处理：${task.code} ${task.title}`,
+          '任务已分配给你，请前往工作台确认是否接受。',
+        );
+      } catch (e) {
+        this.logger.warn(
+          `任务 #${task.id} 真人执行人通知失败: ${(e as Error).message}`,
+        );
       }
     }
   }
@@ -482,7 +505,11 @@ export class TaskLoopService implements OnApplicationBootstrap {
       }
       const attempts = entry.attempts ?? 0;
       if (attempts >= TASK_INBOX_MAX_ATTEMPTS) {
-        if (entry.kind === 'question' || entry.kind === 'handoff') {
+        if (
+          entry.kind === 'question' ||
+          entry.kind === 'handoff' ||
+          entry.kind === 'message'
+        ) {
           await this.fallbackChildToHuman(
             child,
             parent.id,
@@ -621,6 +648,30 @@ export class TaskLoopService implements OnApplicationBootstrap {
     }
   }
 
+  /** 根任务机器人需求方自动验收：每 30s 扫描待验收的根任务。 */
+  private async queueRootRequesterVerification(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastRequesterVerifyScanAt < REQUESTER_VERIFY_SCAN_MS) return;
+    this.lastRequesterVerifyScanAt = now;
+    const rows = await this.tasks.find({
+      where: {
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPT,
+        parentId: IsNull(),
+        requesterType: 'worker',
+      },
+      order: { id: 'ASC' },
+      take: 20,
+    });
+    for (const task of rows) {
+      if (!task.requesterId) continue;
+      if (this.requesterVerify.isActive(task.id)) continue;
+      if (!this.requesterVerify.canVerify(task.id)) continue;
+      if (await this.dispatchService.isWorkerBusy(task.requesterId)) continue;
+      void this.requesterVerify.verify(task);
+    }
+  }
+
   /** 子任务事件是否仍需要父机器人通过动作接口处理。 */
   private childEventNeedsAction(entry: TaskWorkerInbox, child: Task): boolean {
     if (entry.kind === 'question') {
@@ -634,6 +685,10 @@ export class TaskLoopService implements OnApplicationBootstrap {
         child.status === TaskStatus.WAITING &&
         child.subStatus === TaskSubStatus.PENDING_ACCEPT
       );
+    }
+    if (entry.kind === 'message') {
+      // 任务未结束时执行方都可能等待需求方回复；结束后无需再回。
+      return child.status !== TaskStatus.FINISHED;
     }
     return true;
   }

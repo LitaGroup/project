@@ -14,16 +14,21 @@ import {
   type TaskHandoffDocument,
   type TaskPackage,
   type TaskPipelineStage,
+  type WorkbenchTask,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb, type Crumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import { TaskConversationView } from '../components/task-detail/TaskConversationView'
+import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel'
 import { TaskDocumentsPanel } from '../components/task-detail/TaskDocumentsPanel'
 import { TaskEventsPanel } from '../components/task-detail/TaskEventsPanel'
 import { TaskInfoPanel } from '../components/task-detail/TaskInfoPanel'
-import { TaskMarkdownDocumentView } from '../components/task-detail/TaskMarkdownDocumentView'
+import {
+  HandoffDocumentStatus,
+  TaskMarkdownDocumentView,
+} from '../components/task-detail/TaskMarkdownDocumentView'
 import { formatDuration, taskDurationMs } from '../lib/duration'
 
 type ConnectionState = 'connecting' | 'live' | 'reconnecting'
@@ -46,7 +51,8 @@ const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
 
 /**
  * 任务详情：正文按「交付 / 信息 / 事件 / 文档 / 会话 / 复盘」组织，
- * 右侧统一为「我的 AI」。会话只读实时展示多方交互，操作集中在信息 Tab。
+ * 右侧复用工作台的任务协作面板（需求方 / 执行方 / 我的 AI）。
+ * 正文「会话」只读实时展示多方交互，右侧按当前用户身份参与任务。
  */
 export function TaskPackageDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -66,8 +72,14 @@ export function TaskDetailView({
   extraBadges?: ReactNode
 }) {
   const [task, setTask] = useState<TaskPackage | null>(null)
+  const [workbenchTask, setWorkbenchTask] = useState<WorkbenchTask | null>(null)
   const [pipeline, setPipeline] = useState<TaskPipelineStage[]>([])
   const [messages, setMessages] = useState<TaskChatMessage[]>([])
+  const [queuedMessages, setQueuedMessages] = useState<
+    TaskChatSnapshot['queuedMessages']
+  >([])
+  const [hasAcceptanceApplication, setHasAcceptanceApplication] =
+    useState(false)
   const [requesterName, setRequesterName] = useState<string | null>(null)
   const [agentOwnerName, setAgentOwnerName] = useState<string | null>(null)
   const [interventionCount, setInterventionCount] = useState(0)
@@ -98,6 +110,8 @@ export function TaskDetailView({
       setTask(data.task)
       setPipeline(data.pipeline)
       setMessages(data.messages)
+      setQueuedMessages(data.queuedMessages)
+      setHasAcceptanceApplication(data.hasAcceptanceApplication)
       setRequesterName(data.requesterName)
       setAgentOwnerName(data.agentOwnerName)
       setInterventionCount(data.interventionCount)
@@ -118,12 +132,36 @@ export function TaskDetailView({
     loadRef.current = load
   }, [load])
 
+  /** 当前用户在该任务中的工作台角色；加载失败时降级为仅「我的 AI」 */
+  const roleSeq = useRef(0)
+  const loadWorkbenchTask = useCallback(async () => {
+    const seq = ++roleSeq.current
+    try {
+      const data = await api.getWorkbenchTask(taskId)
+      if (seq === roleSeq.current) setWorkbenchTask(data)
+    } catch {
+      // 瞬态失败保留已加载角色；首次失败降级为仅「我的 AI」
+      if (seq === roleSeq.current) {
+        setWorkbenchTask((current) =>
+          current?.id === taskId ? current : null,
+        )
+      }
+    }
+  }, [taskId])
+
+  const loadWorkbenchTaskRef = useRef(loadWorkbenchTask)
   useEffect(() => {
-    // 首次拉取任务对话；setState 均在 fetch 完成后的异步回调里触发，非同步级联
+    loadWorkbenchTaskRef.current = loadWorkbenchTask
+  }, [loadWorkbenchTask])
+
+  useEffect(() => {
+    // 首次拉取任务对话与当前用户角色；setState 均在 fetch 完成后的异步回调里触发
     initialSettledRef.current = false
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
-  }, [load])
+    // oxlint-disable-next-line react/set-state-in-effect
+    void loadWorkbenchTask()
+  }, [load, loadWorkbenchTask])
 
   /** 任务文档数据：交付 / 复盘 / 文档清单；SSE 文档刷新时整体重读 */
   const docsSeq = useRef(0)
@@ -153,6 +191,15 @@ export function TaskDetailView({
     // oxlint-disable-next-line react/set-state-in-effect
     void loadTaskDocuments()
   }, [loadTaskDocuments, docsRevision])
+
+  /** 右侧任务协作操作后同步刷新任务、角色与文档 */
+  const refreshTaskPanel = useCallback(async () => {
+    await Promise.all([
+      loadRef.current(),
+      loadWorkbenchTaskRef.current(),
+      loadTaskDocuments(),
+    ])
+  }, [loadTaskDocuments])
 
   // 持续时间展示：未结束任务定时刷新
   useEffect(() => {
@@ -184,11 +231,28 @@ export function TaskDetailView({
           // 请求仍在途则跳过（避免进入页面重复加载），活跃任务的事件会经 refresh 持续补偿
           if (initialSettledRef.current) {
             void loadRef.current()
+            void loadWorkbenchTaskRef.current()
             setDocsRevision((value) => value + 1)
           }
           break
         case 'message.upsert':
           setMessages((current) => upsertMessage(current, data.message))
+          break
+        case 'queue.upsert':
+          setQueuedMessages((current) => {
+            const index = current.findIndex(
+              (item) => item.id === data.message.id,
+            )
+            if (index < 0) return [...current, data.message]
+            const next = current.slice()
+            next[index] = data.message
+            return next
+          })
+          break
+        case 'queue.delete':
+          setQueuedMessages((current) =>
+            current.filter((item) => !data.ids.includes(item.id)),
+          )
           break
         case 'stage.upsert':
           setPipeline((current) => upsertStage(current, data.stage))
@@ -206,6 +270,7 @@ export function TaskDetailView({
           refreshTimer = window.setTimeout(() => {
             refreshTimer = undefined
             void loadRef.current()
+            void loadWorkbenchTaskRef.current()
             // 文档、交付、复盘与任务详情共用同一个刷新信号
             setDocsRevision((value) => value + 1)
           }, 120)
@@ -263,6 +328,29 @@ export function TaskDetailView({
   )
 
   const currentTask = task?.id === taskId ? task : null
+  /** 角色取工作台单任务接口，任务状态取实时聊天快照，避免操作后状态滞后 */
+  const interactiveTask: WorkbenchTask | null =
+    currentTask && workbenchTask?.id === currentTask.id
+      ? {
+          ...currentTask,
+          workbenchRoles: workbenchTask.workbenchRoles,
+          workbenchAction: workbenchTask.workbenchAction,
+        }
+      : null
+  const interactiveChat: TaskChatSnapshot | null = currentTask
+    ? {
+        task: currentTask,
+        rootTask: currentTask,
+        pipeline,
+        messages,
+        queuedMessages,
+        requesterName,
+        agentOwnerName,
+        interventionCount,
+        hasAcceptanceApplication,
+        events,
+      }
+    : null
 
   // 初始加载失败（没有任何数据）：页面内错误 + 重试
   if (!currentTask && !loading && error) {
@@ -289,7 +377,8 @@ export function TaskDetailView({
 
   const durationMs = taskDurationMs(currentTask, now)
   const handoffPlaceholder =
-    !handoffDoc?.content.trim() ||
+    !handoffDoc?.exists ||
+    !handoffDoc.content.trim() ||
     handoffDoc.content.trim() === '> 正在处理中……'
   const agentName = pipeline.find(
     (stage) => stage.task.id === currentTask.id,
@@ -307,12 +396,25 @@ export function TaskDetailView({
 
   return (
     <DetailPageLayout
+      aiLabel="任务协作"
       ai={
-        <DetailAgentPanel
-          taskId={currentTask.id}
-          emptyTitle={`${currentTask.code} 的独立 AI 会话`}
-          emptyHint="当前任务的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
-          placeholder={`让 AI 处理 ${currentTask.code}，或输入其它指令…`}
+        <TaskWorkbenchPanel
+          task={interactiveTask}
+          chat={interactiveChat}
+          handoffDoc={handoffDoc}
+          onRefresh={refreshTaskPanel}
+          agent={
+            <DetailAgentPanel
+              taskId={currentTask.id}
+              embedded
+              emptyTitle={`${currentTask.code} 的独立 AI 会话`}
+              emptyHint="当前任务的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
+              placeholder={`让 AI 处理 ${currentTask.code}，或输入其它指令…`}
+              onRunFinished={() => {
+                void refreshTaskPanel()
+              }}
+            />
+          }
         />
       }
     >
@@ -397,35 +499,24 @@ export function TaskDetailView({
             {contentTab === 'handoff' && (
               <TaskMarkdownDocumentView
                 title="交付文档"
-                subtitle={handoffDoc?.path}
-                meta={
-                  handoffDoc ? (
-                    <>
-                      <Badge variant="soft" size="sm">
-                        v{handoffDoc.version}
-                      </Badge>
-                      {handoffDoc.submittedVersion !== null && (
-                        <Badge variant="secondary" size="sm">
-                          已提交 v{handoffDoc.submittedVersion}
-                        </Badge>
-                      )}
-                      <span>
-                        {handoffDoc.updatedAt
-                          ? `更新于 ${new Date(
-                              handoffDoc.updatedAt,
-                            ).toLocaleString()}`
-                          : '尚未更新'}
-                      </span>
-                    </>
-                  ) : null
+                footer={
+                  <HandoffDocumentStatus
+                    path={handoffDoc?.path}
+                    version={handoffDoc?.version}
+                    updatedAt={handoffDoc?.updatedAt}
+                    exists={handoffDoc?.exists}
+                    loading={docsLoading && !handoffDoc}
+                  />
                 }
                 content={handoffPlaceholder ? undefined : handoffDoc?.content}
                 loading={docsLoading && !handoffDoc}
                 error={!handoffDoc ? docsError : null}
                 emptyText={
-                  handoffDoc
+                  handoffDoc?.exists
                     ? '执行方尚未更新交付文档，更新后会自动展示'
-                    : '暂无交付文档'
+                    : handoffDoc
+                      ? '执行方尚未创建交付文档；接受任务并开始处理后应立即创建'
+                      : '暂无交付文档'
                 }
                 contentKey={handoffDoc?.version}
               />
@@ -532,6 +623,7 @@ function upsertStage(
 function TaskDetailSkeleton() {
   return (
     <DetailPageLayout
+      aiLabel="任务协作"
       ai={
         <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">

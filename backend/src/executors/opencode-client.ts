@@ -570,11 +570,13 @@ export class OpencodeClient {
     id: string;
     outcome?: string | null;
     time?: { idle?: number | null };
+    location?: { directory: string } | null;
   }> {
     const json = await this.request<{
       id: string;
       outcome?: string | null;
       time?: { idle?: number | null };
+      location?: { directory: string } | null;
     }>(`/api/session/${sessionId}`);
     return OpencodeClient.unwrap(json);
   }

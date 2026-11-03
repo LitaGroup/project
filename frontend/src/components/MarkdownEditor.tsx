@@ -4,11 +4,65 @@ import type { Crepe } from '@milkdown/crepe'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import { api } from '../lib/api'
+import { isDarkTheme, renderMermaidSvg } from '../lib/mermaid'
 
 /** 上传图片到平台图片目录，返回可写入 Markdown 的地址（/images/...） */
 async function uploadImage(file: File): Promise<string> {
   const { url } = await api.uploadImage(file)
   return url
+}
+
+type ApplyCodePreview = (value: null | string | HTMLElement) => void
+
+/** 代码块预览按提交顺序串行渲染，避免较慢的旧内容覆盖刚输入的新内容 */
+let codePreviewQueue: Promise<void> = Promise.resolve()
+
+function mermaidPreviewContent(svg: string): HTMLElement {
+  const host = document.createElement('div')
+  const diagram = document.createElement('div')
+  diagram.className = 'mermaid-diagram'
+  diagram.innerHTML = svg
+  host.append(diagram)
+  return host
+}
+
+function mermaidPreviewError(code: string, reason: unknown): HTMLElement {
+  const message = reason instanceof Error ? reason.message : String(reason)
+  const host = document.createElement('div')
+  const error = document.createElement('div')
+  error.className = 'mermaid-preview-error'
+  const pre = document.createElement('pre')
+  const source = document.createElement('code')
+  source.textContent = code
+  pre.append(source)
+  const hint = document.createElement('p')
+  hint.textContent = `图表渲染失败：${message}`
+  error.append(pre, hint)
+  host.append(error)
+  return host
+}
+
+/**
+ * Crepe 代码块预览支持异步 applyPreview，可直接复用统一 Mermaid 渲染器。
+ * 旧请求仍会完成，但串行队列保证同一代码块最终展示最后一次提交的内容。
+ */
+function enqueueMermaidPreview(
+  code: string,
+  applyPreview: ApplyCodePreview,
+): void {
+  const dark = isDarkTheme()
+  codePreviewQueue = codePreviewQueue
+    .then(async () => {
+      try {
+        const svg = await renderMermaidSvg(code, dark)
+        applyPreview(mermaidPreviewContent(svg))
+      } catch (reason) {
+        applyPreview(mermaidPreviewError(code, reason))
+      }
+    })
+    .catch((reason: unknown) => {
+      console.error('[MarkdownEditor] Mermaid 预览渲染失败', reason)
+    })
 }
 
 /** 当前块的简短类型名：只占一个字位宽度，避免挤占正文 */
@@ -246,11 +300,33 @@ export function MarkdownEditor({
       ? attachBlockTypeLabels(host)
       : undefined
     void (async () => {
-      const { Crepe } = await import('@milkdown/crepe')
+      const [
+        { Crepe },
+        { LanguageDescription, LanguageSupport, StreamLanguage },
+        { languages },
+      ] = await Promise.all([
+        import('@milkdown/crepe'),
+        import('@codemirror/language'),
+        import('@codemirror/language-data'),
+      ])
       if (disposed) {
         root.remove()
         return
       }
+      // 语言列表没有 Mermaid 语法高亮，补一个纯文本条目，便于在块菜单里选中并触发预览
+      const plainTextLanguage = StreamLanguage.define({
+        token(stream) {
+          stream.skipToEnd()
+          return null
+        },
+      })
+      const mermaidLanguage = LanguageDescription.of({
+        // 名称即写回 Markdown 的语言标识，保持小写以兼容各 Markdown 渲染器的语言匹配
+        name: 'mermaid',
+        alias: ['mermaid', 'mmd'],
+        extensions: ['mmd'],
+        support: new LanguageSupport(plainTextLanguage),
+      })
       const crepe = new Crepe({
         root,
         defaultValue: initialValue.current,
@@ -259,6 +335,29 @@ export function MarkdownEditor({
           [Crepe.Feature.Toolbar]: false,
         },
         featureConfigs: {
+          // 代码块：补充 Mermaid 语言与预览；非 Mermaid / LaTeX 代码仍由 Crepe 默认逻辑处理
+          [Crepe.Feature.CodeMirror]: {
+            languages: [mermaidLanguage, ...languages],
+            searchPlaceholder: '搜索语言',
+            noResultText: '无匹配语言',
+            copyText: '复制',
+            previewLabel: '预览',
+            previewLoading:
+              '<span class="mermaid-preview-loading">图表渲染中…</span>',
+            previewToggleText: (previewOnlyMode: boolean) =>
+              previewOnlyMode ? '编辑' : '隐藏',
+            renderPreview: (
+              language: string,
+              content: string,
+              applyPreview: ApplyCodePreview,
+            ) => {
+              if (language.trim().toLowerCase() !== 'mermaid') return null
+              if (!content.trim()) return null
+              enqueueMermaidPreview(content, applyPreview)
+              // 返回 undefined 表示异步预览：Crepe 先展示 previewLoading，完成后调用 applyPreview
+              return undefined
+            },
+          },
           // 内置 UI 的中文文案（斜杠菜单、占位符）
           [Crepe.Feature.Placeholder]: { text: '请输入内容…', mode: 'doc' },
           [Crepe.Feature.BlockEdit]: {
@@ -309,7 +408,15 @@ export function MarkdownEditor({
       void crepe.create().catch((e: unknown) => {
         console.error('[MarkdownEditor] 编辑器初始化失败', e)
       })
-    })()
+    })().catch((error: unknown) => {
+      console.error('[MarkdownEditor] 编辑器加载失败', error)
+      if (disposed) return
+      root.textContent = ''
+      const tip = document.createElement('p')
+      tip.className = 'px-4 py-3 text-sm text-foreground-muted'
+      tip.textContent = '编辑器加载失败，请刷新页面重试'
+      root.append(tip)
+    })
 
     return () => {
       disposed = true

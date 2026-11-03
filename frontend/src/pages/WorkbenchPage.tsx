@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
-  AssistantRuntimeProvider,
-  ThreadPrimitive,
-  useExternalStoreRuntime,
-  type AppendMessage,
-} from '@assistant-ui/react'
-import {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -14,64 +8,21 @@ import {
 } from '@appica/ui-react/accordion'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@appica/ui-react/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@appica/ui-react/select'
-import {
-  ArrowsExchange,
-  Ban,
-  CircleCheck,
-  CircleX,
-  ClipboardCheck,
-  Package2Export,
-  Package2Import,
-  Sparkles,
-  Subtask,
-  Wrench,
-} from '@appica/icons-react'
+import { Wrench } from '@appica/icons-react'
 import {
   api,
-  type TaskChatMessage,
   type TaskChatSnapshot,
   type TaskChatStreamMessage,
   type TaskEvent,
   type TaskHandoffDocument,
-  type TaskTemplate,
   type WorkbenchRole,
   type WorkbenchSummary,
   type WorkbenchTask,
-  type Worker,
-  type WorkerDebugAttachment,
-  type WorkerDebugMode,
-  type WorkerDebugModelCatalog,
-  type WorkerDebugModelSelection,
-  type WorkerDebugSnapshot,
 } from '../lib/api'
-import { TaskStatusBadge } from '../components/StatusBadge'
-import {
-  TaskChatMessageItem,
-  TaskChatQueuedMessages,
-} from '../components/task-detail/TaskChatMessages'
-import { toTaskChatThreadMessage } from '../components/task-detail/task-chat-message'
-import { DebugChat } from '../components/agent-chat/DebugChat'
-import {
-  ChatActionIcon,
-  ChatComposerDock,
-  ChatComposerFrame,
-  ChatSendButton,
-} from '../components/agent-chat/ChatComposer'
+import { MarkdownViewer } from '../components/MarkdownViewer'
+import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel'
+import { HandoffDocumentStatus } from '../components/task-detail/TaskMarkdownDocumentView'
+import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import {
   MarkdownEditor,
   type MarkdownEditorHandle,
@@ -79,20 +30,11 @@ import {
 import { formatDuration, taskDurationMs } from '../lib/duration'
 
 type WorkPanel = 'document' | 'context' | 'log'
-type RightTab = 'requester' | 'responsible' | 'agent'
-type DialogKind =
-  | 'refuse'
-  | 'handoff'
-  | 'assign'
-  | 'subtask'
-  | 'cancel'
-  | null
 type TaskGroupKey = 'in-progress' | 'waiting' | 'completed'
 
 /** 工作台角色展示文案 */
 const WORKBENCH_ROLE_LABELS: Record<WorkbenchRole, string> = {
   agent: '我执行',
-  owner: '我的 AI 执行',
   requester: '我是需求方',
   responsible: '我是执行方',
 }
@@ -121,10 +63,6 @@ function upsertQueuedMessage(
   return next
 }
 
-function markdownText(value: string | null | undefined): string {
-  return value?.trim() || '（暂无）'
-}
-
 /** 操作台：左任务栏 + 中聊天交互 + 右任务详情。真人以绑定机器人身份执行任务。 */
 export function WorkbenchPage() {
   const { taskId } = useParams<{ taskId?: string }>()
@@ -135,36 +73,16 @@ export function WorkbenchPage() {
   )
   const [chat, setChat] = useState<TaskChatSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const [workPanel, setWorkPanel] = useState<WorkPanel>('document')
-  const [rightTab, setRightTab] = useState<RightTab>('requester')
-  const [agentSnapshot, setAgentSnapshot] = useState<WorkerDebugSnapshot | null>(
-    null,
-  )
-  const [agentCatalog, setAgentCatalog] =
-    useState<WorkerDebugModelCatalog | null>(null)
-  const [agentModelBusy, setAgentModelBusy] = useState(false)
-  const [agentModeBusy, setAgentModeBusy] = useState(false)
-  const [agentError, setAgentError] = useState<string | null>(null)
   const [handoffDoc, setHandoffDoc] = useState<TaskHandoffDocument | null>(null)
   const [docLoading, setDocLoading] = useState(false)
   const [docError, setDocError] = useState<string | null>(null)
   const [handoffEditing, setHandoffEditing] = useState(false)
   const [handoffSaving, setHandoffSaving] = useState(false)
-  const [dialog, setDialog] = useState<DialogKind>(null)
-  const [dialogText, setDialogText] = useState('')
   const handoffEditorRef = useRef<MarkdownEditorHandle>(null)
   const [handoffError, setHandoffError] = useState<string | null>(null)
-  const [workers, setWorkers] = useState<Worker[]>([])
-  const [templates, setTemplates] = useState<TaskTemplate[]>([])
-  const [assignWorkerId, setAssignWorkerId] = useState('')
-  const [subtaskTemplateId, setSubtaskTemplateId] = useState('')
-  const [subtaskTitle, setSubtaskTitle] = useState('')
-  const [subtaskInput, setSubtaskInput] = useState('')
-  const [subtaskOutputSpec, setSubtaskOutputSpec] = useState('')
 
   const chatSeq = useRef(0)
 
@@ -202,28 +120,10 @@ export function WorkbenchPage() {
   }, [summary, selectedId])
 
   const isAgent = Boolean(task?.workbenchRoles.includes('agent'))
-  const isOwner = Boolean(task?.workbenchRoles.includes('owner'))
   const isResponsible = Boolean(task?.workbenchRoles.includes('responsible'))
   const isRequester = Boolean(task?.workbenchRoles.includes('requester'))
-  const isResponsibleSide = isAgent || isOwner || isResponsible
-  const rightTabs = useMemo<Array<[RightTab, string]>>(() => {
-    const tabs: Array<[RightTab, string]> = []
-    if (isRequester) tabs.push(['requester', '任务-需求方'])
-    if (isResponsibleSide) tabs.push(['responsible', '任务-执行方'])
-    tabs.push(['agent', '我的AI'])
-    return tabs
-  }, [isRequester, isResponsibleSide])
-  const currentRightTab: RightTab = rightTabs.some(
-    ([key]) => key === rightTab,
-  )
-    ? rightTab
-    : rightTabs[0][0]
-  const activeTaskRole =
-    currentRightTab === 'requester'
-      ? 'requester'
-      : currentRightTab === 'responsible'
-        ? 'responsible'
-        : null
+  const finished = task?.status === '已结束'
+  const awaitingReview = task?.subStatus === '待验收'
 
   useEffect(() => {
     void loadSummary()
@@ -234,17 +134,6 @@ export function WorkbenchPage() {
     const timer = window.setInterval(() => void loadSummary(), 5_000)
     return () => window.clearInterval(timer)
   }, [loadSummary])
-
-  useEffect(() => {
-    api
-      .listWorkers({ role: '工作者' })
-      .then((rows) => setWorkers(rows.filter((row) => row.enabled)))
-      .catch(() => undefined)
-    api
-      .listTaskTemplates()
-      .then(setTemplates)
-      .catch(() => undefined)
-  }, [])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 15_000)
@@ -332,166 +221,6 @@ export function WorkbenchPage() {
     }
   }, [selectedId, loadChat])
 
-  /**
-   * 我的 AGENT：每个任务一个独立会话（taskId 为空时使用通用会话）。
-   * 切换任务时重新拉快照并重连 SSE，避免把上一个任务的上下文带过来。
-   */
-  useEffect(() => {
-    const agentWorkerId = summary?.agent.worker?.id ?? null
-    if (
-      currentRightTab !== 'agent' ||
-      !summary?.agent.available ||
-      !agentWorkerId
-    ) {
-      return
-    }
-    let closed = false
-    const taskQuery = selectedId
-      ? `?taskId=${encodeURIComponent(selectedId)}`
-      : ''
-    setAgentError(null)
-    setAgentSnapshot(null)
-    api
-      .getWorkbenchAgentSnapshot(selectedId)
-      .then((data) => {
-        if (!closed) setAgentSnapshot(data)
-      })
-      .catch((e: Error) => {
-        if (!closed) setAgentError(e.message)
-      })
-    const source = new EventSource(`/api/workbench/agent/stream${taskQuery}`)
-    source.onopen = () => setAgentError(null)
-    source.onmessage = (event: MessageEvent<string>) => {
-      if (closed) return
-      let payload: { type?: string; snapshot?: WorkerDebugSnapshot }
-      try {
-        payload = JSON.parse(event.data) as typeof payload
-      } catch {
-        return
-      }
-      if (payload.type === 'snapshot' && payload.snapshot) {
-        setAgentError(null)
-        setAgentSnapshot(payload.snapshot)
-      }
-    }
-    source.onerror = () => {
-      // EventSource 自动重连；保留服务端返回的首个错误
-      setAgentError((current) => current ?? 'AI 实时连接断开，正在重连…')
-    }
-    return () => {
-      closed = true
-      source.close()
-    }
-  }, [
-    currentRightTab,
-    selectedId,
-    summary?.agent.available,
-    summary?.agent.worker?.id,
-  ])
-
-  /** 我的 AGENT：模型/思考等级清单（每个任务会话独立，切换任务时重新加载） */
-  useEffect(() => {
-    if (currentRightTab !== 'agent' || !summary?.agent?.available) return
-    let closed = false
-    api
-      .getWorkbenchAgentModels(selectedId)
-      .then((data) => {
-        if (!closed) setAgentCatalog(data)
-      })
-      .catch(() => {
-        // 模型清单加载失败不阻塞对话，选择器保留当前快照中的模型
-      })
-    return () => {
-      closed = true
-    }
-  }, [currentRightTab, selectedId, summary?.agent.available])
-
-  /** 我的 AGENT：本轮结束后刷新左栏任务（AGENT 可能通过技能创建/推进了任务） */
-  const agentWasRunning = useRef(false)
-  useEffect(() => {
-    const running = agentSnapshot?.status === 'running'
-    if (agentWasRunning.current && !running) void loadSummary()
-    agentWasRunning.current = running
-  }, [agentSnapshot?.status, loadSummary])
-
-  const sendAgentMessage = useCallback(
-    async (raw: string, files?: WorkerDebugAttachment[]) => {
-      const text = raw.trim()
-      if (!text && !files?.length) return
-      setAgentError(null)
-      try {
-        const next = await api.sendWorkbenchAgentMessage(
-          text,
-          selectedId,
-          files,
-        )
-        setAgentSnapshot(next)
-      } catch (e) {
-        setAgentError((e as Error).message)
-        throw e
-      }
-    },
-    [selectedId],
-  )
-
-  const changeAgentModel = useCallback(
-    async (input: WorkerDebugModelSelection) => {
-      setAgentModelBusy(true)
-      setAgentError(null)
-      try {
-        const next = await api.setWorkbenchAgentModel(input, selectedId)
-        setAgentSnapshot(next)
-        setAgentCatalog((current) =>
-          current ? { ...current, current: next.model } : current,
-        )
-      } catch (e) {
-        setAgentError((e as Error).message)
-      } finally {
-        setAgentModelBusy(false)
-      }
-    },
-    [selectedId],
-  )
-
-  const changeAgentMode = useCallback(
-    async (mode: WorkerDebugMode) => {
-      setAgentModeBusy(true)
-      setAgentError(null)
-      try {
-        setAgentSnapshot(await api.setWorkbenchAgentMode(mode, selectedId))
-      } catch (e) {
-        setAgentError((e as Error).message)
-      } finally {
-        setAgentModeBusy(false)
-      }
-    },
-    [selectedId],
-  )
-
-  const replyAgentQuestion = useCallback(
-    async (questionId: string, answers: string[][] | null) => {
-      setAgentError(null)
-      try {
-        setAgentSnapshot(
-          await api.replyWorkbenchAgentQuestion(
-            questionId,
-            answers,
-            selectedId,
-          ),
-        )
-      } catch (e) {
-        setAgentError((e as Error).message)
-        throw e
-      }
-    },
-    [selectedId],
-  )
-
-  const retryAgent = useCallback(() => {
-    setAgentError(null)
-    void loadSummary()
-  }, [loadSummary])
-
   /** 只使用与当前任务匹配的快照，避免切换任务瞬间短暂展示上一个任务的对话 */
   const activeChat = useMemo(
     () => (chat && task && chat.task.id === task.id ? chat : null),
@@ -504,15 +233,6 @@ export function WorkbenchPage() {
       navigate(`/workbench/tasks/${id}`, { replace: true })
     },
     [navigate],
-  )
-
-  /** 切换身份/会话时清空任务输入，避免把需求方内容误发成执行方消息。 */
-  const selectRightTab = useCallback(
-    (tab: RightTab) => {
-      if (tab !== currentRightTab) setDraft('')
-      setRightTab(tab)
-    },
-    [currentRightTab],
   )
 
   const activeTasks = summary?.tasks ?? []
@@ -543,14 +263,6 @@ export function WorkbenchPage() {
     ],
     [activeTasks],
   )
-
-  const executing = task?.subStatus === '执行中'
-  const awaitingAcceptance = task?.subStatus === '待接受'
-  const awaitingReview = task?.subStatus === '待验收'
-  const awaitingAnswer = task?.subStatus === '待反馈'
-  const completed =
-    task?.status === '已结束' && task?.subStatus === '完成'
-  const delivered = activeChat?.hasAcceptanceApplication ?? false
 
   const handoffPath =
     activeChat?.task.id === selectedId
@@ -602,26 +314,13 @@ export function WorkbenchPage() {
     }
   }, [selectedId, handoffPath, handoffVersion, handoffEditing])
 
-  const run = useCallback(
-    async (action: () => Promise<unknown>, successText?: string) => {
-      setBusy(true)
-      setError(null)
-      try {
-        await action()
-        if (successText) setDialogText(successText)
-        await Promise.all([
-          loadSummary(),
-          selectedId ? loadChat(selectedId) : Promise.resolve(),
-        ])
-      } catch (e) {
-        setError((e as Error).message)
-        throw e
-      } finally {
-        setBusy(false)
-      }
-    },
-    [loadSummary, loadChat, selectedId],
-  )
+  /** 任务协作操作完成后刷新任务角色、任务快照与当前对话 */
+  const refreshTask = useCallback(async () => {
+    await Promise.all([
+      loadSummary(),
+      selectedId ? loadChat(selectedId) : Promise.resolve(),
+    ])
+  }, [loadSummary, loadChat, selectedId])
 
   const saveHandoff = useCallback(async () => {
     if (!selectedId || !handoffDoc || handoffSaving) return
@@ -650,138 +349,25 @@ export function WorkbenchPage() {
     loadChat,
   ])
 
-  const submitMessage = useCallback(
-    async (raw: string) => {
-      const text = raw.trim()
-      if (!text || !task || busy || !activeTaskRole) return
-      if (activeTaskRole === 'requester') {
-        if (task.subStatus === '待验收') {
-          // 需求方身份下，待验收时发送消息等同于验收不通过
-          await run(() => api.workbenchRejectHandoff(task.id, text))
-          return
-        }
-        await run(() => api.sendTaskMessage(task.id, text, 'requester'))
-        return
-      }
-      if (task.subStatus === '待验收') return
-      await run(() =>
-        isAgent && executing
-          ? api.workbenchSendMessage(task.id, text)
-          : api.sendTaskMessage(task.id, text, 'responsible'),
-      )
-    },
-    [task, busy, activeTaskRole, isAgent, executing, run],
-  )
-
-  const sendMessage = useCallback(async () => {
-    const text = draft.trim()
-    if (!text || !task || busy) return
-    try {
-      await submitMessage(text)
-      setDraft((current) => (current.trim() === text ? '' : current))
-    } catch {
-      // 错误已由 run 展示；保留输入内容便于重试
-    }
-  }, [draft, task, busy, submitMessage])
-
-  const runtime = useExternalStoreRuntime<TaskChatMessage>({
-    messages: activeChat?.messages ?? [],
-    convertMessage: toTaskChatThreadMessage,
-    onNew: async (message: AppendMessage) => {
-      const text = message.content
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('\n')
-        .trim()
-      if (text) await submitMessage(text)
-    },
-    isSendDisabled: !task || busy,
-  })
-
-  const submitDialog = useCallback(async () => {
-    if (busy) return
-    if (!task) return
-    try {
-      if (dialog === 'refuse') {
-        await run(() => api.workbenchRefuse(task.id, dialogText.trim()))
-      } else if (dialog === 'handoff') {
-        setHandoffError(null)
-        await run(() => api.workbenchApplyHandoff(task.id))
-      } else if (dialog === 'assign') {
-        if (!assignWorkerId) return
-        await run(() => api.assignTask(task.id, Number(assignWorkerId)))
-      } else if (dialog === 'cancel') {
-        await run(() => api.workbenchCancelTask(task.id))
-      } else if (dialog === 'subtask') {
-        if (!subtaskTemplateId || !subtaskTitle.trim()) return
-        await run(() =>
-          api.workbenchCreateSubtask(task.id, {
-            perspective: activeTaskRole ?? 'requester',
-            templateId: Number(subtaskTemplateId),
-            title: subtaskTitle.trim(),
-            input: subtaskInput.trim() || null,
-            outputSpec: subtaskOutputSpec.trim() || null,
-          }),
-        )
-      }
-      setDialog(null)
-      setDialogText('')
-      setHandoffError(null)
-      setAssignWorkerId('')
-      setSubtaskTemplateId('')
-      setSubtaskTitle('')
-      setSubtaskInput('')
-      setSubtaskOutputSpec('')
-    } catch (e) {
-      // 错误已在 run 中展示；交付弹窗内同步展示，避免提示被弹窗遮挡
-      if (dialog === 'handoff') setHandoffError((e as Error).message)
-    }
-  }, [
-    task,
-    busy,
-    dialog,
-    dialogText,
-    assignWorkerId,
-    subtaskTemplateId,
-    subtaskTitle,
-    subtaskInput,
-    subtaskOutputSpec,
-    activeTaskRole,
-    run,
-  ])
-
-  const replyQuestion = useCallback(
-    async (questionId: string, answers: string[][] | null) => {
-      if (!task) return
-      await run(() =>
-        api.workbenchReplyQuestion(task.id, questionId, {
-          answers: answers ?? undefined,
-          reject: answers === null,
-        }),
-      )
-    },
-    [task, run],
-  )
-
-  const deliveryContent = handoffDoc
+  const deliveryContent = handoffDoc?.exists
     ? handoffDoc.content
     : docLoading
       ? '正在加载交付文档…'
-      : '> 正在处理中……'
+      : ''
+  // MarkdownEditor 是非受控组件，只在挂载时读取 value。加载前与加载后的
+  // path/version 相同（均来自任务快照），必须把文档就绪状态并入 key，
+  // 否则编辑器会一直停留在「正在加载交付文档…」。
+  const deliveryDocState = handoffDoc
+    ? `doc-${handoffDoc.version}`
+    : docLoading
+      ? 'loading'
+      : 'empty'
   const deliveryEditorKey = [
     selectedId,
     handoffDoc?.path ?? handoffPath ?? 'new',
-    handoffDoc?.version ?? handoffVersion,
+    deliveryDocState,
     handoffEditing ? 'edit' : 'view',
   ].join(':')
-
-  const finished = task?.status === '已结束'
-  const deliveryActive = Boolean(task) && isAgent && (executing || awaitingReview)
-  const assignAvailable = Boolean(task) && !finished
-  const requesterSubtaskAvailable =
-    Boolean(task) && isRequester && !finished
-  const responsibleSubtaskAvailable =
-    Boolean(task) && isAgent && executing && !delivered
 
   if (loading && !summary) {
     return (
@@ -906,11 +492,6 @@ export function WorkbenchPage() {
                     {task.workbenchAction}
                   </Badge>
                 )}
-                {isOwner && (
-                  <Badge variant="soft" size="sm">
-                    我的 AI 执行
-                  </Badge>
-                )}
                 {isResponsible && (
                   <Badge variant="soft" size="sm">
                     我是执行方
@@ -956,56 +537,57 @@ export function WorkbenchPage() {
           {!task ? (
             <EmptyWork />
           ) : workPanel === 'document' ? (
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-1.5 text-[11px] text-foreground-muted">
-                <span className="min-w-0 flex-1 truncate">
-                  {handoffDoc
-                    ? `交付文档 · ${handoffDoc.path} · v${handoffDoc.version}`
-                    : '交付文档'}
-                  {handoffDoc?.submittedVersion
-                    ? ` · 已提交 v${handoffDoc.submittedVersion}`
-                    : ''}
-                </span>
-                {docLoading && <span>更新中…</span>}
-                {handoffEditing ? (
-                  <>
-                    <Button
-                      size="sm"
-                      onClick={() => void saveHandoff()}
-                      disabled={handoffSaving}
-                    >
-                      {handoffSaving ? '保存中…' : '保存'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setHandoffEditing(false)
-                        setHandoffError(null)
-                      }}
-                      disabled={handoffSaving}
-                    >
-                      取消
-                    </Button>
-                  </>
-                ) : (
+            <div className="relative flex h-full min-h-0 flex-col">
+              {(docLoading ||
+                handoffEditing ||
+                Boolean(
                   handoffDoc &&
-                  !finished &&
-                  !awaitingReview &&
-                  (isRequester || isAgent) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setHandoffError(null)
-                        setHandoffEditing(true)
-                      }}
-                    >
-                      编辑
-                    </Button>
-                  )
-                )}
-              </div>
+                    !finished &&
+                    !awaitingReview &&
+                    (isRequester || isAgent),
+                )) && (
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-border px-4 py-1.5 text-[11px] text-foreground-muted">
+                  {docLoading && <span>更新中…</span>}
+                  {handoffEditing ? (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={() => void saveHandoff()}
+                        disabled={handoffSaving}
+                      >
+                        {handoffSaving ? '保存中…' : '保存'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setHandoffEditing(false)
+                          setHandoffError(null)
+                        }}
+                        disabled={handoffSaving}
+                      >
+                        取消
+                      </Button>
+                    </>
+                  ) : (
+                    handoffDoc &&
+                    !finished &&
+                    !awaitingReview &&
+                    (isRequester || isAgent) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setHandoffError(null)
+                          setHandoffEditing(true)
+                        }}
+                      >
+                        {handoffDoc.exists ? '编辑' : '创建'}
+                      </Button>
+                    )
+                  )}
+                </div>
+              )}
               <div className="md-editor-scroll min-h-0 flex-1 bg-background">
                 <MarkdownEditor
                   key={deliveryEditorKey}
@@ -1018,7 +600,14 @@ export function WorkbenchPage() {
               </div>
               {handoffEditing && (
                 <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-foreground-muted">
-                  文档正文由执行方和需求方共同维护；内容变化后版本号自动递增，需求方修改会通知执行机器人读取最新版本。
+                  {handoffDoc?.exists
+                    ? '文档正文由执行方和需求方共同维护；内容变化后版本号自动递增，需求方修改会通知执行机器人读取最新版本。'
+                    : '保存后创建交付文档 v1；执行方应在开始处理后立即创建，并随任务进展持续更新。'}
+                </p>
+              )}
+              {!handoffEditing && handoffDoc && !handoffDoc.exists && (
+                <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-foreground-muted">
+                  执行方尚未创建交付文档；开始处理后应立即创建，并随任务进展持续更新。
                 </p>
               )}
               {docError && (
@@ -1031,6 +620,13 @@ export function WorkbenchPage() {
                   {handoffError}
                 </p>
               )}
+              <HandoffDocumentStatus
+                path={handoffDoc?.path ?? handoffPath}
+                version={handoffDoc?.version ?? handoffVersion}
+                updatedAt={handoffDoc?.updatedAt}
+                exists={handoffDoc?.exists}
+                loading={docLoading && !handoffDoc}
+              />
             </div>
           ) : workPanel === 'context' ? (
             <div className="h-full space-y-4 overflow-y-auto p-3 text-sm">
@@ -1045,13 +641,11 @@ export function WorkbenchPage() {
                 }
               />
               <Info title="状态" value={`${task.status}-${task.subStatus}`} />
-              <Section title="任务描述">
-                {markdownText(task.description)}
-              </Section>
-              <Section title="任务输入">{markdownText(task.input)}</Section>
-              <Section title="需求内容">{markdownText(task.content)}</Section>
-              <Section title="输出要求">{markdownText(task.outputSpec)}</Section>
-              <Section title="工作计划">{markdownText(task.workPlan)}</Section>
+              <MarkdownSection title="任务描述" value={task.description} />
+              <MarkdownSection title="任务输入" value={task.input} />
+              <MarkdownSection title="需求内容" value={task.content} />
+              <MarkdownSection title="输出要求" value={task.outputSpec} />
+              <MarkdownSection title="工作计划" value={task.workPlan} />
               {(task.missingItems ?? []).length > 0 && (
                 <Section title="待反馈事项">
                   {(task.missingItems ?? [])
@@ -1068,503 +662,38 @@ export function WorkbenchPage() {
         </div>
       </section>
 
-      {/* AI 工作台：任务-需求方 / 任务-执行方 / 我的AI */}
-      <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] bg-background">
-        <header className="shrink-0 px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-1">
-              {rightTabs.map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => selectRightTab(key)}
-                  className={`rounded-[var(--radius-md)] px-2.5 py-1 text-sm ${
-                    currentRightTab === key
-                      ? 'bg-background-muted font-medium text-foreground-intense'
-                      : 'text-foreground-muted hover:text-foreground-intense'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {currentRightTab !== 'agent' && task && (
-              <TaskStatusBadge
-                status={task.status}
-                subStatus={task.subStatus}
-                showMain
-              />
-            )}
-          </div>
-          {currentRightTab === 'agent' && agentError && (
-            <p
-              role="alert"
-              className="mt-2 text-[11px] text-error-foreground"
-            >
-              {agentError}
-            </p>
-          )}
-        </header>
-
-        {currentRightTab !== 'agent' ? (
-          <>
-            <AssistantRuntimeProvider runtime={runtime}>
-              <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-                <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 py-4">
-                  {!task || !activeChat?.messages.length ? <EmptyChat /> : null}
-                  <ThreadPrimitive.Messages>
-                    {({ message }) => (
-                      <TaskChatMessageItem
-                        message={message}
-                        busy={busy}
-                        viewerPerspective={activeTaskRole ?? undefined}
-                        plainTextBubbles
-                        flatOppositeMessages
-                        canReplyQuestion={(custom) =>
-                          currentRightTab === 'requester' &&
-                          isRequester &&
-                          awaitingAnswer &&
-                          (custom.taskId === undefined ||
-                            custom.taskId === task?.id)
-                        }
-                        onReplyQuestion={replyQuestion}
-                      />
-                    )}
-                  </ThreadPrimitive.Messages>
-                </ThreadPrimitive.Viewport>
-              </ThreadPrimitive.Root>
-            </AssistantRuntimeProvider>
-
-            <ChatComposerDock>
-              <TaskChatQueuedMessages
-                messages={activeChat?.queuedMessages ?? []}
-                className="mb-2"
-              />
-              <ChatComposerFrame
-                left={
-                  task ? (
-                    <>
-                      {currentRightTab === 'requester' && isRequester && (
-                        <>
-                          <ChatActionIcon
-                            label={
-                              awaitingReview
-                                ? '验收通过'
-                                : '验收通过（仅待验收可操作）'
-                            }
-                            icon={ClipboardCheck}
-                            tone="success"
-                            disabled={busy || !awaitingReview}
-                            onClick={() =>
-                              void run(() =>
-                                api.workbenchAcceptHandoff(task.id),
-                              )
-                            }
-                          />
-                          <ChatActionIcon
-                            label="新子任务"
-                            icon={Subtask}
-                            disabled={busy || !requesterSubtaskAvailable}
-                            onClick={() => setDialog('subtask')}
-                          />
-                          <ChatActionIcon
-                            label="分配任务"
-                            icon={ArrowsExchange}
-                            disabled={busy || !assignAvailable}
-                            onClick={() => setDialog('assign')}
-                          />
-                          <ChatActionIcon
-                            label="取消任务"
-                            icon={CircleX}
-                            tone="danger"
-                            disabled={busy || !assignAvailable}
-                            onClick={() => setDialog('cancel')}
-                          />
-                          {completed && (
-                            <ChatActionIcon
-                              label="重新生成复盘"
-                              icon={Sparkles}
-                              disabled={busy}
-                              onClick={() =>
-                                void run(() =>
-                                  api.generateTaskHandoff(task.id),
-                                )
-                              }
-                            />
-                          )}
-                        </>
-                      )}
-                      {currentRightTab === 'responsible' && isAgent && (
-                        <>
-                          {awaitingAcceptance && (
-                            <ChatActionIcon
-                              label="接受任务"
-                              icon={CircleCheck}
-                              tone="success"
-                              disabled={busy}
-                              onClick={() =>
-                                void run(() =>
-                                  api.workbenchAccept(task.id),
-                                )
-                              }
-                            />
-                          )}
-                          <ChatActionIcon
-                            label={
-                              awaitingReview
-                                ? '撤销交付'
-                                : deliveryActive
-                                  ? '发起交付'
-                                  : '发起交付（仅执行中可操作）'
-                            }
-                            icon={
-                              awaitingReview ? Package2Import : Package2Export
-                            }
-                            disabled={
-                              busy || !deliveryActive || handoffEditing
-                            }
-                            onClick={() => {
-                              if (awaitingReview) {
-                                void run(() =>
-                                  api.workbenchRevokeHandoff(task.id),
-                                )
-                              } else {
-                                setHandoffError(null)
-                                setDialog('handoff')
-                              }
-                            }}
-                          />
-                          <ChatActionIcon
-                            label="新子任务"
-                            icon={Subtask}
-                            disabled={busy || !responsibleSubtaskAvailable}
-                            onClick={() => setDialog('subtask')}
-                          />
-                          <ChatActionIcon
-                            label="分配任务"
-                            icon={ArrowsExchange}
-                            disabled={busy || !assignAvailable}
-                            onClick={() => setDialog('assign')}
-                          />
-                          <ChatActionIcon
-                            label={
-                              awaitingAcceptance
-                                ? '拒绝任务'
-                                : '拒绝任务（仅待接受可操作）'
-                            }
-                            icon={Ban}
-                            tone="danger"
-                            disabled={busy || !awaitingAcceptance}
-                            onClick={() => setDialog('refuse')}
-                          />
-                        </>
-                      )}
-                    </>
-                  ) : null
-                }
-                right={
-                  <ChatSendButton
-                    onClick={() => void sendMessage()}
-                    disabled={
-                      !task ||
-                      busy ||
-                      finished ||
-                      !draft.trim() ||
-                      (currentRightTab === 'responsible' && awaitingReview)
-                    }
-                  />
-                }
-              >
-                <textarea
-                  value={draft}
-                  rows={3}
-                  disabled={
-                    !task ||
-                    busy ||
-                    finished ||
-                    (currentRightTab === 'responsible' && awaitingReview)
-                  }
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault()
-                      void sendMessage()
-                    }
-                  }}
-                  placeholder={
-                    !task
-                      ? '选择任务后开始交互'
-                      : finished
-                        ? '任务已结束，不能继续对话'
-                        : currentRightTab === 'requester'
-                          ? awaitingReview
-                            ? '输入验收不通过意见，发送后退回机器人…'
-                            : '以需求方身份补充需求…'
-                          : awaitingReview
-                            ? '待需求方验收，如需继续修改请先撤销交付'
-                            : isAgent && executing
-                              ? '以执行方身份回复…'
-                              : isOwner
-                                ? '向执行该任务的 AI 补充要求…'
-                                : '以执行方身份提供反馈…'
-                  }
-                  className="block h-[72px] w-full resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </ChatComposerFrame>
-            </ChatComposerDock>
-          </>
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col">
-            {!summary?.agent?.available ? (
-              <AgentUnavailable
-                reason={
-                  summary?.agent?.reason ??
-                  '个人 AI 暂不可用，请稍后重试。'
-                }
-                onRetry={retryAgent}
-              />
-            ) : agentSnapshot ? (
-              <DebugChat
-                snapshot={agentSnapshot}
-                running={agentSnapshot.status === 'running'}
-                onSend={sendAgentMessage}
-                onReplyQuestion={replyAgentQuestion}
-                framed={false}
-                enableAttachments
-                onUploadFile={async (file) => {
-                  const uploaded = await api.uploadFile(file)
-                  return {
-                    name: uploaded.filename,
-                    url: uploaded.url,
-                    size: uploaded.size,
-                    mime: uploaded.mime,
-                  }
-                }}
-                modelCatalog={agentCatalog}
-                modelSelection={agentSnapshot.model}
-                onModelChange={changeAgentModel}
-                modelBusy={agentModelBusy}
-                mode={agentSnapshot.mode}
-                onModeChange={changeAgentMode}
-                modeBusy={agentModeBusy}
-                emptyTitle={
-                  task
-                    ? `${task.code} 的独立 AI 会话`
-                    : '和你的 AI 开始对话'
-                }
-                emptyHint={
-                  task
-                    ? '当前任务的对话与其它任务相互隔离；让 AI 查询、创建或推进任务'
-                    : '让 AI 查询、创建或推进任务；它会通过平台技能操作并汇报结果'
-                }
-                placeholder={
-                  agentSnapshot.status === 'running'
-                    ? 'AI 正在回复…'
-                    : task
-                      ? `让 AI 处理 ${task.code}，或输入其它指令…`
-                      : '输入指令，Enter 发送，Shift+Enter 换行，Tab 切换 Build/Plan…'
-                }
-              />
-            ) : agentError ? (
-              <AgentUnavailable
-                reason={agentError}
-                onRetry={retryAgent}
-              />
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-sm text-foreground-muted">
-                正在加载 AI 会话…
-              </div>
-            )}
-          </div>
-        )}
-      </section>
+      <TaskWorkbenchPanel
+        task={task}
+        chat={chat}
+        handoffDoc={handoffDoc}
+        handoffEditing={handoffEditing}
+        onRefresh={refreshTask}
+        agent={
+          <DetailAgentPanel
+            taskId={selectedId}
+            embedded
+            emptyTitle={
+              task ? `${task.code} 的独立 AI 会话` : '和你的 AI 开始对话'
+            }
+            emptyHint={
+              task
+                ? '当前任务的对话与其它任务相互隔离；让 AI 查询、创建或推进任务'
+                : '让 AI 查询、创建或推进任务；它会通过平台技能操作并汇报结果'
+            }
+            placeholder={
+              task
+                ? `让 AI 处理 ${task.code}，或输入其它指令…`
+                : '输入指令，Enter 发送，Shift+Enter 换行…'
+            }
+            onRunFinished={() => {
+              void refreshTask()
+            }}
+          />
+        }
+      />
           </div>
         </div>
       </main>
-
-      {/* 操作弹窗：首期统一结构，后续可按任务类型替换中间面板 */}
-      <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
-        <DialogContent
-          className={dialog === 'handoff' ? 'sm:max-w-2xl' : undefined}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              {dialog === 'refuse'
-                ? '拒绝任务'
-                : dialog === 'handoff'
-                  ? '发起交付'
-                  : dialog === 'assign'
-                    ? '分配任务'
-                    : dialog === 'cancel'
-                      ? '取消任务'
-                      : '创建子任务'}
-            </DialogTitle>
-          </DialogHeader>
-
-          {dialog === 'refuse' && (
-            <DialogBody>
-              <textarea
-                value={dialogText}
-                rows={5}
-                onChange={(event) => setDialogText(event.target.value)}
-                placeholder="请说明原因或反馈意见"
-                className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-border-strong"
-              />
-            </DialogBody>
-          )}
-
-          {dialog === 'handoff' && (
-            <DialogBody>
-              <div className="space-y-2 text-xs leading-relaxed text-foreground-muted">
-                <p>
-                  交付内容以任务交付文档为准，本次申请会锁定当前版本并提交给需求方验收。
-                </p>
-                <p>
-                  当前文档：
-                  {handoffDoc
-                    ? ` ${handoffDoc.path} · v${handoffDoc.version}`
-                    : ' 尚未加载'}
-                </p>
-                {handoffDoc?.content.trim() === '> 正在处理中……' && (
-                  <p role="alert" className="text-error-foreground">
-                    交付文档还没有有效内容，请到左侧「交付文档」面板补充后再申请验收。
-                  </p>
-                )}
-                <p>
-                  申请后如需继续修改，请先撤销交付或等待需求方返工。
-                </p>
-              </div>
-            </DialogBody>
-          )}
-
-          {dialog === 'assign' && (
-            <DialogBody>
-              <label className="block space-y-1">
-                <span className="text-xs text-foreground-muted">处理机器人</span>
-                <Select
-                  value={assignWorkerId}
-                  onValueChange={(value) => setAssignWorkerId(String(value ?? ''))}
-                  items={Object.fromEntries(
-                    workers
-                      .filter((worker) => worker.id !== task?.agentId)
-                      .map((worker) => [String(worker.id), worker.name]),
-                  )}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择机器人" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {workers
-                      .filter((worker) => worker.id !== task?.agentId)
-                      .map((worker) => (
-                        <SelectItem key={worker.id} value={String(worker.id)}>
-                          {worker.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </label>
-            </DialogBody>
-          )}
-
-          {dialog === 'subtask' && (
-            <DialogBody>
-              <div className="space-y-3">
-                <label className="block space-y-1">
-                  <span className="text-xs text-foreground-muted">任务定义</span>
-                  <Select
-                    value={subtaskTemplateId}
-                    onValueChange={(value) =>
-                      setSubtaskTemplateId(String(value ?? ''))
-                    }
-                    items={Object.fromEntries(
-                      templates.map((template) => [
-                        String(template.id),
-                        template.name,
-                      ]),
-                    )}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择任务定义" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {templates.map((template) => (
-                        <SelectItem
-                          key={template.id}
-                          value={String(template.id)}
-                        >
-                          {template.name} · {template.type}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-xs text-foreground-muted">标题</span>
-                  <input
-                    value={subtaskTitle}
-                    onChange={(event) => setSubtaskTitle(event.target.value)}
-                    placeholder="子任务标题"
-                    className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-border-strong"
-                  />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-xs text-foreground-muted">输入</span>
-                  <textarea
-                    value={subtaskInput}
-                    rows={3}
-                    onChange={(event) => setSubtaskInput(event.target.value)}
-                    className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-border-strong"
-                  />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-xs text-foreground-muted">交付要求</span>
-                  <textarea
-                    value={subtaskOutputSpec}
-                    rows={3}
-                    onChange={(event) =>
-                      setSubtaskOutputSpec(event.target.value)
-                    }
-                    className="w-full rounded-[var(--radius-md)] border border-border bg-background px-3 py-2 text-sm outline-none focus:border-border-strong"
-                  />
-                </label>
-              </div>
-            </DialogBody>
-          )}
-
-          {dialog === 'cancel' && (
-            <DialogBody>
-              <p className="text-sm leading-relaxed text-foreground-muted">
-                取消后任务将进入「已结束-取消」，执行中的机器人会被中断，且不可恢复。确认取消
-                {task ? ` ${task.code}「${task.title}」` : '当前任务'}？
-              </p>
-            </DialogBody>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setDialog(null)}>
-              取消
-            </Button>
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={
-                busy ||
-                (dialog === 'refuse' && !dialogText.trim()) ||
-                (dialog === 'assign' && !assignWorkerId) ||
-                (dialog === 'subtask' &&
-                  (!subtaskTemplateId || !subtaskTitle.trim())) ||
-                (dialog === 'handoff' &&
-                  (!handoffDoc || !handoffDoc.content.trim() ||
-                    handoffDoc.content.trim() === '> 正在处理中……'))
-              }
-              onClick={() => void submitDialog()}
-            >
-              {dialog === 'cancel' ? '确认取消' : '提交'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
@@ -1576,40 +705,6 @@ function EmptyWork() {
         <Wrench className="size-5" />
       </span>
       <p>选择任务后查看工作内容</p>
-    </div>
-  )
-}
-
-function EmptyChat() {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-foreground-muted">
-      <span className="rounded-full bg-background-muted p-3">
-        <Wrench className="size-5" />
-      </span>
-      <p>选择任务后，这里显示多机器人协作对话</p>
-    </div>
-  )
-}
-
-function AgentUnavailable({
-  reason,
-  onRetry,
-}: {
-  reason: string
-  onRetry: () => void
-}) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-foreground-muted">
-      <span className="rounded-full bg-background-muted p-3">
-        <Wrench className="size-5" />
-      </span>
-      <p>我的 AI 暂不可用</p>
-      <p className="max-w-md text-xs leading-relaxed text-foreground-subtle">
-        {reason}
-      </p>
-      <Button size="sm" variant="outline" onClick={onRetry}>
-        重试
-      </Button>
     </div>
   )
 }
@@ -1635,6 +730,29 @@ function Section({
       <h4 className="mb-1 text-xs font-medium text-foreground-muted">{title}</h4>
       <div className="whitespace-pre-wrap break-words rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-xs leading-relaxed text-foreground-emphasis">
         {children}
+      </div>
+    </div>
+  )
+}
+
+/** 任务上下文里的 Markdown 字段：与任务详情共用聊天 Markdown 排版，支持 Mermaid */
+function MarkdownSection({
+  title,
+  value,
+}: {
+  title: string
+  value: string | null | undefined
+}) {
+  const text = value?.trim()
+  return (
+    <div>
+      <h4 className="mb-1 text-xs font-medium text-foreground-muted">{title}</h4>
+      <div className="break-words rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-xs leading-relaxed text-foreground-emphasis">
+        {text ? (
+          <MarkdownViewer text={text} className="workbench-markdown" />
+        ) : (
+          <span className="text-foreground-subtle">（暂无）</span>
+        )}
       </div>
     </div>
   )

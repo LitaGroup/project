@@ -1,9 +1,4 @@
-import {
-  useCallback,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -31,7 +26,6 @@ import {
 import type {
   WorkerDebugAttachment,
   WorkerDebugMessage,
-  WorkerDebugMode,
   WorkerDebugModelCatalog,
   WorkerDebugModelSelection,
   WorkerDebugOption,
@@ -82,12 +76,6 @@ interface DebugChatProps {
   onModelChange?: (input: WorkerDebugModelSelection) => Promise<void> | void
   /** 模型切换请求进行中 */
   modelBusy?: boolean
-  /** 主 Agent 模式（我的 AGENT：build / plan） */
-  mode?: WorkerDebugMode | null
-  /** 切换主 Agent 模式 */
-  onModeChange?: (mode: WorkerDebugMode) => Promise<void> | void
-  /** 模式切换请求进行中 */
-  modeBusy?: boolean
 }
 
 /**
@@ -110,9 +98,6 @@ export function DebugChat({
   modelSelection = null,
   onModelChange,
   modelBusy = false,
-  mode = null,
-  onModeChange,
-  modeBusy = false,
 }: DebugChatProps) {
   const [attachments, setAttachments] = useState<WorkerDebugAttachment[]>([])
   const [uploading, setUploading] = useState(false)
@@ -168,26 +153,6 @@ export function DebugChat({
   }
 
   const currentModel = modelSelection ?? modelCatalog?.current ?? null
-
-  // Tab 在输入框内切换 Build / Plan（仅配置了模式的「我的 AI」生效）
-  const handleKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      if (event.key !== 'Tab') return
-      if (
-        event.shiftKey ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.altKey ||
-        event.nativeEvent.isComposing
-      ) {
-        return
-      }
-      if (!mode || !onModeChange || running || modeBusy) return
-      event.preventDefault()
-      void onModeChange(mode === 'build' ? 'plan' : 'build')
-    },
-    [mode, modeBusy, onModeChange, running],
-  )
 
   return (
     <section
@@ -274,38 +239,6 @@ export function DebugChat({
                 }
                 right={
                   <>
-                    {mode && onModeChange && (
-                      <div
-                        className="flex shrink-0 items-center rounded-[var(--radius-md)] border border-border p-0.5 text-[11px]"
-                        role="group"
-                        aria-label="主 Agent 模式"
-                      >
-                        {(
-                          [
-                            ['build', 'Build', '可读取、修改文件并执行命令'],
-                            ['plan', 'Plan', '只分析与规划，不修改文件'],
-                          ] as Array<[WorkerDebugMode, string, string]>
-                        ).map(([value, label, hint]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            title={`${hint}（Tab 切换）`}
-                            aria-pressed={mode === value}
-                            disabled={running || modeBusy}
-                            onClick={() => {
-                              if (mode !== value) void onModeChange(value)
-                            }}
-                            className={`rounded-[var(--radius-sm)] px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                              mode === value
-                                ? 'bg-background-muted font-medium text-foreground-intense'
-                                : 'text-foreground-muted hover:text-foreground-intense'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
                     {currentModel && onModelChange && (
                       <ModelSettingsPicker
                         catalog={modelCatalog}
@@ -335,7 +268,6 @@ export function DebugChat({
                 <ComposerPrimitive.Input
                   rows={2}
                   submitMode="enter"
-                  onKeyDown={handleKeyDown}
                   placeholder={
                     placeholder ??
                     (running

@@ -81,13 +81,35 @@ export class TaskNotifyService {
           humanUserId: true,
           personalAgentUserId: true,
           runtime: true,
+          ownerUserId: true,
+          ownerName: true,
         },
       });
       const boundUserId =
         requesterWorker?.runtime === WorkerRuntime.HUMAN
           ? requesterWorker.humanUserId
           : (requesterWorker?.personalAgentUserId ?? null);
-      if (!boundUserId) return { sent: false };
+      if (!boundUserId) {
+        // 普通 AI 机器人需求方没有绑定用户：回退通知机器人负责人，
+        // 保证自动验收未推进时至少有人工兜底入口。
+        if (requesterWorker) {
+          const openId = await this.workersService.ownerOpenId(requesterWorker);
+          if (openId) {
+            return this.sendCard(
+              task,
+              {
+                openId,
+                ownerName: requesterWorker.ownerName ?? requesterWorker.name,
+              },
+              kind,
+              title,
+              description,
+              '需求方',
+            );
+          }
+        }
+        return { sent: false };
+      }
       const user = await this.users.findOne({
         where: { id: boundUserId },
         select: { id: true, name: true, feishuOpenId: true },
@@ -122,6 +144,40 @@ export class TaskNotifyService {
       }
     }
     return this.notifyTaskOwner(task, kind, title, description);
+  }
+
+  /**
+   * 新任务首次分配到真人执行机器人时，通知绑定的真实用户前往工作台处理。
+   * 非真人机器人、未绑定用户或缺少飞书 openId 时静默跳过。
+   */
+  async notifyTaskHumanAssignee(
+    task: Task,
+    kind: TaskNotifyKind,
+    title: string,
+    description: string,
+  ): Promise<TaskNotifyResult> {
+    if (!task.agentId) return { sent: false };
+    const worker = await this.workers.findOne({
+      where: { id: task.agentId },
+      select: { id: true, name: true, humanUserId: true, runtime: true },
+    });
+    if (worker?.runtime !== WorkerRuntime.HUMAN || !worker.humanUserId) {
+      return { sent: false };
+    }
+    const user = await this.users.findOne({
+      where: { id: worker.humanUserId },
+      select: { id: true, name: true, feishuOpenId: true },
+    });
+    if (!user?.feishuOpenId) return { sent: false };
+    return this.sendCard(
+      task,
+      { openId: user.feishuOpenId, ownerName: user.name },
+      kind,
+      title,
+      description,
+      '执行人',
+      { workbench: true, actionLabel: '打开工作台' },
+    );
   }
 
   /**
@@ -169,9 +225,14 @@ export class TaskNotifyService {
     kind: TaskNotifyKind,
     title: string,
     description: string,
-    receiverLabel: '负责人' | '需求方',
+    receiverLabel: '负责人' | '需求方' | '执行人',
+    options?: { workbench?: boolean; actionLabel?: string },
   ): Promise<TaskNotifyResult> {
     const template = kind === 'accept' ? 'green' : 'orange';
+    const taskUrl =
+      options?.workbench || kind === 'accept'
+        ? `${this.appUrl}/workbench/tasks/${task.id}`
+        : `${this.appUrl}/tasks/${task.id}`;
 
     const statusLabel = `${task.status}-${task.subStatus}`;
     try {
@@ -200,9 +261,12 @@ export class TaskNotifyService {
             actions: [
               {
                 tag: 'button',
-                text: { tag: 'plain_text', content: '打开任务详情' },
+                text: {
+                  tag: 'plain_text',
+                  content: options?.actionLabel ?? '打开任务详情',
+                },
                 type: 'primary',
-                url: `${this.appUrl}/tasks/${task.id}`,
+                url: taskUrl,
               },
             ],
           },

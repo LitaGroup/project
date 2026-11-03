@@ -4,7 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, Repository } from 'typeorm';
+import { FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { User } from '../auth/user.entity';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
@@ -111,10 +111,14 @@ export class TasksAgentService {
     }
     // 用户负责的机器人（workers.ownerUserId）也纳入「我的任务」范围：
     // 与工作台的 responsible 角色保持一致；单独记录，避免被误标为「执行方」。
+    // 个人 AGENT 只承载「我的 AI」对话，不作为对外任务身份。
     const responsibleWorkerIds = new Set<number>();
     if (userIds.size > 0) {
       const owned = await this.workers.find({
-        where: { ownerUserId: In([...userIds]) },
+        where: {
+          ownerUserId: In([...userIds]),
+          personalAgentUserId: IsNull(),
+        },
         select: { id: true },
       });
       for (const worker of owned) {
@@ -245,7 +249,7 @@ export class TasksAgentService {
       task.assignedAt ? `- 分配时间：${beijingTime(task.assignedAt)}` : '',
       task.handoffPath
         ? `- 交付文档：[${task.handoffPath}](/api/tasks/${task.id}/handoff.md)（v${task.handoffVersion}${task.handoffSubmittedVersion ? `，已提交 v${task.handoffSubmittedVersion}` : ''}）`
-        : '',
+        : `- 交付文档：尚未创建（首次写入使用 \`baseVersion=0\`，预定路径 \`${directory}/HANDOFF\`）`,
       `- 任务文档目录：\`${directory}\`（需求明确指定文档地址时以需求为准）`,
       '',
       '## 任务文档',
@@ -328,7 +332,7 @@ export class TasksAgentService {
       '- 提问：`POST /api/tasks/{id}/questions/ask.md`',
       '- 答复：`POST /api/tasks/{id}/questions/{questionId}/answer.md`',
       '- 交付文档：`GET /api/tasks/{id}/handoff.md`',
-      '- 更新交付文档：`POST /api/tasks/{id}/handoff/update.md`（body 带 `content` 与 `baseVersion`）',
+      '- 创建/更新交付文档：`POST /api/tasks/{id}/handoff/update.md`（body 带 `content` 与 `baseVersion`；首次创建用 0，之后按当前版本更新）',
       '- 任务文档目录：`GET /api/tasks/{id}/documents.md`',
       '- 写入任务文档：`POST /api/tasks/{id}/documents.md`（body 带 `name` 与 `content`，如 `TECH_DESIGN.md`）',
       '- 申请验收：`POST /api/tasks/{id}/handoff/apply.md`',
@@ -361,6 +365,15 @@ export class TasksAgentService {
       templateId: input.templateId ?? null,
       ...identity,
     } satisfies CreateTaskInput);
+    const requesterLabel =
+      created.requesterType === 'worker' && created.requesterId
+        ? ((
+            await this.workers.findOne({
+              where: { id: created.requesterId },
+              select: { name: true },
+            })
+          )?.name ?? `机器人 #${created.requesterId}`)
+        : `用户 #${created.requesterId}`;
     return [
       mdFrontmatter({
         title: '任务已创建',
@@ -373,7 +386,7 @@ export class TasksAgentService {
       `- 标题：${created.title}`,
       `- 类型：${created.type}`,
       `- 状态：${created.status}-${created.subStatus}`,
-      `- 需求方：${created.requesterType === 'worker' ? '机器人（' + created.requesterId + '）' : '用户（' + created.requesterId + '）'}`,
+      `- 需求方：${requesterLabel}`,
       '',
       '## 读取与跟进',
       '',
@@ -396,15 +409,12 @@ export class TasksAgentService {
     >
   > {
     if (req.worker) {
-      const humanUserId = req.worker.humanUserId ?? null;
-      if (!humanUserId && req.worker.personalAgentUserId) {
-        return {
-          createdById: req.worker.personalAgentUserId,
-          requesterType: 'worker',
-          requesterId: req.worker.id,
-          operatorName: req.worker.name,
-        };
+      // 个人 AGENT 仅是用户的 AI 对话通道：对外需求方固定映射为其主人
+      // 的真人机器人，个人 AGENT 不再写入任何任务身份字段。
+      if (req.worker.personalAgentUserId) {
+        return this.userIdentity(req.worker.personalAgentUserId, null);
       }
+      const humanUserId = req.worker.humanUserId ?? null;
       return {
         createdById: humanUserId,
         requesterType: 'worker',
@@ -413,12 +423,31 @@ export class TasksAgentService {
       };
     }
     if (!req.user) throw new ForbiddenException('缺少用户身份');
-    const human = await this.workersService.findByHumanUserId(req.user.id);
+    return this.userIdentity(req.user.id, req.user.name ?? null);
+  }
+
+  /** 用户身份创建任务：需求方优先绑定真人机器人，没有时回退用户本人 */
+  private async userIdentity(
+    userId: number,
+    operatorName: string | null,
+  ): Promise<
+    Pick<
+      CreateTaskInput,
+      'createdById' | 'requesterType' | 'requesterId' | 'operatorName'
+    >
+  > {
+    const [human, user] = await Promise.all([
+      this.workersService.findByHumanUserId(userId),
+      this.users.findOne({
+        where: { id: userId },
+        select: { id: true, name: true },
+      }),
+    ]);
     return {
-      createdById: req.user.id,
+      createdById: userId,
       requesterType: human ? 'worker' : 'user',
-      requesterId: human?.id ?? req.user.id,
-      operatorName: req.user.name ?? null,
+      requesterId: human?.id ?? userId,
+      operatorName: operatorName ?? user?.name ?? undefined,
     };
   }
 
@@ -521,18 +550,31 @@ export class TasksAgentService {
       }
       if (task.createdById) userIds.add(task.createdById);
     }
-    const [workers, users] = await Promise.all([
-      workerIds.size
-        ? this.workers.find({ where: { id: In([...workerIds]) } })
-        : Promise.resolve([]),
-      userIds.size
-        ? this.users.find({ where: { id: In([...userIds]) } })
-        : Promise.resolve([]),
-    ]);
-    return {
-      workers: new Map(workers.map((worker) => [worker.id, worker.name])),
-      users: new Map(users.map((user) => [user.id, user.name])),
-    };
+    const workers = workerIds.size
+      ? await this.workers.find({ where: { id: In([...workerIds]) } })
+      : [];
+    // 历史任务里的个人 AGENT 对外统一显示其主人姓名（个人 AGENT 不再作为任务身份）
+    for (const worker of workers) {
+      if (worker.personalAgentUserId) userIds.add(worker.personalAgentUserId);
+    }
+    const users = userIds.size
+      ? await this.users.find({ where: { id: In([...userIds]) } })
+      : [];
+    const usersById = new Map(users.map((user) => [user.id, user.name]));
+    const workersById = new Map<number, string>();
+    for (const worker of workers) {
+      if (worker.personalAgentUserId) {
+        workersById.set(
+          worker.id,
+          usersById.get(worker.personalAgentUserId) ??
+            worker.ownerName ??
+            worker.name,
+        );
+        continue;
+      }
+      workersById.set(worker.id, worker.name);
+    }
+    return { workers: workersById, users: usersById };
   }
 
   private agentName(
