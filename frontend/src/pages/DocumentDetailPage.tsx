@@ -25,6 +25,8 @@ import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { ApipostDocViewer } from '../components/ApipostDocViewer'
 import { DocToc } from '../components/DocToc'
 import { MarkdownEditor, type MarkdownEditorHandle } from '../components/MarkdownEditor'
+import { DetailPageLayout } from '../components/detail/DetailPageLayout'
+import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 
 /** 编辑器正文标题选择器：仅取 ProseMirror 直接子级（排除引用块内的标题，与目录解析口径一致） */
 const HEADING_SELECTOR = '.milkdown .ProseMirror > :is(h1, h2, h3, h4, h5, h6)'
@@ -203,7 +205,30 @@ export function DocumentDetailPage() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <DetailPageLayout
+      ai={
+        <DetailAgentPanel
+          context={{
+            type: 'document',
+            id: `document:${doc.id}`,
+            title: doc.title,
+            summary: [
+              `类型：${doc.type}`,
+              doc.projectId ? `项目 ID：${doc.projectId}` : '未归属项目',
+              `来源：${documentSourceLabel(doc.source)}`,
+              doc.description ? `描述：${doc.description}` : '',
+            ]
+              .filter(Boolean)
+              .join('；'),
+            readUrl: `/api/documents/${doc.id}.md`,
+          }}
+          emptyTitle={`「${doc.title}」的独立 AI 会话`}
+          emptyHint="让 AI 阅读当前文档、整理内容或回答相关问题"
+          placeholder="询问当前文档的内容…"
+        />
+      }
+    >
+      <div className="flex h-full min-h-0 flex-col gap-4">
       {/* 1. 文档属性信息：压缩为不超过 3 行的紧凑布局 */}
       <div className="flex flex-col gap-1.5">
         <PageBreadcrumb
@@ -345,7 +370,8 @@ export function DocumentDetailPage() {
           </>
         )}
       </section>
-    </div>
+      </div>
+    </DetailPageLayout>
   )
 }
 

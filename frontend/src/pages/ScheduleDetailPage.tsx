@@ -1,27 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-} from '@appica/ui-react/card'
-import {
-  Table,
-  TableBody,
-  TableRow,
-  TableCell,
-} from '@appica/ui-react/table'
-import { Button } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
-import { Progress } from '@appica/ui-react/progress'
+import { Button } from '@appica/ui-react/button'
 import {
   api,
   type CheckRun,
   type ProjectCheck,
   type ProjectSchedule,
 } from '../lib/api'
+import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
+import {
+  RunDetailView,
+  type RunHistoryItem,
+} from '../components/detail/RunDetailView'
 import { DeleteScheduleButton, ScheduleFormDialog } from './ProjectDetailPage'
-import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { Terminal } from '../components/Terminal'
 
 const runStatusMeta: Record<
@@ -51,7 +43,14 @@ function formatDuration(run: CheckRun, now: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
 }
 
-/** 定时任务详情页：任务信息 + 该任务触发的检查脚本运行（布局同检查运行页） */
+function toHistory(runs: CheckRun[]): RunHistoryItem[] {
+  return runs.slice(0, 5).map((run) => ({
+    id: run.id,
+    label: `${new Date(run.startedAt).toLocaleString()} · ${runStatusMeta[run.status].text}`,
+  }))
+}
+
+/** 定时任务详情页：任务信息 + 该任务触发的检查脚本运行 */
 export function ScheduleDetailPage() {
   const { id, scheduleId } = useParams<{
     id: string
@@ -70,7 +69,7 @@ export function ScheduleDetailPage() {
   const [runData, setRunData] = useState<CheckRun | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
-  // 仅用于驱动运行中耗时每秒重渲染（轮询本身也会触发）
+  // 仅用于驱动运行中耗时每秒重渲染
   const [now, setNow] = useState(() => Date.now())
 
   const loadHistory = useCallback(
@@ -161,171 +160,142 @@ export function ScheduleDetailPage() {
   const run = selectedRunId !== null && runData?.id === selectedRunId ? runData : null
   const progress =
     run && run.total ? Math.round((run.current / run.total) * 100) : null
+  const history = toHistory(runs)
 
   return (
-    <div className="flex h-full gap-6">
-      {/* 左侧：终端输出（撑满剩余高度，底部与页面对齐） */}
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <PageBreadcrumb
-          items={[
-            { label: '定时任务', to: '/schedules' },
-            { label: projectName ?? '…', to: `/projects/${projectId}` },
-            { label: schedule?.title ?? '…' },
-          ]}
+    <RunDetailView
+      ai={
+        <DetailAgentPanel
+          context={{
+            type: 'script',
+            id: `schedule:${scheduleIdNum}`,
+            title: `定时任务 ${schedule?.title ?? scheduleIdNum}`,
+            summary: [
+              schedule?.cron ? `cron：${schedule.cron}` : '',
+              check?.scriptPath ? `脚本：${check.scriptPath}` : '',
+              run
+                ? `最近运行：${runStatusMeta[run.status].text}，当前步骤 ${run.current}/${run.total ?? '—'}`
+                : '暂无运行记录',
+            ]
+              .filter(Boolean)
+              .join('；'),
+          }}
+          emptyTitle={`定时任务 ${schedule?.title ?? scheduleIdNum} 的独立 AI 会话`}
+          emptyHint="让 AI 分析调度计划、脚本或历史运行结果"
+          placeholder="询问当前定时任务或运行结果…"
         />
-        <section className="flex min-h-0 flex-1 flex-col">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">
-                定时任务：{schedule?.title ?? '…'}
+      }
+      breadcrumb={[
+        { label: '定时任务', to: '/schedules' },
+        { label: projectName ?? '…', to: `/projects/${projectId}` },
+        { label: schedule?.title ?? '…' },
+      ]}
+      title={`定时任务：${schedule?.title ?? '…'}`}
+      subtitle={
+        schedule ? (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1" title={check?.scriptPath}>
+            <code>{schedule.cron}</code>
+            <span>·</span>
+            <span>
+              下次执行：
+              {schedule.nextRunAt
+                ? new Date(schedule.nextRunAt).toLocaleString()
+                : '—'}
+            </span>
+            <span>·</span>
+            <span>已运行 {schedule.runCount} 次</span>
+            {check && (
+              <>
+                <span>·</span>
+                <span>
+                  脚本：
+                  <Link
+                    to={`/projects/${projectId}/checks/${check.id}`}
+                    className="underline"
+                  >
+                    {check.code}
+                  </Link>
+                </span>
+              </>
+            )}
+          </p>
+        ) : undefined
+      }
+      actions={
+        <Button size="sm" onClick={startRun} disabled={starting}>
+          {starting ? '启动中…' : '运行'}
+        </Button>
+      }
+      error={error}
+      run={
+        run
+          ? {
+              statusBadge: <RunStatusBadge status={run.status} />,
+              total: run.total,
+              current: run.current,
+              progress,
+              duration: formatDuration(run, now),
+              message: run.message,
+            }
+          : null
+      }
+      history={history}
+      selectedRunId={selectedRunId}
+      onSelectRun={setSelectedRunId}
+      terminal={
+        run ? <Terminal run={run} scriptPath={check?.scriptPath} /> : undefined
+      }
+      emptyText="暂无运行记录，点击“运行”手动触发一次。"
+      extra={
+        schedule ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            <section className="rounded-[var(--radius-lg)] border border-border bg-background p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-foreground-intense">
+                  任务操作
+                </h2>
+                <Badge variant={schedule.enabled ? 'success' : 'secondary'}>
+                  {schedule.enabled ? '已启用' : '已停用'}
+                </Badge>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <ScheduleFormDialog
+                  projectId={projectId}
+                  checks={checks}
+                  schedule={schedule}
+                  onSaved={loadSchedule}
+                />
+                <DeleteScheduleButton
+                  schedule={schedule}
+                  onDeleted={() =>
+                    api
+                      .deleteSchedule(schedule.id)
+                      .then(() => navigate(`/projects/${projectId}`))
+                      .catch((e: Error) => setError(e.message))
+                  }
+                />
+              </div>
+            </section>
+
+            <section className="rounded-[var(--radius-lg)] border border-border bg-background p-3">
+              <h2 className="mb-2 text-sm font-semibold text-foreground-intense">
+                计划
               </h2>
-              {schedule && (
-                <p className="text-sm" title={check?.scriptPath}>
-                  <code>{schedule.cron}</code>
-                  {' · '}
-                  下次执行：
-                  {schedule.nextRunAt
-                    ? new Date(schedule.nextRunAt).toLocaleString()
-                    : '—'}
-                  {' · '}
-                  已运行 {schedule.runCount} 次
-                  {check && (
-                    <>
-                      {' · '}
-                      脚本：
-                      <Link
-                        to={`/projects/${projectId}/checks/${check.id}`}
-                        className="underline"
-                      >
-                        {check.code}
-                      </Link>
-                    </>
-                  )}
+              {schedule.nextRuns ? (
+                <ul className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                  {schedule.nextRuns.map((t) => (
+                    <li key={t}>{new Date(t).toLocaleString()}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-foreground-muted">
+                  已停用，暂无执行计划
                 </p>
               )}
-            </div>
-            <Button size="sm" onClick={startRun} disabled={starting}>
-              {starting ? '启动中…' : '运行'}
-            </Button>
+            </section>
           </div>
-          {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
-          {!run && <p className="text-sm">暂无运行记录，点击"运行"手动触发一次。</p>}
-          {run && <Terminal run={run} scriptPath={check?.scriptPath} />}
-        </section>
-      </div>
-
-      {/* 右侧：运行状态 + 历史记录 */}
-      <aside className="flex w-80 shrink-0 flex-col gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>运行状态</CardTitle>
-          </CardHeader>
-          {run ? (
-            <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
-              <div className="flex justify-between">
-                <dt>状态</dt>
-                <dd>
-                  <RunStatusBadge status={run.status} />
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>总步数</dt>
-                <dd>{run.total ?? '—'}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>当前步数</dt>
-                <dd>{run.current}</dd>
-              </div>
-              <div className="flex flex-col gap-1">
-                <div className="flex justify-between">
-                  <dt>进度</dt>
-                  <dd>{progress !== null ? `${progress}%` : '—'}</dd>
-                </div>
-                <Progress value={progress} />
-              </div>
-              <div className="flex justify-between">
-                <dt>耗时</dt>
-                <dd>{formatDuration(run, now)}</dd>
-              </div>
-              {run.message && (
-                <div className="flex flex-col gap-1">
-                  <dt>消息</dt>
-                  <dd className="whitespace-pre-wrap">{run.message}</dd>
-                </div>
-              )}
-            </dl>
-          ) : (
-            <p className="px-6 pb-6 text-sm">暂无运行记录</p>
-          )}
-          {schedule && (
-            <div className="flex gap-2 px-6 pb-6">
-              <ScheduleFormDialog
-                projectId={projectId}
-                checks={checks}
-                schedule={schedule}
-                onSaved={loadSchedule}
-              />
-              <DeleteScheduleButton
-                schedule={schedule}
-                onDeleted={() =>
-                  api
-                    .deleteSchedule(schedule.id)
-                    .then(() => navigate(`/projects/${projectId}`))
-                    .catch((e: Error) => setError(e.message))
-                }
-              />
-            </div>
-          )}
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>计划</CardTitle>
-          </CardHeader>
-          {/* 未来 5 次执行时间（cron 表达式实时计算） */}
-          {schedule?.nextRuns ? (
-            <ul className="flex flex-col gap-2 px-6 pb-6 text-sm">
-              {schedule.nextRuns.map((t) => (
-                <li key={t}>{new Date(t).toLocaleString()}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="px-6 pb-6 text-sm">已停用，暂无执行计划</p>
-          )}
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>运行历史</CardTitle>
-          </CardHeader>
-          {/* 只展示最近 5 条，无标题行（列义自明） */}
-          <Table>
-            <TableBody>
-              {runs.slice(0, 5).map((r) => (
-                <TableRow
-                  key={r.id}
-                  className={
-                    r.id === selectedRunId ? 'bg-background-muted' : undefined
-                  }
-                  onClick={() => setSelectedRunId(r.id)}
-                >
-                  <TableCell>
-                    {new Date(r.startedAt).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="w-20">
-                    <RunStatusBadge status={r.status} />
-                  </TableCell>
-                </TableRow>
-              ))}
-              {runs.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={2}>暂无运行记录</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-      </aside>
-    </div>
+        ) : undefined
+      }
+    />
   )
 }

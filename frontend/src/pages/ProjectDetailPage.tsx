@@ -102,6 +102,7 @@ import {
   StatusBadge,
 } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { RunStats } from '../components/RunStats'
 import { CountRow } from '../components/CountRow'
 import { TestFormDialog } from '../components/TestFormDialog'
@@ -135,13 +136,9 @@ export function ProjectDetailPage() {
   if (!project) return <p>加载中…</p>
 
   return (
-    <div className="flex gap-6">
-      {/* 左侧：内容区，从上到下平铺 */}
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <PageBreadcrumb
-          items={[{ label: '项目', to: '/projects' }, { label: project.name }]}
-        />
-
+    <DetailPageLayout>
+      {/* 单栏内容区：属性摘要置顶，业务板块自上而下平铺 */}
+      <div className="flex min-w-0 flex-col gap-6">
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">文档</h2>
@@ -269,10 +266,12 @@ export function ProjectDetailPage() {
         <section>
           <ReleasesSection project={project} onChanged={reload} />
         </section>
-      </div>
 
-      {/* 右侧：项目详情（每个可编辑字段展示态带虚线下划线，hover 提示「点击编辑」，点击即编辑） */}
-      <aside className="w-80 shrink-0">
+      {/* 项目详情（每个可编辑字段展示态带虚线下划线，hover 提示「点击编辑」，点击即编辑） */}
+      <section className="order-first space-y-6">
+        <PageBreadcrumb
+          items={[{ label: '项目', to: '/projects' }, { label: project.name }]}
+        />
         <TooltipProvider>
           <Card>
             <CardHeader>
@@ -293,7 +292,7 @@ export function ProjectDetailPage() {
                 <EditDescriptionDialog project={project} onSaved={reload} />
               </CardDescription>
             </CardHeader>
-            <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
+            <dl className="grid gap-3 px-6 pb-6 text-sm sm:grid-cols-2 xl:grid-cols-4">
               <div className="flex items-center justify-between">
                 <dt>类型</dt>
                 <dd>
@@ -393,8 +392,9 @@ export function ProjectDetailPage() {
             </div>
           </Card>
         </TooltipProvider>
-      </aside>
-    </div>
+      </section>
+      </div>
+    </DetailPageLayout>
   )
 }
 

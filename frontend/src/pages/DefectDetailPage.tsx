@@ -51,6 +51,7 @@ import {
 } from '../lib/api'
 import { DefectStatusBadge, DefectPriorityBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { Terminal } from '../components/Terminal'
 import { DefectImagesField } from '../components/DefectImagesField'
 
@@ -244,16 +245,9 @@ export function DefectDetailPage() {
   if (!defect) return <p>加载中…</p>
 
   return (
-    <div className="flex gap-6">
-      {/* 左侧：预期 + 实际 + 图片 + 测试运行结果 + 变更记录 */}
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <PageBreadcrumb
-          items={[
-            { label: '缺陷', to: '/defects' },
-            { label: projectName ?? '…', to: `/projects/${projectId}` },
-            { label: defect.expected.split('\n')[0] || `缺陷 ${defect.id}` },
-          ]}
-        />
+    <DetailPageLayout>
+      {/* 单栏内容区：缺陷属性置顶，预期/实际/图片/运行结果/变更记录自上而下平铺 */}
+      <div className="flex min-w-0 flex-col gap-6">
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <section>
             <h2 className="mb-3 text-xl font-semibold">预期功能描述</h2>
@@ -402,10 +396,16 @@ export function DefectDetailPage() {
             </Card>
           )}
         </section>
-      </div>
 
-      {/* 右侧：属性 */}
-      <aside className="w-80 shrink-0">
+      {/* 缺陷属性 */}
+      <section className="order-first space-y-6">
+        <PageBreadcrumb
+          items={[
+            { label: '缺陷', to: '/defects' },
+            { label: projectName ?? '…', to: `/projects/${projectId}` },
+            { label: defect.expected.split('\n')[0] || `缺陷 ${defect.id}` },
+          ]}
+        />
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-2">
@@ -422,7 +422,7 @@ export function DefectDetailPage() {
               </a>
             </CardTitle>
           </CardHeader>
-          <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
+          <dl className="grid gap-3 px-6 pb-6 text-sm sm:grid-cols-2 xl:grid-cols-4">
             <div className="flex items-center justify-between">
               <dt>状态</dt>
               <dd className="flex items-center gap-2">
@@ -486,7 +486,8 @@ export function DefectDetailPage() {
             )}
           </div>
         </Card>
-      </aside>
+      </section>
+      </div>
 
       {/* 验证通过确认弹窗：确认后一步流转"关闭"并写入变更记录 */}
       {confirmCloseRun && (
@@ -499,7 +500,7 @@ export function DefectDetailPage() {
           }}
         />
       )}
-    </div>
+    </DetailPageLayout>
   )
 }
 

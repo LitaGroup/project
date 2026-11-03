@@ -1,21 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-} from '@appica/ui-react/card'
-import {
-  Table,
-  TableBody,
-  TableRow,
-  TableCell,
-} from '@appica/ui-react/table'
-import { Button } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
-import { Progress } from '@appica/ui-react/progress'
+import { Button } from '@appica/ui-react/button'
 import { api, type ExportRun, type ProjectExport } from '../lib/api'
-import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
+import {
+  RunDetailView,
+  type RunHistoryItem,
+} from '../components/detail/RunDetailView'
 import { Terminal } from '../components/Terminal'
 
 const runStatusMeta: Record<
@@ -23,8 +15,8 @@ const runStatusMeta: Record<
   { text: string; variant: 'info' | 'success' | 'error' | 'warning' }
 > = {
   running: { text: '运行中', variant: 'info' },
-  success: { text: '成功', variant: 'success' },
-  fail: { text: '失败', variant: 'error' },
+  success: { text: '通过', variant: 'success' },
+  fail: { text: '未通过', variant: 'error' },
   error: { text: '异常', variant: 'warning' },
 }
 
@@ -42,6 +34,13 @@ function formatDuration(run: ExportRun, now: number): string {
       : null)
   if (ms === null) return '—'
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
+}
+
+function toHistory(runs: ExportRun[]): RunHistoryItem[] {
+  return runs.slice(0, 5).map((run) => ({
+    id: run.id,
+    label: `${new Date(run.startedAt).toLocaleString()} · ${runStatusMeta[run.status].text}`,
+  }))
 }
 
 /** 产物文件下载地址：/export-files/{exportId}/{runId}/{file}（file 逐段编码，支持子目录） */
@@ -140,142 +139,93 @@ export function ExportRunPage() {
   const files = run?.files ?? []
 
   return (
-    <div className="flex h-full gap-6">
-      {/* 左侧：终端输出（撑满剩余高度，底部与页面对齐） */}
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <PageBreadcrumb
-          items={[
-            { label: '导出', to: '/exports' },
-            { label: projectName ?? '…', to: `/projects/${projectId}` },
-            { label: exportItem?.code ?? '…' },
-          ]}
+    <RunDetailView
+      ai={
+        <DetailAgentPanel
+          context={{
+            type: 'script',
+            id: `export:${exportIdNum}`,
+            title: `导出 ${exportItem?.code ?? exportIdNum}`,
+            summary: [
+              exportItem?.scriptPath ? `脚本：${exportItem.scriptPath}` : '',
+              run
+                ? `最近运行：${runStatusMeta[run.status].text}，产物 ${files.length} 个`
+                : '暂无运行记录',
+            ]
+              .filter(Boolean)
+              .join('；'),
+          }}
+          emptyTitle={`导出 ${exportItem?.code ?? exportIdNum} 的独立 AI 会话`}
+          emptyHint="让 AI 分析当前导出脚本、运行输出或产物"
+          placeholder="询问当前导出脚本或产物…"
         />
-        <section className="flex min-h-0 flex-1 flex-col">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">
-                导出：{exportItem?.code ?? '…'}
-              </h2>
-              {exportItem && (
-                <p className="text-sm" title={exportItem.scriptPath}>
-                  {exportItem.scriptPath}
-                </p>
-              )}
-            </div>
-            <Button size="sm" onClick={startRun} disabled={starting}>
-              {starting ? '启动中…' : '运行'}
-            </Button>
-          </div>
-          {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
-          {!run && <p className="text-sm">暂无运行记录，点击"运行"开始。</p>}
-          {run && <Terminal run={run} scriptPath={exportItem?.scriptPath} />}
-        </section>
-      </div>
-
-      {/* 右侧：运行状态 + 产物文件 + 历史记录 */}
-      <aside className="flex w-80 shrink-0 flex-col gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>运行状态</CardTitle>
-          </CardHeader>
-          {run ? (
-            <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
-              <div className="flex justify-between">
-                <dt>状态</dt>
-                <dd>
-                  <RunStatusBadge status={run.status} />
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>总步数</dt>
-                <dd>{run.total ?? '—'}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>当前步数</dt>
-                <dd>{run.current}</dd>
-              </div>
-              <div className="flex flex-col gap-1">
-                <div className="flex justify-between">
-                  <dt>进度</dt>
-                  <dd>{progress !== null ? `${progress}%` : '—'}</dd>
-                </div>
-                <Progress value={progress} />
-              </div>
-              <div className="flex justify-between">
-                <dt>耗时</dt>
-                <dd>{formatDuration(run, now)}</dd>
-              </div>
-              {run.message && (
-                <div className="flex flex-col gap-1">
-                  <dt>消息</dt>
-                  <dd className="whitespace-pre-wrap">{run.message}</dd>
-                </div>
-              )}
-            </dl>
-          ) : (
-            <p className="px-6 pb-6 text-sm">暂无运行记录</p>
-          )}
-        </Card>
-
-        {run && files.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>产物文件</CardTitle>
-            </CardHeader>
-            <ul className="flex flex-col gap-2 px-6 pb-6 text-sm">
+      }
+      breadcrumb={[
+        { label: '导出', to: '/exports' },
+        { label: projectName ?? '…', to: `/projects/${projectId}` },
+        { label: exportItem?.code ?? '…' },
+      ]}
+      title={`导出：${exportItem?.code ?? '…'}`}
+      subtitle={
+        exportItem?.scriptPath ? (
+          <span className="block truncate" title={exportItem.scriptPath}>
+            {exportItem.scriptPath}
+          </span>
+        ) : undefined
+      }
+      actions={
+        <Button size="sm" onClick={startRun} disabled={starting}>
+          {starting ? '启动中…' : '运行'}
+        </Button>
+      }
+      error={error}
+      run={
+        run
+          ? {
+              statusBadge: <RunStatusBadge status={run.status} />,
+              total: run.total,
+              current: run.current,
+              progress,
+              duration: formatDuration(run, now),
+              message: run.message,
+            }
+          : null
+      }
+      history={toHistory(runs)}
+      selectedRunId={selectedRunId}
+      onSelectRun={setSelectedRunId}
+      terminal={
+        run ? <Terminal run={run} scriptPath={exportItem?.scriptPath} /> : undefined
+      }
+      emptyText="暂无运行记录，点击“运行”开始。"
+      extra={
+        run && files.length > 0 ? (
+          <section className="rounded-[var(--radius-lg)] border border-border bg-background p-3">
+            <h2 className="mb-2 text-sm font-semibold text-foreground-intense">
+              产物文件
+            </h2>
+            <ul className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
               {files.map((f) => (
-                <li key={f.file} className="flex flex-col">
+                <li key={f.file} className="flex min-w-0 flex-col">
                   <a
                     href={exportFileUrl(run, f.file)}
                     download
-                    className="truncate underline"
+                    className="max-w-80 truncate underline"
                     title={f.file}
                   >
                     {f.title || f.file}
                   </a>
                   {f.title && f.title !== f.file && (
-                    <span className="truncate text-xs text-foreground-muted">
+                    <span className="max-w-80 truncate text-xs text-foreground-muted">
                       {f.file}
                     </span>
                   )}
                 </li>
               ))}
             </ul>
-          </Card>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>运行历史</CardTitle>
-          </CardHeader>
-          {/* 只展示最近 5 条，无标题行（列义自明） */}
-          <Table>
-            <TableBody>
-              {runs.slice(0, 5).map((r) => (
-                <TableRow
-                  key={r.id}
-                  className={
-                    r.id === selectedRunId ? 'bg-background-muted' : undefined
-                  }
-                  onClick={() => setSelectedRunId(r.id)}
-                >
-                  <TableCell>
-                    {new Date(r.startedAt).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="w-20">
-                    <RunStatusBadge status={r.status} />
-                  </TableCell>
-                </TableRow>
-              ))}
-              {runs.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={2}>暂无运行记录</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-      </aside>
-    </div>
+          </section>
+        ) : undefined
+      }
+    />
   )
 }
