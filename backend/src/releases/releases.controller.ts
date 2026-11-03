@@ -15,7 +15,7 @@ import { ReleaseStatus } from '../common/enums';
 import { ProjectRelease } from './project-release.entity';
 import { ReleasesService, SubmitReleaseInput } from './releases.service';
 
-/** 提测状态判定入参：状态须为 待冒烟 / 已通过 / 未通过 */
+/** 提测状态判定入参：状态须为 待冒烟 / 进行中 / 已通过 / 未通过 */
 class UpdateReleaseStatusDto {
   /** 目标状态（由测试同学判定） */
   status: ReleaseStatus;
@@ -87,7 +87,7 @@ export class ReleasesMarkdownController {
 export class ReleaseRecordsController {
   constructor(private readonly releasesService: ReleasesService) {}
 
-  /** 状态判定：待冒烟 → 已通过 / 未通过（可改回待冒烟重新冒烟），记录判定人与判定时间 */
+  /** 状态推进：待冒烟 → 进行中 → 已通过 / 未通过；仅终态记录判定人与判定时间 */
   @Patch(':id/status')
   updateStatus(
     @Param('id', ParseIntPipe) id: number,

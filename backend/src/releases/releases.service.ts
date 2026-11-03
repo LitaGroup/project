@@ -22,7 +22,7 @@ const RELEASE_WEBHOOK =
 /** 卡片内提测内容截断长度（lark_md 卡片过长会被飞书折叠/截断） */
 const CONTENT_CARD_MAX = 800;
 
-/** 提测状态可选值（待冒烟 / 已通过 / 未通过） */
+/** 提测状态可选值（待冒烟 / 进行中 / 已通过 / 未通过） */
 export const RELEASE_STATUS_VALUES: string[] = Object.values(ReleaseStatus);
 
 /** 读库状态归一：历史行或异常值为空时按「待冒烟」处理 */
@@ -115,8 +115,9 @@ export class ReleasesService {
   }
 
   /**
-   * 测试同学判定提测结果：待冒烟 → 已通过 / 未通过（也可改回待冒烟重新冒烟）。
-   * 判定为已通过/未通过时记录判定人与判定时间；改回待冒烟时清空。
+   * 测试同学推进提测状态：待冒烟 → 进行中 → 已通过 / 未通过。
+   * 已通过表示测试完成且缺陷全部修复并通过测试，未通过表示未达到验收要求；
+   * 仅这两个终态记录判定人与判定时间，切回待冒烟/进行中时清空。
    * 状态未变化幂等返回（不刷新判定时间）。
    */
   async updateStatus(
@@ -136,7 +137,10 @@ export class ReleasesService {
 
     const now = new Date();
     release.status = status;
-    if (status === ReleaseStatus.PENDING) {
+    if (
+      status === ReleaseStatus.PENDING ||
+      status === ReleaseStatus.IN_PROGRESS
+    ) {
       release.verifier = null;
       release.verifiedAt = null;
     } else {
@@ -209,7 +213,7 @@ export class ReleasesService {
           : '—'
       }`,
       `- 提测内容：${release.content ? '已记录（见项目详情）' : '—'}`,
-      `- 提测状态：**${releaseStatusOf(release.status)}**（由测试同学判定「已通过 / 未通过」）`,
+      `- 提测状态：**${releaseStatusOf(release.status)}**（待冒烟 / 进行中 / 已通过 / 未通过）`,
       `- 已通知：提测群「H5 Release | 提测上线」+ 项目人员私聊（发送失败仅告警，不影响提测）`,
       `- 阅读地址：GET /api/projects/${release.projectId}.md`,
       `- 提测记录：GET /api/releases.md?projectId=${release.projectId}`,
@@ -242,7 +246,7 @@ export class ReleasesService {
       `# ${title}`,
       '',
       `共 ${items.length} 条（按提测时间倒序）。提测：\`POST /api/projects/{projectId}/release.md\`，body \`{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}]}\`（仅 testers 必填且须为用户系统内用户）`,
-      `判定提测结果（由测试同学操作）：\`POST /api/releases/{id}/status.md\`，body \`{"status": "已通过" | "未通过" | "待冒烟"}\`——新提测默认「待冒烟」，改回「待冒烟」会清空判定人/判定时间以便重新冒烟`,
+      `推进提测状态（由测试同学操作）：\`POST /api/releases/{id}/status.md\`，body \`{"status": "待冒烟" | "进行中" | "已通过" | "未通过"}\`——新提测默认「待冒烟」，开始测试后改为「进行中」；仅「已通过 / 未通过」记录判定人/判定时间，切回「待冒烟 / 进行中」会清空`,
       '',
       ...(lines.length > 0 ? lines : ['（暂无提测记录）']),
       '',

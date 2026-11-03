@@ -208,7 +208,7 @@ describe('ReleasesService', () => {
     expect(saved.testers).toEqual(['王五', '赵六', '孙七']);
   });
 
-  it('判定提测状态：已通过记录判定人与时间，改回待冒烟清空', async () => {
+  it('推进提测状态：仅已通过/未通过记录判定人与时间，进行中/待冒烟清空', async () => {
     const release = {
       id: 9,
       projectId: 1,
@@ -232,6 +232,15 @@ describe('ReleasesService', () => {
     const failed = await service.updateStatus(9, ReleaseStatus.FAILED, '赵六');
     expect(failed.status).toBe(ReleaseStatus.FAILED);
     expect(failed.verifier).toBe('赵六');
+
+    const inProgress = await service.updateStatus(
+      9,
+      ReleaseStatus.IN_PROGRESS,
+      '王五',
+    );
+    expect(inProgress.status).toBe(ReleaseStatus.IN_PROGRESS);
+    expect(inProgress.verifier).toBeNull();
+    expect(inProgress.verifiedAt).toBeNull();
 
     const pending = await service.updateStatus(
       9,

@@ -596,7 +596,7 @@ export class ProjectsService {
       `curl '/api/releases.md?projectId=${project.id}'  # 提测记录清单（时间倒序，含状态/判定人/判定时间）`,
       '```',
       '',
-      '判定提测结果（由测试同学操作；新提测默认「待冒烟」，可改为「已通过」/「未通过」，改回「待冒烟」会清空判定人/判定时间以便重新冒烟）：',
+      '推进提测状态（由测试同学操作；新提测默认「待冒烟」，开始测试后改为「进行中」，仅「已通过」/「未通过」记录判定人/判定时间，切回「待冒烟」/「进行中」会清空）：',
       '',
       '```bash',
       `curl -X POST /api/releases/{releaseId}/status.md -H 'Content-Type: application/json' -d '{"status": "已通过"}'`,

@@ -54,15 +54,15 @@ export class ProjectRelease {
   @Column({ type: 'varchar', length: 100, nullable: true })
   operator: string | null;
 
-  /** 提测状态：提测默认「待冒烟」，由测试同学判定「已通过 / 未通过」 */
+  /** 提测状态：待冒烟（默认）/ 进行中 / 已通过 / 未通过 */
   @Column({ type: 'varchar', length: 20, default: ReleaseStatus.PENDING })
   status: string;
 
-  /** 判定人姓名（改为已通过/未通过时记录，改回待冒烟时清空） */
+  /** 判定人姓名（改为已通过/未通过时记录，待冒烟/进行中时清空） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   verifier: string | null;
 
-  /** 判定时间（改为已通过/未通过时记录，改回待冒烟时清空） */
+  /** 判定时间（改为已通过/未通过时记录，待冒烟/进行中时清空） */
   @Column({ type: 'timestamptz', nullable: true })
   verifiedAt: Date | null;
 

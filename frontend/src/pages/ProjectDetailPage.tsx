@@ -4097,7 +4097,7 @@ function ReleasesSection({
   )
 }
 
-/** 提测状态判定下拉：待冒烟（默认）/ 已通过 / 未通过，改回待冒烟清空判定人/判定时间 */
+/** 提测状态判定下拉：待冒烟（默认）/ 进行中 / 已通过 / 未通过，待冒烟/进行中不保留判定人/判定时间 */
 function ReleaseStatusSelect({
   release,
   onChanged,
