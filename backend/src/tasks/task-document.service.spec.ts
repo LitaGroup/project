@@ -431,6 +431,50 @@ describe('TaskDocumentService 任务文档', () => {
     );
   });
 
+  it('登记 HANDOFF 仍是占位时，自动回收同任务其他日期目录的真实交付文档', async () => {
+    currentTask = task({
+      handoffPath: '/task/20261028/TK-0001/HANDOFF',
+      handoffVersion: 1,
+    });
+    const placeholder = node(
+      '/task/20261028/TK-0001/HANDOFF',
+      '---\nversion: "1"\n---\n> 正在处理中……',
+    );
+    const actual = node(
+      '/task/20261027/TK-0001/HANDOFF',
+      '# 实际交付\n\n真实内容',
+      new Date('2026-10-27T18:00:00+08:00'),
+    );
+    knowledge.findNodeByPath.mockResolvedValueOnce(placeholder);
+    knowledge.listArticlesByPrefix.mockResolvedValue([placeholder, actual]);
+    knowledge.update.mockImplementationOnce((id: string) =>
+      Promise.resolve({
+        ...actual,
+        id,
+        content: '---\nversion: "1"\n---\n# 实际交付\n\n真实内容',
+      }),
+    );
+
+    const document = await service.ensureHandoff(currentTask);
+
+    expect(document.path).toBe('/task/20261027/TK-0001/HANDOFF');
+    expect(document.content).toBe('# 实际交付\n\n真实内容');
+    expect(currentTask.handoffPath).toBe('/task/20261027/TK-0001/HANDOFF');
+  });
+
+  it('任务文档清单解析 frontmatter description', async () => {
+    knowledge.listArticlesByPrefix.mockResolvedValue([
+      node(
+        '/task/20261028/TK-0001/API',
+        '---\ndescription: "接口说明文档"\n---\n# API',
+      ),
+    ]);
+
+    const view = await service.taskDocumentsView(currentTask);
+
+    expect(view.documents[0].description).toBe('接口说明文档');
+  });
+
   it('任务文档 Tab 返回直属 Markdown 文档并提取图片/文件产物', async () => {
     knowledge.listArticlesByPrefix.mockResolvedValue([
       node(

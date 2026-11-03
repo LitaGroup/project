@@ -288,6 +288,9 @@ export function TaskDetailView({
   }
 
   const durationMs = taskDurationMs(currentTask, now)
+  const handoffPlaceholder =
+    !handoffDoc?.content.trim() ||
+    handoffDoc.content.trim() === '> 正在处理中……'
   const agentName = pipeline.find(
     (stage) => stage.task.id === currentTask.id,
   )?.agent?.name
@@ -416,10 +419,14 @@ export function TaskDetailView({
                     </>
                   ) : null
                 }
-                content={handoffDoc?.content}
+                content={handoffPlaceholder ? undefined : handoffDoc?.content}
                 loading={docsLoading && !handoffDoc}
                 error={!handoffDoc ? docsError : null}
-                emptyText="暂无交付文档"
+                emptyText={
+                  handoffDoc
+                    ? '执行方尚未更新交付文档，更新后会自动展示'
+                    : '暂无交付文档'
+                }
                 contentKey={handoffDoc?.version}
               />
             )}
@@ -445,11 +452,9 @@ export function TaskDetailView({
 
             {contentTab === 'documents' && (
               <TaskDocumentsPanel
-                taskId={taskId}
                 data={documents}
                 loading={docsLoading}
                 error={docsError}
-                revision={docsRevision}
               />
             )}
 

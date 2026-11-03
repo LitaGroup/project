@@ -53,6 +53,8 @@ export interface TaskDocumentEntry {
   /** Markdown 接口地址（带 .md） */
   markdownUrl: string;
   title: string;
+  /** 文档 Frontmatter 中的描述（可空） */
+  description: string | null;
   updatedAt: string | null;
 }
 
@@ -231,6 +233,17 @@ function frontmatterVersion(markdown: string): number | null {
   return Number.isFinite(version) && version > 0 ? version : null;
 }
 
+/** 读取文档 Frontmatter 的 description（支持单/双引号，不做完整 YAML 解析） */
+function frontmatterDescription(markdown: string): string | null {
+  if (!hasYamlFrontmatter(markdown)) return null;
+  const match = markdown.match(
+    /^description:\s*(?:"([^"]*)"|'([^']*)'|(.+?))\s*$/m,
+  );
+  if (!match) return null;
+  const value = (match[1] ?? match[2] ?? match[3] ?? '').trim();
+  return value || null;
+}
+
 /**
  * 任务文档（统一放在 /task/{yyyyMMdd}/{任务编号}/）：
  * - HANDOFF：任务创建时生成，执行机器人/需求方持续维护，申请验收时锁定版本
@@ -291,9 +304,23 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     this.assertKnowledge();
     const plannedPath = this.handoffPath(task);
     let node = await this.knowledge.findNodeByPath(plannedPath);
-    if (!node && !task.handoffPath?.trim() && options.legacy !== false) {
+    if (!node && options.legacy !== false) {
       node = await this.findLegacyHandoff(task);
     }
+    let body = node
+      ? stripKnowledgeFrontmatter(node.content ?? '').trim()
+      : INITIAL_HANDOFF_BODY;
+
+    // 历史任务可能因早期读取在派生路径生成了占位文档，而真实 HANDOFF 位于
+    // 其它日期目录。只要当前仍是占位正文，就尝试回收同任务的真实交付文档。
+    if (options.legacy !== false && (!node || !this.hasHandoffBody(body))) {
+      const recovered = await this.findLegacyHandoff(task);
+      if (recovered && recovered.id !== node?.id) {
+        node = recovered;
+        body = stripKnowledgeFrontmatter(recovered.content ?? '').trim();
+      }
+    }
+
     const path = node?.path ?? plannedPath;
     if (node && node.kind !== 'article') {
       throw new BadRequestException(`任务文档路径 ${path} 已被目录占用`);
@@ -301,9 +328,6 @@ export class TaskDocumentService implements OnApplicationBootstrap {
 
     const now = new Date();
     let version = task.handoffVersion > 0 ? task.handoffVersion : 0;
-    let body = node
-      ? stripKnowledgeFrontmatter(node.content ?? '').trim()
-      : INITIAL_HANDOFF_BODY;
     if (!version) {
       version = node ? (frontmatterVersion(node.content ?? '') ?? 1) : 1;
     }
@@ -640,6 +664,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       url: `/docs/detail/${encodeKnowledgePath(path)}`,
       markdownUrl: `/docs/detail/${encodeKnowledgePath(path)}.md`,
       title,
+      description: frontmatterDescription(content),
       updatedAt: now.toISOString(),
     };
   }
@@ -875,6 +900,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       url: `/docs/detail/${encodeKnowledgePath(node.path)}`,
       markdownUrl: `/docs/detail/${encodeKnowledgePath(node.path)}.md`,
       title: node.title,
+      description: frontmatterDescription(node.content ?? ''),
       updatedAt: node.updatedAt ? node.updatedAt.toISOString() : null,
     };
   }
@@ -936,6 +962,12 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       return (
         nodes
           .filter((node) => pattern.test(node.path))
+          // 只回收真实正文，避免把另一个占位 HANDOFF 当成有效交付
+          .filter((node) =>
+            this.hasHandoffBody(
+              stripKnowledgeFrontmatter(node.content ?? '').trim(),
+            ),
+          )
           .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ??
         null
       );

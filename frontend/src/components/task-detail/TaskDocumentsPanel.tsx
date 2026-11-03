@@ -1,70 +1,26 @@
-import { useEffect, useState } from 'react'
 import { Badge } from '@appica/ui-react/badge'
-import {
-  api,
-  type TaskDocumentContent,
-  type TaskDocumentsView,
-} from '../../lib/api'
-import { TaskMarkdownDocumentView } from './TaskMarkdownDocumentView'
+import type { TaskDocumentsView } from '../../lib/api'
 
 interface TaskDocumentsPanelProps {
-  taskId: number
   data: TaskDocumentsView | null
   loading: boolean
   error: string | null
-  /** SSE 文档刷新版本，用于重读当前选中文档正文 */
-  revision: number
 }
 
 /**
- * 任务详情「文档」Tab：任务目录下全部 Markdown 文档 + 文档引用的图片/文件。
- * 文档清单由父页面按任务 SSE 刷新，正文按当前选中项读取。
+ * 任务详情「文档」Tab：仅展示任务文档索引。
+ * 每条展示标题、描述（存在时）与文件路径；点击后新窗口打开文档详情页。
+ * 文档中引用的图片/文件保留为链接清单，不再在 Tab 内预览正文。
  */
 export function TaskDocumentsPanel({
-  taskId,
   data,
   loading,
   error,
-  revision,
 }: TaskDocumentsPanelProps) {
-  const [selectedName, setSelectedName] = useState<string | null>(null)
-  const [content, setContent] = useState<TaskDocumentContent | null>(null)
-  const [contentLoading, setContentLoading] = useState(false)
-  const [contentError, setContentError] = useState<string | null>(null)
-
   const documents = data?.documents ?? []
   const artifacts = data?.artifacts ?? []
   const images = artifacts.filter((artifact) => artifact.kind === 'image')
   const files = artifacts.filter((artifact) => artifact.kind === 'file')
-  const selectedDocument =
-    documents.find((doc) => doc.name === selectedName) ?? documents[0] ?? null
-  const activeName = selectedDocument?.name ?? null
-  const preview = content?.name === activeName ? content : null
-
-  useEffect(() => {
-    if (!activeName) return
-    let active = true
-    // oxlint-disable-next-line react/set-state-in-effect
-    setContentLoading(true)
-    setContentError(null)
-    api
-      .getTaskDocument(taskId, activeName)
-      .then((next) => {
-        if (active) setContent(next)
-      })
-      .catch((e: Error) => {
-        if (active) {
-          setContent(null)
-          setContentError(e.message)
-        }
-      })
-      .finally(() => {
-        if (active) setContentLoading(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [taskId, activeName, revision])
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
@@ -94,124 +50,99 @@ export function TaskDocumentsPanel({
         </p>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 max-lg:grid-rows-[240px_minmax(320px,1fr)] lg:grid-cols-[250px_minmax(0,1fr)]">
-        <aside className="min-h-0 overflow-y-auto border-b border-border p-2 lg:border-r lg:border-b-0">
-          {loading && documents.length === 0 ? (
-            <p className="p-2 text-xs text-foreground-muted">正在加载文档…</p>
-          ) : documents.length === 0 ? (
-            <p className="p-2 text-xs text-foreground-muted">暂无任务文档</p>
-          ) : (
-            <ul className="flex flex-col gap-0.5">
-              {documents.map((doc) => {
-                const active = doc.name === activeName
-                return (
-                  <li key={doc.path}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedName(doc.name)}
-                      className={`w-full rounded-[var(--radius-md)] px-2.5 py-2 text-left transition-colors ${
-                        active
-                          ? 'bg-background-muted text-foreground-intense'
-                          : 'text-foreground-muted hover:bg-background-muted hover:text-foreground-intense'
-                      }`}
-                    >
-                      <span className="block truncate text-sm">{doc.name}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-foreground-subtle">
-                        {doc.updatedAt
-                          ? new Date(doc.updatedAt).toLocaleString()
-                          : '未知更新时间'}
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {loading && documents.length === 0 ? (
+          <p className="px-1 py-2 text-sm text-foreground-muted">
+            正在加载文档…
+          </p>
+        ) : documents.length === 0 ? (
+          <p className="px-1 py-2 text-sm text-foreground-muted">
+            暂无任务文档
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {documents.map((doc) => (
+              <li key={doc.path}>
+                <a
+                  href={doc.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-[var(--radius-md)] border border-border bg-background px-3 py-2.5 no-underline transition-colors hover:border-border-strong hover:bg-background-muted"
+                  title={doc.path}
+                >
+                  <span className="block break-words text-sm font-medium text-foreground-intense underline decoration-border-strong underline-offset-2">
+                    {doc.title || doc.name}
+                  </span>
+                  {doc.description && (
+                    <span className="mt-1 block break-words text-xs leading-relaxed text-foreground-muted">
+                      {doc.description}
+                    </span>
+                  )}
+                  <span className="mt-1 block break-all font-mono text-[11px] text-foreground-subtle">
+                    {doc.path}
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
 
-          {images.length > 0 && (
-            <section className="mt-3 border-t border-border pt-3">
-              <h3 className="mb-2 px-1 text-xs font-medium text-foreground-muted">
-                图片（{images.length}）
-              </h3>
-              <div className="grid grid-cols-2 gap-2">
-                {images.map((image) => (
+        {images.length > 0 && (
+          <section className="mt-4 border-t border-border pt-3">
+            <h3 className="mb-2 text-xs font-medium text-foreground-muted">
+              图片（{images.length}）
+            </h3>
+            <ul className="flex flex-col gap-1.5">
+              {images.map((image) => (
+                <li key={image.url}>
                   <a
-                    key={image.url}
                     href={image.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="group min-w-0 rounded-[var(--radius-md)] border border-border bg-background p-1"
-                    title={`${image.name} · 来自 ${image.sourceDocument}`}
+                    className="block rounded-[var(--radius-md)] px-2 py-1.5 no-underline hover:bg-background-muted"
+                    title={image.url}
                   >
-                    <img
-                      src={image.url}
-                      alt={image.name}
-                      className="h-20 w-full rounded-[var(--radius-sm)] object-cover"
-                      loading="lazy"
-                    />
-                    <span className="mt-1 block truncate px-0.5 text-[10px] text-foreground-muted">
+                    <span className="block break-words text-xs text-foreground-emphasis underline decoration-border-strong underline-offset-2">
                       {image.name}
                     </span>
+                    <span className="mt-0.5 block break-all font-mono text-[10px] text-foreground-subtle">
+                      {image.url}
+                    </span>
                   </a>
-                ))}
-              </div>
-            </section>
-          )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-          {files.length > 0 && (
-            <section className="mt-3 border-t border-border pt-3">
-              <h3 className="mb-2 px-1 text-xs font-medium text-foreground-muted">
-                文件（{files.length}）
-              </h3>
-              <ul className="flex flex-col gap-1">
-                {files.map((file) => (
-                  <li key={file.url} className="min-w-0">
-                    <a
-                      href={file.url}
-                      download
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-[var(--radius-md)] px-2 py-1.5 text-xs text-foreground-emphasis hover:bg-background-muted"
-                      title={`${file.name} · 来自 ${file.sourceDocument}`}
-                    >
-                      <span className="block truncate underline">
-                        {file.name}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[10px] text-foreground-subtle">
-                        {file.sourceDocument}
-                      </span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </aside>
-
-        <div className="min-h-0 min-w-0 p-2">
-          {selectedDocument ? (
-            <TaskMarkdownDocumentView
-              title={selectedDocument.name}
-              subtitle={selectedDocument.path}
-              meta={
-                selectedDocument.updatedAt
-                  ? `更新于 ${new Date(
-                      selectedDocument.updatedAt,
-                    ).toLocaleString()}`
-                  : null
-              }
-              content={preview?.content}
-              loading={contentLoading}
-              error={contentError}
-              emptyText="文档内容为空"
-              contentKey={`${selectedDocument.path}:${selectedDocument.updatedAt ?? ''}:${preview?.updatedAt ?? ''}:${preview?.content.length ?? 0}`}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-foreground-muted">
-              选择左侧文档查看内容
-            </div>
-          )}
-        </div>
+        {files.length > 0 && (
+          <section className="mt-4 border-t border-border pt-3">
+            <h3 className="mb-2 text-xs font-medium text-foreground-muted">
+              文件（{files.length}）
+            </h3>
+            <ul className="flex flex-col gap-1.5">
+              {files.map((file) => (
+                <li key={file.url}>
+                  <a
+                    href={file.url}
+                    download
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block rounded-[var(--radius-md)] px-2 py-1.5 no-underline hover:bg-background-muted"
+                    title={file.url}
+                  >
+                    <span className="block break-words text-xs text-foreground-emphasis underline decoration-border-strong underline-offset-2">
+                      {file.name}
+                    </span>
+                    <span className="mt-0.5 block break-all font-mono text-[10px] text-foreground-subtle">
+                      {file.url}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </section>
   )

@@ -1,5 +1,15 @@
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { MarkdownEditor } from '../MarkdownEditor'
+
+/** MarkdownEditor 是非受控组件：内容一旦变化必须换 key 重新挂载，避免继续显示旧正文。 */
+function contentFingerprint(content: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${content.length}:${(hash >>> 0).toString(36)}`
+}
 
 interface TaskMarkdownDocumentViewProps {
   title: string
@@ -25,6 +35,10 @@ export function TaskMarkdownDocumentView({
   contentKey,
 }: TaskMarkdownDocumentViewProps) {
   const hasContent = Boolean(content?.trim())
+  const editorKey = useMemo(
+    () => `${contentKey ?? ''}:${contentFingerprint(content ?? '')}`,
+    [content, contentKey],
+  )
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
@@ -60,11 +74,7 @@ export function TaskMarkdownDocumentView({
         </div>
       ) : (
         <div className="md-editor-scroll min-h-0 flex-1">
-          <MarkdownEditor
-            key={contentKey ?? content}
-            value={content ?? ''}
-            readOnly
-          />
+          <MarkdownEditor key={editorKey} value={content ?? ''} readOnly />
         </div>
       )}
     </section>

@@ -1071,7 +1071,7 @@ export interface Worker {
   enabled: boolean
   /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
-  /** 工位路径 {WORKER_BASE_DIR}/worker/{id}（未配置 env 为 null） */
+  /** 工位路径：生产 {WORKER_BASE_DIR}/worker/{id}，开发 {WORKER_BASE_DIR}/worker-dev/{id}（未配置 env 为 null） */
   workdir: string | null
   liveStatus: WorkerLiveStatus
   activeTask: { id: number; code: string; title: string; status: string } | null
@@ -1673,6 +1673,8 @@ export interface TaskDocumentEntry {
   /** Markdown 接口地址 */
   markdownUrl: string
   title: string
+  /** 文档 Frontmatter 中的描述 */
+  description: string | null
   updatedAt: string | null
 }
 
