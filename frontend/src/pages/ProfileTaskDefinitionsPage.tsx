@@ -22,6 +22,7 @@ import {
   ToolbarInput,
 } from '@appica/ui-react/toolbar'
 import { api, type TaskTemplate, type TaskTypeDef, type Worker } from '../lib/api'
+import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { useAuth } from '../context/AuthContext'
 import { TaskTemplateTable } from '../components/TaskTemplateTable'
 
@@ -33,11 +34,11 @@ function filterTemplates(
   keyword: string,
   typeFilter: string,
 ): TaskTemplate[] {
-  const query = keyword.trim().toLowerCase()
   return list.filter((template) => {
-    if (query) {
-      const haystack = `${template.name} ${template.description ?? ''}`.toLowerCase()
-      if (!haystack.includes(query)) return false
+    if (
+      !matchesPinyinSearch(keyword, [template.name, template.description])
+    ) {
+      return false
     }
     if (typeFilter !== 'all' && template.type !== typeFilter) return false
     return true
@@ -229,7 +230,7 @@ function FilterToolbar({
         className="w-64"
         render={
           <Input
-            placeholder="搜索名称、描述…"
+            placeholder="搜索名称、描述或拼音…"
             clearable
             value={keyword}
             onChange={(e) => onKeyword(e.target.value)}

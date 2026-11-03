@@ -62,6 +62,9 @@ importers:
       pg:
         specifier: ^8.23.1
         version: 8.23.1
+      pinyin-pro:
+        specifier: ^3.29.5
+        version: 3.29.5
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -195,6 +198,9 @@ importers:
       mermaid:
         specifier: ^12.2.0
         version: 12.2.0
+      pinyin-pro:
+        specifier: ^3.29.5
+        version: 3.29.5
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -5158,6 +5164,9 @@ packages:
   picomatch@4.0.5:
     resolution: {integrity: sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A==}
     engines: {node: '>=12'}
+
+  pinyin-pro@3.29.5:
+    resolution: {integrity: sha512-Fk5YoRmtdHqJWqAuzYVG/NzvzeCbaG+ZEwbY6Nbps3QAIrvQQEtcm49frcyCM8i2b5najnzPDtYqrHRYTTiuwQ==}
 
   pirates@4.0.7:
     resolution: {integrity: sha512-TfySrs/5nm8fQJDcBDuUng3VOUKsd7S+zqvbOTiGXHfxX4wK31ard+hoNuvkicM/2YFzlpDgABOevKSsB4G/FA==}
@@ -12190,6 +12199,8 @@ snapshots:
   picomatch@4.0.4: {}
 
   picomatch@4.0.5: {}
+
+  pinyin-pro@3.29.5: {}
 
   pirates@4.0.7: {}
 

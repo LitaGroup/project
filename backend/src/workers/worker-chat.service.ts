@@ -7,6 +7,7 @@ import type { MessageEvent } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Observable, Subscription } from 'rxjs';
+import { matchesPinyinSearch } from '../common/pinyin-search';
 import { Worker } from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
 import {
@@ -59,12 +60,9 @@ export class WorkerChatService {
     query?: string,
   ): Promise<WorkerDebugOption[]> {
     const options = await this.visibleWorkers(userId);
-    const q = query?.trim().toLowerCase();
-    if (!q) return options;
+    if (!query?.trim()) return options;
     return options.filter((worker) =>
-      `${worker.id} ${worker.name} ${worker.intro ?? ''}`
-        .toLowerCase()
-        .includes(q),
+      matchesPinyinSearch(query, [worker.id, worker.name, worker.intro]),
     );
   }
 

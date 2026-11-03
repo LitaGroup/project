@@ -66,6 +66,35 @@ describe('WorkerChatService', () => {
     ]);
   });
 
+  it('机器人搜索支持中文、全拼、首字母、英文与 ID', async () => {
+    const { service } = createService({
+      options: [
+        option(1001, '活动开发机器人'),
+        option(1002, 'Data Agent'),
+        option(1003, '女武神'),
+      ],
+      owners: [
+        { id: 1001, personalAgentUserId: null },
+        { id: 1002, personalAgentUserId: null },
+        { id: 1003, personalAgentUserId: null },
+      ],
+    });
+
+    for (const query of [
+      '开发',
+      'huodongkaifa',
+      'hdkfjqr',
+      'agent',
+      '1002',
+      'nvwushen',
+    ]) {
+      await expect(service.listWorkers(10, query)).resolves.toHaveLength(1);
+    }
+    await expect(service.listWorkers(10, '不存在的机器人')).resolves.toEqual(
+      [],
+    );
+  });
+
   it('会话按首条消息时间倒序并限制 20 条', async () => {
     const options = Array.from({ length: 22 }, (_, index) => option(index + 1));
     const sessions = options.map((worker, index) => ({

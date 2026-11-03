@@ -23,6 +23,7 @@ import {
   type WorkerDebugSnapshot,
 } from '../lib/api'
 import { visibleEventSource } from '../lib/event-source'
+import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 import { DebugChat } from '../components/agent-chat/DebugChat'
 
@@ -136,15 +137,13 @@ export function RobotChatPage() {
     )
   }, [selectedId, sessions, snapshot?.worker, workers])
 
-  const filteredWorkers = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return workers
-    return workers.filter((worker) =>
-      `${worker.id} ${worker.name} ${worker.intro ?? ''}`
-        .toLowerCase()
-        .includes(q),
-    )
-  }, [search, workers])
+  const filteredWorkers = useMemo(
+    () =>
+      workers.filter((worker) =>
+        matchesPinyinSearch(search, [worker.id, worker.name, worker.intro]),
+      ),
+    [search, workers],
+  )
 
   const selectWorker = useCallback(
     (id: number) => {
@@ -267,7 +266,7 @@ export function RobotChatPage() {
             onChange={(event) => setSearch(event.target.value)}
             onClear={() => setSearch('')}
             clearable
-            placeholder="搜索名称、简介、ID…"
+            placeholder="搜索名称、简介、ID 或拼音…"
             aria-label="搜索机器人"
           />
           {filteredWorkers.length === 0 ? (

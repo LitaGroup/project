@@ -21,6 +21,7 @@
     "framer-motion": "^14.6.0",
     "github-slugger": "^2.0.0",
     "mermaid": "^12.2.0",
+    "pinyin-pro": "^3.29.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "10.1.0",

@@ -21,12 +21,14 @@ import {
   DialogTitle,
 } from '@appica/ui-react/dialog'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@appica/ui-react/select'
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  createComboboxItems,
+} from '@appica/ui-react/combobox'
 import {
   ArrowsExchange,
   Ban,
@@ -48,6 +50,7 @@ import {
   type WorkbenchTask,
   type Worker,
 } from '../../lib/api'
+import { matchesPinyinSearch } from '../../lib/pinyin-search'
 import { TaskStatusBadge } from '../StatusBadge'
 import {
   TaskChatMessageItem,
@@ -115,6 +118,27 @@ export function TaskWorkbenchPanel({
   const [subtaskTitle, setSubtaskTitle] = useState('')
   const [subtaskInput, setSubtaskInput] = useState('')
   const [subtaskOutputSpec, setSubtaskOutputSpec] = useState('')
+
+  const assignWorkers = useMemo(
+    () => workers.filter((worker) => worker.id !== task?.agentId),
+    [workers, task?.agentId],
+  )
+  const assignWorkerItems = useMemo(
+    () =>
+      createComboboxItems(assignWorkers, {
+        getValue: (worker) => String(worker.id),
+        getLabel: (worker) => worker.name,
+      }),
+    [assignWorkers],
+  )
+  const subtaskTemplateItems = useMemo(
+    () =>
+      createComboboxItems(templates, {
+        getValue: (template) => String(template.id),
+        getLabel: (template) => template.name,
+      }),
+    [templates],
+  )
 
   const roles = task?.workbenchRoles ?? []
   const isAgent = roles.includes('agent')
@@ -687,30 +711,31 @@ export function TaskWorkbenchPanel({
             <DialogBody>
               <label className="block space-y-1">
                 <span className="text-xs text-foreground-muted">处理机器人</span>
-                <Select
-                  value={assignWorkerId}
+                <Combobox
+                  items={assignWorkerItems}
+                  value={assignWorkerId || null}
                   onValueChange={(value) =>
                     setAssignWorkerId(String(value ?? ''))
                   }
-                  items={Object.fromEntries(
-                    workers
-                      .filter((worker) => worker.id !== task?.agentId)
-                      .map((worker) => [String(worker.id), worker.name]),
-                  )}
+                  filter={(worker: Worker, query: string) =>
+                    matchesPinyinSearch(query, [worker.name])
+                  }
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择机器人" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {workers
-                      .filter((worker) => worker.id !== task?.agentId)
-                      .map((worker) => (
-                        <SelectItem key={worker.id} value={String(worker.id)}>
+                  <ComboboxInput
+                    placeholder="搜索机器人名称"
+                    aria-label="处理机器人"
+                  />
+                  <ComboboxContent>
+                    <ComboboxEmpty>没有匹配的机器人</ComboboxEmpty>
+                    <ComboboxList>
+                      {(worker: Worker) => (
+                        <ComboboxItem key={worker.id} value={String(worker.id)}>
                           {worker.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+                        </ComboboxItem>
+                      )}
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
               </label>
             </DialogBody>
           )}
@@ -720,32 +745,37 @@ export function TaskWorkbenchPanel({
               <div className="space-y-3">
                 <label className="block space-y-1">
                   <span className="text-xs text-foreground-muted">任务定义</span>
-                  <Select
-                    value={subtaskTemplateId}
+                  <Combobox
+                    items={subtaskTemplateItems}
+                    value={subtaskTemplateId || null}
                     onValueChange={(value) =>
                       setSubtaskTemplateId(String(value ?? ''))
                     }
-                    items={Object.fromEntries(
-                      templates.map((template) => [
-                        String(template.id),
+                    filter={(template: TaskTemplate, query: string) =>
+                      matchesPinyinSearch(query, [
                         template.name,
-                      ]),
-                    )}
+                        template.type,
+                      ])
+                    }
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择任务定义" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {templates.map((template) => (
-                        <SelectItem
-                          key={template.id}
-                          value={String(template.id)}
-                        >
-                          {template.name} · {template.type}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <ComboboxInput
+                      placeholder="搜索任务定义名称或类型"
+                      aria-label="任务定义"
+                    />
+                    <ComboboxContent>
+                      <ComboboxEmpty>没有匹配的任务定义</ComboboxEmpty>
+                      <ComboboxList>
+                        {(template: TaskTemplate) => (
+                          <ComboboxItem
+                            key={template.id}
+                            value={String(template.id)}
+                          >
+                            {template.name} · {template.type}
+                          </ComboboxItem>
+                        )}
+                      </ComboboxList>
+                    </ComboboxContent>
+                  </Combobox>
                 </label>
                 <label className="block space-y-1">
                   <span className="text-xs text-foreground-muted">标题</span>

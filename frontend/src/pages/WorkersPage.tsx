@@ -41,6 +41,7 @@ import {
   type Executor,
   type Worker,
 } from '../lib/api'
+import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { WorkerLiveBadge } from '../components/StatusBadge'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 
@@ -80,11 +81,11 @@ export function WorkersPage() {
   )
 
   const filtered = useMemo(() => {
-    const query = keyword.trim().toLowerCase()
     return (workers ?? []).filter((worker) => {
-      if (query) {
-        const haystack = `${worker.id} ${worker.name} ${worker.intro ?? ''}`.toLowerCase()
-        if (!haystack.includes(query)) return false
+      if (
+        !matchesPinyinSearch(keyword, [worker.id, worker.name, worker.intro])
+      ) {
+        return false
       }
       if (roleFilter !== 'all' && worker.role !== roleFilter) return false
       if (statusFilter !== 'all' && worker.liveStatus !== statusFilter) return false
@@ -144,7 +145,7 @@ export function WorkersPage() {
           className="w-64"
           render={
             <Input
-              placeholder="搜索名称、简介、ID…"
+              placeholder="搜索名称、简介、ID 或拼音…"
               clearable
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}

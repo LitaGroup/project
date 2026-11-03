@@ -157,6 +157,7 @@ TypeORM `synchronize` 仅在非 production 开启，**后续生产结构变更�
 - 飞书链接解析支持 `docx/docs/sheets/base/wiki` 五种路径；wiki 节点先经 `resolveWiki` 转成实际资源（query 参数如 sheet/table/view 会从原链接透传）。
 - bitable `records/search` 必须传 `automatic_fields: true`，否则响应没有记录级 `last_modified_time`（增量同步依赖它）。
 - **飞书 token 统一从 Lita 平台 API 获取**（`POST {LITA_API_HOST}/admin-ai/v1/auth/platform-token/getToken`，header `L-USER-TOKEN`，测试/生产一致），`FeishuService` 启动预热 + 每 30 分钟定时刷新（`@Cron`）；兜底才是 `FEISHU_APP_ID/SECRET` 自建应用模式。不要再引入静态 token。
+- **任务定义与机器人搜索统一支持拼音**：前端搜索/联想复用 `frontend/src/lib/pinyin-search.ts` 的 `matchesPinyinSearch`，后端服务端关键词过滤复用 `backend/src/common/pinyin-search.ts`；保留中文/英文/ID 原文子串匹配，同时支持无声调全拼与拼音首字母（如 `huodongkaifajiqiren` / `hdkfjqr`），拼音匹配忽略空格标点、`nv` 可匹配 `nü`。新增任务定义/机器人相关搜索或 Autocomplete/Combobox 时必须复用，避免退回纯名称匹配。
 - **前端 SSE 统一用 `frontend/src/lib/event-source.ts` 的 `visibleEventSource`**（不要直接 `new EventSource`）：标签页隐藏时主动断开、恢复可见时重连。浏览器对同源 HTTP/1.1 只有 6 个并发连接，任务详情等页面常驻多条 SSE（任务对话 + 我的 AI），同时开几个任务/机器人标签页就会占满连接池，后续接口请求一直排队（典型表现：左侧任务列表已加载、右侧正文停在骨架屏）。服务端所有 SSE 在订阅建立时都会先推快照，重连后状态不会丢。
 
 ## Appica UI 硬性规则（违反会静默出错）

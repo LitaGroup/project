@@ -16,6 +16,7 @@ import {
   AutocompleteItem,
 } from '@appica/ui-react/autocomplete'
 import { api, type TaskTemplate, type Worker } from '../lib/api'
+import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import {
   MarkdownEditor,
@@ -213,11 +214,14 @@ export function TaskCreatePage() {
                 items={templateOptions}
                 value={templateName}
                 onValueChange={(value) => changeTemplate(value as string)}
+                filter={(item: unknown, query: string) =>
+                  matchesPinyinSearch(query, [String(item)])
+                }
                 clearable
                 openOnInputClick
               >
                 <AutocompleteInput
-                  placeholder="搜索任务定义名称，可留空"
+                  placeholder="搜索任务定义名称或拼音，可留空"
                   aria-label="任务定义"
                 />
                 <AutocompleteContent>
@@ -232,7 +236,7 @@ export function TaskCreatePage() {
                 </AutocompleteContent>
               </Autocomplete>
               <span className="text-xs text-foreground-muted">
-                可留空；输入名称搜索，选中后自动带入该定义配置的执行机器人
+                可留空；支持名称、全拼或首字母搜索，选中后自动带入该定义配置的执行机器人
               </span>
             </label>
             <label className="flex flex-col gap-1 text-sm">
@@ -241,11 +245,14 @@ export function TaskCreatePage() {
                 items={workerOptions}
                 value={agentName}
                 onValueChange={(value) => changeAgent(value as string)}
+                filter={(item: unknown, query: string) =>
+                  matchesPinyinSearch(query, [String(item)])
+                }
                 clearable
                 openOnInputClick
               >
                 <AutocompleteInput
-                  placeholder="搜索机器人名称，留空自动分配"
+                  placeholder="搜索机器人名称或拼音，留空自动分配"
                   aria-label="执行机器人"
                 />
                 <AutocompleteContent>

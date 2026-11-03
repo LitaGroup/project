@@ -16,6 +16,7 @@ import {
   ToolbarInput,
 } from '@appica/ui-react/toolbar'
 import { api, type TaskTemplate, type TaskTypeDef, type Worker } from '../lib/api'
+import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { useAuth } from '../context/AuthContext'
 import {
   SYSTEM_TASK_TEMPLATE_IDS,
@@ -68,11 +69,11 @@ export function TaskTemplatesPage() {
   )
 
   const filtered = useMemo(() => {
-    const query = keyword.trim().toLowerCase()
     return (templates ?? []).filter((template) => {
-      if (query) {
-        const haystack = `${template.name} ${template.description ?? ''}`.toLowerCase()
-        if (!haystack.includes(query)) return false
+      if (
+        !matchesPinyinSearch(keyword, [template.name, template.description])
+      ) {
+        return false
       }
       if (typeFilter !== 'all' && template.type !== typeFilter) return false
       if (workerFilter === 'none') {
@@ -129,7 +130,7 @@ export function TaskTemplatesPage() {
           className="w-64"
           render={
             <Input
-              placeholder="搜索名称、描述…"
+              placeholder="搜索名称、描述或拼音…"
               clearable
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}

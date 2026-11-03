@@ -25,6 +25,7 @@ import {
   type TaskTemplate,
   type TicketConfig,
 } from '../lib/api'
+import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 
 /** 系统任务定义：未知任务 + 六类工单调度，不能作为后续转派定义 */
@@ -177,14 +178,9 @@ function EditConfigDialog({
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
 
-  const filtered = candidates.filter((template) => {
-    const q = query.trim().toLowerCase()
-    return (
-      !q ||
-      template.name.toLowerCase().includes(q) ||
-      template.type.toLowerCase().includes(q)
-    )
-  })
+  const filtered = candidates.filter((template) =>
+    matchesPinyinSearch(query, [template.name, template.type]),
+  )
 
   const toggle = (id: number, checked: boolean) => {
     setSelected((current) => {
@@ -225,7 +221,7 @@ function EditConfigDialog({
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索任务定义名称或类型…"
+              placeholder="搜索任务定义名称、类型或拼音…"
             />
             <div className="max-h-96 min-h-32 overflow-auto rounded-[var(--radius-md)] border border-border-strong">
               {filtered.length === 0 ? (

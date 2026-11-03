@@ -32,6 +32,7 @@ import {
   type TaskTypeDef,
   type Worker,
 } from '../lib/api'
+import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import {
   MarkdownEditor,
@@ -301,6 +302,9 @@ export function TaskTemplateEditPage() {
                 items={agentItems}
                 value={agentIds}
                 onValueChange={(value) => setAgentIds(value as string[])}
+                filter={(worker: AgentOption, query: string) =>
+                  matchesPinyinSearch(query, [worker.name])
+                }
               >
                 <ComboboxChips
                   className="w-full"
@@ -329,7 +333,7 @@ export function TaskTemplateEditPage() {
                 </ComboboxContent>
               </Combobox>
               <span className="text-xs text-foreground-muted">
-                可添加多个；不选择时平台按任务类型继续匹配，仍无法匹配则归入未知任务
+                可添加多个，支持名称、全拼或首字母搜索；不选择时平台按任务类型继续匹配，仍无法匹配则归入未知任务
               </span>
             </label>
           </div>
