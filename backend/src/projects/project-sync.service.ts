@@ -154,6 +154,17 @@ export function extractLinkedNames(
   return names.length ? names.join('、') : undefined;
 }
 
+/**
+ * 记录级修改时间统一转毫秒。飞书接口当前返回毫秒时间戳，历史版本曾返回微秒；
+ * 按数量级兼容两种格式，避免毫秒被再除 1000 后误判为 1970 年。
+ */
+export function toLastModifiedMs(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return value >= 1e14 ? Math.floor(value / 1000) : value;
+}
+
 /** 日期字段：飞书存 ms 时间戳（表时区通常为 +08:00），转为 YYYY-MM-DD */
 function extractDate(value: unknown): string | null {
   if (typeof value !== 'number') return null;
@@ -244,9 +255,9 @@ export class ProjectSyncService {
       tableId,
       viewId,
     );
-    // search 接口 automatic_fields 的 last_modified_time 为微秒，需 /1000 转毫秒
+    // search 接口 automatic_fields 的 last_modified_time 当前为毫秒，兼容历史微秒格式
     const fresh = records.filter(
-      (r) => (r.last_modified_time ?? 0) / 1000 >= since,
+      (r) => toLastModifiedMs(r.last_modified_time) >= since,
     );
 
     // 资源人员现用 SingleLink 字段（关联技术资源表），先批量解析关联记录姓名

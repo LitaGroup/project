@@ -3,6 +3,7 @@ import {
   extractDocLinks,
   extractLinkedNames,
   toIterationCycle,
+  toLastModifiedMs,
   toProjectStatus,
 } from './project-sync.service';
 
@@ -36,6 +37,24 @@ describe('toProjectStatus（需求池状态 → 平台项目状态）', () => {
     expect(toProjectStatus(null, noDevs)).toBe(ProjectStatus.PLANNED);
     expect(toProjectStatus(undefined, noDevs)).toBe(ProjectStatus.PLANNED);
     expect(toProjectStatus(42, noDevs)).toBe(ProjectStatus.PLANNED);
+  });
+});
+
+describe('toLastModifiedMs（飞书记录时间戳 → 毫秒）', () => {
+  it('当前毫秒时间戳保持不变', () => {
+    expect(toLastModifiedMs(1793703191000)).toBe(1793703191000);
+  });
+
+  it('历史微秒时间戳转换为毫秒', () => {
+    expect(toLastModifiedMs(1793703191000000)).toBe(1793703191000);
+  });
+
+  it('空值 / 非法 / 非正数返回 0', () => {
+    expect(toLastModifiedMs(undefined)).toBe(0);
+    expect(toLastModifiedMs(null)).toBe(0);
+    expect(toLastModifiedMs(Number.NaN)).toBe(0);
+    expect(toLastModifiedMs(0)).toBe(0);
+    expect(toLastModifiedMs(-1)).toBe(0);
   });
 });
 
