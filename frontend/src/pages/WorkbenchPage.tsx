@@ -87,6 +87,18 @@ export function WorkbenchPage() {
 
   const activeTasks = useMemo(() => summary?.tasks ?? [], [summary])
 
+  /** 关联任务在我的任务清单内时留在工作台切换，否则进入任务中心详情。 */
+  const openRelatedTask = useCallback(
+    (id: number) => {
+      if (activeTasks.some((task) => task.id === id)) {
+        selectTask(id)
+      } else {
+        navigate(`/tasks/${id}`)
+      }
+    },
+    [activeTasks, navigate, selectTask],
+  )
+
   const taskGroups = useMemo(
     () => [
       {
@@ -234,6 +246,7 @@ export function WorkbenchPage() {
               hideBreadcrumb
               handoffEditable
               onTaskChange={loadSummary}
+              onOpenTask={openRelatedTask}
             />
           ) : (
             <EmptyWork />

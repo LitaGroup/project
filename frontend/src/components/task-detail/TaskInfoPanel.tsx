@@ -79,10 +79,6 @@ export function TaskInfoPanel({
         </section>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <DetailField title="任务描述" value={task.description} />
-          <DetailField title="需求内容" value={task.content} />
-          <DetailField title="任务输入" value={task.input} />
-          <DetailField title="输出要求" value={task.outputSpec} />
           <DetailField title="工作计划" value={task.workPlan} />
         </div>
 

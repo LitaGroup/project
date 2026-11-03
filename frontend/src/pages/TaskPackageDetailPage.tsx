@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import { Skeleton } from '@appica/ui-react/skeleton'
@@ -25,6 +25,8 @@ import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel
 import { TaskDocumentsPanel } from '../components/task-detail/TaskDocumentsPanel'
 import { TaskEventsPanel } from '../components/task-detail/TaskEventsPanel'
 import { TaskInfoPanel } from '../components/task-detail/TaskInfoPanel'
+import { TaskRequirementPanel } from '../components/task-detail/TaskRequirementPanel'
+import { TaskTreePanel } from '../components/task-detail/TaskTreePanel'
 import {
   HandoffDocumentStatus,
   TaskMarkdownDocumentView,
@@ -36,6 +38,8 @@ import { visibleEventSource } from '../lib/event-source'
 type ConnectionState = 'connecting' | 'live' | 'reconnecting'
 type TaskContentTab =
   | 'handoff'
+  | 'requirement'
+  | 'tasks'
   | 'info'
   | 'events'
   | 'documents'
@@ -44,6 +48,8 @@ type TaskContentTab =
 
 const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
   ['handoff', '交付'],
+  ['requirement', '需求'],
+  ['tasks', '任务'],
   ['info', '信息'],
   ['events', '事件'],
   ['documents', '文档'],
@@ -52,7 +58,7 @@ const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
 ]
 
 /**
- * 任务详情：正文按「交付 / 信息 / 事件 / 文档 / 会话 / 复盘」组织，
+ * 任务详情：正文按「交付 / 需求 / 任务 / 信息 / 事件 / 文档 / 会话 / 复盘」组织，
  * 右侧复用工作台的任务协作面板（需求方 / 执行方 / 我的 AI）。
  * 正文「会话」只读实时展示多方交互，右侧按当前用户身份参与任务。
  */
@@ -73,6 +79,7 @@ export function TaskDetailView({
   hideBreadcrumb = false,
   handoffEditable = false,
   onTaskChange,
+  onOpenTask,
 }: {
   taskId: number
   breadcrumb?: Crumb[]
@@ -84,7 +91,10 @@ export function TaskDetailView({
   handoffEditable?: boolean
   /** 任务或文档刷新后通知外部，用于同步工作台左侧任务列表 */
   onTaskChange?: () => void | Promise<void>
+  /** 打开关联任务：普通详情默认跳转任务中心，工作台可切换当前任务 */
+  onOpenTask?: (taskId: number) => void
 }) {
+  const navigate = useNavigate()
   const [task, setTask] = useState<TaskPackage | null>(null)
   const [workbenchTask, setWorkbenchTask] = useState<WorkbenchTask | null>(null)
   const [pipeline, setPipeline] = useState<TaskPipelineStage[]>([])
@@ -489,6 +499,8 @@ export function TaskDetailView({
         .map((question) => [question.id, question]),
     ).values(),
   )
+  const openRelatedTask =
+    onOpenTask ?? ((id: number) => navigate(`/tasks/${id}`))
 
   return (
     <DetailPageLayout
@@ -678,6 +690,19 @@ export function TaskDetailView({
               />
             )}
 
+            {contentTab === 'requirement' && (
+              <TaskRequirementPanel key={taskId} task={currentTask} />
+            )}
+
+            {contentTab === 'tasks' && (
+              <TaskTreePanel
+                key={taskId}
+                pipeline={pipeline}
+                currentTaskId={currentTask.id}
+                onOpenTask={openRelatedTask}
+              />
+            )}
+
             {contentTab === 'info' && (
               <TaskInfoPanel
                 key={taskId}
@@ -773,7 +798,7 @@ function upsertStage(
 }
 
 /**
- * 首屏骨架：镜像真实页面布局（面包屑 + 标题区 + 六个正文 Tab + 右侧 AI），
+ * 首屏骨架：镜像真实页面布局（面包屑 + 标题区 + 正文 Tab + 右侧 AI），
  * 快照返回后就地填充，避免整页空白等待与明显布局跳动。
  */
 function TaskDetailSkeleton({
