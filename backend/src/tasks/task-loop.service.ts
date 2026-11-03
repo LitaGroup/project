@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, LessThan, Repository } from 'typeorm';
@@ -40,6 +41,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
   private readonly reminding = new Set<number>();
   private readonly offering = new Set<number>();
   private readonly resuming = new Set<number>();
+  private readonly apiUrl: string;
 
   constructor(
     @InjectRepository(Task)
@@ -49,7 +51,12 @@ export class TaskLoopService implements OnApplicationBootstrap {
     private readonly dispatchService: TaskDispatchService,
     private readonly taskNotify: TaskNotifyService,
     private readonly workerInbox: TaskWorkerInboxService,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.apiUrl = (
+      config.get<string>('API_URL') ?? 'http://localhost:3100/api'
+    ).replace(/\/+$/, '');
+  }
 
   async onApplicationBootstrap(): Promise<void> {
     try {
@@ -361,35 +368,79 @@ export class TaskLoopService implements OnApplicationBootstrap {
         }
         continue;
       }
-      if (parent.status !== TaskStatus.WAITING) continue;
-      const prompt = taskInboxPrompt(entry, child);
-      if (parent.subStatus === TaskSubStatus.PENDING_RESUME) {
+      const prompt = taskInboxPrompt(entry, child, this.apiUrl);
+      if (
+        parent.status === TaskStatus.WAITING &&
+        parent.subStatus === TaskSubStatus.PENDING_RESUME
+      ) {
         if (parent.resumePrompt?.includes(`事件收件箱 ID：${entry.id}`)) {
           await this.workerInbox.markQueued(entry.id);
           continue;
         }
-        await this.tasks.update(
-          { id: parent.id, status: TaskStatus.WAITING },
+        const updated = await this.tasks.update(
+          {
+            id: parent.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_RESUME,
+          },
           {
             resumePrompt: [parent.resumePrompt?.trim(), prompt]
               .filter(Boolean)
               .join('\n\n---\n\n'),
           },
         );
+        if (!updated.affected) continue;
         await this.workerInbox.markQueued(entry.id);
         continue;
       }
-      const updated = await this.tasks.update(
-        { id: parent.id, status: TaskStatus.WAITING },
-        {
-          subStatus: TaskSubStatus.PENDING_RESUME,
-          resumePrompt: prompt,
-          remindCount: 0,
-          firstRemindedAt: null,
-          lastRemindedAt: null,
-        },
-      );
-      if (!updated.affected) continue;
+
+      let updated: { affected?: number | null } | null = null;
+      if (
+        parent.status === TaskStatus.WAITING &&
+        parent.subStatus === TaskSubStatus.PENDING_ACCEPT
+      ) {
+        updated = await this.tasks.update(
+          {
+            id: parent.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_ACCEPT,
+          },
+          {
+            subStatus: TaskSubStatus.PENDING_RESUME,
+            resumePrompt: prompt,
+            remindCount: 0,
+            firstRemindedAt: null,
+            lastRemindedAt: null,
+          },
+        );
+      } else if (
+        parent.status === TaskStatus.RUNNING &&
+        parent.subStatus === TaskSubStatus.EXECUTING
+      ) {
+        // 会话已结束但任务仍停在执行中（等待机器人申请验收）时，
+        // 机器人实际空闲，可以把子任务事件排入待继续并唤醒。
+        // 当前回合仍在输出时保持 pending，避免同一会话并行重入。
+        if (this.dispatchService.taskChatRunning(parent.id)) continue;
+        updated = await this.tasks.update(
+          {
+            id: parent.id,
+            status: TaskStatus.RUNNING,
+            subStatus: TaskSubStatus.EXECUTING,
+          },
+          {
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_RESUME,
+            resumePrompt: prompt,
+            remindCount: 0,
+            firstRemindedAt: null,
+            lastRemindedAt: null,
+          },
+        );
+      } else {
+        // 父任务自己的待反馈/待接受等状态不能被覆盖，事件留到可恢复时处理。
+        continue;
+      }
+      if (!updated?.affected) continue;
       await this.workerInbox.markQueued(entry.id);
       await this.tasksService.addEvent(
         parent.id,

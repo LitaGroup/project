@@ -212,6 +212,42 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
     );
   });
 
+  it('机器人需求方答复子任务提问后恢复执行并结算收件箱', async () => {
+    task.status = TaskStatus.WAITING;
+    task.subStatus = TaskSubStatus.PENDING_FEEDBACK;
+    task.requesterType = 'worker';
+    task.requesterId = worker.id;
+    messagesRepo.findOne.mockResolvedValue({
+      taskId: 1,
+      messageKey: 'chat:1:question:project-q1',
+      question: {
+        id: 'project-q1',
+        sessionId: 'session-1',
+        state: 'pending',
+        askedAt: new Date().toISOString(),
+        questions: [
+          { header: '方案确认', question: '使用哪个方案？', custom: true },
+        ],
+      },
+      status: 'running',
+    });
+
+    const saved = await service.answer(
+      1,
+      'project-q1',
+      { type: 'worker', worker },
+      { answers: [['A 方案']] },
+    );
+
+    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
+    expect(saved.resumePrompt).toContain('答：A 方案');
+    expect(inbox.completeForChild).toHaveBeenCalledWith(
+      1,
+      'question',
+      'project-q1',
+    );
+  });
+
   it('非需求方不能答复 project 提问', async () => {
     task.subStatus = TaskSubStatus.PENDING_FEEDBACK;
     await expect(

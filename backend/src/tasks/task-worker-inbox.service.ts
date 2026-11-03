@@ -74,14 +74,16 @@ export class TaskWorkerInboxService {
 
   /**
    * 父会话结束但未处理的事件：提问/验收需要显式动作，重新排队；
-   * 拒绝/取消提醒已在会话中送达，不要求固定动作，直接视为处理完成。
+   * 拒绝/取消提醒不要求固定动作，直接视为处理完成。
+   * 同时覆盖 queued（已写入 resumePrompt 但尚未投递）与 delivered（已投递但会话异常结束），
+   * 避免会话失败、人工中断或进程重启后事件永久滞留。
    */
   async requeueDelivered(parentTaskId: number): Promise<void> {
     await this.inbox.update(
       {
         parentTaskId,
         kind: In(['question', 'handoff']),
-        status: 'delivered',
+        status: In(['queued', 'delivered']),
       },
       { status: 'pending', deliveredAt: null },
     );
@@ -89,7 +91,7 @@ export class TaskWorkerInboxService {
       {
         parentTaskId,
         kind: In(['refused', 'cancelled']),
-        status: 'delivered',
+        status: In(['queued', 'delivered']),
       },
       { status: 'done', processedAt: new Date() },
     );
@@ -127,13 +129,138 @@ export class TaskWorkerInboxService {
   }
 }
 
+function payloadText(
+  payload: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = payload[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function optionText(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null;
+  if (!value || typeof value !== 'object') return null;
+  const option = value as Record<string, unknown>;
+  const label =
+    typeof option.label === 'string' && option.label.trim()
+      ? option.label.trim()
+      : null;
+  if (!label) return null;
+  const description =
+    typeof option.description === 'string' && option.description.trim()
+      ? option.description.trim()
+      : null;
+  return description ? `${label}（${description}）` : label;
+}
+
+/** 收件箱 payload 里的问题正文转成父机器人可直接阅读的清单。 */
+function questionPromptLines(questions: unknown): string[] {
+  if (!Array.isArray(questions)) return [];
+  const lines: string[] = [];
+  questions.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return;
+    const question = item as Record<string, unknown>;
+    const header =
+      typeof question.header === 'string' ? question.header.trim() : '';
+    const content =
+      typeof question.question === 'string' ? question.question.trim() : '';
+    const options = Array.isArray(question.options)
+      ? question.options
+          .map(optionText)
+          .filter((option): option is string => Boolean(option))
+      : [];
+    lines.push(
+      `${index + 1}. ${header || `问题 ${index + 1}`}`,
+      `   - 内容：${content || '（见子任务详情）'}`,
+      `   - 选项：${options.join(' / ') || '无'}`,
+      `   - 回答方式：${question.multiple === true ? '多选' : '单选'}；${
+        question.custom === false ? '仅限选项' : '允许自由输入'
+      }`,
+    );
+  });
+  return lines;
+}
+
 /** 发给父任务机器人的结构化事件说明。 */
-export function taskInboxPrompt(entry: TaskWorkerInbox, child: Task): string {
+export function taskInboxPrompt(
+  entry: TaskWorkerInbox,
+  child: Task,
+  apiUrl = '/api',
+): string {
+  const payload = entry.payload ?? {};
+  const base = apiUrl.trim().replace(/\/+$/, '') || '/api';
+  const endpoint = (path: string): string => `${base}${path}`;
+  const handoffUrl = payloadText(payload, 'handoffUrl');
+  const acceptUrl = endpoint(`/tasks/${child.id}/handoff/accept.md`);
+  const refuseUrl = endpoint(`/tasks/${child.id}/handoff/refuse.md`);
+  const failUrl = endpoint(`/tasks/${child.id}/fail.md`);
+  const detailUrl = endpoint(`/tasks/${child.id}.md`);
+  const handoffReadUrl = endpoint(`/tasks/${child.id}/handoff.md`);
+  const answerUrl = endpoint(
+    `/tasks/${child.id}/questions/${encodeURIComponent(
+      entry.referenceId ?? '',
+    )}/answer.md`,
+  );
+  const questions = Array.isArray(payload.questions) ? payload.questions : [];
+  const questionLines = questionPromptLines(questions);
+  const answerExample = JSON.stringify({
+    answers: Array.from({ length: Math.max(questions.length, 1) }, () => [
+      '答案',
+    ]),
+  });
+
   const action =
     entry.kind === 'question'
-      ? `请读取子任务待答提问 ${entry.referenceId ?? ''}，调用 task-question-answer 答复。`
+      ? [
+          '请先读取子任务详情并回答下方问题，处理后必须调用答复接口；只回复消息不会解除子任务的待反馈状态。',
+          `- 子任务详情：GET ${detailUrl}`,
+          '',
+          '**待回答问题**',
+          '',
+          ...(questionLines.length
+            ? questionLines
+            : ['事件未携带问题正文，请先读取子任务详情。']),
+          '',
+          '```bash',
+          'TOKEN=$(cat .opencode/agent-token)',
+          `curl -sS -X POST '${answerUrl}' \\`,
+          '  -H "X-Worker-Token: $TOKEN" \\',
+          '  -H "Content-Type: application/json" \\',
+          `  -d '${answerExample}'`,
+          '```',
+          '',
+          '`answers` 外层长度必须与问题数量一致，每个问题的答案放在对应内层数组。',
+          '多选可填写多个选项 label；仅限选项时必须使用给定 label；无法回答时可传 `{"reject":true}` 跳过。',
+        ].join('\n')
       : entry.kind === 'handoff'
-        ? '请检查子任务交付物，调用 task-handoff-accept 通过、task-handoff-refuse 返工，或 task-fail 判定失败。'
+        ? [
+            '请先读取子任务交付文档并检查交付物，处理后必须调用以下接口之一（不能只回复消息）：',
+            `- 交付文档：GET ${handoffReadUrl}`,
+            ...(handoffUrl ? [`- 文档查看地址：${handoffUrl}`] : []),
+            '',
+            '```bash',
+            'TOKEN=$(cat .opencode/agent-token)',
+            '# 验收通过',
+            `curl -sS -X POST '${acceptUrl}' \\`,
+            '  -H "X-Worker-Token: $TOKEN" \\',
+            '  -H "Content-Type: application/json" \\',
+            "  -d '{}'",
+            '',
+            '# 返工（content 必填）',
+            `curl -sS -X POST '${refuseUrl}' \\`,
+            '  -H "X-Worker-Token: $TOKEN" \\',
+            '  -H "Content-Type: application/json" \\',
+            '  -d \'{"content":"具体返工原因"}\'',
+            '',
+            '# 判定失败（reason 必填）',
+            `curl -sS -X POST '${failUrl}' \\`,
+            '  -H "X-Worker-Token: $TOKEN" \\',
+            '  -H "Content-Type: application/json" \\',
+            '  -d \'{"reason":"失败原因"}\'',
+            '```',
+            '',
+            '验收前必须确认交付物满足子任务输出要求；通过后该子任务即结束。',
+          ].join('\n')
         : entry.kind === 'refused'
           ? `子机器人拒绝承接。理由：${child.refusalReason ?? '未填写'}；分发建议：${child.dispatchSuggestion ?? '无'}。请决定是否创建新的子任务。`
           : '子任务已取消，请评估对父任务的影响并继续处理。';
@@ -147,6 +274,6 @@ export function taskInboxPrompt(entry: TaskWorkerInbox, child: Task): string {
     '',
     action,
     '',
-    '处理完成后继续当前父任务；不要代替子任务执行机器人调用接受、提问或验收申请接口。',
+    '处理完该事件后再推进当前父任务；不要代替子任务执行机器人调用接受、提问或验收申请接口。',
   ].join('\n');
 }

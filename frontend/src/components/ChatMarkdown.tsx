@@ -59,10 +59,23 @@ const MARKDOWN_COMPONENTS = {
 }
 
 /** 聊天消息 Markdown 渲染（沿用任务详情页 `.task-chat-markdown` 排版） */
-export function ChatMarkdown({ text }: { text: string }) {
+export function ChatMarkdown({
+  text,
+  onPrimary = false,
+}: {
+  text: string
+  /** 主色气泡内使用：继承气泡文字色，保证对比度 */
+  onPrimary?: boolean
+}) {
   if (!text.trim()) return null
   return (
-    <div className="task-chat-markdown">
+    <div
+      className={
+        onPrimary
+          ? 'task-chat-markdown task-chat-markdown-on-primary'
+          : 'task-chat-markdown'
+      }
+    >
       <ReactMarkdown
         remarkPlugins={MARKDOWN_PLUGINS}
         components={MARKDOWN_COMPONENTS}

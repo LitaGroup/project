@@ -4,6 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Observable } from 'rxjs';
 import { FindOptionsWhere, In, Repository } from 'typeorm';
@@ -63,6 +64,86 @@ const WORKBENCH_STATUSES = [
 ];
 /** 操作台单次返回上限：等待/进行通常很少；已完成只保留最近记录，避免清单无限增长 */
 const WORKBENCH_TASK_LIMIT = 300;
+
+/** 详情页「我的 AI」可用的页面类型 */
+export type AgentPageContextType = 'document' | 'script';
+
+/** 详情页上下文入参（query/body 原始值） */
+export interface AgentPageContextInput {
+  type?: string;
+  id?: string;
+  title?: string;
+  summary?: string;
+  readUrl?: string;
+}
+
+/** 规范化后的详情页 AI 上下文 */
+export interface AgentPageContext {
+  type: AgentPageContextType;
+  id: string;
+  title?: string;
+  summary?: string;
+  readUrl?: string;
+}
+
+const AGENT_PAGE_TYPES = new Set<AgentPageContextType>(['document', 'script']);
+const AGENT_PAGE_LABELS: Record<AgentPageContextType, string> = {
+  document: '文档',
+  script: '脚本',
+};
+
+/**
+ * 校验并规范化详情页上下文。
+ * 未提供 type 时返回 null（沿用任务/通用会话）；提供了 type 但缺 id 视为非法。
+ */
+export function normalizeAgentPageContext(
+  input?: AgentPageContextInput | null,
+): AgentPageContext | null {
+  const type = input?.type?.trim();
+  if (!type) return null;
+  if (!AGENT_PAGE_TYPES.has(type as AgentPageContextType)) {
+    throw new BadRequestException('不支持的 AI 页面上下文类型');
+  }
+  const id = input?.id?.trim();
+  if (!id) throw new BadRequestException('缺少 AI 页面上下文 ID');
+  if (id.length > 500) {
+    throw new BadRequestException('AI 页面上下文 ID 过长');
+  }
+  const title = input?.title?.trim().slice(0, 200) || undefined;
+  const summary = input?.summary?.trim().slice(0, 2000) || undefined;
+  const readUrl = input?.readUrl?.trim();
+  return {
+    type: type as AgentPageContextType,
+    id,
+    title,
+    summary,
+    // 仅透传站内只读接口，避免把任意 URL 带进提示词
+    ...(readUrl?.startsWith('/api/') ? { readUrl: readUrl.slice(0, 500) } : {}),
+  };
+}
+
+/** 每个详情页一个稳定且较短的会话范围（路径等长 ID 先取哈希） */
+function agentPageScope(context: AgentPageContext): string {
+  const hash = createHash('sha1')
+    .update(`${context.type}:${context.id}`)
+    .digest('hex')
+    .slice(0, 20);
+  return `agent:page:${context.type}:${hash}`;
+}
+
+/** 详情页上下文仅作为本轮提示词前缀，不写入用户气泡 */
+function buildAgentPagePrompt(context: AgentPageContext): string {
+  return [
+    '# 当前详情页',
+    '',
+    `- 页面类型：${AGENT_PAGE_LABELS[context.type]}`,
+    `- 标题：${context.title ?? context.id}`,
+    ...(context.summary ? [`- 概要：${context.summary}`] : []),
+    ...(context.readUrl ? [`- 内容读取接口：${context.readUrl}`] : []),
+    '',
+    '回答或操作前先读取当前页面对应的内容，不要假设页面之外的上下文。',
+  ].join('\n');
+}
 
 /**
  * 操作台：真人通过自己的绑定机器人参与任务。
@@ -437,25 +518,39 @@ export class WorkbenchService {
     return this.personalAgents.infoForUser(user);
   }
 
-  /** 我的 AGENT：对话快照（每个任务独立会话） */
+  /** 我的 AGENT：对话快照（任务或详情页独立会话） */
   agentSnapshot(
     user: User,
     taskId?: number | null,
+    pageContext?: AgentPageContext | null,
   ): Promise<WorkerDebugSnapshot> {
-    return this.personalAgents.snapshot(user, taskId);
+    return this.personalAgents.snapshot(
+      user,
+      taskId,
+      pageContext ? agentPageScope(pageContext) : null,
+    );
   }
 
-  /** 我的 AGENT：对话 SSE（每个任务独立会话） */
-  agentStream(user: User, taskId?: number | null): Observable<MessageEvent> {
-    return this.personalAgents.stream(user, taskId);
+  /** 我的 AGENT：对话 SSE（任务或详情页独立会话） */
+  agentStream(
+    user: User,
+    taskId?: number | null,
+    pageContext?: AgentPageContext | null,
+  ): Observable<MessageEvent> {
+    return this.personalAgents.stream(
+      user,
+      taskId,
+      pageContext ? agentPageScope(pageContext) : null,
+    );
   }
 
-  /** 我的 AGENT：发送消息；可携带当前工作台选中任务作为上下文 */
+  /** 我的 AGENT：发送消息；可携带当前任务或详情页作为上下文 */
   async agentSend(
     user: User,
     content: string,
     taskId?: number | null,
     files?: WorkerDebugAttachment[],
+    pageContext?: AgentPageContext | null,
   ): Promise<WorkerDebugSnapshot> {
     const text = content.trim();
     if (!text && !files?.length) {
@@ -491,9 +586,12 @@ export class WorkbenchService {
         '',
         '如需操作该任务，先读取详情确认最新状态，再按个人 AGENT 角色定义中的接口执行。',
       ].join('\n');
+    } else if (pageContext) {
+      taskContext = buildAgentPagePrompt(pageContext);
     }
     return this.personalAgents.send(user, text, {
       taskId,
+      scope: pageContext ? agentPageScope(pageContext) : null,
       taskContext,
       files,
     });
@@ -503,8 +601,13 @@ export class WorkbenchService {
   agentModels(
     user: User,
     taskId?: number | null,
+    pageContext?: AgentPageContext | null,
   ): Promise<WorkerDebugModelCatalog> {
-    return this.personalAgents.models(user, taskId);
+    return this.personalAgents.models(
+      user,
+      taskId,
+      pageContext ? agentPageScope(pageContext) : null,
+    );
   }
 
   /** 我的 AGENT：切换模型/思考等级 */
@@ -512,8 +615,14 @@ export class WorkbenchService {
     user: User,
     input: WorkerDebugModelSelection,
     taskId?: number | null,
+    pageContext?: AgentPageContext | null,
   ): Promise<WorkerDebugSnapshot> {
-    return this.personalAgents.setModel(user, input, taskId);
+    return this.personalAgents.setModel(
+      user,
+      input,
+      taskId,
+      pageContext ? agentPageScope(pageContext) : null,
+    );
   }
 
   /** 我的 AGENT：切换 build / plan 模式 */
@@ -521,16 +630,27 @@ export class WorkbenchService {
     user: User,
     mode: WorkerDebugMode,
     taskId?: number | null,
+    pageContext?: AgentPageContext | null,
   ): Promise<WorkerDebugSnapshot> {
-    return this.personalAgents.setMode(user, mode, taskId);
+    return this.personalAgents.setMode(
+      user,
+      mode,
+      taskId,
+      pageContext ? agentPageScope(pageContext) : null,
+    );
   }
 
   /** 我的 AGENT：中断当前轮次 */
   agentInterrupt(
     user: User,
     taskId?: number | null,
+    pageContext?: AgentPageContext | null,
   ): Promise<WorkerDebugSnapshot> {
-    return this.personalAgents.interrupt(user, taskId);
+    return this.personalAgents.interrupt(
+      user,
+      taskId,
+      pageContext ? agentPageScope(pageContext) : null,
+    );
   }
 
   /** 我的 AGENT：回答/跳过提问 */
@@ -539,13 +659,28 @@ export class WorkbenchService {
     questionId: string,
     input: { answers?: string[][]; reject?: boolean },
     taskId?: number | null,
+    pageContext?: AgentPageContext | null,
   ): Promise<WorkerDebugSnapshot> {
-    return this.personalAgents.replyQuestion(user, questionId, input, taskId);
+    return this.personalAgents.replyQuestion(
+      user,
+      questionId,
+      input,
+      taskId,
+      pageContext ? agentPageScope(pageContext) : null,
+    );
   }
 
   /** 我的 AGENT：重置会话 */
-  agentReset(user: User, taskId?: number | null): Promise<WorkerDebugSnapshot> {
-    return this.personalAgents.reset(user, taskId);
+  agentReset(
+    user: User,
+    taskId?: number | null,
+    pageContext?: AgentPageContext | null,
+  ): Promise<WorkerDebugSnapshot> {
+    return this.personalAgents.reset(
+      user,
+      taskId,
+      pageContext ? agentPageScope(pageContext) : null,
+    );
   }
 
   private async withAgentWorker<T>(

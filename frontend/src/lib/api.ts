@@ -852,6 +852,46 @@ function handleUnauthorized(path: string): void {
   }
 }
 
+/** 我的 AI：详情页上下文 -> query 参数 */
+function agentPageContextQuery(context?: AgentPageContext | null): string {
+  if (!context) return ''
+  const params = new URLSearchParams()
+  params.set('contextType', context.type)
+  params.set('contextId', context.id)
+  if (context.title) params.set('contextTitle', context.title)
+  if (context.summary) params.set('contextSummary', context.summary)
+  if (context.readUrl) params.set('contextReadUrl', context.readUrl)
+  return params.toString()
+}
+
+/** 我的 AI：详情页上下文 -> POST body */
+function agentPageContextBody(
+  context?: AgentPageContext | null,
+): Record<string, string> {
+  if (!context) return {}
+  return {
+    contextType: context.type,
+    contextId: context.id,
+    ...(context.title ? { contextTitle: context.title } : {}),
+    ...(context.summary ? { contextSummary: context.summary } : {}),
+    ...(context.readUrl ? { contextReadUrl: context.readUrl } : {}),
+  }
+}
+
+/** 我的 AI SSE 地址（工作台/详情页共用） */
+export function workbenchAgentStreamUrl(
+  taskId?: number | null,
+  context?: AgentPageContext | null,
+): string {
+  const query = [
+    taskId ? `taskId=${encodeURIComponent(taskId)}` : '',
+    agentPageContextQuery(context),
+  ]
+    .filter(Boolean)
+    .join('&')
+  return `/api/workbench/agent/stream${query ? `?${query}` : ''}`
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -1031,7 +1071,7 @@ export interface Worker {
   enabled: boolean
   /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
-  /** 工位路径 {WORKER_BASE_DIR}/worker/{id}（未配置 env 为 null） */
+  /** 工位路径：生产 {WORKER_BASE_DIR}/worker/{id}，开发 {WORKER_BASE_DIR}/worker-dev/{id}（未配置 env 为 null） */
   workdir: string | null
   liveStatus: WorkerLiveStatus
   activeTask: { id: number; code: string; title: string; status: string } | null
@@ -1588,6 +1628,19 @@ export interface WorkbenchAgentInfo {
   reason: string | null
 }
 
+/** 详情页「我的 AI」页面类型（每个类型 + ID 使用独立会话） */
+export type AgentPageContextType = 'document' | 'script'
+
+/** 详情页「我的 AI」上下文：会话按 type + id 隔离，内容读取接口供 AI 取当前页面 */
+export interface AgentPageContext {
+  type: AgentPageContextType
+  id: string
+  title?: string
+  summary?: string
+  /** 站内只读接口，如 /api/documents/12.md */
+  readUrl?: string
+}
+
 /** 操作台初始数据 */
 export interface WorkbenchSummary {
   worker: Worker
@@ -1607,6 +1660,43 @@ export interface TaskHandoffDocument {
   content: string
   updatedAt: string | null
   updatedBy: string | null
+}
+
+/** 任务目录下的 Markdown 文档（任务详情「文档」Tab） */
+export interface TaskDocumentEntry {
+  /** 阅读名，如 HANDOFF.md / API.md */
+  name: string
+  /** 知识路径（不带 .md） */
+  path: string
+  /** 网页阅读地址 */
+  url: string
+  /** Markdown 接口地址 */
+  markdownUrl: string
+  title: string
+  /** 文档 Frontmatter 中的描述 */
+  description: string | null
+  updatedAt: string | null
+}
+
+/** 任务文档中引用的站内图片/文件 */
+export interface TaskArtifactEntry {
+  name: string
+  kind: 'image' | 'file'
+  url: string
+  /** 引用该产物的文档 */
+  sourceDocument: string
+}
+
+/** 任务详情「文档」Tab 数据 */
+export interface TaskDocumentsView {
+  directory: string
+  documents: TaskDocumentEntry[]
+  artifacts: TaskArtifactEntry[]
+}
+
+/** 任务文档正文（去掉平台 Frontmatter） */
+export interface TaskDocumentContent extends TaskDocumentEntry {
+  content: string
 }
 
 /** 任务聊天 SSE 推送 */
@@ -2712,52 +2802,98 @@ export const api = {
   /** 我的 AGENT：可用状态（未创建/执行器离线时带原因） */
   getWorkbenchAgent: () =>
     request<WorkbenchAgentInfo>('/workbench/agent'),
-  /** 我的 AGENT：对话快照（taskId 为空使用通用会话，否则每个任务独立会话） */
-  getWorkbenchAgentSnapshot: (taskId?: number | null) =>
-    request<WorkerDebugSnapshot>(
-      `/workbench/agent/snapshot${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}`,
-    ),
-  /** 我的 AGENT：发送消息；taskId 同时隔离会话与作为本轮工作台任务上下文 */
+  /** 我的 AGENT：对话快照（taskId / 详情页上下文为空时使用通用会话） */
+  getWorkbenchAgentSnapshot: (
+    taskId?: number | null,
+    context?: AgentPageContext | null,
+  ) => {
+    const query = [
+      taskId ? `taskId=${encodeURIComponent(taskId)}` : '',
+      agentPageContextQuery(context),
+    ]
+      .filter(Boolean)
+      .join('&')
+    return request<WorkerDebugSnapshot>(
+      `/workbench/agent/snapshot${query ? `?${query}` : ''}`,
+    )
+  },
+  /** 我的 AGENT：发送消息；taskId / 详情页上下文同时隔离会话并作为本轮上下文 */
   sendWorkbenchAgentMessage: (
     content: string,
     taskId?: number | null,
     files?: WorkerDebugAttachment[],
+    context?: AgentPageContext | null,
   ) =>
     request<WorkerDebugSnapshot>('/workbench/agent/messages', {
       method: 'POST',
-      body: JSON.stringify({ content, taskId: taskId ?? null, files }),
+      body: JSON.stringify({
+        content,
+        taskId: taskId ?? null,
+        files,
+        ...agentPageContextBody(context),
+      }),
     }),
   /** 我的 AGENT：可切换的模型与思考等级清单 */
-  getWorkbenchAgentModels: (taskId?: number | null) =>
-    request<WorkerDebugModelCatalog>(
-      `/workbench/agent/models${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ''}`,
-    ),
+  getWorkbenchAgentModels: (
+    taskId?: number | null,
+    context?: AgentPageContext | null,
+  ) => {
+    const query = [
+      taskId ? `taskId=${encodeURIComponent(taskId)}` : '',
+      agentPageContextQuery(context),
+    ]
+      .filter(Boolean)
+      .join('&')
+    return request<WorkerDebugModelCatalog>(
+      `/workbench/agent/models${query ? `?${query}` : ''}`,
+    )
+  },
   /** 我的 AGENT：切换模型/思考等级（返回最新快照） */
   setWorkbenchAgentModel: (
     input: WorkerDebugModelSelection,
     taskId?: number | null,
+    context?: AgentPageContext | null,
   ) =>
     request<WorkerDebugSnapshot>('/workbench/agent/model', {
       method: 'POST',
-      body: JSON.stringify({ ...input, taskId: taskId ?? null }),
+      body: JSON.stringify({
+        ...input,
+        taskId: taskId ?? null,
+        ...agentPageContextBody(context),
+      }),
     }),
   /** 我的 AGENT：切换 build / plan 模式（返回最新快照） */
-  setWorkbenchAgentMode: (mode: WorkerDebugMode, taskId?: number | null) =>
+  setWorkbenchAgentMode: (
+    mode: WorkerDebugMode,
+    taskId?: number | null,
+    context?: AgentPageContext | null,
+  ) =>
     request<WorkerDebugSnapshot>('/workbench/agent/mode', {
       method: 'POST',
-      body: JSON.stringify({ mode, taskId: taskId ?? null }),
+      body: JSON.stringify({
+        mode,
+        taskId: taskId ?? null,
+        ...agentPageContextBody(context),
+      }),
     }),
   /** 我的 AGENT：中断当前轮次 */
-  interruptWorkbenchAgent: (taskId?: number | null) =>
+  interruptWorkbenchAgent: (
+    taskId?: number | null,
+    context?: AgentPageContext | null,
+  ) =>
     request<WorkerDebugSnapshot>('/workbench/agent/interrupt', {
       method: 'POST',
-      body: JSON.stringify({ taskId: taskId ?? null }),
+      body: JSON.stringify({
+        taskId: taskId ?? null,
+        ...agentPageContextBody(context),
+      }),
     }),
   /** 我的 AGENT：回答（answers）或跳过（null）提问 */
   replyWorkbenchAgentQuestion: (
     questionId: string,
     answers: string[][] | null,
     taskId?: number | null,
+    context?: AgentPageContext | null,
   ) =>
     request<WorkerDebugSnapshot>(
       `/workbench/agent/questions/${encodeURIComponent(questionId)}/reply`,
@@ -2766,17 +2902,38 @@ export const api = {
         body: JSON.stringify({
           ...(answers ? { answers } : { reject: true }),
           taskId: taskId ?? null,
+          ...agentPageContextBody(context),
         }),
       },
     ),
-  /** 我的 AGENT：重置当前任务会话 */
-  resetWorkbenchAgent: (taskId?: number | null) =>
+  /** 我的 AGENT：重置当前任务/详情页会话 */
+  resetWorkbenchAgent: (
+    taskId?: number | null,
+    context?: AgentPageContext | null,
+  ) =>
     request<WorkerDebugSnapshot>('/workbench/agent/reset', {
       method: 'POST',
-      body: JSON.stringify({ taskId: taskId ?? null }),
+      body: JSON.stringify({
+        taskId: taskId ?? null,
+        ...agentPageContextBody(context),
+      }),
     }),
   /** 任务详情页聊天快照：当前任务 + 所属 PIPELINE + 对话消息 */
   getTaskChat: (id: number) => request<TaskChatSnapshot>(`/tasks/${id}/chat`),
+  /** 任务详情「交付」Tab：交付文档正文与版本信息 */
+  getTaskHandoff: (id: number) =>
+    request<TaskHandoffDocument>(`/tasks/${id}/handoff`),
+  /** 任务详情「复盘」Tab：复盘文档；尚未生成时为 null */
+  getTaskReview: (id: number) =>
+    request<TaskDocumentContent | null>(`/tasks/${id}/review`),
+  /** 任务详情「文档」Tab：任务目录文档 + 文档引用的图片/文件 */
+  listTaskDocuments: (id: number) =>
+    request<TaskDocumentsView>(`/tasks/${id}/documents`),
+  /** 读取任务目录下某篇 Markdown 文档的正文 */
+  getTaskDocument: (id: number, name: string) =>
+    request<TaskDocumentContent>(
+      `/tasks/${id}/documents/${encodeURIComponent(name)}`,
+    ),
   createTaskPackage: (input: {
     /** 可空：按任务描述首行生成标题 */
     title?: string

@@ -119,6 +119,7 @@ describe('TaskDocumentService 任务文档', () => {
       tasksRepo as never,
       templatesRepo as never,
       knowledge as unknown as KnowledgeService,
+      { taskChanged: jest.fn() } as never,
     );
   });
 
@@ -428,6 +429,120 @@ describe('TaskDocumentService 任务文档', () => {
     expect(documents[2].markdownUrl).toBe(
       '/docs/detail/task/20261028/TK-0001/API.md',
     );
+  });
+
+  it('登记 HANDOFF 仍是占位时，自动回收同任务其他日期目录的真实交付文档', async () => {
+    currentTask = task({
+      handoffPath: '/task/20261028/TK-0001/HANDOFF',
+      handoffVersion: 1,
+    });
+    const placeholder = node(
+      '/task/20261028/TK-0001/HANDOFF',
+      '---\nversion: "1"\n---\n> 正在处理中……',
+    );
+    const actual = node(
+      '/task/20261027/TK-0001/HANDOFF',
+      '# 实际交付\n\n真实内容',
+      new Date('2026-10-27T18:00:00+08:00'),
+    );
+    knowledge.findNodeByPath.mockResolvedValueOnce(placeholder);
+    knowledge.listArticlesByPrefix.mockResolvedValue([placeholder, actual]);
+    knowledge.update.mockImplementationOnce((id: string) =>
+      Promise.resolve({
+        ...actual,
+        id,
+        content: '---\nversion: "1"\n---\n# 实际交付\n\n真实内容',
+      }),
+    );
+
+    const document = await service.ensureHandoff(currentTask);
+
+    expect(document.path).toBe('/task/20261027/TK-0001/HANDOFF');
+    expect(document.content).toBe('# 实际交付\n\n真实内容');
+    expect(currentTask.handoffPath).toBe('/task/20261027/TK-0001/HANDOFF');
+  });
+
+  it('任务文档清单解析 frontmatter description', async () => {
+    knowledge.listArticlesByPrefix.mockResolvedValue([
+      node(
+        '/task/20261028/TK-0001/API',
+        '---\ndescription: "接口说明文档"\n---\n# API',
+      ),
+    ]);
+
+    const view = await service.taskDocumentsView(currentTask);
+
+    expect(view.documents[0].description).toBe('接口说明文档');
+  });
+
+  it('任务文档 Tab 返回直属 Markdown 文档并提取图片/文件产物', async () => {
+    knowledge.listArticlesByPrefix.mockResolvedValue([
+      node(
+        '/task/20261028/TK-0001/HANDOFF',
+        '![页面截图](/images/uploads/20261028/a.png)\n\n[导出文件](/files/20261028/report.xlsx)\n\n[H5 包](http://localhost:5273/files/20261028/h5.zip)',
+      ),
+      node(
+        '/task/20261028/TK-0001/API',
+        '重复图片：![页面截图](/images/uploads/20261028/a.png)',
+      ),
+      node(
+        '/task/20261028/TK-0001/sub/TECH_DESIGN',
+        '![深层](/images/deep.png)',
+      ),
+    ]);
+
+    const view = await service.taskDocumentsView(currentTask);
+
+    expect(view.directory).toBe('/task/20261028/TK-0001');
+    expect(view.documents.map((document) => document.name)).toEqual([
+      'HANDOFF.md',
+      'API.md',
+    ]);
+    expect(view.artifacts).toEqual([
+      {
+        name: '页面截图',
+        kind: 'image',
+        url: '/images/uploads/20261028/a.png',
+        sourceDocument: 'HANDOFF.md',
+      },
+      {
+        name: '导出文件',
+        kind: 'file',
+        url: '/files/20261028/report.xlsx',
+        sourceDocument: 'HANDOFF.md',
+      },
+      {
+        name: 'H5 包',
+        kind: 'file',
+        url: '/files/20261028/h5.zip',
+        sourceDocument: 'HANDOFF.md',
+      },
+    ]);
+  });
+
+  it('读取任务文档与复盘时去掉 Frontmatter；未生成复盘返回 null', async () => {
+    knowledge.findNodeByPath.mockResolvedValueOnce(
+      node(
+        '/task/20261028/TK-0001/TECH_DESIGN',
+        '---\ndocument: "TECH_DESIGN"\nupdate: 2026-10-28 10:00:00\n---\n# 技术方案',
+      ),
+    );
+    const document = await service.readTaskDocument(
+      currentTask,
+      'TECH_DESIGN.md',
+    );
+    expect(document.name).toBe('TECH_DESIGN.md');
+    expect(document.content).toBe('# 技术方案');
+
+    knowledge.findNodeByPath.mockResolvedValueOnce(null);
+    expect(await service.readReview(currentTask)).toBeNull();
+
+    knowledge.findNodeByPath.mockResolvedValueOnce(
+      node('/task/20261028/TK-0001/REVIEW', '# 复盘'),
+    );
+    const review = await service.readReview(currentTask);
+    expect(review?.name).toBe('REVIEW.md');
+    expect(review?.content).toBe('# 复盘');
   });
 
   it('写入任务目录普通文档时补 .md 阅读名并生成 Frontmatter', async () => {

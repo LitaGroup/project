@@ -1,30 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-} from '@appica/ui-react/card'
-import {
-  Table,
-  TableBody,
-  TableRow,
-  TableCell,
-} from '@appica/ui-react/table'
-import { Button } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
-import { Progress } from '@appica/ui-react/progress'
+import { Button } from '@appica/ui-react/button'
 import {
   Select,
-  SelectTrigger,
-  SelectValue,
   SelectContent,
   SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@appica/ui-react/select'
-import { api, type AppVersion, type Project, type TestRun, type ProjectTest } from '../lib/api'
-import { PageBreadcrumb } from '../components/PageBreadcrumb'
-import { Terminal } from '../components/Terminal'
+import {
+  api,
+  type AppVersion,
+  type Project,
+  type ProjectTest,
+  type TestRun,
+} from '../lib/api'
+import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
+import {
+  RunDetailView,
+  type RunHistoryItem,
+} from '../components/detail/RunDetailView'
 import { NewDefectDialog } from '../components/NewDefectDialog'
+import { Terminal } from '../components/Terminal'
 
 const runStatusMeta: Record<
   TestRun['status'],
@@ -53,6 +51,13 @@ function formatDuration(run: TestRun, now: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
 }
 
+function toHistory(runs: TestRun[]): RunHistoryItem[] {
+  return runs.slice(0, 5).map((run) => ({
+    id: run.id,
+    label: `${new Date(run.startedAt).toLocaleString()} · ${runStatusMeta[run.status].text}`,
+  }))
+}
+
 export function TestRunPage() {
   const { id, testId } = useParams<{ id: string; testId: string }>()
   const projectId = Number(id)
@@ -68,7 +73,7 @@ export function TestRunPage() {
   // APP 测试运行需选 app 版本
   const [appVersions, setAppVersions] = useState<AppVersion[]>([])
   const [appVersionId, setAppVersionId] = useState<number | null>(null)
-  // 仅用于驱动运行中耗时每秒重渲染（轮询本身也会触发）
+  // 仅用于驱动运行中耗时每秒重渲染
   const [now, setNow] = useState(() => Date.now())
 
   const loadHistory = useCallback(
@@ -145,7 +150,7 @@ export function TestRunPage() {
       .startTestRun(
         testIdNum,
         test?.device === 'android' || test?.device === 'ios'
-          ? appVersionId ?? undefined
+          ? (appVersionId ?? undefined)
           : undefined,
       )
       .then((r) => {
@@ -164,195 +169,143 @@ export function TestRunPage() {
     run && run.total ? Math.round((run.current / run.total) * 100) : null
   // 失败项：可一键生成缺陷（来源=脚本，预填步骤/预期/实际）
   const failedItems = (run?.items ?? []).filter((i) => i.status === 'fail')
+  const defectProject = {
+    id: projectId,
+    name: projectName ?? `#${projectId}`,
+  } as Project
 
   return (
-    <div className="flex h-full gap-6">
-      {/* 左侧：终端输出（撑满剩余高度，底部与页面对齐） */}
-      <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <PageBreadcrumb
-          items={[
-            { label: '测试', to: '/tests' },
-            { label: projectName ?? '…', to: `/projects/${projectId}` },
-            { label: test?.code ?? '…' },
-          ]}
+    <RunDetailView
+      ai={
+        <DetailAgentPanel
+          context={{
+            type: 'script',
+            id: `test:${testIdNum}`,
+            title: `测试 ${test?.code ?? testIdNum}`,
+            summary: [
+              test?.scriptPath ? `脚本：${test.scriptPath}` : '',
+              test?.device ? `执行设备：${test.device}` : '',
+              run
+                ? `最近运行：${runStatusMeta[run.status].text}，当前步骤 ${run.current}/${run.total ?? '—'}`
+                : '暂无运行记录',
+            ]
+              .filter(Boolean)
+              .join('；'),
+          }}
+          emptyTitle={`测试 ${test?.code ?? testIdNum} 的独立 AI 会话`}
+          emptyHint="让 AI 分析当前用例、运行输出或失败项"
+          placeholder="询问当前测试用例或运行结果…"
         />
-        <section className="flex min-h-0 flex-1 flex-col">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">
-                测试：{test?.code ?? '…'}
-              </h2>
-              {test && (
-                <p className="text-sm" title={test.scriptPath}>
-                  {test.scriptPath}
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {test?.device !== 'h5' &&
-                test?.device !== 'server' &&
-                appVersions.length > 0 && (
-                <Select
-                  value={appVersionId !== null ? String(appVersionId) : ''}
-                  onValueChange={(v) =>
-                    setAppVersionId(v ? Number(v) : null)
-                  }
-                  items={Object.fromEntries(
-                    appVersions.map((v) => [
-                      String(v.id),
-                      `${v.appTarget} ${v.version}`,
-                    ]),
-                  )}
-                >
-                  <SelectTrigger className="w-56">
-                    <SelectValue placeholder="选择 app 版本" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {appVersions.map((v) => (
-                      <SelectItem key={v.id} value={String(v.id)}>
-                        {v.appTarget} {v.version}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Button
-                size="sm"
-                onClick={startRun}
-                // APP 测试可不选 app 版本（后端 appVersionId 可空：跳过装 app，依赖预装环境）
-                disabled={starting}
+      }
+      breadcrumb={[
+        { label: '测试', to: '/tests' },
+        { label: projectName ?? '…', to: `/projects/${projectId}` },
+        { label: test?.code ?? '…' },
+      ]}
+      title={`测试：${test?.code ?? '…'}`}
+      subtitle={
+        test?.scriptPath ? (
+          <span className="block truncate" title={test.scriptPath}>
+            {test.scriptPath}
+          </span>
+        ) : undefined
+      }
+      actions={
+        <>
+          {test?.device !== 'h5' &&
+            test?.device !== 'server' &&
+            appVersions.length > 0 && (
+              <Select
+                value={appVersionId !== null ? String(appVersionId) : ''}
+                onValueChange={(v) => setAppVersionId(v ? Number(v) : null)}
+                items={Object.fromEntries(
+                  appVersions.map((v) => [
+                    String(v.id),
+                    `${v.appTarget} ${v.version}`,
+                  ]),
+                )}
               >
-                {starting ? '启动中…' : '运行'}
-              </Button>
-            </div>
-          </div>
-          {error && <p className="mb-2 text-sm">操作失败:{error}</p>}
-          {!run && <p className="text-sm">暂无运行记录，点击"运行"开始。</p>}
-          {run && <Terminal run={run} scriptPath={test?.scriptPath} />}
-        </section>
-      </div>
-
-      {/* 右侧：运行状态 + 历史记录 */}
-      <aside className="flex w-80 shrink-0 flex-col gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>运行状态</CardTitle>
-          </CardHeader>
-          {run ? (
-            <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
-              <div className="flex justify-between">
-                <dt>状态</dt>
-                <dd>
-                  <RunStatusBadge status={run.status} />
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>总步数</dt>
-                <dd>{run.total ?? '—'}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>当前步数</dt>
-                <dd>{run.current}</dd>
-              </div>
-              <div className="flex flex-col gap-1">
-                <div className="flex justify-between">
-                  <dt>进度</dt>
-                  <dd>{progress !== null ? `${progress}%` : '—'}</dd>
-                </div>
-                <Progress value={progress} />
-              </div>
-              <div className="flex justify-between">
-                <dt>耗时</dt>
-                <dd>{formatDuration(run, now)}</dd>
-              </div>
-              {run.message && (
-                <div className="flex flex-col gap-1">
-                  <dt>消息</dt>
-                  <dd className="whitespace-pre-wrap">{run.message}</dd>
-                </div>
-              )}
-            </dl>
-          ) : (
-            <p className="px-6 pb-6 text-sm">暂无运行记录</p>
-          )}
-        </Card>
-
-        {failedItems.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>失败项（{failedItems.length}）</CardTitle>
-            </CardHeader>
-            <div className="flex flex-col gap-2 px-6 pb-6">
-              {failedItems.map((item, idx) => {
-                const defectProject = {
-                  id: projectId,
-                  name: projectName ?? `#${projectId}`,
-                } as Project
-                return (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between gap-2 text-sm"
-                  >
-                    <span
-                      className="min-w-0 flex-1 truncate"
-                      title={item.title ?? item.message ?? ''}
-                    >
-                      {item.no !== undefined ? `${item.no}. ` : ''}
-                      {item.title ?? item.message ?? '失败项'}
-                    </span>
-                    <NewDefectDialog
-                      projects={[defectProject]}
-                      preset={{
-                        projectId,
-                        testScript: test?.scriptPath,
-                        expected: item.expect ?? item.title ?? item.message,
-                        actual: item.real ?? item.message,
-                      }}
-                      trigger={
-                        <Button variant="outline" size="sm">
-                          生成缺陷
-                        </Button>
-                      }
-                    />
-                  </div>
-                )
-              })}
-            </div>
-          </Card>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>运行历史</CardTitle>
-          </CardHeader>
-          {/* 只展示最近 5 条，无标题行（列义自明） */}
-          <Table>
-            <TableBody>
-              {runs.slice(0, 5).map((r) => (
-                <TableRow
-                  key={r.id}
-                  className={
-                    r.id === selectedRunId ? 'bg-background-muted' : undefined
-                  }
-                  onClick={() => setSelectedRunId(r.id)}
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="选择 app 版本" />
+                </SelectTrigger>
+                <SelectContent>
+                  {appVersions.map((v) => (
+                    <SelectItem key={v.id} value={String(v.id)}>
+                      {v.appTarget} {v.version}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          <Button
+            size="sm"
+            onClick={startRun}
+            // APP 测试可不选 app 版本（后端 appVersionId 可空：跳过装 app，依赖预装环境）
+            disabled={starting}
+          >
+            {starting ? '启动中…' : '运行'}
+          </Button>
+        </>
+      }
+      error={error}
+      run={
+        run
+          ? {
+              statusBadge: <RunStatusBadge status={run.status} />,
+              total: run.total,
+              current: run.current,
+              progress,
+              duration: formatDuration(run, now),
+              message: run.message,
+            }
+          : null
+      }
+      history={toHistory(runs)}
+      selectedRunId={selectedRunId}
+      onSelectRun={setSelectedRunId}
+      terminal={
+        run ? <Terminal run={run} scriptPath={test?.scriptPath} /> : undefined
+      }
+      emptyText="暂无运行记录，点击“运行”开始。"
+      extra={
+        failedItems.length > 0 ? (
+          <section className="rounded-[var(--radius-lg)] border border-border bg-background p-3">
+            <h2 className="mb-2 text-sm font-semibold text-foreground-intense">
+              失败项（{failedItems.length}）
+            </h2>
+            <div className="flex flex-col gap-2">
+              {failedItems.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between gap-2 text-sm"
                 >
-                  <TableCell>
-                    {new Date(r.startedAt).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="w-20">
-                    <RunStatusBadge status={r.status} />
-                  </TableCell>
-                </TableRow>
+                  <span
+                    className="min-w-0 flex-1 truncate"
+                    title={item.title ?? item.message ?? ''}
+                  >
+                    {item.no !== undefined ? `${item.no}. ` : ''}
+                    {item.title ?? item.message ?? '失败项'}
+                  </span>
+                  <NewDefectDialog
+                    projects={[defectProject]}
+                    preset={{
+                      projectId,
+                      testScript: test?.scriptPath,
+                      expected: item.expect ?? item.title ?? item.message,
+                      actual: item.real ?? item.message,
+                    }}
+                    trigger={
+                      <Button variant="outline" size="sm">
+                        生成缺陷
+                      </Button>
+                    }
+                  />
+                </div>
               ))}
-              {runs.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={2}>暂无运行记录</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-      </aside>
-    </div>
+            </div>
+          </section>
+        ) : undefined
+      }
+    />
   )
 }

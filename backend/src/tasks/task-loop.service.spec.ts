@@ -101,6 +101,9 @@ describe('TaskLoopService 多机器人协同', () => {
       dispatchService as never,
       taskNotify as never,
       inbox as never,
+      {
+        get: jest.fn().mockReturnValue('http://api.example/api'),
+      } as never,
     );
     (service as unknown as { ready: boolean }).ready = true;
   });
@@ -257,7 +260,11 @@ describe('TaskLoopService 多机器人协同', () => {
     await service.tick();
 
     expect(tasksRepo.update).toHaveBeenCalledWith(
-      { id: 1, status: TaskStatus.WAITING },
+      {
+        id: 1,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPT,
+      },
       expect.objectContaining({
         subStatus: TaskSubStatus.PENDING_RESUME,
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -265,6 +272,213 @@ describe('TaskLoopService 多机器人协同', () => {
       }),
     );
     expect(inbox.markQueued).toHaveBeenCalledWith(9);
+  });
+
+  it('执行中的父任务当前回合已结束时，子任务验收事件会唤醒父机器人', async () => {
+    const entry = {
+      id: 11,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'handoff',
+      referenceId: null,
+      payload: {
+        handoffUrl: '/docs/detail/task/20261103/TK-0002/HANDOFF',
+        acceptUrl: 'http://localhost:3100/api/tasks/2/handoff/accept.md',
+      },
+      status: 'pending',
+    } as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      code: 'TK-0002',
+      parentId: 1,
+      rootId: 1,
+      requesterType: 'worker',
+      requesterId: 1001,
+      subStatus: TaskSubStatus.PENDING_ACCEPT,
+    });
+    inbox.listPending.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(where.id === 1 ? parent : child),
+    );
+
+    await service.tick();
+
+    expect(dispatchService.taskChatRunning).toHaveBeenCalledWith(1);
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      {
+        id: 1,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      expect.objectContaining({
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_RESUME,
+        resumePrompt: expect.stringContaining(
+          'http://api.example/api/tasks/2/handoff/accept.md',
+        ) as string,
+      }),
+    );
+    expect(inbox.markQueued).toHaveBeenCalledWith(11);
+    expect(tasksService.addEvent).toHaveBeenCalledWith(
+      1,
+      '系统',
+      expect.stringContaining('子任务 TK-0002 的 handoff 事件已入队'),
+      null,
+      expect.objectContaining({ childTaskId: 2, inboxId: 11 }),
+    );
+  });
+
+  it('执行中父任务会收到子任务提问正文和完整答复地址', async () => {
+    const entry = {
+      id: 14,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'question',
+      referenceId: 'project-q1',
+      payload: {
+        questions: [
+          {
+            header: '方案确认',
+            question: '使用哪个活动方案？',
+            options: [{ label: 'A 方案' }, { label: 'B 方案' }],
+            multiple: false,
+            custom: true,
+          },
+        ],
+      },
+      status: 'pending',
+    } as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      parentId: 1,
+      rootId: 1,
+      requesterType: 'worker',
+      requesterId: 1001,
+      subStatus: TaskSubStatus.PENDING_FEEDBACK,
+    });
+    inbox.listPending.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(where.id === 1 ? parent : child),
+    );
+    let resumePrompt = '';
+    tasksRepo.update.mockImplementation(
+      (_criteria: unknown, patch: Partial<Task>) => {
+        if (patch.resumePrompt) resumePrompt = patch.resumePrompt;
+        return Promise.resolve({ affected: 1 });
+      },
+    );
+
+    await service.tick();
+
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      {
+        id: 1,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      expect.objectContaining({
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_RESUME,
+      }),
+    );
+    expect(resumePrompt).toContain('使用哪个活动方案？');
+    expect(resumePrompt).toContain('A 方案 / B 方案');
+    expect(resumePrompt).toContain('允许自由输入');
+    expect(resumePrompt).toContain(
+      'http://api.example/api/tasks/2/questions/project-q1/answer.md',
+    );
+    expect(resumePrompt).toContain('只回复消息不会解除');
+    expect(inbox.markQueued).toHaveBeenCalledWith(14);
+  });
+
+  it('执行中的父任务当前回合仍在输出时不注入子任务事件', async () => {
+    const entry = {
+      id: 12,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'handoff',
+      referenceId: null,
+      status: 'pending',
+    } as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      parentId: 1,
+      rootId: 1,
+      requesterType: 'worker',
+      requesterId: 1001,
+      subStatus: TaskSubStatus.PENDING_ACCEPT,
+    });
+    inbox.listPending.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(where.id === 1 ? parent : child),
+    );
+    dispatchService.taskChatRunning.mockReturnValue(true);
+
+    await service.tick();
+
+    expect(tasksRepo.update).not.toHaveBeenCalled();
+    expect(inbox.markQueued).not.toHaveBeenCalled();
+  });
+
+  it('父任务自身待反馈时不被子任务事件改写状态', async () => {
+    const entry = {
+      id: 13,
+      parentTaskId: 1,
+      workerId: 1001,
+      childTaskId: 2,
+      kind: 'handoff',
+      referenceId: null,
+      status: 'pending',
+    } as TaskWorkerInbox;
+    const parent = baseTask({
+      id: 1,
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_FEEDBACK,
+      agentId: 1001,
+    });
+    const child = baseTask({
+      id: 2,
+      parentId: 1,
+      rootId: 1,
+      requesterType: 'worker',
+      requesterId: 1001,
+      subStatus: TaskSubStatus.PENDING_ACCEPT,
+    });
+    inbox.listPending.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockImplementation(
+      ({ where }: { where: { id: number } }) =>
+        Promise.resolve(where.id === 1 ? parent : child),
+    );
+
+    await service.tick();
+
+    expect(tasksRepo.update).not.toHaveBeenCalled();
+    expect(inbox.markQueued).not.toHaveBeenCalled();
+    expect(tasksService.addEvent).not.toHaveBeenCalled();
   });
 
   it('父任务不可用时把子任务需求方回退给根任务创建人', async () => {

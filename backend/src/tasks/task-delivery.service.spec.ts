@@ -64,6 +64,7 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     discardQueuedConversations: jest.Mock;
   };
   let handoffService: { request: jest.Mock };
+  let workerInbox: { completeForChild: jest.Mock };
   let taskDocuments: {
     updateHandoff: jest.Mock;
     readHandoff: jest.Mock;
@@ -142,6 +143,9 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
     };
     handoffService = { request: jest.fn().mockResolvedValue({}) };
+    workerInbox = {
+      completeForChild: jest.fn().mockResolvedValue(undefined),
+    };
     taskDocuments = {
       updateHandoff: jest.fn().mockResolvedValue({
         task: baseTask(),
@@ -169,9 +173,7 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       taskDocuments as never,
       handoffService as never,
       taskNotify as never,
-      {
-        completeForChild: jest.fn().mockResolvedValue(undefined),
-      } as never,
+      workerInbox as never,
       { get: jest.fn() } as never,
     );
   });
@@ -308,6 +310,35 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     expect(dispatchService.destroyAcceptedSession).toHaveBeenCalledWith(1);
     expect(md).toContain('# 任务验收已通过');
     expect(md).toContain('- 状态：已结束-完成');
+  });
+
+  it('机器人需求方验收子任务并结算收件箱事件', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({ requesterType: 'worker', requesterId: 1001 }),
+    );
+
+    await service.acceptHandoff(1, { type: 'worker', worker: worker() });
+
+    expect(tasksService.accept).toHaveBeenCalledWith(1, '前端工程师');
+    expect(workerInbox.completeForChild).toHaveBeenCalledWith(1, 'handoff');
+    expect(dispatchService.discardQueuedConversations).toHaveBeenCalledWith(1);
+    expect(handoffService.request).toHaveBeenCalledWith(1);
+    expect(dispatchService.destroyAcceptedSession).toHaveBeenCalledWith(1);
+  });
+
+  it('非需求方机器人不能验收子任务', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({ requesterType: 'worker', requesterId: 1001 }),
+    );
+
+    await expect(
+      service.acceptHandoff(1, {
+        type: 'worker',
+        worker: worker({ id: 1002, name: '其他机器人' }),
+      }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(tasksService.accept).not.toHaveBeenCalled();
+    expect(workerInbox.completeForChild).not.toHaveBeenCalled();
   });
 
   it('非需求方不能处理验收反馈', async () => {

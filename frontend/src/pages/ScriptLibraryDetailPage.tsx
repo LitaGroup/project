@@ -1,19 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-} from '@appica/ui-react/card'
-import {
-  Table,
-  TableBody,
-  TableRow,
-  TableCell,
-} from '@appica/ui-react/table'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
-import { Progress } from '@appica/ui-react/progress'
 import {
   api,
   SCRIPT_LIBRARY_KIND_ITEMS,
@@ -21,7 +9,11 @@ import {
   type ScriptLibraryRun,
   type ScriptLibraryScriptDetail,
 } from '../lib/api'
-import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
+import {
+  RunDetailView,
+  type RunHistoryItem,
+} from '../components/detail/RunDetailView'
 import { Terminal } from '../components/Terminal'
 
 /** 描述生成状态展示 */
@@ -61,6 +53,13 @@ function formatDuration(run: ScriptLibraryRun, now: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`
 }
 
+function toHistory(runs: ScriptLibraryRun[]): RunHistoryItem[] {
+  return runs.slice(0, 5).map((run) => ({
+    id: run.id,
+    label: `${new Date(run.startedAt).toLocaleString()} · ${runStatusMeta[run.status].text}`,
+  }))
+}
+
 /** 产物文件下载地址：/export-files/library/{runId}/{file}（file 逐段编码，支持子目录） */
 function libraryFileUrl(run: ScriptLibraryRun, file: string): string {
   const encoded = file.split('/').map(encodeURIComponent).join('/')
@@ -69,7 +68,7 @@ function libraryFileUrl(run: ScriptLibraryRun, file: string): string {
 
 /**
  * 脚本库脚本详情：源码查看 + 直接运行（无需登记到项目）。
- * 左侧终端实时输出，右侧运行状态 / 产物文件（导出脚本）/ 运行历史。
+ * 正文承载脚本信息、终端与运行资料，右侧统一为「我的 AI」。
  */
 export function ScriptLibraryDetailPage() {
   const [searchParams] = useSearchParams()
@@ -155,7 +154,7 @@ export function ScriptLibraryDetailPage() {
     api
       .regenerateLibraryDescription(scriptPath)
       .then(() => {
-        // 转入待生成后刷新详情（状态徽标更新为"待生成"）
+        // 转入待生成后刷新详情（状态徽标更新为“待生成”）
         return api.getLibraryScript(scriptPath).then(setScript)
       })
       .catch((e: Error) => setError(e.message))
@@ -170,222 +169,192 @@ export function ScriptLibraryDetailPage() {
   const progress =
     run && run.total ? Math.round((run.current / run.total) * 100) : null
   const files = run?.files ?? []
+  const fileName = scriptPath.split('/').pop() ?? scriptPath
 
   return (
-    <div className="flex h-full gap-6">
-      {/* 左侧：脚本信息 + 终端输出（撑满剩余高度） */}
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
-        <PageBreadcrumb
-          items={[
-            { label: '脚本库', to: '/docs/scripts' },
-            { label: scriptPath },
-          ]}
+    <RunDetailView
+      ai={
+        <DetailAgentPanel
+          context={{
+            type: 'script',
+            id: `library:${scriptPath}`,
+            title: `脚本 ${fileName}`,
+            summary: [
+              script?.kind ? `类型：${SCRIPT_LIBRARY_KIND_ITEMS[script.kind]}` : '',
+              `路径：${scriptPath}`,
+              script?.description ? `描述：${script.description}` : '',
+              run
+                ? `最近运行：${runStatusMeta[run.status].text}，产物 ${files.length} 个`
+                : '暂无运行记录',
+            ]
+              .filter(Boolean)
+              .join('；'),
+          }}
+          emptyTitle={`${fileName} 的独立 AI 会话`}
+          emptyHint="让 AI 分析脚本源码、描述或运行结果"
+          placeholder="询问当前脚本或运行结果…"
         />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="flex items-center gap-2 text-xl font-semibold">
-              <span className="truncate" title={scriptPath}>
-                {scriptPath.split('/').pop() ?? scriptPath}
+      }
+      breadcrumb={[
+        { label: '脚本库', to: '/docs/scripts' },
+        { label: scriptPath },
+      ]}
+      title={fileName}
+      subtitle={
+        <p className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 truncate" title={scriptPath}>
+            {scriptPath}
+          </span>
+          {script && (
+            <Badge variant="secondary">
+              {SCRIPT_LIBRARY_KIND_ITEMS[script.kind]}
+            </Badge>
+          )}
+          {script?.revision && (
+            <span className="text-xs text-foreground-subtle">
+              提交 {script.revision.slice(0, 7)}
+            </span>
+          )}
+          {script && (script.description || script.descriptionStatus) && (
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 text-foreground-subtle">描述：</span>
+              <span className="min-w-0 truncate" title={script.description ?? ''}>
+                {script.description ?? '尚未生成'}
               </span>
-              {script && (
-                <Badge variant="secondary">
-                  {SCRIPT_LIBRARY_KIND_ITEMS[script.kind]}
-                </Badge>
-              )}
-            </h2>
-            <p className="mt-0.5 truncate text-sm text-foreground-muted" title={scriptPath}>
-              {scriptPath}
-              {script?.revision && ` · 提交 ${script.revision.slice(0, 7)}`}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {script && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSource((v) => !v)}
-              >
-                {showSource ? '收起源码' : '查看源码'}
-              </Button>
-            )}
+              {script.descriptionStatus &&
+                script.descriptionStatus !== 'done' && (
+                  <Badge
+                    variant={
+                      descriptionStatusMeta[script.descriptionStatus].variant
+                    }
+                  >
+                    {descriptionStatusMeta[script.descriptionStatus].text}
+                  </Badge>
+                )}
+            </span>
+          )}
+        </p>
+      }
+      actions={
+        <>
+          {script && (
             <Button
               variant="outline"
               size="sm"
-              onClick={regenerateDescription}
-              disabled={regenerating || !script || script.descriptionStatus === 'running'}
+              onClick={() => setShowSource((v) => !v)}
             >
-              {regenerating ? '提交中…' : '重新生成描述'}
+              {showSource ? '收起源码' : '查看源码'}
             </Button>
-            {script?.githubUrl && (
-              <Button variant="ghost" size="sm" render={<a href={script.githubUrl} target="_blank" rel="noreferrer" />}>
-                GitHub
-              </Button>
-            )}
-            <Button size="sm" onClick={startRun} disabled={starting || !script}>
-              {starting ? '启动中…' : '运行'}
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={regenerateDescription}
+            disabled={
+              regenerating || !script || script.descriptionStatus === 'running'
+            }
+          >
+            {regenerating ? '提交中…' : '重新生成描述'}
+          </Button>
+          {script?.githubUrl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              render={
+                <a
+                  href={script.githubUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                />
+              }
+            >
+              GitHub
             </Button>
-          </div>
-        </div>
-
-        {script && (script.description || script.descriptionStatus) && (
-          <p className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="shrink-0 text-foreground-muted">描述：</span>
-            {script.description ? (
-              <span>{script.description}</span>
-            ) : (
-              <span className="text-foreground-muted">
-                尚未生成，由「脚本描述机器人」分析代码后自动补充
-              </span>
-            )}
-            {script.descriptionStatus && script.descriptionStatus !== 'done' && (
-              <Badge variant={descriptionStatusMeta[script.descriptionStatus].variant}>
-                {descriptionStatusMeta[script.descriptionStatus].text}
-              </Badge>
-            )}
-          </p>
-        )}
-
-        {error && <p className="text-sm">操作失败:{error}</p>}
-
-        {showSource && script && (
-          <pre className="max-h-72 shrink-0 overflow-auto rounded-[var(--radius-md)] bg-background-muted p-4 font-mono text-xs leading-5">
+          )}
+          <Button size="sm" onClick={startRun} disabled={starting || !script}>
+            {starting ? '启动中…' : '运行'}
+          </Button>
+        </>
+      }
+      error={error}
+      run={
+        run
+          ? {
+              statusBadge: <RunStatusBadge status={run.status} />,
+              total: run.total,
+              current: run.current,
+              progress,
+              duration: formatDuration(run, now),
+              message: run.message,
+            }
+          : null
+      }
+      history={toHistory(runs)}
+      selectedRunId={selectedRunId}
+      onSelectRun={setSelectedRunId}
+      beforeTerminal={
+        showSource && script ? (
+          <pre className="max-h-64 shrink-0 overflow-auto rounded-[var(--radius-md)] bg-background-muted p-4 font-mono text-xs leading-5">
             {script.content}
           </pre>
-        )}
-
-        <section className="flex min-h-0 flex-1 flex-col">
-          {!run && !error && (
-            <p className="text-sm">暂无运行记录，点击"运行"开始。</p>
-          )}
-          {run && <Terminal run={run} scriptPath={run.scriptPath} />}
-        </section>
-      </div>
-
-      {/* 右侧：运行状态 + 产物文件 + 历史记录 */}
-      <aside className="flex w-80 shrink-0 flex-col gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>运行状态</CardTitle>
-          </CardHeader>
-          {run ? (
-            <dl className="flex flex-col gap-3 px-6 pb-6 text-sm">
-              <div className="flex justify-between">
-                <dt>状态</dt>
-                <dd>
-                  <RunStatusBadge status={run.status} />
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>总步数</dt>
-                <dd>{run.total ?? '—'}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>当前步数</dt>
-                <dd>{run.current}</dd>
-              </div>
-              <div className="flex flex-col gap-1">
-                <div className="flex justify-between">
-                  <dt>进度</dt>
-                  <dd>{progress !== null ? `${progress}%` : '—'}</dd>
-                </div>
-                <Progress value={progress} />
-              </div>
-              <div className="flex justify-between">
-                <dt>耗时</dt>
-                <dd>{formatDuration(run, now)}</dd>
-              </div>
-              {run.message && (
-                <div className="flex flex-col gap-1">
-                  <dt>消息</dt>
-                  <dd className="whitespace-pre-wrap">{run.message}</dd>
-                </div>
-              )}
-            </dl>
-          ) : (
-            <p className="px-6 pb-6 text-sm">暂无运行记录</p>
-          )}
-        </Card>
-
-        {run && files.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>产物文件</CardTitle>
-            </CardHeader>
-            <ul className="flex flex-col gap-2 px-6 pb-6 text-sm">
-              {files.map((f) => (
-                <li key={f.file} className="flex flex-col">
-                  <a
-                    href={libraryFileUrl(run, f.file)}
-                    download
-                    className="truncate underline"
-                    title={f.file}
-                  >
-                    {f.title || f.file}
-                  </a>
-                  {f.title && f.title !== f.file && (
-                    <span className="truncate text-xs text-foreground-muted">
-                      {f.file}
+        ) : undefined
+      }
+      terminal={
+        run ? <Terminal run={run} scriptPath={run.scriptPath} /> : undefined
+      }
+      emptyText="暂无运行记录，点击“运行”开始。"
+      extra={
+        files.length > 0 || script?.projectIds.length ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {run && files.length > 0 && (
+              <section className="rounded-[var(--radius-lg)] border border-border bg-background p-3">
+                <h2 className="mb-2 text-sm font-semibold text-foreground-intense">
+                  产物文件
+                </h2>
+                <ul className="flex flex-col gap-1.5 text-sm">
+                  {files.map((f) => (
+                    <li key={f.file} className="flex min-w-0 flex-col">
+                      <a
+                        href={libraryFileUrl(run, f.file)}
+                        download
+                        className="truncate underline"
+                        title={f.file}
+                      >
+                        {f.title || f.file}
+                      </a>
+                      {f.title && f.title !== f.file && (
+                        <span className="truncate text-xs text-foreground-muted">
+                          {f.file}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {script && script.projectIds.length > 0 && (
+              <section className="rounded-[var(--radius-lg)] border border-border bg-background p-3">
+                <h2 className="mb-2 text-sm font-semibold text-foreground-intense">
+                  已登记项目
+                </h2>
+                <p className="text-sm">
+                  {script.projectIds.map((pid, i) => (
+                    <span key={pid}>
+                      {i > 0 && '、'}
+                      <Link
+                        to={`/projects/${pid}`}
+                        className="text-foreground-intense underline"
+                      >
+                        项目 #{pid}
+                      </Link>
                     </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </Card>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>运行历史</CardTitle>
-          </CardHeader>
-          {/* 只展示最近 5 条，无标题行（列义自明） */}
-          <Table>
-            <TableBody>
-              {runs.slice(0, 5).map((r) => (
-                <TableRow
-                  key={r.id}
-                  className={
-                    r.id === selectedRunId ? 'bg-background-muted' : undefined
-                  }
-                  onClick={() => setSelectedRunId(r.id)}
-                >
-                  <TableCell>
-                    {new Date(r.startedAt).toLocaleString()}
-                  </TableCell>
-                  <TableCell className="w-20">
-                    <RunStatusBadge status={r.status} />
-                  </TableCell>
-                </TableRow>
-              ))}
-              {runs.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={2}>暂无运行记录</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-
-        {script && script.projectIds.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>已登记项目</CardTitle>
-            </CardHeader>
-            <p className="px-6 pb-6 text-sm">
-              {script.projectIds.map((pid, i) => (
-                <span key={pid}>
-                  {i > 0 && '、'}
-                  <Link
-                    to={`/projects/${pid}`}
-                    className="text-foreground-intense underline"
-                  >
-                    项目 #{pid}
-                  </Link>
-                </span>
-              ))}
-            </p>
-          </Card>
-        )}
-      </aside>
-    </div>
+                  ))}
+                </p>
+              </section>
+            )}
+          </div>
+        ) : undefined
+      }
+    />
   )
 }

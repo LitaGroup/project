@@ -59,7 +59,12 @@ export interface PersonalAgentInfo {
 export interface PersonalAgentSendOptions {
   /** 当前工作台选中任务：每个任务使用独立的 opencode 会话 */
   taskId?: number | null;
-  /** 当前工作台选中任务的上下文（不写入用户气泡，仅作为本轮提示词前缀） */
+  /**
+   * 自定义会话范围（详情页使用）。
+   * 优先生效，未提供时按 taskId 推导任务/通用会话。
+   */
+  scope?: string | null;
+  /** 当前页面上下文（不写入用户气泡，仅作为本轮提示词前缀） */
   taskContext?: string | null;
   /** 随消息发送的附件（已上传文件的公开地址） */
   files?: WorkerDebugAttachment[];
@@ -115,7 +120,9 @@ export class PersonalAgentsService {
    * 我的 AI 会话范围：每个任务独立 session，未选中任务时使用通用会话。
    * 机器人调试页仍使用 debug scope，两者上下文互不影响。
    */
-  private scopeOf(taskId?: number | null): string {
+  private scopeOf(taskId?: number | null, scope?: string | null): string {
+    const custom = scope?.trim();
+    if (custom) return custom;
     const id = Number(taskId);
     return Number.isInteger(id) && id > 0 ? `agent:task:${id}` : 'agent:global';
   }
@@ -250,13 +257,18 @@ export class PersonalAgentsService {
   async snapshot(
     user: User,
     taskId?: number | null,
+    scope?: string | null,
   ): Promise<WorkerDebugSnapshot> {
     const { worker } = await this.requireChatAgent(user);
-    return this.debug.snapshot(user.id, worker.id, this.scopeOf(taskId));
+    return this.debug.snapshot(user.id, worker.id, this.scopeOf(taskId, scope));
   }
 
-  /** 我的 AGENT 对话 SSE（按任务隔离会话） */
-  stream(user: User, taskId?: number | null): Observable<MessageEvent> {
+  /** 我的 AGENT 对话 SSE（按任务/详情页隔离会话） */
+  stream(
+    user: User,
+    taskId?: number | null,
+    scope?: string | null,
+  ): Observable<MessageEvent> {
     return new Observable<MessageEvent>((subscriber) => {
       let closed = false;
       let inner: Subscription | null = null;
@@ -264,7 +276,7 @@ export class PersonalAgentsService {
         .then(({ worker }) => {
           if (closed) return;
           inner = this.debug
-            .stream(user.id, worker.id, this.scopeOf(taskId))
+            .stream(user.id, worker.id, this.scopeOf(taskId, scope))
             .subscribe(subscriber);
         })
         .catch((error: Error) => {
@@ -285,7 +297,7 @@ export class PersonalAgentsService {
   ): Promise<WorkerDebugSnapshot> {
     const { worker, workdir } = await this.requireChatAgent(user);
     return this.debug.send(user.id, worker.id, content, {
-      scope: this.scopeOf(options?.taskId),
+      scope: this.scopeOf(options?.taskId, options?.scope),
       firstPrompt: buildPersonalAgentFirstPrompt(
         worker.prompt,
         this.apiUrl,
@@ -301,9 +313,10 @@ export class PersonalAgentsService {
   async models(
     user: User,
     taskId?: number | null,
+    scope?: string | null,
   ): Promise<WorkerDebugModelCatalog> {
     const { worker } = await this.requireChatAgent(user);
-    return this.debug.models(user.id, worker.id, this.scopeOf(taskId));
+    return this.debug.models(user.id, worker.id, this.scopeOf(taskId, scope));
   }
 
   /** 我的 AGENT：切换模型/思考等级 */
@@ -311,9 +324,15 @@ export class PersonalAgentsService {
     user: User,
     input: WorkerDebugModelSelection,
     taskId?: number | null,
+    scope?: string | null,
   ): Promise<WorkerDebugSnapshot> {
     const { worker } = await this.requireChatAgent(user);
-    return this.debug.setModel(user.id, worker.id, input, this.scopeOf(taskId));
+    return this.debug.setModel(
+      user.id,
+      worker.id,
+      input,
+      this.scopeOf(taskId, scope),
+    );
   }
 
   /** 我的 AGENT：切换主 Agent 模式（build / plan） */
@@ -321,17 +340,28 @@ export class PersonalAgentsService {
     user: User,
     mode: WorkerDebugMode,
     taskId?: number | null,
+    scope?: string | null,
   ): Promise<WorkerDebugSnapshot> {
     const { worker } = await this.requireChatAgent(user);
-    return this.debug.setMode(user.id, worker.id, mode, this.scopeOf(taskId));
+    return this.debug.setMode(
+      user.id,
+      worker.id,
+      mode,
+      this.scopeOf(taskId, scope),
+    );
   }
 
   async interrupt(
     user: User,
     taskId?: number | null,
+    scope?: string | null,
   ): Promise<WorkerDebugSnapshot> {
     const { worker } = await this.requireChatAgent(user);
-    return this.debug.interrupt(user.id, worker.id, this.scopeOf(taskId));
+    return this.debug.interrupt(
+      user.id,
+      worker.id,
+      this.scopeOf(taskId, scope),
+    );
   }
 
   async replyQuestion(
@@ -339,6 +369,7 @@ export class PersonalAgentsService {
     questionId: string,
     input: { answers?: string[][]; reject?: boolean },
     taskId?: number | null,
+    scope?: string | null,
   ): Promise<WorkerDebugSnapshot> {
     const { worker } = await this.requireChatAgent(user);
     return this.debug.replyQuestion(
@@ -346,16 +377,17 @@ export class PersonalAgentsService {
       worker.id,
       questionId,
       input,
-      this.scopeOf(taskId),
+      this.scopeOf(taskId, scope),
     );
   }
 
   async reset(
     user: User,
     taskId?: number | null,
+    scope?: string | null,
   ): Promise<WorkerDebugSnapshot> {
     const { worker } = await this.requireChatAgent(user);
-    return this.debug.reset(user.id, worker.id, this.scopeOf(taskId));
+    return this.debug.reset(user.id, worker.id, this.scopeOf(taskId, scope));
   }
 
   /** 可用性描述（不修改数据库） */

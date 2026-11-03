@@ -22,7 +22,12 @@ import type {
   WorkerDebugMode,
   WorkerDebugSnapshot,
 } from '../workers/worker-debug.types';
-import { WorkbenchService, WorkbenchSummary } from './workbench.service';
+import {
+  normalizeAgentPageContext,
+  WorkbenchService,
+  WorkbenchSummary,
+  type AgentPageContext,
+} from './workbench.service';
 import { Task } from './task.entity';
 
 class WorkbenchRefuseDto {
@@ -75,13 +80,22 @@ class WorkbenchFailDto {
   reason?: string;
 }
 
-class WorkbenchReplyDto {
+/** 详情页「我的 AI」上下文字段（文档/脚本等页面） */
+class WorkbenchAgentPageContextDto {
+  contextType?: string;
+  contextId?: string;
+  contextTitle?: string;
+  contextSummary?: string;
+  contextReadUrl?: string;
+}
+
+class WorkbenchReplyDto extends WorkbenchAgentPageContextDto {
   answers?: string[][];
   reject?: boolean;
   taskId?: number | null;
 }
 
-class WorkbenchAgentMessageDto {
+class WorkbenchAgentMessageDto extends WorkbenchAgentPageContextDto {
   content?: string;
   /** 当前工作台选中任务（作为 AGENT 上下文，不写入用户气泡） */
   taskId?: number | null;
@@ -94,19 +108,19 @@ class WorkbenchAgentMessageDto {
   }>;
 }
 
-class WorkbenchAgentModelDto {
+class WorkbenchAgentModelDto extends WorkbenchAgentPageContextDto {
   providerId?: string;
   modelId?: string;
   variant?: string | null;
   taskId?: number | null;
 }
 
-class WorkbenchAgentModeDto {
+class WorkbenchAgentModeDto extends WorkbenchAgentPageContextDto {
   mode?: string;
   taskId?: number | null;
 }
 
-class WorkbenchAgentTargetDto {
+class WorkbenchAgentTargetDto extends WorkbenchAgentPageContextDto {
   taskId?: number | null;
 }
 
@@ -114,6 +128,23 @@ class WorkbenchAgentTargetDto {
 function parseTaskId(value: unknown): number | null {
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/** 把 query/body 的上下文扁平字段整理为规范化后的详情页上下文 */
+function parsePageContext(
+  input: WorkbenchAgentPageContextDto | undefined,
+): AgentPageContext | null {
+  return normalizeAgentPageContext(
+    input
+      ? {
+          type: input.contextType,
+          id: input.contextId,
+          title: input.contextTitle,
+          summary: input.contextSummary,
+          readUrl: input.contextReadUrl,
+        }
+      : null,
+  );
 }
 
 /** 操作台：无左侧子导航，当前用户通过绑定机器人在一个完整面板中处理任务 */
@@ -136,31 +167,35 @@ export class WorkbenchController {
     return this.workbench.agentInfo(this.requireUser(req));
   }
 
-  /** 我的 AGENT 对话快照（taskId：每个任务独立会话） */
+  /** 我的 AGENT 对话快照（taskId / 详情页上下文：独立会话） */
   @Get('agent/snapshot')
   agentSnapshot(
     @Req() req: AuthedRequest,
     @Query('taskId') taskId?: string,
+    @Query() query?: WorkbenchAgentPageContextDto,
   ): Promise<WorkerDebugSnapshot> {
     return this.workbench.agentSnapshot(
       this.requireUser(req),
       parseTaskId(taskId),
+      parsePageContext(query),
     );
   }
 
-  /** 我的 AGENT 对话实时流（SSE；taskId：每个任务独立会话） */
+  /** 我的 AGENT 对话实时流（SSE；taskId / 详情页上下文：独立会话） */
   @Sse('agent/stream')
   agentStream(
     @Req() req: AuthedRequest,
     @Query('taskId') taskId?: string,
+    @Query() query?: WorkbenchAgentPageContextDto,
   ): Observable<MessageEvent> {
     return this.workbench.agentStream(
       this.requireUser(req),
       parseTaskId(taskId),
+      parsePageContext(query),
     );
   }
 
-  /** 我的 AGENT 发送消息；taskId 同时隔离会话与作为本轮上下文 */
+  /** 我的 AGENT 发送消息；taskId / 详情页上下文同时隔离会话并作为本轮上下文 */
   @Post('agent/messages')
   agentSend(
     @Req() req: AuthedRequest,
@@ -178,15 +213,21 @@ export class WorkbenchController {
           ...(typeof file.size === 'number' ? { size: file.size } : {}),
           ...(file.mime?.trim() ? { mime: file.mime.trim() } : {}),
         })),
+      parsePageContext(dto),
     );
   }
 
   /** 我的 AGENT：模型 + 思考等级清单 */
   @Get('agent/models')
-  agentModels(@Req() req: AuthedRequest, @Query('taskId') taskId?: string) {
+  agentModels(
+    @Req() req: AuthedRequest,
+    @Query('taskId') taskId?: string,
+    @Query() query?: WorkbenchAgentPageContextDto,
+  ) {
     return this.workbench.agentModels(
       this.requireUser(req),
       parseTaskId(taskId),
+      parsePageContext(query),
     );
   }
 
@@ -204,6 +245,7 @@ export class WorkbenchController {
         variant: dto.variant ?? null,
       },
       parseTaskId(dto.taskId),
+      parsePageContext(dto),
     );
   }
 
@@ -218,6 +260,7 @@ export class WorkbenchController {
       this.requireUser(req),
       mode,
       parseTaskId(dto.taskId),
+      parsePageContext(dto),
     );
   }
 
@@ -230,6 +273,7 @@ export class WorkbenchController {
     return this.workbench.agentInterrupt(
       this.requireUser(req),
       parseTaskId(dto?.taskId),
+      parsePageContext(dto),
     );
   }
 
@@ -245,10 +289,11 @@ export class WorkbenchController {
       questionId,
       { answers: dto.answers, reject: dto.reject === true },
       parseTaskId(dto.taskId),
+      parsePageContext(dto),
     );
   }
 
-  /** 我的 AGENT 重置当前任务的会话 */
+  /** 我的 AGENT 重置当前任务/详情页的会话 */
   @Post('agent/reset')
   agentReset(
     @Req() req: AuthedRequest,
@@ -257,6 +302,7 @@ export class WorkbenchController {
     return this.workbench.agentReset(
       this.requireUser(req),
       parseTaskId(dto?.taskId),
+      parsePageContext(dto),
     );
   }
 

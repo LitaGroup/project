@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,6 +15,7 @@ import { encodeKnowledgePath } from '../knowledge/knowledge.path';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import type { KnowledgeNode } from '../knowledge/knowledge.types';
 import { Task } from './task.entity';
+import { TaskRealtimeService } from './task-realtime.service';
 import { TaskTemplate } from './task-template.entity';
 
 export interface TaskDocumentResult {
@@ -51,6 +53,8 @@ export interface TaskDocumentEntry {
   /** Markdown 接口地址（带 .md） */
   markdownUrl: string;
   title: string;
+  /** 文档 Frontmatter 中的描述（可空） */
+  description: string | null;
   updatedAt: string | null;
 }
 
@@ -61,6 +65,29 @@ export interface TaskAuxDocumentInput {
   content?: string;
   title?: string;
   updatedBy: string;
+}
+
+/** 任务文档正文（网页只读预览用） */
+export interface TaskDocumentContentEntry extends TaskDocumentEntry {
+  /** 去掉平台 Frontmatter 后的 Markdown 正文 */
+  content: string;
+}
+
+/** 任务文档中引用的站内图片/文件 */
+export interface TaskArtifactEntry {
+  name: string;
+  kind: 'image' | 'file';
+  /** 站内公开地址（/images、/files、/export-files） */
+  url: string;
+  /** 引用该产物的任务文档 */
+  sourceDocument: string;
+}
+
+/** 任务详情「文档」Tab 的完整数据 */
+export interface TaskDocumentsView {
+  directory: string;
+  documents: TaskDocumentEntry[];
+  artifacts: TaskArtifactEntry[];
 }
 
 interface LegacyReviewDocument {
@@ -109,6 +136,87 @@ function documentReadName(name: string): string {
   return name.toLowerCase().endsWith('.md') ? name : `${name}.md`;
 }
 
+/** Markdown 图片/链接与 HTML img：用于从任务文档中提取图片、文件产物 */
+const MARKDOWN_ARTIFACT_LINK =
+  /(!?)\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/g;
+const HTML_IMAGE = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
+const LOCAL_ARTIFACT_PREFIXES = ['/images/', '/files/', '/export-files/'];
+const IMAGE_EXTENSION = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#].*)?$/i;
+
+/** 把站内绝对地址归一为相对路径；外部地址返回 null */
+function normalizeLocalArtifactUrl(raw: string): string | null {
+  const url = raw.replace(/^<|>$/g, '').trim();
+  if (!url) return null;
+  if (LOCAL_ARTIFACT_PREFIXES.some((prefix) => url.startsWith(prefix))) {
+    return url;
+  }
+  try {
+    const parsed = new URL(url);
+    if (!/^https?:$/.test(parsed.protocol)) return null;
+    if (
+      LOCAL_ARTIFACT_PREFIXES.some((prefix) =>
+        parsed.pathname.startsWith(prefix),
+      )
+    ) {
+      return `${parsed.pathname}${parsed.search}`;
+    }
+  } catch {
+    // 非绝对 URL：忽略
+  }
+  return null;
+}
+
+function artifactName(label: string, url: string): string {
+  const cleanLabel = label.trim();
+  if (cleanLabel) return cleanLabel;
+  const path = url.split(/[?#]/)[0];
+  const raw = path.slice(path.lastIndexOf('/') + 1);
+  try {
+    return decodeURIComponent(raw) || path || url;
+  } catch {
+    return raw || url;
+  }
+}
+
+/** 从任务文档正文中提取站内图片与文件（同一 URL 只保留一条） */
+function extractTaskArtifacts(
+  documents: Array<{ name: string; content: string }>,
+): TaskArtifactEntry[] {
+  const found = new Map<string, TaskArtifactEntry>();
+  const add = (
+    rawUrl: string,
+    label: string,
+    sourceDocument: string,
+    forceImage = false,
+  ) => {
+    const url = normalizeLocalArtifactUrl(rawUrl);
+    if (!url) return;
+    const kind: TaskArtifactEntry['kind'] =
+      forceImage || url.startsWith('/images/') || IMAGE_EXTENSION.test(url)
+        ? 'image'
+        : 'file';
+    const key = `${kind}:${url}`;
+    if (found.has(key)) return;
+    found.set(key, {
+      name: artifactName(label, url),
+      kind,
+      url,
+      sourceDocument,
+    });
+  };
+
+  for (const document of documents) {
+    const body = stripKnowledgeFrontmatter(document.content);
+    for (const match of body.matchAll(MARKDOWN_ARTIFACT_LINK)) {
+      add(match[3], match[2] ?? '', document.name, match[1] === '!');
+    }
+    for (const match of body.matchAll(HTML_IMAGE)) {
+      add(match[1], '', document.name, true);
+    }
+  }
+  return [...found.values()];
+}
+
 function dateStamp(value: Date): string {
   return beijingTime(value).slice(0, 10).replace(/-/g, '');
 }
@@ -123,6 +231,17 @@ function frontmatterVersion(markdown: string): number | null {
   if (!match) return null;
   const version = Number(match[1]);
   return Number.isFinite(version) && version > 0 ? version : null;
+}
+
+/** 读取文档 Frontmatter 的 description（支持单/双引号，不做完整 YAML 解析） */
+function frontmatterDescription(markdown: string): string | null {
+  if (!hasYamlFrontmatter(markdown)) return null;
+  const match = markdown.match(
+    /^description:\s*(?:"([^"]*)"|'([^']*)'|(.+?))\s*$/m,
+  );
+  if (!match) return null;
+  const value = (match[1] ?? match[2] ?? match[3] ?? '').trim();
+  return value || null;
 }
 
 /**
@@ -144,6 +263,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     @InjectRepository(TaskTemplate)
     private readonly taskTemplates: Repository<TaskTemplate>,
     private readonly knowledge: KnowledgeService,
+    private readonly taskRealtime: TaskRealtimeService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -184,9 +304,23 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     this.assertKnowledge();
     const plannedPath = this.handoffPath(task);
     let node = await this.knowledge.findNodeByPath(plannedPath);
-    if (!node && !task.handoffPath?.trim() && options.legacy !== false) {
+    if (!node && options.legacy !== false) {
       node = await this.findLegacyHandoff(task);
     }
+    let body = node
+      ? stripKnowledgeFrontmatter(node.content ?? '').trim()
+      : INITIAL_HANDOFF_BODY;
+
+    // 历史任务可能因早期读取在派生路径生成了占位文档，而真实 HANDOFF 位于
+    // 其它日期目录。只要当前仍是占位正文，就尝试回收同任务的真实交付文档。
+    if (options.legacy !== false && (!node || !this.hasHandoffBody(body))) {
+      const recovered = await this.findLegacyHandoff(task);
+      if (recovered && recovered.id !== node?.id) {
+        node = recovered;
+        body = stripKnowledgeFrontmatter(recovered.content ?? '').trim();
+      }
+    }
+
     const path = node?.path ?? plannedPath;
     if (node && node.kind !== 'article') {
       throw new BadRequestException(`任务文档路径 ${path} 已被目录占用`);
@@ -194,9 +328,6 @@ export class TaskDocumentService implements OnApplicationBootstrap {
 
     const now = new Date();
     let version = task.handoffVersion > 0 ? task.handoffVersion : 0;
-    let body = node
-      ? stripKnowledgeFrontmatter(node.content ?? '').trim()
-      : INITIAL_HANDOFF_BODY;
     if (!version) {
       version = node ? (frontmatterVersion(node.content ?? '') ?? 1) : 1;
     }
@@ -351,6 +482,8 @@ export class TaskDocumentService implements OnApplicationBootstrap {
         throw error;
       }
       const saved = await this.mustFind(taskId);
+      // 任务详情「交付 / 文档」Tab 与工作台依赖该事件实时刷新
+      this.taskRealtime.taskChanged(taskId);
       return {
         task: saved,
         document: {
@@ -407,7 +540,9 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     content: string;
   }): Promise<TaskDocumentResult> {
     const path = this.reviewPath(input.task);
-    return this.upsertArticle(path, input.title, input.content);
+    const result = await this.upsertArticle(path, input.title, input.content);
+    this.taskRealtime.taskChanged(input.task.id);
+    return result;
   }
 
   /**
@@ -441,23 +576,59 @@ export class TaskDocumentService implements OnApplicationBootstrap {
 
   /** 列出任务目录下的文档（HANDOFF 优先，REVIEW 次之，其余按名称排序）。 */
   async listTaskDocuments(task: Task): Promise<TaskDocumentEntry[]> {
-    this.assertKnowledge();
-    const directory = this.taskDirectory(task);
-    const nodes = await this.knowledge.listArticlesByPrefix(directory);
+    const { nodes, directory } = await this.directTaskDocumentNodes(task);
     return nodes
       .filter((node) => node.parentPath === directory)
       .map((node) => this.documentEntry(node))
-      .sort((a, b) => {
-        const rank = (name: string): number =>
-          name === `${HANDOFF_DOCUMENT}.md`
-            ? 0
-            : name === `${REVIEW_DOCUMENT}.md`
-              ? 1
-              : 2;
-        return (
-          rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'en')
-        );
-      });
+      .sort((a, b) => this.compareTaskDocuments(a, b));
+  }
+
+  /** 任务详情「文档」Tab：Markdown 文档 + 文档中引用的图片/文件。 */
+  async taskDocumentsView(task: Task): Promise<TaskDocumentsView> {
+    const { nodes, directory } = await this.directTaskDocumentNodes(task);
+    const direct = nodes.filter((node) => node.parentPath === directory);
+    const documents = direct
+      .map((node) => this.documentEntry(node))
+      .sort((a, b) => this.compareTaskDocuments(a, b));
+    const artifacts = extractTaskArtifacts(
+      direct.map((node) => ({
+        name: documentReadName(node.name),
+        content: node.content ?? '',
+      })),
+    );
+    return { directory, documents, artifacts };
+  }
+
+  /** 读取任务目录下某篇文档的正文（去掉平台 Frontmatter）。 */
+  async readTaskDocument(
+    task: Task,
+    name: string,
+  ): Promise<TaskDocumentContentEntry> {
+    this.assertKnowledge();
+    const normalized = normalizeTaskDocumentName(name);
+    const path = this.taskDocumentPath(task, normalized);
+    const node = await this.knowledge.findNodeByPath(path);
+    if (!node || node.kind !== 'article') {
+      throw new NotFoundException(
+        `任务文档 ${documentReadName(normalized)} 不存在`,
+      );
+    }
+    return {
+      ...this.documentEntry(node),
+      content: stripKnowledgeFrontmatter(node.content ?? '').trim(),
+    };
+  }
+
+  /** 复盘文档（尚未生成时返回 null）。 */
+  async readReview(task: Task): Promise<TaskDocumentContentEntry | null> {
+    this.assertKnowledge();
+    const path = this.reviewPath(task);
+    const node = await this.knowledge.findNodeByPath(path);
+    if (!node || node.kind !== 'article') return null;
+    return {
+      ...this.documentEntry(node),
+      content: stripKnowledgeFrontmatter(node.content ?? '').trim(),
+    };
   }
 
   /**
@@ -486,12 +657,14 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       updated_by: input.updatedBy,
     })}${body}\n`;
     await this.upsertArticle(path, title, content);
+    this.taskRealtime.taskChanged(task.id);
     return {
       name: `${name}.md`,
       path,
       url: `/docs/detail/${encodeKnowledgePath(path)}`,
       markdownUrl: `/docs/detail/${encodeKnowledgePath(path)}.md`,
       title,
+      description: frontmatterDescription(content),
       updatedAt: now.toISOString(),
     };
   }
@@ -697,6 +870,29 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     return migrated;
   }
 
+  private async directTaskDocumentNodes(task: Task): Promise<{
+    nodes: KnowledgeNode[];
+    directory: string;
+  }> {
+    this.assertKnowledge();
+    const directory = this.taskDirectory(task);
+    const nodes = await this.knowledge.listArticlesByPrefix(directory);
+    return { nodes, directory };
+  }
+
+  private compareTaskDocuments(
+    a: TaskDocumentEntry,
+    b: TaskDocumentEntry,
+  ): number {
+    const rank = (name: string): number =>
+      name === `${HANDOFF_DOCUMENT}.md`
+        ? 0
+        : name === `${REVIEW_DOCUMENT}.md`
+          ? 1
+          : 2;
+    return rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'en');
+  }
+
   private documentEntry(node: KnowledgeNode): TaskDocumentEntry {
     return {
       name: documentReadName(node.name),
@@ -704,6 +900,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       url: `/docs/detail/${encodeKnowledgePath(node.path)}`,
       markdownUrl: `/docs/detail/${encodeKnowledgePath(node.path)}.md`,
       title: node.title,
+      description: frontmatterDescription(node.content ?? ''),
       updatedAt: node.updatedAt ? node.updatedAt.toISOString() : null,
     };
   }
@@ -765,6 +962,12 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       return (
         nodes
           .filter((node) => pattern.test(node.path))
+          // 只回收真实正文，避免把另一个占位 HANDOFF 当成有效交付
+          .filter((node) =>
+            this.hasHandoffBody(
+              stripKnowledgeFrontmatter(node.content ?? '').trim(),
+            ),
+          )
           .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ??
         null
       );

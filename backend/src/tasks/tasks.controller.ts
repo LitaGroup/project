@@ -38,6 +38,7 @@ import {
 import { TaskDispatchService } from './task-dispatch.service';
 import type { TaskDeliveryReportInput } from './task-delivery-report';
 import { TaskDocumentService } from './task-document.service';
+import type { TaskDocumentsView } from './task-document.service';
 import { TaskHandoffService } from './task-handoff.service';
 import {
   AnswerQuestionInput,
@@ -462,6 +463,42 @@ export class TasksController {
       `> 任务文档目录：\`${this.taskDocuments.taskDirectory(task)}\`。HANDOFF 请使用 \`POST /api/tasks/${task.id}/handoff/update.md\` 维护。`,
       '',
     ].join('\n');
+  }
+
+  /** 任务详情「文档」Tab：文档清单 + 文档中引用的站内图片/文件。 */
+  @Get(':id/documents')
+  taskDocumentsView(
+    @Param('id', ParseIntPipe) id: number,
+  ): Promise<TaskDocumentsView> {
+    return this.tasksService.mustFind(id).then(async (task) => {
+      await this.taskDocuments.ensureHandoff(task);
+      return this.taskDocuments.taskDocumentsView(task);
+    });
+  }
+
+  /** 任务详情「文档」Tab：读取某篇任务文档的 Markdown 正文。 */
+  @Get(':id/documents/:name')
+  taskDocumentContent(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('name') name: string,
+  ) {
+    return this.tasksService
+      .mustFind(id)
+      .then((task) => this.taskDocuments.readTaskDocument(task, name));
+  }
+
+  /** 任务详情「交付」Tab：交付文档正文与版本信息。 */
+  @Get(':id/handoff')
+  taskHandoffDocument(@Param('id', ParseIntPipe) id: number) {
+    return this.deliveryService.getHandoff(id);
+  }
+
+  /** 任务详情「复盘」Tab：复盘文档；任务尚未生成时返回 null。 */
+  @Get(':id/review')
+  taskReview(@Param('id', ParseIntPipe) id: number) {
+    return this.tasksService
+      .mustFind(id)
+      .then((task) => this.taskDocuments.readReview(task));
   }
 
   /** 读取任务交付文档（任务全生命周期文档，Frontmatter 含平台维护的版本号）。 */
