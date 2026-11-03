@@ -538,9 +538,9 @@ export class TaskDispatchService
   }
 
   /**
-   * 执行方消息通知机器人需求方：子任务需求方为 AI 机器人时进入父机器人收件箱，
-   * 由 LOOP 在父机器人空闲时唤醒它读取消息并回复。
-   * 根任务、真人需求方与个人 AGENT 需求方不进收件箱（真人走工作台/提醒）。
+   * 执行方消息通知机器人需求方：子任务写入父任务收件箱，由 LOOP 唤醒父机器人；
+   * 根任务写入自身收件箱，由 LOOP 用需求方机器人执行器创建一次性回复会话。
+   * 真人需求方与个人 AGENT 需求方不进收件箱（真人走工作台/提醒）。
    */
   async notifyRequesterWorkerMessage(
     task: Task,
@@ -548,7 +548,6 @@ export class TaskDispatchService
     referenceId?: string | null,
   ): Promise<void> {
     try {
-      if (!task.parentId) return;
       if (task.requesterType !== 'worker' || !task.requesterId) return;
       const requester = await this.workers.findOne({
         where: { id: task.requesterId },

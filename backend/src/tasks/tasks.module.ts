@@ -26,6 +26,7 @@ import { TaskLoopService } from './task-loop.service';
 import { TaskNotifyService } from './task-notify.service';
 import { TaskQuestionAutoAnswerService } from './task-question-auto-answer.service';
 import { TaskRealtimeService } from './task-realtime.service';
+import { TaskRequesterReplyService } from './task-requester-reply.service';
 import { TaskRequesterVerifyService } from './task-requester-verify.service';
 import {
   TaskTemplatesController,
@@ -83,6 +84,7 @@ import { WorkbenchService } from './workbench.service';
     TaskLoopService,
     TaskNotifyService,
     TaskQuestionAutoAnswerService,
+    TaskRequesterReplyService,
     TaskRequesterVerifyService,
     TaskWorkerInboxService,
     TaskCollaborationService,

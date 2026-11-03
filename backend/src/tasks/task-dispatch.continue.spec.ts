@@ -399,12 +399,28 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
     });
   });
 
-  it('根任务、真人需求方与个人 AGENT 需求方不进入收件箱', async () => {
+  it('根任务 AI 机器人需求方会收到执行方消息收件箱事件', async () => {
+    workersRepo.findOne.mockResolvedValue({
+      id: 1001,
+      runtime: WorkerRuntime.OPENCODE,
+      personalAgentUserId: null,
+    });
     const rootTask = baseTask({ parentId: null, requesterId: 1001 });
     rootTask.requesterType = 'worker';
-    await service.notifyRequesterWorkerMessage(rootTask, '消息');
-    expect(inbox.enqueue).not.toHaveBeenCalled();
 
+    await service.notifyRequesterWorkerMessage(
+      rootTask,
+      '  根任务消息  ',
+      'chat:1:assistant:9',
+    );
+
+    expect(inbox.enqueue).toHaveBeenCalledWith(rootTask, 'message', {
+      referenceId: 'chat:1:assistant:9',
+      payload: { content: '根任务消息' },
+    });
+  });
+
+  it('真人需求方与个人 AGENT 需求方不进入收件箱', async () => {
     workersRepo.findOne.mockResolvedValue({
       id: 1001,
       runtime: WorkerRuntime.HUMAN,

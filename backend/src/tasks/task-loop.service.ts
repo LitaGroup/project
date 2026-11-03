@@ -25,6 +25,7 @@ import {
   TASK_REMIND_TIMEOUT_DAYS,
 } from './task-loop.rules';
 import { TasksService } from './tasks.service';
+import { TaskRequesterReplyService } from './task-requester-reply.service';
 import { TaskRequesterVerifyService } from './task-requester-verify.service';
 import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 import {
@@ -40,11 +41,15 @@ const OFFER_STALL_MS = 10 * 60_000;
 const OFFER_STALL_REMIND_MS = 30 * 60_000;
 /** 根任务机器人需求方自动验收扫描间隔 */
 const REQUESTER_VERIFY_SCAN_MS = 30_000;
+/** 根任务执行方消息补建扫描间隔与回看窗口 */
+const ROOT_MESSAGE_SCAN_MS = 30_000;
+const ROOT_MESSAGE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * 多机器人任务 LOOP（每秒）：
  * 待分配→分配；待接受→任务邀约；待继续→机器人空闲后恢复；
- * 机器人需求方收件箱→父任务待继续；待反馈/待验收仅提醒，不占用机器人。
+ * 机器人需求方收件箱→父任务待继续 / 根任务需求方一次性回复；
+ * 待反馈/待验收仅提醒，不占用机器人。
  */
 @Injectable()
 export class TaskLoopService implements OnApplicationBootstrap {
@@ -63,6 +68,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
   private lastOrphanScanAt = 0;
   private orphanScanCursor = 0;
   private lastRequesterVerifyScanAt = 0;
+  private lastRootMessageScanAt = 0;
   private readonly apiUrl: string;
 
   constructor(
@@ -76,6 +82,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     private readonly taskNotify: TaskNotifyService,
     private readonly workerInbox: TaskWorkerInboxService,
     private readonly requesterVerify: TaskRequesterVerifyService,
+    private readonly requesterReply: TaskRequesterReplyService,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -99,6 +106,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     this.running = true;
     try {
       await this.repairOrphanChildEvents();
+      await this.repairRootRequesterMessages();
       await this.queueWorkerInbox();
       await this.queueRootRequesterVerification();
       await this.assignPending();
@@ -465,20 +473,82 @@ export class TaskLoopService implements OnApplicationBootstrap {
         : (children[children.length - 1]?.id ?? this.orphanScanCursor);
   }
 
+  /**
+   * 补建根任务执行方消息事件：
+   * 历史版本会直接丢弃根任务消息，进程重启也可能在落库后、入队前中断。
+   * 以最近一条真人执行方消息为准，没有对应收件箱事件且之后没有需求方回复时补建。
+   */
+  private async repairRootRequesterMessages(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastRootMessageScanAt < ROOT_MESSAGE_SCAN_MS) return;
+    this.lastRootMessageScanAt = now;
+    const roots = await this.tasks.find({
+      where: {
+        parentId: IsNull(),
+        requesterType: 'worker',
+        status: In([TaskStatus.WAITING, TaskStatus.RUNNING]),
+        updatedAt: MoreThan(new Date(now - ROOT_MESSAGE_LOOKBACK_MS)),
+      },
+      order: { updatedAt: 'DESC' },
+      take: 50,
+    });
+    for (const task of roots) {
+      if (!task.requesterId) continue;
+      const rows = await this.messages.find({
+        where: { taskId: task.id, kind: 'message' },
+        order: { id: 'DESC' },
+        take: 20,
+      });
+      const latestHumanMessage = rows.find(
+        (row) =>
+          row.role === 'assistant' &&
+          row.meta?.humanWorkerMessage === true &&
+          row.content.trim(),
+      );
+      if (!latestHumanMessage) continue;
+      const replied = rows.some(
+        (row) =>
+          row.role === 'user' &&
+          row.createdAt.getTime() > latestHumanMessage.createdAt.getTime(),
+      );
+      if (replied) continue;
+      if (
+        await this.workerInbox.hasReference(
+          task.id,
+          'message',
+          latestHumanMessage.messageKey,
+        )
+      ) {
+        continue;
+      }
+      await this.workerInbox.enqueue(task, 'message', {
+        referenceId: latestHumanMessage.messageKey,
+        payload: { content: latestHumanMessage.content.trim() },
+      });
+    }
+  }
+
   private async queueWorkerInbox(): Promise<void> {
     const entries = await this.workerInbox.listActionable(
       new Date(),
       TASK_INBOX_STALE_MS,
     );
     for (const entry of entries) {
-      const [parent, child] = await Promise.all([
-        this.tasks.findOne({ where: { id: entry.parentTaskId } }),
-        this.tasks.findOne({ where: { id: entry.childTaskId } }),
-      ]);
+      const child = await this.tasks.findOne({
+        where: { id: entry.childTaskId },
+      });
       if (!child) {
         await this.workerInbox.markDead(entry.id);
         continue;
       }
+      // 根任务消息事件以任务自身作为 parentTaskId，由需求方机器人一次性会话回复。
+      if (entry.parentTaskId === entry.childTaskId) {
+        await this.queueRootRequesterMessage(child, entry);
+        continue;
+      }
+      const parent = await this.tasks.findOne({
+        where: { id: entry.parentTaskId },
+      });
       if (
         !parent ||
         parent.status === TaskStatus.FINISHED ||
@@ -646,6 +716,31 @@ export class TaskLoopService implements OnApplicationBootstrap {
         { childTaskId: child.id, inboxId: entry.id, kind: entry.kind },
       );
     }
+  }
+
+  /** 根任务执行方消息：调用需求方机器人一次性会话回复，不覆盖任务状态。 */
+  private async queueRootRequesterMessage(
+    task: Task,
+    entry: TaskWorkerInbox,
+  ): Promise<void> {
+    if (
+      task.parentId ||
+      task.requesterType !== 'worker' ||
+      task.requesterId !== entry.workerId
+    ) {
+      await this.workerInbox.markDead(entry.id);
+      return;
+    }
+    if (entry.kind !== 'message') {
+      await this.workerInbox.markDead(entry.id);
+      return;
+    }
+    if (task.status === TaskStatus.FINISHED) {
+      await this.workerInbox.markDone(entry.id);
+      return;
+    }
+    if (this.requesterReply.isActive(task.id)) return;
+    await this.requesterReply.reply(task, entry);
   }
 
   /** 根任务机器人需求方自动验收：每 30s 扫描待验收的根任务。 */

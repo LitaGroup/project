@@ -60,11 +60,16 @@ describe('TaskLoopService 多机器人协同', () => {
     reopen: jest.Mock;
     defer: jest.Mock;
     enqueue: jest.Mock;
+    hasReference: jest.Mock;
   };
   let requesterVerify: {
     isActive: jest.Mock;
     canVerify: jest.Mock;
     verify: jest.Mock;
+  };
+  let requesterReply: {
+    isActive: jest.Mock;
+    reply: jest.Mock;
   };
   let service: TaskLoopService;
 
@@ -112,11 +117,16 @@ describe('TaskLoopService 多机器人协同', () => {
       reopen: jest.fn().mockResolvedValue(true),
       defer: jest.fn().mockResolvedValue(undefined),
       enqueue: jest.fn().mockResolvedValue(null),
+      hasReference: jest.fn().mockResolvedValue(false),
     };
     requesterVerify = {
       isActive: jest.fn().mockReturnValue(false),
       canVerify: jest.fn().mockReturnValue(true),
       verify: jest.fn().mockResolvedValue(false),
+    };
+    requesterReply = {
+      isActive: jest.fn().mockReturnValue(false),
+      reply: jest.fn().mockResolvedValue(true),
     };
     service = new TaskLoopService(
       tasksRepo as never,
@@ -127,6 +137,7 @@ describe('TaskLoopService 多机器人协同', () => {
       taskNotify as never,
       inbox as never,
       requesterVerify as never,
+      requesterReply as never,
       {
         get: jest.fn().mockReturnValue('http://api.example/api'),
       } as never,
@@ -575,6 +586,77 @@ describe('TaskLoopService 多机器人协同', () => {
       }),
     );
     expect(inbox.markQueued).toHaveBeenCalledWith(18);
+  });
+
+  it('根任务执行方消息交给需求方机器人一次性会话回复', async () => {
+    const entry = {
+      id: 21,
+      parentTaskId: 54,
+      workerId: 1002,
+      childTaskId: 54,
+      kind: 'message',
+      referenceId: 'chat:54:assistant:1',
+      payload: { content: '你问的是 Lita' },
+      status: 'pending',
+      attempts: 0,
+    } as unknown as TaskWorkerInbox;
+    const root = baseTask({
+      id: 54,
+      code: 'TK-0054',
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+      agentId: 1035,
+      requesterType: 'worker',
+      requesterId: 1002,
+    });
+    inbox.listActionable.mockResolvedValue([entry]);
+    tasksRepo.findOne.mockResolvedValue(root);
+
+    await service.tick();
+
+    expect(requesterReply.reply).toHaveBeenCalledWith(root, entry);
+    expect(inbox.markQueued).not.toHaveBeenCalledWith(21);
+  });
+
+  it('根任务真人执行方消息缺失收件箱事件时自动补建', async () => {
+    const root = baseTask({
+      id: 54,
+      code: 'TK-0054',
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+      agentId: 1035,
+      requesterType: 'worker',
+      requesterId: 1002,
+    });
+    tasksRepo.find.mockResolvedValue([root]);
+    messagesRepo.find.mockResolvedValue([
+      {
+        id: 433,
+        taskId: 54,
+        messageKey: 'chat:54:assistant:1',
+        role: 'assistant',
+        sender: { name: '胡峰' },
+        content: '你问的是 Lita',
+        meta: { humanWorkerMessage: true },
+        createdAt: new Date(),
+      },
+    ]);
+
+    await (
+      service as unknown as {
+        repairRootRequesterMessages: () => Promise<void>;
+      }
+    ).repairRootRequesterMessages();
+
+    expect(inbox.hasReference).toHaveBeenCalledWith(
+      54,
+      'message',
+      'chat:54:assistant:1',
+    );
+    expect(inbox.enqueue).toHaveBeenCalledWith(root, 'message', {
+      referenceId: 'chat:54:assistant:1',
+      payload: { content: '你问的是 Lita' },
+    });
   });
 
   it('子任务提交验收后执行方消息仍会唤醒机器人需求方', async () => {
