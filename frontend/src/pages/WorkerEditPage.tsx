@@ -143,20 +143,20 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const isScheduler = role === '调度器'
   /** 面包屑固定用初始标题；页面大标题跟随名称输入变化 */
   const initialTitle = personal
-    ? '我的代理'
+    ? '助理配置'
     : worker
       ? `编辑「${worker.name}」`
       : '新建机器人'
   const typedName = name.trim()
   const pageTitle = personal
-    ? '我的代理'
+    ? '助理配置'
     : worker
       ? typedName
         ? `编辑「${typedName}」`
         : initialTitle
       : typedName || initialTitle
   const breadcrumbItems = personal
-    ? [{ label: '个人中心', to: '/profile' }, { label: '我的代理' }]
+    ? [{ label: '个人中心', to: '/profile' }, { label: '助理配置' }]
     : [{ label: '机器人', to: listPath }, { label: initialTitle }]
 
   useEffect(() => {
@@ -741,7 +741,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
 
         <Card className="w-full shrink-0 lg:min-h-0 lg:w-[26rem]">
           <CardHeader className="flex-none">
-            <CardTitle>{personal ? '我的代理配置' : '基础信息'}</CardTitle>
+            <CardTitle>{personal ? '助理配置' : '基础信息'}</CardTitle>
             <CardDescription>
               {personal
                 ? '技能、规范、AGENTS.md 与执行器决定「我的助理」的对话能力'

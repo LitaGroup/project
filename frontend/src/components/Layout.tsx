@@ -186,7 +186,7 @@ const PROFILE_SECTION: NavSection = {
       ready: true,
       end: true,
     },
-    { to: '/profile/robot', label: '我的代理', icon: Robot, ready: true },
+    { to: '/profile/robot', label: '助理配置', icon: Robot, ready: true },
     {
       to: '/profile/task-definitions',
       label: '任务定义',
@@ -251,7 +251,7 @@ function UserArea() {
           个人中心
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => navigate('/profile/robot')}>
-          我的代理
+          助理配置
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => navigate('/profile/task-definitions')}>
           任务定义
