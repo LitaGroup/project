@@ -8,6 +8,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
+import { homedir } from 'os';
+import { join } from 'path';
 import { In, Repository } from 'typeorm';
 import {
   TaskStatus,
@@ -69,7 +71,7 @@ function normalizeAvatarUrl(value: string | null | undefined): string | null {
 export interface WorkerView extends Worker {
   /** 系统机器人（systemKey 或系统 ID 段，由代码内置，网页不可新增/删除） */
   system: boolean;
-  /** 工位路径：生产 {WORKER_BASE_DIR}/worker/{id}，开发 {WORKER_BASE_DIR}/worker-dev/{id}；未配置 WORKER_BASE_DIR 为 null */
+  /** 工位路径：生产 {WORKER_BASE_DIR}/worker/{id}，开发 {WORKER_BASE_DIR}/worker-dev/{id}；生产未配置 WORKER_BASE_DIR 为 null */
   workdir: string | null;
   liveStatus: WorkerLiveStatus;
   /** 当前活跃任务（执行中/等待派发/待验收中最新一条） */
@@ -112,11 +114,30 @@ export class WorkersService implements OnApplicationBootstrap {
     private readonly standardCatalog: WorkerStandardCatalogService,
     config: ConfigService,
   ) {
-    this.workerBaseDir = config.get<string>('WORKER_BASE_DIR')?.trim() || null;
+    const configuredBaseDir =
+      config.get<string>('WORKER_BASE_DIR')?.trim() || null;
     this.workerDirSegment =
       config.get<string>('NODE_ENV')?.trim() === 'production'
         ? 'worker'
         : 'worker-dev';
+    // 开发环境未配置 WORKER_BASE_DIR 时回退到执行器用户主目录（本机开发约定），
+    // 避免创建机器人时因平台部署缺省配置而无法初始化工作环境；生产仍要求显式配置。
+    this.workerBaseDir =
+      configuredBaseDir ??
+      (this.workerDirSegment === 'worker-dev'
+        ? join(homedir(), 'runtime')
+        : null);
+    if (!configuredBaseDir) {
+      if (this.workerBaseDir) {
+        this.logger.warn(
+          `未配置 WORKER_BASE_DIR，开发环境使用默认工位根目录 ${this.workerBaseDir}`,
+        );
+      } else {
+        this.logger.warn(
+          '生产环境未配置 WORKER_BASE_DIR，机器人工作环境将无法初始化',
+        );
+      }
+    }
   }
 
   /** 启动时补齐真人机器人；通讯录同步可能在应用启动后继续创建新用户 */

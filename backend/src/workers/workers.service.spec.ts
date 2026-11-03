@@ -1,3 +1,5 @@
+import { homedir } from 'os';
+import { join } from 'path';
 import { WorkerRuntime } from '../common/enums';
 import { Worker } from './worker.entity';
 import { WorkersService } from './workers.service';
@@ -170,6 +172,22 @@ describe('WorkersService 工位目录', () => {
     );
   });
 
+  it('开发环境未配置 WORKER_BASE_DIR 时回退到用户主目录 runtime', () => {
+    const { service } = createHarness([], { NODE_ENV: 'development' });
+
+    expect(service.workdirOf(1001)).toBe(
+      join(homedir(), 'runtime', 'worker-dev', '1001'),
+    );
+  });
+
+  it('未配置 NODE_ENV 且未配置 WORKER_BASE_DIR 时同样回退开发目录', () => {
+    const { service } = createHarness();
+
+    expect(service.workdirOf(1001)).toBe(
+      join(homedir(), 'runtime', 'worker-dev', '1001'),
+    );
+  });
+
   it('去除工位根目录尾部斜杠', () => {
     const { service } = createHarness([], {
       NODE_ENV: 'production',
@@ -179,8 +197,8 @@ describe('WorkersService 工位目录', () => {
     expect(service.workdirOf(1001)).toBe('/data/opencode-workers/worker/1001');
   });
 
-  it('未配置 WORKER_BASE_DIR 时返回 null', () => {
-    const { service } = createHarness();
+  it('生产环境未配置 WORKER_BASE_DIR 时返回 null', () => {
+    const { service } = createHarness([], { NODE_ENV: 'production' });
 
     expect(service.workdirOf(1001)).toBeNull();
   });
