@@ -69,7 +69,7 @@ function normalizeAvatarUrl(value: string | null | undefined): string | null {
 export interface WorkerView extends Worker {
   /** 系统机器人（systemKey 或系统 ID 段，由代码内置，网页不可新增/删除） */
   system: boolean;
-  /** 工位路径 {WORKER_BASE_DIR}/worker/{id}；未配置 WORKER_BASE_DIR 为 null */
+  /** 工位路径：生产 {WORKER_BASE_DIR}/worker/{id}，开发 {WORKER_BASE_DIR}/worker-dev/{id}；未配置 WORKER_BASE_DIR 为 null */
   workdir: string | null;
   liveStatus: WorkerLiveStatus;
   /** 当前活跃任务（执行中/等待派发/待验收中最新一条） */
@@ -89,6 +89,8 @@ export class WorkersService implements OnApplicationBootstrap {
   private readonly logger = new Logger(WorkersService.name);
   /** 工位根目录（执行器机器上的路径约定，环境变量 WORKER_BASE_DIR） */
   private readonly workerBaseDir: string | null;
+  /** 工位目录段：生产 worker、开发 worker-dev（由 NODE_ENV 决定） */
+  private readonly workerDirSegment: 'worker' | 'worker-dev';
 
   /** 自定义机器人 ID 起点是否已校正（只调整一次序列） */
   private idFloorEnsured = false;
@@ -111,6 +113,10 @@ export class WorkersService implements OnApplicationBootstrap {
     config: ConfigService,
   ) {
     this.workerBaseDir = config.get<string>('WORKER_BASE_DIR')?.trim() || null;
+    this.workerDirSegment =
+      config.get<string>('NODE_ENV')?.trim() === 'production'
+        ? 'worker'
+        : 'worker-dev';
   }
 
   /** 启动时补齐真人机器人；通讯录同步可能在应用启动后继续创建新用户 */
@@ -131,10 +137,10 @@ export class WorkersService implements OnApplicationBootstrap {
     return users.length;
   }
 
-  /** 工位路径：{WORKER_BASE_DIR}/worker/{id}/（不落库实时计算） */
+  /** 工位路径：生产 {WORKER_BASE_DIR}/worker/{id}、开发 {WORKER_BASE_DIR}/worker-dev/{id}（不落库实时计算） */
   workdirOf(id: number): string | null {
     if (!this.workerBaseDir) return null;
-    return `${this.workerBaseDir.replace(/\/+$/, '')}/worker/${id}`;
+    return `${this.workerBaseDir.replace(/\/+$/, '')}/${this.workerDirSegment}/${id}`;
   }
 
   /** 列表（role 筛选），附实时状态与工位路径 */

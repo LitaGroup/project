@@ -1,6 +1,6 @@
 ---
 description: "> AI 助手提示：任务处理中心（FEATURE-02）的设计与实施方案。执行器/机器人/任务包/调度机器人的领域模型、opencode 集成细节、状态机与实施顺序。调度能力已并入机器人（系统机器人 ID < 1000），不再使用平台进程内 PI Agent。"
-version: 1.1.1
+version: 1.1.2
 type: docs
 ---
 
@@ -83,7 +83,7 @@ type: docs
 ### 4.2 `workers` 机器人 + 调度器
 `name`、`intro`（擅长什么/能接什么任务）、`kind`（WorkerKind：智能体/员工，本期仅智能体）、`role`（WorkerRole：工作者/调度器）、`runtime`（WorkerRuntime：opencode/pi）、`executorId`（runtime=opencode 必填）、`providerId`、`modelId`、`prompt`（角色定义 longtext）、`skills`（simple-json：`[{name, content}]` 技能名+MD 内容）、`taskDefs`（simple-json：`[{type, inputs:[{name,desc,required}], outputs:[...], how}]` 任务定义）、`ownerUserId`（责任人，users 表）、`materials`（调度材料 longtext，调度器专用）、`enabled`
 - 运行状态不落库：由名下任务实时推导（空闲中/工作中/等待中/验收中），`GET /api/workers` 附带
-- `workdir` 不落库：`{WORKER_BASE_DIR}/worker/{id}/` 实时计算返回（见「六」）
+- `workdir` 不落库：`NODE_ENV=production` 时 `{WORKER_BASE_DIR}/worker/{id}/`、其余环境 `{WORKER_BASE_DIR}/worker-dev/{id}/`，服务层实时计算返回（见「六」）
 
 ### 4.3 `tasks` 任务包（自引用树）
 `code`（编号 TK-xxx 自动）、`title`、`type`（TaskType：需求分析/技术设计/前端开发/后端开发/客户端开发/UI设计/测试/发布/其它）、`parentId`/`rootId`/`sortOrder`、`input`（输入 longtext）、`outputSpec`（明确输出 longtext）、`missingItems`（simple-json：`[{item, reason}]` 缺失清单）、`status`（见「五」）、`agentId`（分配的机器人）、`schedulerId`、`executorId` + `opencodeSessionId`（执行绑定）、`result`（交付物/最终产出 longtext）、`acceptedAt/acceptedBy`、`deliveredAt`、`acceptRejectCount`（累计验收不通过）、`ownerTakeoverAt/ownerTakeoverUserId/ownerTakeoverName`（第 4 次不通过后的负责人接管快照）、`archivedAt`、`canceledAt`、`createdById`
@@ -115,7 +115,7 @@ type: docs
 
 ## 六、workdir 规则（机器人独立工位）
 
-- `workdir = {WORKER_BASE_DIR}/worker/{worker.id}/`；`WORKER_BASE_DIR` 为平台后端 `.env` 环境变量（执行器机器上的路径约定）。
+- `workdir`：`NODE_ENV=production` 时为 `{WORKER_BASE_DIR}/worker/{worker.id}/`，其余环境为 `{WORKER_BASE_DIR}/worker-dev/{worker.id}/`；`WORKER_BASE_DIR` 为平台后端 `.env` 环境变量（执行器机器上的路径约定），`NODE_ENV` 仅 `production` 使用生产目录。
 - 不落库，服务层实时计算；worker API 响应附带 `workdir`；任务包不带 workdir 字段。
 - **创建时机**：派发前由后端调执行器 `POST /api/shell` 执行 `mkdir -p {workdir}/.opencode`（幂等），并写入机器人独立令牌 `.opencode/agent-token`（权限 600），成功后再建会话。
 - **串行约束**：同一机器人 P1 串行执行（workdir 共享工位，避免并行互踩；与智能体状态模型天然一致）。P2 如需并行，按 `{workdir}/{taskId}/` 或 worktree 再隔离。
@@ -215,6 +215,7 @@ type: docs
 | 生产执行器 | `10.251.6.12:49374`（password 待提供） |
 | `DEEPSEEK_API_KEY` | （已废弃）原 PI 调度器使用，现统一走执行器供应商配置 |
 | `WORKER_BASE_DIR` | 后端 `.env`，执行器机器上的工位根目录（默认建议 `<执行器侧约定路径>`，登记执行器页面展示） |
+| `NODE_ENV` | `production` 使用 `worker/` 工位目录，其余环境使用 `worker-dev/`；生产启动时需显式设置 |
 | 执行器登记 | 页面录入（ip/port/token），不预置种子数据 |
 
 ---

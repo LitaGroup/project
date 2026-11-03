@@ -3,7 +3,10 @@ import { Worker } from './worker.entity';
 import { WorkersService } from './workers.service';
 
 /** Worker 仓储桩：内存数组模拟 findOne/create/save/update/query */
-function createHarness(initial: Array<Partial<Worker>> = []) {
+function createHarness(
+  initial: Array<Partial<Worker>> = [],
+  env: Record<string, string | undefined> = {},
+) {
   const store = initial.map(
     (worker) =>
       ({
@@ -52,7 +55,7 @@ function createHarness(initial: Array<Partial<Worker>> = []) {
     {} as never,
     {} as never,
     {} as never,
-    { get: () => undefined } as never,
+    { get: (key: string) => env[key] } as never,
   );
   return { service, workers };
 }
@@ -133,5 +136,52 @@ describe('WorkersService 真人机器人', () => {
     });
 
     expect(worker.name).toBe('张三#1');
+  });
+});
+
+describe('WorkersService 工位目录', () => {
+  it('生产环境使用 worker 目录', () => {
+    const { service } = createHarness([], {
+      NODE_ENV: 'production',
+      WORKER_BASE_DIR: '/data/opencode-workers',
+    });
+
+    expect(service.workdirOf(1001)).toBe('/data/opencode-workers/worker/1001');
+  });
+
+  it('开发环境使用 worker-dev 目录', () => {
+    const { service } = createHarness([], {
+      NODE_ENV: 'development',
+      WORKER_BASE_DIR: '/data/opencode-workers',
+    });
+
+    expect(service.workdirOf(1001)).toBe(
+      '/data/opencode-workers/worker-dev/1001',
+    );
+  });
+
+  it('未配置 NODE_ENV 时按开发环境处理', () => {
+    const { service } = createHarness([], {
+      WORKER_BASE_DIR: '/data/opencode-workers',
+    });
+
+    expect(service.workdirOf(1001)).toBe(
+      '/data/opencode-workers/worker-dev/1001',
+    );
+  });
+
+  it('去除工位根目录尾部斜杠', () => {
+    const { service } = createHarness([], {
+      NODE_ENV: 'production',
+      WORKER_BASE_DIR: '/data/opencode-workers/',
+    });
+
+    expect(service.workdirOf(1001)).toBe('/data/opencode-workers/worker/1001');
+  });
+
+  it('未配置 WORKER_BASE_DIR 时返回 null', () => {
+    const { service } = createHarness();
+
+    expect(service.workdirOf(1001)).toBeNull();
   });
 });
