@@ -623,7 +623,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
             {personal
-              ? '这是你在工作台「我的 AI」中实际对话的 AGENT；任务的实际执行仍由真人机器人负责'
+              ? '这是你在工作台「我的助理」中实际对话的 AGENT；任务的实际执行仍由真人机器人负责'
               : isScheduler
                 ? '系统调度机器人：保留历史调度能力，新任务由平台自动匹配分配'
                 : '机器人的上级对机器人的产出结果负责'}
@@ -650,7 +650,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       )}
       {worker?.personalAgentUserId && (
         <p className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm text-foreground-muted">
-          这是用户 #{worker.personalAgentUserId} 的个人 AI AGENT：工作台「我的 AI」直接与它对话，每个任务使用独立会话；保存后会重新初始化 AGENTS.md、技能与规范。
+          这是用户 #{worker.personalAgentUserId} 的个人 AI AGENT：工作台「我的助理」直接与它对话，每个任务使用独立会话；保存后会重新初始化 AGENTS.md、技能与规范。
         </p>
       )}
 
@@ -744,7 +744,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
             <CardTitle>{personal ? '我的代理配置' : '基础信息'}</CardTitle>
             <CardDescription>
               {personal
-                ? '技能、规范、AGENTS.md 与执行器决定「我的 AI」的对话能力'
+                ? '技能、规范、AGENTS.md 与执行器决定「我的助理」的对话能力'
                 : '名称、简介与任务定义用于平台匹配任务与分配机器人，执行器、默认模型与思考等级决定运行方式'}
             </CardDescription>
           </CardHeader>
@@ -766,7 +766,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
                     {worker?.name ?? name}
                   </p>
                   <p className="text-xs text-foreground-muted">
-                    机器人 #{worker?.id ?? '—'} · 工作台「我的 AI」专用
+                    机器人 #{worker?.id ?? '—'} · 工作台「我的助理」专用
                   </p>
                 </div>
               </div>

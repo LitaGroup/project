@@ -22,6 +22,7 @@ import {
   MessageCircleQuestion,
   Paperclip,
   Plus,
+  Rotate,
 } from '@appica/icons-react'
 import type {
   WorkerDebugAttachment,
@@ -68,6 +69,10 @@ interface DebugChatProps {
   enableAttachments?: boolean
   /** 上传文件并返回公开地址 */
   onUploadFile?: (file: File) => Promise<WorkerDebugAttachment>
+  /** 重置当前会话；传入后在文件上传按钮右侧展示重置图标 */
+  onReset?: () => void | Promise<void>
+  /** 会话重置进行中 */
+  resetBusy?: boolean
   /** 可切换的模型/思考等级清单 */
   modelCatalog?: WorkerDebugModelCatalog | null
   /** 当前选择的模型/思考等级 */
@@ -94,6 +99,8 @@ export function DebugChat({
   framed = true,
   enableAttachments = false,
   onUploadFile,
+  onReset,
+  resetBusy = false,
   modelCatalog = null,
   modelSelection = null,
   onModelChange,
@@ -215,27 +222,38 @@ export function DebugChat({
                   />
                 }
                 left={
-                  enableAttachments && onUploadFile ? (
-                    <>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(event) => {
-                          void handleFiles(event.target.files)
-                          event.target.value = ''
-                        }}
-                      />
+                  <>
+                    {enableAttachments && onUploadFile ? (
+                      <>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={(event) => {
+                            void handleFiles(event.target.files)
+                            event.target.value = ''
+                          }}
+                        />
+                        <ChatActionIcon
+                          label={uploading ? '正在上传文件' : '上传文件'}
+                          icon={Plus}
+                          busy={uploading}
+                          disabled={running}
+                          onClick={() => fileInputRef.current?.click()}
+                        />
+                      </>
+                    ) : null}
+                    {onReset ? (
                       <ChatActionIcon
-                        label={uploading ? '正在上传文件' : '上传文件'}
-                        icon={Plus}
-                        busy={uploading}
+                        label={resetBusy ? '重置中…' : '重置会话'}
+                        icon={Rotate}
+                        busy={resetBusy}
                         disabled={running}
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => void onReset()}
                       />
-                    </>
-                  ) : null
+                    ) : null}
+                  </>
                 }
                 right={
                   <>

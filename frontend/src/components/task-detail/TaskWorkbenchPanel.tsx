@@ -149,7 +149,7 @@ export function TaskWorkbenchPanel({
     if (isRequester) tabs.push(['requester', '任务-需求方'])
     // 任务沟通仅限需求方与当前真人执行机器人；机器人负责人/接管人不参与。
     if (isAgent) tabs.push(['responsible', '任务-执行方'])
-    tabs.push(['agent', '我的AI'])
+    tabs.push(['agent', '我的助理'])
     return tabs
   }, [isRequester, isAgent])
 

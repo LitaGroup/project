@@ -224,35 +224,23 @@ export function DetailAgentPanel({
           : 'rounded-[var(--radius-lg)] border border-border'
       }`}
     >
-      {/* 独立展示时右侧留出抽屉关闭按钮的位置，避免与「重置」重叠 */}
-      <header
-        className={`flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2 ${
-          embedded ? 'pr-3' : 'pr-12'
-        }`}
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-sm font-medium text-foreground-intense">
-            我的 AI
-          </span>
-          {label && (
-            <Badge variant="soft" size="sm">
-              {label}
-            </Badge>
-          )}
-          {snapshot?.status === 'running' && (
-            <span className="text-[11px] text-info-foreground">回复中…</span>
-          )}
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={!snapshot || snapshot.status === 'running' || resetting}
-          onClick={() => void resetConversation()}
-        >
-          {resetting ? '重置中…' : '重置'}
-        </Button>
-      </header>
+      {!embedded && (
+        <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="text-sm font-medium text-foreground-intense">
+              我的助理
+            </span>
+            {label && (
+              <Badge variant="soft" size="sm">
+                {label}
+              </Badge>
+            )}
+            {snapshot?.status === 'running' && (
+              <span className="text-[11px] text-info-foreground">回复中…</span>
+            )}
+          </div>
+        </header>
+      )}
 
       {error && (
         <p
@@ -273,7 +261,7 @@ export function DetailAgentPanel({
             reason={
               infoError ??
               info?.reason ??
-              '个人 AI 暂不可用，请稍后重试。'
+              '个人助理暂不可用，请稍后重试。'
             }
             onRetry={loadInfo}
           />
@@ -294,18 +282,20 @@ export function DetailAgentPanel({
                 mime: uploaded.mime,
               }
             }}
+            onReset={resetConversation}
+            resetBusy={resetting}
             modelCatalog={catalog}
             modelSelection={snapshot.model}
             onModelChange={changeModel}
             modelBusy={modelBusy}
-            emptyTitle={emptyTitle ?? '和你的 AI 开始对话'}
+            emptyTitle={emptyTitle ?? '和你的助理开始对话'}
             emptyHint={
               emptyHint ??
-              '当前页面使用独立会话；让 AI 读取当前内容、查资料或执行操作'
+              '当前页面使用独立会话；让助理读取当前内容、查资料或执行操作'
             }
             placeholder={
               snapshot.status === 'running'
-                ? 'AI 正在回复…'
+                ? '助理正在回复…'
                 : placeholder ??
                   '输入指令，Enter 发送，Shift+Enter 换行…'
             }
@@ -337,7 +327,7 @@ function AgentUnavailable({
       <span className="rounded-full bg-background-muted p-3">
         <Wrench className="size-5" />
       </span>
-      <p>我的 AI 暂不可用</p>
+      <p>我的助理暂不可用</p>
       <p className="max-w-md text-xs leading-relaxed text-foreground-subtle">
         {reason}
       </p>

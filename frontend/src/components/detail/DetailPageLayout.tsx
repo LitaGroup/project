@@ -50,7 +50,7 @@ interface DetailPageLayoutProps {
 export function DetailPageLayout({
   children,
   ai,
-  aiLabel = '我的 AI',
+  aiLabel = '我的助理',
   className,
 }: DetailPageLayoutProps) {
   const wide = useWideLayout(WIDE_QUERY)
