@@ -732,6 +732,7 @@ export function TaskDetailView({
 
             {contentTab === 'conversation' && (
               <TaskConversationView
+                taskId={taskId}
                 messages={messages}
                 connection={connection}
               />
