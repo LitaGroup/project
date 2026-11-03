@@ -142,17 +142,16 @@ export function TaskWorkbenchPanel({
 
   const roles = task?.workbenchRoles ?? []
   const isAgent = roles.includes('agent')
-  const isResponsible = roles.includes('responsible')
   const isRequester = roles.includes('requester')
-  const isResponsibleSide = isAgent || isResponsible
 
   const rightTabs = useMemo<Array<[RightTab, string]>>(() => {
     const tabs: Array<[RightTab, string]> = []
     if (isRequester) tabs.push(['requester', '任务-需求方'])
-    if (isResponsibleSide) tabs.push(['responsible', '任务-执行方'])
+    // 任务沟通仅限需求方与当前真人执行机器人；机器人负责人/接管人不参与。
+    if (isAgent) tabs.push(['responsible', '任务-执行方'])
     tabs.push(['agent', '我的AI'])
     return tabs
-  }, [isRequester, isResponsibleSide])
+  }, [isRequester, isAgent])
 
   const currentRightTab: RightTab = rightTabs.some(
     ([key]) => key === rightTab,

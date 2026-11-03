@@ -563,6 +563,45 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     expect(saved.subStatus).toBe(TaskSubStatus.PENDING_ACCEPT);
   });
 
+  it('机器人负责人不能以执行方身份参与任务沟通', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        requesterType: 'worker',
+        requesterId: 2002,
+        agentId: 2000,
+      }),
+    );
+    workersRepo.findOne.mockImplementation(
+      ({ where }: { where: { humanUserId?: number } }) =>
+        Promise.resolve(
+          where.humanUserId === 8
+            ? { id: 1001, name: '张三', runtime: 'human' }
+            : null,
+        ),
+    );
+
+    await expect(
+      service.sendMessage(1, user(), '负责人补充说明', 'responsible'),
+    ).rejects.toThrow('仅任务的真人执行机器人可以以执行方身份发送消息');
+    expect(taskChat.postAssistantMessage).not.toHaveBeenCalled();
+  });
+
+  it('无关用户不能以需求方身份参与任务沟通', async () => {
+    tasksRepo.findOne.mockResolvedValue(
+      baseTask({
+        requesterType: 'worker',
+        requesterId: 2002,
+        agentId: 2000,
+      }),
+    );
+    workersRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.sendMessage(1, user(), '无关用户补充需求'),
+    ).rejects.toThrow('仅任务需求方可以以需求方身份发送消息');
+    expect(dispatchService.continueConversation).not.toHaveBeenCalled();
+  });
+
   it('已结束任务不能发送消息', async () => {
     tasksRepo.findOne.mockResolvedValue(
       baseTask({

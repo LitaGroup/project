@@ -43,7 +43,11 @@ export type { WorkbenchRole } from './workbench-roles';
 
 /** 操作台任务项：任务本体 + 当前用户可扮演的角色与下一步动作 */
 export interface WorkbenchTask extends Task {
-  /** agent=我的真人机器人执行；requester=我（含历史个人 AGENT 需求方）是需求方；responsible=我负责的机器人/已接管任务 */
+  /**
+   * agent=我的真人机器人执行；requester=我（含历史个人 AGENT 需求方）是需求方；
+   * responsible=我负责的机器人/已接管任务。responsible 仅用于任务可见与管理提示，
+   * 不参与任务沟通（沟通仅限需求方与当前真人执行机器人）。
+   */
   workbenchRoles: WorkbenchRole[];
   /** 当前需要当前用户处理的动作；空表示等待其他参与方 */
   workbenchAction: string | null;

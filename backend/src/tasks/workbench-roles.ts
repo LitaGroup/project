@@ -2,7 +2,10 @@ import type { User } from '../auth/user.entity';
 import type { Worker } from '../workers/worker.entity';
 import type { Task } from './task.entity';
 
-/** 工作台角色：我执行（真人）/ 我是需求方 / 我是负责人 */
+/**
+ * 工作台角色：我执行（真人）/ 我是需求方 / 我是负责人。
+ * 其中 responsible 仅表示我负责的机器人执行或由我接管，不授予任务沟通身份。
+ */
 export type WorkbenchRole = 'agent' | 'requester' | 'responsible';
 
 /** 计算工作台角色所需的任务字段（便于单元测试，不依赖完整实体） */

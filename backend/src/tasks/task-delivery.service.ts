@@ -235,14 +235,29 @@ export class TaskDeliveryService {
           : null;
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
+
+    // 任务沟通仅限需求方与当前真人执行机器人，机器人负责人/接管人及无关用户不参与。
+    const isRequester =
+      (task.requesterType === 'worker' &&
+        (task.requesterId === humanWorker?.id ||
+          task.requesterId === personalAgent?.id)) ||
+      (task.requesterType === 'user' && task.requesterId === actor.id) ||
+      (!task.requesterType && task.createdById === actor.id);
+    const isExecutor =
+      humanWorker?.runtime === WorkerRuntime.HUMAN &&
+      task.agentId === humanWorker.id;
+    if (perspective === 'responsible' && !isExecutor) {
+      throw new ForbiddenException(
+        '仅任务的真人执行机器人可以以执行方身份发送消息',
+      );
+    }
+    if (perspective !== 'responsible' && !isRequester) {
+      throw new ForbiddenException('仅任务需求方可以以需求方身份发送消息');
+    }
+
     // 执行方是当前用户的真人机器人：任何未结束状态（含待验收）都按操作台对话落库，
     // 不触发机器人会话，也不改变任务状态。
-    if (
-      perspective === 'responsible' &&
-      humanWorker &&
-      humanWorker.runtime === WorkerRuntime.HUMAN &&
-      task.agentId === humanWorker.id
-    ) {
+    if (perspective === 'responsible' && isExecutor && humanWorker) {
       const message = await this.taskChat.postAssistantMessage(taskId, text, {
         meta: {
           humanWorkerMessage: true,
