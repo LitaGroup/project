@@ -33,7 +33,14 @@ pnpm -C frontend build
 echo "==> 发布前端静态文件"
 sudo rsync -a --delete "$APP_DIR/frontend/dist/" /var/www/work-test.agent.cinta.team/
 
-mkdir -p "$APP_DIR/logs" "$APP_DIR/scripts" "$APP_DIR/webroot-images" "$APP_DIR/export-files" "$APP_DIR/files"
+mkdir -p "$APP_DIR/logs" "$APP_DIR/webroot-images" "$APP_DIR/export-files" "$APP_DIR/files"
+
+echo "==> 更新 systemd 与 nginx 配置"
+sudo cp "$APP_DIR/deploy/dev/litawork-backend.service" "/etc/systemd/system/${SERVICE}.service"
+sudo cp "$APP_DIR/deploy/dev/nginx.conf" /etc/nginx/sites-available/work-test.agent.cinta.team
+sudo systemctl daemon-reload
+sudo nginx -t
+sudo systemctl reload nginx
 
 echo "==> 重启后端服务"
 sudo systemctl restart "$SERVICE"
