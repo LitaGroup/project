@@ -30,6 +30,9 @@ pnpm -C backend build
 echo "==> 构建前端"
 pnpm -C frontend build
 
+echo "==> 发布前端静态文件"
+sudo rsync -a --delete "$APP_DIR/frontend/dist/" /var/www/work-test.agent.cinta.team/
+
 mkdir -p "$APP_DIR/logs" "$APP_DIR/scripts" "$APP_DIR/webroot-images" "$APP_DIR/export-files" "$APP_DIR/files"
 
 echo "==> 重启后端服务"

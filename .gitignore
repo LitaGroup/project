@@ -10,3 +10,6 @@ dist/
 /files/
 appium-agent/app-cache/
 install-state.json
+/logs/
+/webroot-images/
+/export-files/
