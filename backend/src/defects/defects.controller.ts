@@ -16,7 +16,7 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import { TestRun } from '../tests/test-run.entity';
 import { DefectChangeRecord } from './defect-change-record.entity';
 import { Defect } from './defect.entity';
-import { DefectsService } from './defects.service';
+import { DefectCreateActor, DefectsService } from './defects.service';
 
 class CreateDefectDto {
   /** 所属项目 */
@@ -72,6 +72,11 @@ class CreateDefectRecordDto {
   remark?: string;
 }
 
+/** 自动缺陷处理任务的需求方/操作人身份。 */
+function defectActor(req: AuthedRequest): DefectCreateActor {
+  return { user: req.user, worker: req.worker };
+}
+
 @Controller('defects')
 export class DefectsController {
   constructor(private readonly defectsService: DefectsService) {}
@@ -90,7 +95,12 @@ export class DefectsController {
     @Body() dto: CreateDefectDto,
     @Req() req: AuthedRequest,
   ): Promise<Defect> {
-    return this.defectsService.create(dto, '录入', req.user?.name);
+    return this.defectsService.create(
+      dto,
+      '录入',
+      req.worker?.name ?? req.user?.name,
+      defectActor(req),
+    );
   }
 
   /**
@@ -103,7 +113,11 @@ export class DefectsController {
     @Body() dto: CreateDefectDto,
     @Req() req: AuthedRequest,
   ): Promise<string> {
-    return this.defectsService.createMarkdown(dto, req.user?.name);
+    return this.defectsService.createMarkdown(
+      dto,
+      req.worker?.name ?? req.user?.name,
+      defectActor(req),
+    );
   }
 
   /** Markdown 视图（须声明在 :id 之前，避免 :id 匹配到带 .md 后缀的路径） */

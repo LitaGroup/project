@@ -4025,6 +4025,25 @@ function ReleasesSection({
                   <dt className="shrink-0 text-foreground-muted">提测人</dt>
                   <dd>{selected.operator ?? '—'}</dd>
                 </div>
+                {selected.workerId && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="shrink-0 text-foreground-muted">提测机器人</dt>
+                    <dd>#{selected.workerId}</dd>
+                  </div>
+                )}
+                {selected.sourceTaskId && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="shrink-0 text-foreground-muted">来源任务</dt>
+                    <dd>
+                      <Link
+                        to={`/tasks/${selected.sourceTaskId}`}
+                        className="underline"
+                      >
+                        #{selected.sourceTaskId}
+                      </Link>
+                    </dd>
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-4">
                   <dt className="shrink-0 text-foreground-muted">状态</dt>
                   <dd>

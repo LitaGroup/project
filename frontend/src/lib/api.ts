@@ -608,8 +608,12 @@ export interface ProjectRelease {
   branches: ReleaseBranch[] | null
   /** 测试人员姓名（至少 1 个，均为用户系统内用户） */
   testers: string[]
-  /** 提测人姓名 */
+  /** 提测人姓名（机器人提测时为机器人名称） */
   operator: string | null
+  /** 发起提测的机器人（人工提测为空） */
+  workerId: number | null
+  /** 发起提测时机器人正在执行的任务 */
+  sourceTaskId: number | null
   /** 提测状态：待冒烟（默认）/ 进行中 / 已通过 / 未通过 */
   status: ReleaseStatus
   /** 判定人姓名（已通过/未通过时记录，待冒烟/进行中为空） */
@@ -677,6 +681,10 @@ export interface Defect {
   fixedAt: string | null
   /** 验证时间（人工二次确认，改为"关闭"时记录） */
   verifiedAt: string | null
+  /** 来源提测记录（机器人提测后的新缺陷自动关联） */
+  releaseId: number | null
+  /** 自动创建的缺陷处理任务 */
+  followupTaskId: number | null
   createdAt: string
   updatedAt: string
 }
@@ -2408,6 +2416,8 @@ export const api = {
       urls?: string[]
       branches?: ReleaseBranch[]
       testers: string[]
+      /** 来源任务（机器人调用时可显式指定；网页提测一般不传） */
+      taskId?: number
     },
   ) =>
     request<ProjectRelease>(`/projects/${projectId}/release`, {

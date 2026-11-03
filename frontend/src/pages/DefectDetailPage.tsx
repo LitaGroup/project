@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   Card,
   CardHeader,
@@ -463,6 +463,25 @@ export function DefectDetailPage() {
               <dt>验证时间</dt>
               <dd>{formatTime(defect.verifiedAt)}</dd>
             </div>
+            {defect.releaseId && (
+              <div className="flex justify-between">
+                <dt>来源提测</dt>
+                <dd>#{defect.releaseId}</dd>
+              </div>
+            )}
+            {defect.followupTaskId && (
+              <div className="flex justify-between">
+                <dt>处理任务</dt>
+                <dd>
+                  <Link
+                    to={`/tasks/${defect.followupTaskId}`}
+                    className="underline"
+                  >
+                    #{defect.followupTaskId}
+                  </Link>
+                </dd>
+              </div>
+            )}
           </dl>
           <div className="flex flex-col gap-2 px-6 pb-6">
             <EditContentDialog defect={defect} onSaved={reload} />

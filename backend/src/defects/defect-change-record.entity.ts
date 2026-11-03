@@ -8,7 +8,7 @@ import {
 
 /**
  * 缺陷变更记录来源：
- * 录入=前端表单 / AI=.md 接口 / 自动=脚本回归通过自动流转
+ * 录入=前端表单 / AI=.md 接口 / 自动=脚本回归、提测缺陷派单等平台动作
  */
 export const DEFECT_RECORD_SOURCES = ['录入', 'AI', '自动'] as const;
 

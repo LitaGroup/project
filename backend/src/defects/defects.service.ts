@@ -1,17 +1,31 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as path from 'path';
-import { FindOptionsSelect, In, Repository } from 'typeorm';
-import { DefectPriority, DefectStatus } from '../common/enums';
+import { FindOptionsSelect, In, IsNull, Repository } from 'typeorm';
+import {
+  DefectPriority,
+  DefectStatus,
+  ReleaseStatus,
+  WorkerRole,
+} from '../common/enums';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { Project } from '../projects/project.entity';
+import {
+  ACTIVE_RELEASE_STATUSES,
+  ProjectRelease,
+} from '../releases/project-release.entity';
+import { Task } from '../tasks/task.entity';
+import { TasksService } from '../tasks/tasks.service';
 import { TestRun } from '../tests/test-run.entity';
 import { TestsService } from '../tests/tests.service';
+import { User } from '../auth/user.entity';
+import { Worker } from '../workers/worker.entity';
 import {
   DefectChangeRecord,
   DEFECT_RECORD_SOURCES,
@@ -33,6 +47,8 @@ export const DEFECT_LIST_SELECT: FindOptionsSelect<Defect> = {
   projectId: true,
   fixedAt: true,
   verifiedAt: true,
+  releaseId: true,
+  followupTaskId: true,
   createdAt: true,
   updatedAt: true,
 };
@@ -53,7 +69,7 @@ export interface CreateDefectInput {
   testScript?: string;
 }
 
-/** 变更记录来源：录入（前端表单）/ AI（.md 接口）/ 自动（测试运行流转） */
+/** 变更记录来源：录入（前端表单）/ AI（.md 接口）/ 自动（测试运行、提测缺陷派单等） */
 export type DefectRecordSource = (typeof DEFECT_RECORD_SOURCES)[number];
 
 export interface UpdateDefectInput {
@@ -87,6 +103,19 @@ export interface CreateRecordInput {
   remark?: string;
 }
 
+/** 缺陷创建人身份：用于把自动创建的处理任务正确挂到需求方。 */
+export interface DefectCreateActor {
+  user?: Pick<User, 'id' | 'name'> | null;
+  worker?: Worker | null;
+}
+
+interface TaskRequesterIdentity {
+  createdById: number | null;
+  requesterType: 'user' | 'worker';
+  requesterId: number;
+  operatorName?: string;
+}
+
 /**
  * 平台侧端取值：只保留 前端/后端/APP端/未知（默认）。
  */
@@ -105,6 +134,8 @@ function defectLabel(expected: string | null | undefined): string {
 
 @Injectable()
 export class DefectsService implements OnModuleInit {
+  private readonly logger = new Logger(DefectsService.name);
+
   constructor(
     @InjectRepository(Defect)
     private readonly defects: Repository<Defect>,
@@ -112,7 +143,16 @@ export class DefectsService implements OnModuleInit {
     private readonly records: Repository<DefectChangeRecord>,
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
+    @InjectRepository(ProjectRelease)
+    private readonly releases: Repository<ProjectRelease>,
+    @InjectRepository(Worker)
+    private readonly workers: Repository<Worker>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
+    @InjectRepository(Task)
+    private readonly tasks: Repository<Task>,
     private readonly testsService: TestsService,
+    private readonly tasksService: TasksService,
   ) {}
 
   onModuleInit(): void {
@@ -260,14 +300,26 @@ export class DefectsService implements OnModuleInit {
   /** Markdown 视图（GET /api/defects/:id.md）：元信息 + 预期/实际/图片 + 变更记录 + AI 操作 */
   async findOneMarkdown(id: number): Promise<string> {
     const defect = await this.findOne(id);
-    const project = await this.projects.findOne({
-      where: { id: defect.projectId },
-      select: { id: true, name: true },
-    });
+    const [project, followupTask] = await Promise.all([
+      this.projects.findOne({
+        where: { id: defect.projectId },
+        select: { id: true, name: true },
+      }),
+      defect.followupTaskId
+        ? this.tasks.findOne({
+            where: { id: defect.followupTaskId },
+            select: { id: true, code: true },
+          })
+        : Promise.resolve(null),
+    ]);
     const meta = [
       `- ID：${defect.id}`,
       `- 项目：${project ? `${project.name}（${defect.projectId}）` : defect.projectId}`,
       `- 状态：${defect.status}`,
+      defect.releaseId ? `- 来源提测：#${defect.releaseId}` : null,
+      defect.followupTaskId
+        ? `- 处理任务：${followupTask?.code ?? `#${defect.followupTaskId}`}（\`GET /api/tasks/${defect.followupTaskId}.md\`）`
+        : null,
       `- 端：${defect.platform ?? '—'}`,
       `- 优先级：${defect.priority}`,
       `- 用例：${defect.testScript ? `\`${defect.testScript}\`` : '—'}`,
@@ -283,7 +335,7 @@ export class DefectsService implements OnModuleInit {
       }),
       `# ${defectLabel(defect.expected) || `缺陷 ${defect.id}`}`,
       '',
-      ...meta,
+      ...meta.filter((line): line is string => line !== null),
       '',
       '## 预期功能描述',
       '',
@@ -388,8 +440,9 @@ export class DefectsService implements OnModuleInit {
   async createMarkdown(
     input: CreateDefectInput,
     operator?: string | null,
+    actor?: DefectCreateActor,
   ): Promise<string> {
-    const defect = await this.create(input, 'AI', operator);
+    const defect = await this.create(input, 'AI', operator, actor);
     return this.renderMutationMarkdown('创建', defect, operator);
   }
 
@@ -434,10 +487,16 @@ export class DefectsService implements OnModuleInit {
       `- 预期：${defectLabel(defect.expected)}`,
       `- 状态：${defect.status}`,
       `- 项目：${defect.projectId}`,
+      defect.releaseId ? `- 来源提测：#${defect.releaseId}` : null,
+      defect.followupTaskId
+        ? `- 处理任务：#${defect.followupTaskId}（GET /api/tasks/${defect.followupTaskId}.md）`
+        : null,
       `- 操作人：${operator ?? '—'}`,
       `- 阅读地址：GET /api/defects/${defect.id}.md`,
       '',
-    ].join('\n');
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n');
   }
 
   /** 批量取项目名（Markdown 清单用） */
@@ -458,6 +517,7 @@ export class DefectsService implements OnModuleInit {
     input: CreateDefectInput,
     recordSource: DefectRecordSource = '录入',
     operator?: string | null,
+    actor?: DefectCreateActor,
   ): Promise<Defect> {
     const expected = (input.expected ?? '').trim();
     const actual = (input.actual ?? '').trim();
@@ -490,6 +550,8 @@ export class DefectsService implements OnModuleInit {
           input.testScript !== undefined
             ? this.normalizeTestScript(input.testScript)
             : null,
+        releaseId: null,
+        followupTaskId: null,
       }),
     );
     await this.saveRecord(saved, {
@@ -497,7 +559,7 @@ export class DefectsService implements OnModuleInit {
       source: recordSource,
       operator,
     });
-    return saved;
+    return this.dispatchFollowupTask(saved, project, operator, actor);
   }
 
   /**
@@ -604,6 +666,243 @@ export class DefectsService implements OnModuleInit {
   }
 
   // ---- 内部 ----
+
+  /**
+   * 机器人提测后的新缺陷闭环：
+   * 关联项目最新一条有效提测（待冒烟/进行中/未通过），把缺陷作为独立任务派回原提测机器人。
+   * 派单失败不回滚缺陷，失败原因写入缺陷变更记录。
+   */
+  private async dispatchFollowupTask(
+    defect: Defect,
+    project: Project,
+    operator: string | null | undefined,
+    actor?: DefectCreateActor,
+  ): Promise<Defect> {
+    try {
+      // 只认项目最新一条提测：最新提测已通过/由人工发起时，不允许回退到更早的机器人提测。
+      const release = await this.releases.findOne({
+        where: { projectId: defect.projectId },
+        order: { createdAt: 'DESC', id: 'DESC' },
+      });
+      if (
+        !release ||
+        !ACTIVE_RELEASE_STATUSES.includes(release.status as ReleaseStatus)
+      ) {
+        return defect;
+      }
+
+      defect.releaseId = release.id;
+      let saved = await this.defects.save(defect);
+      if (!release.workerId) return saved;
+
+      const worker = await this.workers.findOne({
+        where: {
+          id: release.workerId,
+          enabled: true,
+          role: WorkerRole.WORKER,
+          personalAgentUserId: IsNull(),
+        },
+      });
+      if (!worker) {
+        await this.saveRecord(saved, {
+          content: `原提测机器人 #${release.workerId} 已停用或不可用，未自动创建缺陷处理任务`,
+          source: '自动',
+        });
+        return saved;
+      }
+
+      const sourceTask = release.sourceTaskId
+        ? await this.tasks.findOne({ where: { id: release.sourceTaskId } })
+        : null;
+      const requester = await this.resolveTaskRequester(
+        actor,
+        worker,
+        sourceTask,
+        operator,
+      );
+      if (!requester) {
+        await this.saveRecord(saved, {
+          content: `已关联原提测机器人「${worker.name}」，但未能确定处理任务需求方，未自动创建处理任务`,
+          source: '自动',
+        });
+        return saved;
+      }
+
+      try {
+        const task = await this.tasksService.create({
+          title: `修复缺陷 #${saved.id}：${defectLabel(saved.expected)}`,
+          description: this.buildFollowupDescription(
+            saved,
+            project,
+            release,
+            sourceTask,
+          ),
+          outputSpec:
+            '按当前机器人职责完成缺陷分析、修复与必要回归，并在任务交付文档和缺陷变更记录中留下可验证的处理结果。',
+          agentId: worker.id,
+          ...requester,
+          operatorName: '自动派单',
+        });
+        saved.followupTaskId = task.id;
+        saved = await this.defects.save(saved);
+        await this.saveRecord(saved, {
+          content: `已通知原提测机器人「${worker.name}」，自动创建处理任务 ${task.code}`,
+          source: '自动',
+        });
+        return saved;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : String(error ?? '未知错误');
+        this.logger.error(
+          `缺陷 #${saved.id} 自动创建处理任务失败（worker=${worker.id}）：${message}`,
+        );
+        await this.saveRecord(saved, {
+          content: `自动创建缺陷处理任务失败：${message}`,
+          source: '自动',
+        });
+        return saved;
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? '未知错误');
+      this.logger.error(`缺陷 #${defect.id} 提测派单流程异常：${message}`);
+      return defect;
+    }
+  }
+
+  /** 处理任务需求方：当前缺陷创建人 > 来源任务需求方 > 机器人负责人。 */
+  private async resolveTaskRequester(
+    actor: DefectCreateActor | undefined,
+    releaseWorker: Worker,
+    sourceTask: Task | null,
+    operator?: string | null,
+  ): Promise<TaskRequesterIdentity | null> {
+    if (actor?.worker) {
+      if (actor.worker.personalAgentUserId) {
+        return this.userRequester(actor.worker.personalAgentUserId);
+      }
+      return {
+        createdById:
+          actor.worker.humanUserId ??
+          actor.worker.ownerUserId ??
+          sourceTask?.createdById ??
+          null,
+        requesterType: 'worker',
+        requesterId: actor.worker.id,
+        operatorName: actor.worker.name,
+      };
+    }
+    if (actor?.user && actor.user.id > 0) {
+      return this.userRequester(actor.user.id, actor.user.name);
+    }
+    if (sourceTask?.requesterType && sourceTask.requesterId) {
+      return {
+        createdById: sourceTask.createdById,
+        requesterType: sourceTask.requesterType,
+        requesterId: sourceTask.requesterId,
+      };
+    }
+    if (operator?.trim()) {
+      const user = await this.users.findOne({
+        where: { name: operator.trim() },
+        select: { id: true, name: true },
+      });
+      if (user) return this.userRequester(user.id, user.name);
+    }
+    if (releaseWorker.ownerUserId) {
+      return this.userRequester(releaseWorker.ownerUserId);
+    }
+    return null;
+  }
+
+  /** 用户创建缺陷时，需求方优先使用其真人机器人。 */
+  private async userRequester(
+    userId: number,
+    userName?: string | null,
+  ): Promise<TaskRequesterIdentity | null> {
+    // 公共 Agent 使用不落库的虚拟管理员 id=0，不能作为任务需求方。
+    if (userId <= 0) return null;
+    const human = await this.workers.findOne({
+      where: { humanUserId: userId },
+      select: { id: true, name: true, humanUserId: true },
+    });
+    if (human) {
+      return {
+        createdById: userId,
+        requesterType: 'worker',
+        requesterId: human.id,
+        operatorName: human.name,
+      };
+    }
+    const user =
+      userName !== undefined
+        ? { id: userId, name: userName ?? `用户#${userId}` }
+        : await this.users.findOne({
+            where: { id: userId },
+            select: { id: true, name: true },
+          });
+    if (!user) return null;
+    return {
+      createdById: userId,
+      requesterType: 'user',
+      requesterId: userId,
+      operatorName: user.name,
+    };
+  }
+
+  /** 自动处理任务的正文：保留缺陷/提测上下文，具体处理步骤交给机器人职责定义。 */
+  private buildFollowupDescription(
+    defect: Defect,
+    project: Project,
+    release: ProjectRelease,
+    sourceTask: Task | null,
+  ): string {
+    const lines = [
+      '# 缺陷处理任务',
+      '',
+      '本任务由平台在机器人提测后检测到新缺陷自动创建。',
+      '',
+      '## 缺陷信息',
+      '',
+      `- 缺陷：[\`#${defect.id}\`](/api/defects/${defect.id}.md)`,
+      `- 项目：${project.name}（#${project.id}）`,
+      `- 端：${defect.platform ?? '未知'}`,
+      `- 优先级：${defect.priority}`,
+      `- 当前状态：${defect.status}`,
+      defect.testScript ? `- 用例脚本：\`${defect.testScript}\`` : null,
+      '',
+      '## 预期功能描述',
+      '',
+      defect.expected,
+      '',
+      '## 实际结果描述',
+      '',
+      defect.actual,
+    ];
+    if (defect.images && defect.images.length > 0) {
+      lines.push('', '## 缺陷图片', '');
+      for (const image of defect.images) lines.push(`![缺陷图片](${image})`);
+    }
+    lines.push(
+      '',
+      '## 来源提测',
+      '',
+      `- 提测记录：#${release.id}（${release.status}）`,
+      `- 提测时间：${beijingTime(release.createdAt)}`,
+      `- 提测机器人：${release.operator ?? `#${release.workerId}`}`,
+      sourceTask
+        ? `- 来源任务：${sourceTask.code} ${sourceTask.title}（#${sourceTask.id}）`
+        : null,
+      release.content ? `- 提测内容：${release.content}` : null,
+      '',
+      '## 处理参考',
+      '',
+      `- 缺陷详情：\`GET /api/defects/${defect.id}.md\``,
+      `- 缺陷处理结果与状态：\`POST /api/defects/${defect.id}/status.md\``,
+      `- 缺陷变更记录：\`POST /api/defects/${defect.id}/records.md\``,
+    );
+    return lines.filter((line): line is string => line !== null).join('\n');
+  }
 
   /** 写入一条变更记录（status 取缺陷当前状态；source 缺省录入） */
   private saveRecord(

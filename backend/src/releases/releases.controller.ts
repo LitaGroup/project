@@ -13,7 +13,11 @@ import {
 import type { AuthedRequest } from '../auth/auth.guard';
 import { ReleaseStatus } from '../common/enums';
 import { ProjectRelease } from './project-release.entity';
-import { ReleasesService, SubmitReleaseInput } from './releases.service';
+import {
+  ReleaseActor,
+  ReleasesService,
+  SubmitReleaseInput,
+} from './releases.service';
 
 /** 提测状态判定入参：状态须为 待冒烟 / 进行中 / 已通过 / 未通过 */
 class UpdateReleaseStatusDto {
@@ -31,6 +35,17 @@ class SubmitReleaseDto implements SubmitReleaseInput {
   branches?: { repo: string; branch: string }[];
   /** 测试人员（至少 1 人） */
   testers: string[];
+  /** 来源任务（机器人可选；缺省自动取当前执行中的任务） */
+  taskId?: number;
+}
+
+/** 机器人令牌优先作为提测身份；网页登录用户仍记录为提测人。 */
+function releaseActor(req: AuthedRequest, taskId?: number): ReleaseActor {
+  return {
+    operator: req.worker?.name ?? req.user?.name ?? null,
+    workerId: req.worker?.id ?? null,
+    sourceTaskId: taskId ?? null,
+  };
 }
 
 /** 项目提测端点（挂在 /projects 前缀下，与 ProjectsController 的路由互不冲突） */
@@ -45,7 +60,7 @@ export class ReleasesController {
     @Body() dto: SubmitReleaseDto,
     @Req() req: AuthedRequest,
   ): Promise<ProjectRelease> {
-    return this.releasesService.submit(id, dto, req.user?.name);
+    return this.releasesService.submit(id, dto, releaseActor(req, dto.taskId));
   }
 
   /** AI 用：提测并返回 Markdown 结果（text/markdown） */
@@ -56,7 +71,11 @@ export class ReleasesController {
     @Body() dto: SubmitReleaseDto,
     @Req() req: AuthedRequest,
   ): Promise<string> {
-    return this.releasesService.submitMarkdown(id, dto, req.user?.name);
+    return this.releasesService.submitMarkdown(
+      id,
+      dto,
+      releaseActor(req, dto.taskId),
+    );
   }
 
   /** 提测记录列表（倒序） */

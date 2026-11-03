@@ -402,6 +402,11 @@ export class ProjectsService {
       if (d.platform) parts.push(`端：${d.platform}`);
       if (d.priority) parts.push(`优先级：${d.priority}`);
       if (d.testScript) parts.push(`测试脚本：${d.testScript}`);
+      if (d.followupTaskId) {
+        parts.push(
+          `处理任务：[#${d.followupTaskId}](/api/tasks/${d.followupTaskId}.md)`,
+        );
+      }
       return `- ${parts.join(' — ')}`;
     });
     const resourceLines = project.projectResources.map((r) => {
@@ -437,6 +442,8 @@ export class ProjectsService {
         `**${beijingTime(r.createdAt)}**（id：${r.id}）提测人 ${r.operator ?? '—'} — 状态：**${r.status ?? '待冒烟'}**`,
         `测试人员：${r.testers.join('、')}`,
       ];
+      if (r.workerId) parts.push(`提测机器人：#${r.workerId}`);
+      if (r.sourceTaskId) parts.push(`来源任务：#${r.sourceTaskId}`);
       if (r.verifier) parts.push(`判定人：${r.verifier}`);
       if (r.verifiedAt) parts.push(`判定时间：${beijingTime(r.verifiedAt)}`);
       if (r.urls?.length) parts.push(`访问地址：${r.urls.join('、')}`);
@@ -573,6 +580,8 @@ export class ProjectsService {
       'curl -X POST /api/defects/{defectId}/delete.md  # 删除（仅本地）',
       '```',
       '',
+      '机器人提测后的新缺陷：平台先取项目最新一条提测，仅当它处于 待冒烟 / 进行中 / 未通过 且由机器人发起时，自动创建缺陷处理任务并指派原提测机器人（最新提测已通过或人工提测时不回退到更早记录）；任务与来源提测记录写入缺陷详情（`releaseId` / `followupTaskId`），派单失败原因写入变更记录。',
+      '',
       '节点（某个时间点需完成的事项；状态由 达成+实际达成日期+日期 推导：准备中/提前达成/达成/延期/取消）：',
       '',
       '```bash',
@@ -592,7 +601,7 @@ export class ProjectsService {
       '项目提测（创建提测记录，状态流转「测试中」，并通知提测群「H5 Release | 提测上线」+ 项目人员私聊；仅 testers 必填——至少 1 人且须为用户系统内用户，content/urls/branches 可空）：',
       '',
       '```bash',
-      `curl -X POST /api/projects/${project.id}/release.md -H 'Content-Type: application/json' -d '{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}]}'`,
+      `curl -X POST /api/projects/${project.id}/release.md -H 'Content-Type: application/json' -d '{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}], "taskId": 123}'  # 机器人可显式传 taskId，缺省自动关联当前执行中的任务`,
       `curl '/api/releases.md?projectId=${project.id}'  # 提测记录清单（时间倒序，含状态/判定人/判定时间）`,
       '```',
       '',
