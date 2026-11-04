@@ -137,7 +137,9 @@ export class TasksService {
     subStatus?: TaskSubStatus;
     type?: string;
     rootOnly?: boolean;
-  }): Promise<Array<Task & { children?: Task[] }>> {
+  }): Promise<
+    Array<Task & { children?: Task[]; requesterName: string | null }>
+  > {
     const qb = this.tasks.createQueryBuilder('t');
     if (params.rootOnly !== false) {
       qb.where('t.parentId IS NULL');
@@ -170,30 +172,109 @@ export class TasksService {
         list.push(c);
         byParent.set(c.parentId!, list);
       }
+      const nameOf = await this.requesterNameResolver([...roots, ...children]);
       return roots.map((r) => {
         const children = byParent.get(r.id) ?? [];
         for (const child of children) {
-          Object.assign(child, { liveLines: this.recentLiveLines(child.id) });
+          Object.assign(child, {
+            liveLines: this.recentLiveLines(child.id),
+            requesterName: nameOf(child),
+          });
         }
         return Object.assign(r, {
           children,
           liveLines: this.recentLiveLines(r.id),
+          requesterName: nameOf(r),
         });
       });
     }
     // 平铺列表（看板用）：附带执行中任务的实时输出，避免前端逐个拉详情
+    const nameOf = await this.requesterNameResolver(roots);
     return roots.map((r) =>
-      Object.assign(r, { liveLines: this.recentLiveLines(r.id) }),
+      Object.assign(r, {
+        liveLines: this.recentLiveLines(r.id),
+        requesterName: nameOf(r),
+      }),
     );
   }
 
   /** 单个任务列表快照（SSE 任务变更推送用，不含详情事件时间线） */
   async findOneForList(
     id: number,
-  ): Promise<(Task & { liveLines: string[] }) | null> {
+  ): Promise<
+    (Task & { liveLines: string[]; requesterName: string | null }) | null
+  > {
     const task = await this.tasks.findOne({ where: { id } });
     if (!task) return null;
-    return Object.assign(task, { liveLines: this.recentLiveLines(id) });
+    const nameOf = await this.requesterNameResolver([task]);
+    return Object.assign(task, {
+      liveLines: this.recentLiveLines(id),
+      requesterName: nameOf(task),
+    });
+  }
+
+  /**
+   * 批量解析任务需求方展示名：worker 取机器人名（历史个人 AGENT 显示其主人），
+   * user 取用户姓名；需求方缺省时回退任务创建人。
+   */
+  private async requesterNameResolver(
+    tasks: Task[],
+  ): Promise<(task: Task) => string | null> {
+    const workerIds = new Set<number>();
+    const userIds = new Set<number>();
+    const requesterOf = (
+      task: Task,
+    ): { type: 'user' | 'worker' | null; id: number | null } => {
+      const type = task.requesterType ?? (task.createdById ? 'user' : null);
+      const id = task.requesterId ?? task.createdById;
+      return { type, id };
+    };
+    for (const task of tasks) {
+      const { type, id } = requesterOf(task);
+      if (!id) continue;
+      if (type === 'worker') workerIds.add(id);
+      else if (type === 'user') userIds.add(id);
+    }
+    const workers = workerIds.size
+      ? await this.workers.find({
+          where: { id: In([...workerIds]) },
+          select: {
+            id: true,
+            name: true,
+            ownerName: true,
+            personalAgentUserId: true,
+          },
+        })
+      : [];
+    for (const worker of workers) {
+      if (worker.personalAgentUserId) userIds.add(worker.personalAgentUserId);
+    }
+    const users = userIds.size
+      ? await this.users.find({
+          where: { id: In([...userIds]) },
+          select: { id: true, name: true },
+        })
+      : [];
+    const userNames = new Map(users.map((user) => [user.id, user.name]));
+    const workerNames = new Map<number, string>();
+    for (const worker of workers) {
+      workerNames.set(
+        worker.id,
+        worker.personalAgentUserId
+          ? (userNames.get(worker.personalAgentUserId) ??
+              worker.ownerName ??
+              worker.name)
+          : worker.name,
+      );
+    }
+    return (task) => {
+      const { type, id } = requesterOf(task);
+      if (!id) return null;
+      if (type === 'worker') {
+        return workerNames.get(id) ?? `机器人 #${id}`;
+      }
+      return userNames.get(id) ?? `用户 #${id}`;
+    };
   }
 
   /** 列表快照只保留最近 60 行输出，完整输出仍走详情/任务级 SSE */

@@ -1317,6 +1317,8 @@ export interface TaskPackage {
   requesterType: 'user' | 'worker' | null
   /** 需求方 id（users.id 或 workers.id，与 requesterType 联合解释） */
   requesterId: number | null
+  /** 需求方展示名（列表接口/看板 SSE 附带；worker 显示机器人名，历史个人 AGENT 显示主人） */
+  requesterName?: string | null
   /** 待继续时下一次派发需要补充的上下文（答复/返工/子任务事件） */
   resumePrompt: string | null
   /** 最近一次任务邀约时间（待接受重试节流） */

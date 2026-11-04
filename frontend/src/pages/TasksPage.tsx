@@ -324,6 +324,7 @@ function TaskListView({
             <TableHead className="w-28">编号</TableHead>
             <TableHead>任务名称</TableHead>
             <TableHead className="w-24">状态</TableHead>
+            <TableHead className="w-36">需求方</TableHead>
             <TableHead className="w-36">处理机器人</TableHead>
             <TableHead className="w-40">处理时间</TableHead>
           </TableRow>
@@ -346,6 +347,12 @@ function TaskListView({
                   subStatus={task.subStatus}
                 />
               </TableCell>
+              <TableCell
+                className="max-w-36 truncate"
+                title={task.requesterName ?? undefined}
+              >
+                {task.requesterName ?? '—'}
+              </TableCell>
               <TableCell className="max-w-36 truncate">
                 {task.agentId
                   ? (workerName.get(task.agentId) ?? `#${task.agentId}`)
@@ -361,7 +368,7 @@ function TaskListView({
           ))}
           {tasks !== null && filtered.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5}>
+              <TableCell colSpan={6}>
                 {tasks.length === 0
                   ? activeOnly
                     ? '暂无未结束的任务'
@@ -372,7 +379,7 @@ function TaskListView({
           )}
           {tasks === null && (
             <TableRow>
-              <TableCell colSpan={5}>加载中…</TableCell>
+              <TableCell colSpan={6}>加载中…</TableCell>
             </TableRow>
           )}
         </TableBody>
