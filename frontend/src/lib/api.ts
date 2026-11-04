@@ -2715,6 +2715,9 @@ export const api = {
   listTaskTemplates: () => request<TaskTemplate[]>('/task-templates'),
   getTaskTemplate: (id: number) =>
     request<TaskTemplate>(`/task-templates/${id}`),
+  /** 任务定义最近匹配的任务（最多 5 个，含根任务与子任务，按更新时间倒序） */
+  listTaskTemplateTasks: (id: number) =>
+    request<TaskPackage[]>(`/task-templates/${id}/tasks`),
   createTaskTemplate: (input: {
     name: string
     type?: string | null

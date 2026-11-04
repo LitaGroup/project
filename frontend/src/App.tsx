@@ -24,6 +24,8 @@ import { SchedulesPage } from './pages/SchedulesPage'
 import { TaskCenterPage } from './pages/TaskCenterPage'
 import { TasksPage } from './pages/TasksPage'
 import { TaskCreatePage } from './pages/TaskCreatePage'
+import { TaskDefinitionsPage } from './pages/TaskDefinitionsPage'
+import { TaskDefinitionDetailPage } from './pages/TaskDefinitionDetailPage'
 import { TaskTemplatesPage } from './pages/TaskTemplatesPage'
 import { TaskTypesPage } from './pages/TaskTypesPage'
 import { TaskTemplateEditPage } from './pages/TaskTemplateEditPage'
@@ -159,6 +161,11 @@ function App() {
           <Route path="/tasks/list" element={<TasksPage />} />
           <Route path="/tasks/new" element={<TaskCreatePage />} />
           <Route path="/tasks/live" element={<WorkersLivePage />} />
+          <Route path="/tasks/definitions" element={<TaskDefinitionsPage />} />
+          <Route
+            path="/tasks/definitions/:templateId"
+            element={<TaskDefinitionDetailPage />}
+          />
           {/* 任务类型 / 任务定义 / 机器人 / 执行器已迁移到管理模块：旧链接兼容 */}
           <Route
             path="/tasks/types"

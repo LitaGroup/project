@@ -28,7 +28,6 @@ import {
   DropdownMenuItem,
 } from '@appica/ui-react/dropdown-menu'
 import {
-  Activity,
   Briefcase,
   Bug,
   CalendarClock,
@@ -116,12 +115,11 @@ const NAV_SECTIONS: NavSection[] = [
   {
     key: 'tasks',
     label: '任务',
-    to: '/tasks',
+    to: '/tasks/list',
     match: (p) => p.startsWith('/tasks'),
     items: [
       { to: '/tasks/list', label: '任务', icon: ClipboardList, ready: true },
-      { to: '/tasks', label: '任务概览', icon: ChartPie, ready: true },
-      { to: '/tasks/live', label: '工作概览', icon: Activity, ready: true },
+      { to: '/tasks/definitions', label: '定义', icon: Package, ready: true },
     ],
   },
   {

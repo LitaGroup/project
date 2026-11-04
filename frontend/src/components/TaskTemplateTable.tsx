@@ -28,8 +28,8 @@ export const SYSTEM_TASK_TEMPLATE_IDS = new Set([6, 10, 11, 12, 13, 14, 15])
 interface TaskTemplateTableProps {
   templates: TaskTemplate[] | null
   workers: Worker[]
-  /** manage=管理模块（编辑/删除）；plain=个人中心（关注/查看） */
-  mode?: 'manage' | 'plain'
+  /** manage=管理模块（编辑/删除）；plain=个人中心（关注/查看）；readonly=任务栏目只读（仅查看详情） */
+  mode?: 'manage' | 'plain' | 'readonly'
   currentUserId?: number | null
   /** 删除或关注状态变更后刷新列表 */
   onChanged?: () => void
@@ -37,7 +37,7 @@ interface TaskTemplateTableProps {
   emptyText?: string
 }
 
-/** 任务定义表格：管理模块与个人中心共用 */
+/** 任务定义表格：管理模块、个人中心与任务栏目只读列表共用 */
 export function TaskTemplateTable({
   templates,
   workers,
@@ -71,7 +71,16 @@ export function TaskTemplateTable({
             <TableRow key={template.id}>
               <TableCell className="max-w-52">
                 <p className="flex items-center gap-1.5 truncate font-medium">
-                  <span className="truncate">{template.name}</span>
+                  {mode === 'readonly' ? (
+                    <Link
+                      to={`/tasks/definitions/${template.id}`}
+                      className="truncate underline-offset-2 hover:underline"
+                    >
+                      {template.name}
+                    </Link>
+                  ) : (
+                    <span className="truncate">{template.name}</span>
+                  )}
                   {system && (
                     <Badge variant="soft" size="sm">
                       系统
@@ -146,6 +155,13 @@ export function TaskTemplateTable({
                         />
                       )}
                     </>
+                  ) : mode === 'readonly' ? (
+                    <Link
+                      to={`/tasks/definitions/${template.id}`}
+                      className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                    >
+                      查看
+                    </Link>
                   ) : (
                     <>
                       <Button

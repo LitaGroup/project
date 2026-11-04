@@ -13,6 +13,7 @@ import { markdownCell, markdownLabel } from '../common/markdown-table';
 import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 import { TaskTypesService } from '../task-types/task-types.service';
 import { Worker } from '../workers/worker.entity';
+import { Task } from './task.entity';
 import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import {
@@ -54,6 +55,8 @@ export class TaskTemplatesService implements OnModuleInit {
   constructor(
     @InjectRepository(TaskTemplate)
     private readonly templates: Repository<TaskTemplate>,
+    @InjectRepository(Task)
+    private readonly tasks: Repository<Task>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
     @InjectRepository(TaskTemplateFollow)
@@ -193,6 +196,16 @@ export class TaskTemplatesService implements OnModuleInit {
       throw new NotFoundException(`TaskTemplate ${id} not found`);
     }
     return template;
+  }
+
+  /** 任务定义详情侧数据：匹配该定义的最近任务（最多 5 个，含根任务与子任务，按更新时间倒序） */
+  async findRecentTasks(id: number): Promise<Task[]> {
+    await this.findOne(id);
+    return this.tasks.find({
+      where: { templateId: id },
+      order: { updatedAt: 'DESC', id: 'DESC' },
+      take: 5,
+    });
   }
 
   /** Agent 清单：GET /api/task-templates.md */
