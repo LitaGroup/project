@@ -161,6 +161,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
       { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
+      { to: '/admin/ticket-definitions', label: '工单定义', icon: TimelineEvent, ready: true },
       { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
       { to: '/admin/task-types', label: '任务类型', icon: Label, ready: true },
       { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },

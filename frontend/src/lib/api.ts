@@ -1476,6 +1476,75 @@ export interface TicketConfig {
   description: string
 }
 
+/** 工单工作流节点类型：操作 / 审批 / 验收 */
+export const WORKFLOW_NODE_KINDS = ['operation', 'approval', 'acceptance'] as const
+export type WorkflowNodeKind = (typeof WORKFLOW_NODE_KINDS)[number]
+
+/** 节点执行结果；审批节点使用 approved/rejected，其它节点使用 succeeded/failed */
+export const WORKFLOW_OUTCOMES = [
+  'succeeded',
+  'failed',
+  'approved',
+  'rejected',
+] as const
+export type WorkflowOutcome = (typeof WORKFLOW_OUTCOMES)[number]
+
+/** 流程结束的虚拟节点 */
+export const WORKFLOW_END_NODE = '$end'
+
+export interface WorkflowNodeDefinition {
+  key: string
+  name: string
+  kind: WorkflowNodeKind
+  taskTemplateId: number | null
+  executorWorkerId: number | null
+  approverWorkerId: number | null
+  description: string | null
+}
+
+export interface WorkflowEdgeDefinition {
+  from: string
+  to: string
+  outcome: WorkflowOutcome | null
+  label: string | null
+}
+
+export interface WorkflowDefinitionJson {
+  startNode: string
+  nodes: WorkflowNodeDefinition[]
+  edges: WorkflowEdgeDefinition[]
+}
+
+export interface TicketWorkflowDefinitionSummary {
+  id: number
+  code: string
+  category: string
+  name: string
+  description: string | null
+  builtIn: boolean
+  enabled: boolean
+  latestPublishedVersion: number
+  latestPublishedAt: string | null
+  draftUpdatedAt: string | null
+  updatedAt: string
+}
+
+export interface TicketWorkflowPublishedVersion {
+  version: number
+  name: string
+  description: string | null
+  definition: WorkflowDefinitionJson
+  publishedById: number | null
+  publishedByName: string | null
+  publishedAt: string
+}
+
+export interface TicketWorkflowDefinitionDetail extends TicketWorkflowDefinitionSummary {
+  draft: WorkflowDefinitionJson
+  published: TicketWorkflowPublishedVersion | null
+}
+
+
 /** 任务看板 SSE（GET /api/tasks/stream）：初始快照 + 增量事件 */
 export type TaskRealtimeMessage =
   | { type: 'snapshot'; tasks: TaskPackage[]; at: number }
@@ -2708,6 +2777,44 @@ export const api = {
       {
         method: 'PATCH',
         body: JSON.stringify({ allowedTemplateIds }),
+      },
+    ),
+
+  /** 管理端工单定义（系统内置，仅测试工单） */
+  listTicketWorkflowDefinitions: () =>
+    request<TicketWorkflowDefinitionSummary[]>('/ticket-workflow-definitions'),
+  getTicketWorkflowDefinition: (id: number) =>
+    request<TicketWorkflowDefinitionDetail>(`/ticket-workflow-definitions/${id}`),
+  saveTicketWorkflowDraft: (
+    id: number,
+    input: {
+      name?: string
+      description?: string | null
+      enabled?: boolean
+      definition: WorkflowDefinitionJson
+    },
+  ) =>
+    request<TicketWorkflowDefinitionDetail>(
+      `/ticket-workflow-definitions/${id}/draft`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      },
+    ),
+  publishTicketWorkflow: (
+    id: number,
+    input: {
+      name?: string
+      description?: string | null
+      enabled?: boolean
+      definition: WorkflowDefinitionJson
+    },
+  ) =>
+    request<TicketWorkflowDefinitionDetail>(
+      `/ticket-workflow-definitions/${id}/publish`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
       },
     ),
 

@@ -49,6 +49,8 @@ import { TicketsPage } from './pages/TicketsPage'
 import { TicketCreatePage } from './pages/TicketCreatePage'
 import { TicketDetailPage } from './pages/TicketDetailPage'
 import { TicketConfigPage } from './pages/TicketConfigPage'
+import { TicketDefinitionsPage } from './pages/TicketDefinitionsPage'
+import { TicketDefinitionEditPage } from './pages/TicketDefinitionEditPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
 import { RobotChatPage } from './pages/RobotChatPage'
 
@@ -266,6 +268,11 @@ function App() {
           />
           <Route path="/admin/users" element={<UserListPage />} />
           <Route path="/admin/ticket-config" element={<TicketConfigPage />} />
+          <Route path="/admin/ticket-definitions" element={<TicketDefinitionsPage />} />
+          <Route
+            path="/admin/ticket-definitions/:definitionId"
+            element={<TicketDefinitionEditPage />}
+          />
           <Route path="/admin/repos" element={<ReposPage />} />
           </Route>
         </Route>
