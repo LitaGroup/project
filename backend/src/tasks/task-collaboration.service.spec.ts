@@ -3,6 +3,7 @@ import { TaskStatus, TaskSubStatus } from '../common/enums';
 import type { User } from '../auth/user.entity';
 import type { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
+import type { AskQuestionInput } from './task-collaboration.service';
 import { TaskCollaborationService } from './task-collaboration.service';
 
 describe('TaskCollaborationService 多机器人协同动作', () => {
@@ -187,6 +188,82 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
       'question',
       expect.objectContaining({ referenceId: result.questionId }),
     );
+  });
+
+  it('project 提问归一化字符串与 value 形式的选项', async () => {
+    task.status = TaskStatus.RUNNING;
+    task.subStatus = TaskSubStatus.EXECUTING;
+
+    const requests: unknown[] = [];
+    const enqueuedEntries: unknown[] = [];
+    taskChat.questionAsked.mockImplementation(
+      (_taskId: number, request: unknown) => {
+        requests.push(request);
+        return Promise.resolve(true);
+      },
+    );
+    inbox.enqueue.mockImplementation(
+      (_task: unknown, _kind: unknown, entry: unknown) => {
+        enqueuedEntries.push(entry);
+        return Promise.resolve(null);
+      },
+    );
+
+    await service.ask(1, worker, {
+      questions: [
+        {
+          header: '时间范围',
+          question: '按日趋势还是区间汇总？',
+          options: ['按日趋势', { value: '区间汇总', description: '整体统计' }],
+        },
+      ],
+    } as unknown as AskQuestionInput);
+
+    const request = requests[0] as {
+      questions: Array<{
+        options?: Array<{ label: string; description?: string }>;
+      }>;
+    };
+    expect(request.questions[0].options).toEqual([
+      { label: '按日趋势' },
+      { label: '区间汇总', description: '整体统计' },
+    ]);
+    const entry = enqueuedEntries[0] as {
+      payload: { questions: typeof request.questions };
+    };
+    expect(entry.payload.questions[0].options).toEqual(
+      request.questions[0].options,
+    );
+  });
+
+  it('仅限选项但选项全部无效时回退为允许自由输入', async () => {
+    task.status = TaskStatus.RUNNING;
+    task.subStatus = TaskSubStatus.EXECUTING;
+
+    const requests: unknown[] = [];
+    taskChat.questionAsked.mockImplementation(
+      (_taskId: number, request: unknown) => {
+        requests.push(request);
+        return Promise.resolve(true);
+      },
+    );
+
+    await service.ask(1, worker, {
+      questions: [
+        {
+          header: '确认',
+          question: '使用哪个方案？',
+          options: ['', { foo: 'bar' }],
+          custom: false,
+        },
+      ],
+    } as unknown as AskQuestionInput);
+
+    const request = requests[0] as {
+      questions: Array<{ options?: unknown[]; custom?: boolean }>;
+    };
+    expect(request.questions[0].options).toBeUndefined();
+    expect(request.questions[0].custom).toBe(true);
   });
 
   it('需求方答复后进入待继续并结算问题', async () => {

@@ -438,6 +438,49 @@ describe('TaskChatService snapshot 最终产出去重', () => {
     });
   });
 
+  it('快照中的提问卡片归一化历史脏选项', async () => {
+    messagesRepo.find.mockResolvedValue([
+      {
+        taskId: 34,
+        messageKey: 'chat:34:question:q1',
+        role: 'assistant',
+        sender: { id: 'worker:1', name: '机器人', kind: 'worker' },
+        content: '',
+        reasoning: null,
+        status: 'complete',
+        kind: 'question',
+        tools: null,
+        question: {
+          id: 'q1',
+          sessionId: 's1',
+          state: 'pending',
+          askedAt: '2026-10-27T10:06:00Z',
+          questions: [
+            {
+              question: '按日趋势还是区间汇总？',
+              header: '时间范围',
+              options: [
+                { 0: '按', 1: '日', 2: '趋', 3: '势' },
+                { value: '区间汇总', description: '整体统计' },
+              ],
+            },
+          ],
+        },
+        meta: null,
+        createdAt: new Date('2026-10-27T10:06:00Z'),
+        updatedAt: new Date('2026-10-27T10:06:00Z'),
+      },
+    ]);
+
+    const messages = (await service.snapshot(34)).messages;
+    const card = messages.find((message) => message.kind === 'question');
+
+    expect(card?.question?.questions[0].options).toEqual([
+      { label: '按日趋势' },
+      { label: '区间汇总', description: '整体统计' },
+    ]);
+  });
+
   it('快照保留历史验收申请标记，返工后仍为 true', async () => {
     eventsRepo.find.mockResolvedValue([
       {

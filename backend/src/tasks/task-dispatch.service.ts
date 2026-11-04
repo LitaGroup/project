@@ -2296,8 +2296,10 @@ export class TaskDispatchService
         `curl -sS -X POST '${this.apiUrl}/tasks/${task.id}/questions/ask.md' \\`,
         '  -H "X-Worker-Token: $TOKEN" \\',
         '  -H "Content-Type: application/json" \\',
-        '  -d \'{"questions":[{"header":"请确认","question":"需要确认什么？","custom":true}]}\'',
+        '  -d \'{"questions":[{"header":"请确认","question":"需要确认什么？","options":[{"label":"选项 A","description":"说明"},{"label":"选项 B"}],"custom":true}]}\'',
         '```',
+        '',
+        'options 为 {label, description?} 对象数组（label 必填），不要传字符串；multiple:true 表示多选，custom:false 表示仅限选项。',
       ].join('\n'),
     );
     sections.push(

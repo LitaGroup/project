@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { In, Repository } from 'typeorm';
 import { mdFrontmatter } from '../common/frontmatter';
+import { normalizeQuestionOptions } from '../common/question-option';
 import { TaskStatus, TaskSubStatus, WorkerRole } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
@@ -276,11 +277,17 @@ export class TaskCollaborationService {
     ) {
       throw new BadRequestException('仅执行中的任务可以提问');
     }
-    const questions = (input.questions ?? []).map((question) => ({
-      ...question,
-      header: question.header?.trim() || '请确认',
-      question: question.question?.trim() || '',
-    }));
+    const questions = (input.questions ?? []).map((question) => {
+      const options = normalizeQuestionOptions(question.options);
+      return {
+        ...question,
+        header: question.header?.trim() || '请确认',
+        question: question.question?.trim() || '',
+        options,
+        // 声明「仅限选项」但选项全部无效时回退为允许自由输入，保证问题可回答
+        custom: question.custom === false && !options ? true : question.custom,
+      };
+    });
     if (
       questions.length === 0 ||
       questions.length > 20 ||

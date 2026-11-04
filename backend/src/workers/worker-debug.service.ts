@@ -17,6 +17,7 @@ import { basename, join } from 'path';
 import { In, LessThan, MoreThanOrEqual, Repository } from 'typeorm';
 import { Observable } from 'rxjs';
 import { WorkerRuntime } from '../common/enums';
+import { normalizeQuestionOptions } from '../common/question-option';
 import { fileWebroot } from '../common/paths';
 import { variantLabel } from '../common/variants';
 import { Executor } from '../executors/executor.entity';
@@ -274,7 +275,7 @@ export function upsertDebugQuestion(
       sessionId: request.sessionID || fallbackSessionId,
       questions: (request.questions ?? []).map((question) => ({
         ...question,
-        options: question.options?.map((option) => ({ ...option })),
+        options: normalizeQuestionOptions(question.options),
       })),
       state: 'pending',
       askedAt: createdAt,

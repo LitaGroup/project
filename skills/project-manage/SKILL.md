@@ -548,7 +548,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/refuse.md \
 # 执行机器人提问；调用后停止本轮，等待平台恢复
 curl -X POST {BASE}/api/tasks/{taskId}/questions/ask.md \
   -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"questions":[{"header":"方案确认","question":"使用哪个方案？","custom":true}]}'
+  -d '{"questions":[{"header":"方案确认","question":"使用哪个方案？","options":[{"label":"方案 A","description":"改动最小"},{"label":"方案 B"}],"custom":true}]}'
 
 # 人或机器人需求方答复；答案顺序与问题一致
 curl -X POST {BASE}/api/tasks/{taskId}/questions/{questionId}/answer.md \
@@ -556,6 +556,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/questions/{questionId}/answer.md \
   -d '{"answers":[["使用方案 A"]]}'
 ```
 
+- `options` 为 `{label, description?}` 对象数组（label 必填，不要传字符串）；`multiple:true` 表示多选，`custom:false` 表示仅限选项
 - 提问使用 project 生成的问题 ID，不再依赖 opencode 原生 question；答复后任务进入待继续，LOOP 空闲时恢复
 - 人类需求方使用 `X-Agent-Token`，机器人需求方使用 `X-Worker-Token`；跳过答复用 `{"reject":true}`
 

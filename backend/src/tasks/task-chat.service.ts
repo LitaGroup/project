@@ -11,6 +11,7 @@ import { filter, Observable, Subject, Subscription } from 'rxjs';
 import { In, Repository } from 'typeorm';
 import { User } from '../auth/user.entity';
 import { WorkerRole, WorkerRuntime } from '../common/enums';
+import { normalizeQuestionOptions } from '../common/question-option';
 import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
@@ -820,7 +821,7 @@ export class TaskChatService implements OnModuleDestroy {
         sessionId: request.sessionID,
         questions: (request.questions ?? []).map((question) => ({
           ...question,
-          options: question.options?.map((option) => ({ ...option })),
+          options: normalizeQuestionOptions(question.options),
         })),
         state: 'pending',
         askedAt: new Date().toISOString(),
@@ -1407,7 +1408,7 @@ export class TaskChatService implements OnModuleDestroy {
             ...message.question,
             questions: message.question.questions.map((question) => ({
               ...question,
-              options: question.options?.map((option) => ({ ...option })),
+              options: normalizeQuestionOptions(question.options),
             })),
             answers: message.question.answers?.map((answer) => [...answer]),
           }
@@ -1469,7 +1470,17 @@ export class TaskChatService implements OnModuleDestroy {
       status: row.status,
       kind: row.kind,
       tools: row.tools ?? undefined,
-      question: row.question ?? undefined,
+      // 读取时归一化选项，修复历史脏数据（字符串/value 字段）导致的空白选项
+      question: row.question
+        ? {
+            ...row.question,
+            questions: row.question.questions.map((item) => ({
+              ...item,
+              options: normalizeQuestionOptions(item.options),
+            })),
+            answers: row.question.answers?.map((answer) => [...answer]),
+          }
+        : undefined,
       meta: row.meta ?? undefined,
     };
   }
