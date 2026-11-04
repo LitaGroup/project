@@ -19,6 +19,7 @@ import { FeishuService } from '../feishu/feishu.service';
 import { Project } from '../projects/project.entity';
 import { User } from '../auth/user.entity';
 import { Task } from '../tasks/task.entity';
+import { TaskWorkerInboxService } from '../tasks/task-worker-inbox.service';
 import { ProjectRelease, ReleaseBranch } from './project-release.entity';
 
 /** 提测通知群「H5 Release | 提测上线」的群机器人 webhook（固定） */
@@ -70,6 +71,7 @@ export class ReleasesService {
     private readonly users: Repository<User>,
     @InjectRepository(Task)
     private readonly tasks: Repository<Task>,
+    private readonly workerInbox: TaskWorkerInboxService,
     private readonly feishu: FeishuService,
     config: ConfigService,
   ) {
@@ -161,6 +163,7 @@ export class ReleasesService {
 
     if (releaseStatusOf(release.status) === status) return release;
 
+    const previousStatus = releaseStatusOf(release.status);
     const now = new Date();
     release.status = status;
     if (
@@ -173,7 +176,25 @@ export class ReleasesService {
       release.verifier = operator?.trim() || null;
       release.verifiedAt = now;
     }
-    return this.releases.save(release);
+    const saved = await this.releases.save(release);
+
+    // 状态变化写入提测机器人收件箱；项目读取或入队失败均不影响状态变更结果。
+    try {
+      const project = await this.projects.findOne({
+        where: { id: saved.projectId },
+        select: { id: true, name: true },
+      });
+      await this.workerInbox.enqueueReleaseStatus(
+        saved,
+        previousStatus,
+        project?.name ?? null,
+      );
+    } catch (e) {
+      this.logger.warn(
+        `提测状态通知入队失败（release ${saved.id}）：${(e as Error).message}`,
+      );
+    }
+    return saved;
   }
 
   /** AI 用：判定提测结果并返回 Markdown 结果 */

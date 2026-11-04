@@ -72,6 +72,9 @@ describe('TaskLoopService 多机器人协同', () => {
     isActive: jest.Mock;
     reply: jest.Mock;
   };
+  let releaseNotification: {
+    handle: jest.Mock;
+  };
   let service: TaskLoopService;
 
   beforeEach(() => {
@@ -130,6 +133,9 @@ describe('TaskLoopService 多机器人协同', () => {
       isActive: jest.fn().mockReturnValue(false),
       reply: jest.fn().mockResolvedValue(true),
     };
+    releaseNotification = {
+      handle: jest.fn().mockResolvedValue(undefined),
+    };
     service = new TaskLoopService(
       tasksRepo as never,
       messagesRepo as never,
@@ -140,6 +146,7 @@ describe('TaskLoopService 多机器人协同', () => {
       inbox as never,
       requesterVerify as never,
       requesterReply as never,
+      releaseNotification as never,
       {
         get: jest.fn().mockReturnValue('http://api.example/api'),
       } as never,

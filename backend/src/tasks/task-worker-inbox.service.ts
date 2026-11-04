@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
+import type { ProjectRelease } from '../releases/project-release.entity';
 import type { Task } from './task.entity';
 import {
   TaskWorkerInbox,
@@ -56,6 +57,54 @@ export class TaskWorkerInboxService {
         kind,
         referenceId,
         payload: options?.payload ?? null,
+        status: 'pending',
+      }),
+    );
+  }
+
+  /**
+   * 提测状态变化通知：提测机器人作为收件人，来源任务仅作为上下文。
+   * 机器人提测时若无当前执行任务，来源任务用 0 占位，由 LOOP 的提测通知分支处理。
+   */
+  async enqueueReleaseStatus(
+    release: ProjectRelease,
+    previousStatus: string,
+    projectName?: string | null,
+  ): Promise<TaskWorkerInbox | null> {
+    if (!release.workerId) return null;
+    const taskId = release.sourceTaskId ?? 0;
+    // 同一次状态流转只入队一次；后续相同状态组合再次变化会生成新 referenceId。
+    const referenceId = `release:${release.id}:${previousStatus}:${
+      release.status
+    }:${Date.now()}`;
+    const existing = await this.inbox.findOne({
+      where: {
+        childTaskId: taskId,
+        kind: 'release',
+        referenceId,
+        status: In([...OPEN_STATUSES]),
+      },
+    });
+    if (existing) return existing;
+    return this.inbox.save(
+      this.inbox.create({
+        parentTaskId: taskId,
+        workerId: release.workerId,
+        childTaskId: taskId,
+        kind: 'release',
+        referenceId,
+        payload: {
+          releaseId: release.id,
+          projectId: release.projectId,
+          projectName: projectName ?? null,
+          fromStatus: previousStatus,
+          toStatus: release.status,
+          operator: release.operator ?? null,
+          verifier: release.verifier ?? null,
+          verifiedAt: release.verifiedAt?.toISOString() ?? null,
+          testers: release.testers ?? [],
+          sourceTaskId: release.sourceTaskId ?? null,
+        },
         status: 'pending',
       }),
     );

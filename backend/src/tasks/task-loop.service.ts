@@ -27,6 +27,7 @@ import {
 import { TasksService } from './tasks.service';
 import { TaskRequesterReplyService } from './task-requester-reply.service';
 import { TaskRequesterVerifyService } from './task-requester-verify.service';
+import { TaskReleaseNotificationService } from './task-release-notification.service';
 import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 import {
   taskInboxPrompt,
@@ -84,6 +85,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     private readonly workerInbox: TaskWorkerInboxService,
     private readonly requesterVerify: TaskRequesterVerifyService,
     private readonly requesterReply: TaskRequesterReplyService,
+    private readonly releaseNotification: TaskReleaseNotificationService,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -536,6 +538,11 @@ export class TaskLoopService implements OnApplicationBootstrap {
       TASK_INBOX_STALE_MS,
     );
     for (const entry of entries) {
+      // 提测通知不是父子任务事件：不查任务、不改任务状态，由独立服务消费。
+      if (entry.kind === 'release') {
+        await this.releaseNotification.handle(entry);
+        continue;
+      }
       const child = await this.tasks.findOne({
         where: { id: entry.childTaskId },
       });

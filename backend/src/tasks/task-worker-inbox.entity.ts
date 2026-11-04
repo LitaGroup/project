@@ -7,9 +7,9 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-/** 需要父任务机器人处理的子任务事件类型。 */
+/** 需要父任务机器人处理的子任务事件类型；release 为提测机器人通知事件。 */
 export type TaskWorkerInboxKind =
-  'question' | 'handoff' | 'message' | 'refused' | 'cancelled';
+  'question' | 'handoff' | 'message' | 'refused' | 'cancelled' | 'release';
 
 /** pending=待排队；queued=已写入待继续上下文；delivered=已发给父机器人；done/dead=结束 */
 export type TaskWorkerInboxStatus =
@@ -33,6 +33,10 @@ export class TaskWorkerInbox {
   @Column({ type: 'int' })
   workerId: number;
 
+  /**
+   * 关联任务；release 通知在机器人没有来源任务时用 0 占位
+   * （该事件由 LOOP 直接交给提测通知服务，不作为父子任务事件处理）。
+   */
   @Column({ type: 'int' })
   childTaskId: number;
 

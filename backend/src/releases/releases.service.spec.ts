@@ -7,6 +7,7 @@ import { FeishuService } from '../feishu/feishu.service';
 import { Project } from '../projects/project.entity';
 import { User } from '../auth/user.entity';
 import { Task } from '../tasks/task.entity';
+import { TaskWorkerInboxService } from '../tasks/task-worker-inbox.service';
 import { ProjectRelease } from './project-release.entity';
 import { ReleasesService } from './releases.service';
 
@@ -18,6 +19,7 @@ describe('ReleasesService', () => {
   let usersFind: jest.Mock;
   let tasksFindOne: jest.Mock;
   let sendUserCard: jest.Mock;
+  let enqueueReleaseStatus: jest.Mock;
   let fetchMock: jest.Mock;
   const realFetch = globalThis.fetch;
 
@@ -53,6 +55,7 @@ describe('ReleasesService', () => {
     tasksFindOne = jest.fn();
     sendUserCard = jest.fn();
     sendUserCard.mockResolvedValue(undefined);
+    enqueueReleaseStatus = jest.fn().mockResolvedValue(null);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -79,6 +82,10 @@ describe('ReleasesService', () => {
           useValue: { findOne: tasksFindOne },
         },
         { provide: FeishuService, useValue: { sendUserCard } },
+        {
+          provide: TaskWorkerInboxService,
+          useValue: { enqueueReleaseStatus },
+        },
         { provide: ConfigService, useValue: { get: () => undefined } },
       ],
     }).compile();
@@ -177,6 +184,10 @@ describe('ReleasesService', () => {
           useValue: { findOne: jest.fn() },
         },
         { provide: FeishuService, useValue: { sendUserCard } },
+        {
+          provide: TaskWorkerInboxService,
+          useValue: { enqueueReleaseStatus },
+        },
         { provide: ConfigService, useValue: { get: () => undefined } },
       ],
     }).compile();
@@ -223,6 +234,10 @@ describe('ReleasesService', () => {
           useValue: { findOne: jest.fn() },
         },
         { provide: FeishuService, useValue: { sendUserCard } },
+        {
+          provide: TaskWorkerInboxService,
+          useValue: { enqueueReleaseStatus },
+        },
         { provide: ConfigService, useValue: { get: () => undefined } },
       ],
     }).compile();
@@ -295,6 +310,45 @@ describe('ReleasesService', () => {
     expect(pending.verifiedAt).toBeNull();
   });
 
+  it('状态变化时进入提测机器人收件箱；状态未变化不通知', async () => {
+    releasesFindOne.mockResolvedValue({
+      id: 9,
+      projectId: 1,
+      status: ReleaseStatus.PENDING,
+      workerId: 7,
+      sourceTaskId: 88,
+      operator: '活动开发机器人',
+      testers: ['王五'],
+      verifier: null,
+      verifiedAt: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    });
+
+    await service.updateStatus(9, ReleaseStatus.PASSED, '测试同学');
+
+    expect(enqueueReleaseStatus).toHaveBeenCalledTimes(1);
+    expect(enqueueReleaseStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 9,
+        workerId: 7,
+        sourceTaskId: 88,
+        status: ReleaseStatus.PASSED,
+      }),
+      ReleaseStatus.PENDING,
+      '活动项目',
+    );
+
+    releasesFindOne.mockResolvedValue({
+      id: 9,
+      status: ReleaseStatus.PASSED,
+      workerId: 7,
+      sourceTaskId: 88,
+      testers: ['王五'],
+    });
+    await service.updateStatus(9, ReleaseStatus.PASSED, '测试同学');
+    expect(enqueueReleaseStatus).toHaveBeenCalledTimes(1);
+  });
+
   it('状态未变化时幂等返回，不刷新判定人/判定时间', async () => {
     const verifiedAt = new Date('2026-01-02T00:00:00Z');
     releasesFindOne.mockResolvedValue({
@@ -339,6 +393,10 @@ describe('ReleasesService', () => {
           useValue: { findOne: jest.fn() },
         },
         { provide: FeishuService, useValue: { sendUserCard } },
+        {
+          provide: TaskWorkerInboxService,
+          useValue: { enqueueReleaseStatus },
+        },
         { provide: ConfigService, useValue: { get: () => undefined } },
       ],
     }).compile();
