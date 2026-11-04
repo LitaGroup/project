@@ -10,7 +10,7 @@ import { TaskTemplate } from '../tasks/task-template.entity';
 import { Worker } from '../workers/worker.entity';
 import { WorkflowDefinitionVersion } from './workflow-definition-version.entity';
 import { WorkflowDefinition } from './workflow-definition.entity';
-import { TEST_TICKET_WORKFLOW } from './system-workflows';
+import { SYSTEM_TICKET_WORKFLOWS } from './system-workflows';
 import { normalizeWorkflowDefinition } from './workflow-validation';
 import type {
   TicketWorkflowDefinitionDetail,
@@ -47,31 +47,30 @@ export class WorkflowDefinitionsService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const existing = await this.definitions.findOne({
-      where: [
-        { code: TEST_TICKET_WORKFLOW.code },
-        { category: TEST_TICKET_WORKFLOW.category },
-      ],
-    });
-    if (existing) return;
-    await this.definitions
-      .createQueryBuilder()
-      .insert()
-      .into(WorkflowDefinition)
-      .values({
-        code: TEST_TICKET_WORKFLOW.code,
-        category: TEST_TICKET_WORKFLOW.category,
-        name: TEST_TICKET_WORKFLOW.name,
-        description: TEST_TICKET_WORKFLOW.description,
-        builtIn: true,
-        enabled: true,
-        draftDefinition: TEST_TICKET_WORKFLOW.definition,
-        latestPublishedVersion: 0,
-        latestPublishedAt: null,
-        draftUpdatedAt: null,
-      })
-      .orIgnore()
-      .execute();
+    for (const workflow of SYSTEM_TICKET_WORKFLOWS) {
+      const existing = await this.definitions.findOne({
+        where: [{ code: workflow.code }, { category: workflow.category }],
+      });
+      if (existing) continue;
+      await this.definitions
+        .createQueryBuilder()
+        .insert()
+        .into(WorkflowDefinition)
+        .values({
+          code: workflow.code,
+          category: workflow.category,
+          name: workflow.name,
+          description: workflow.description,
+          builtIn: true,
+          enabled: true,
+          draftDefinition: workflow.definition,
+          latestPublishedVersion: 0,
+          latestPublishedAt: null,
+          draftUpdatedAt: null,
+        })
+        .orIgnore()
+        .execute();
+    }
   }
 
   async findAll(): Promise<TicketWorkflowDefinitionSummary[]> {

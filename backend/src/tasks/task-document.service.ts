@@ -58,6 +58,10 @@ export interface TaskDocumentEntry {
   /** 文档 Frontmatter 中的描述（可空） */
   description: string | null;
   updatedAt: string | null;
+  /** 来源任务（「文档」Tab 聚合子任务文档时携带） */
+  taskId?: number;
+  taskCode?: string;
+  taskTitle?: string;
 }
 
 export interface TaskAuxDocumentInput {
@@ -83,11 +87,17 @@ export interface TaskArtifactEntry {
   url: string;
   /** 引用该产物的任务文档 */
   sourceDocument: string;
+  /** 来源任务（「文档」Tab 聚合子任务文档时携带） */
+  taskId?: number;
+  taskCode?: string;
+  taskTitle?: string;
 }
 
-/** 任务详情「文档」Tab 的完整数据 */
+/** 任务详情「文档」Tab 的完整数据（documents 含当前任务与全部子任务文档） */
 export interface TaskDocumentsView {
   directory: string;
+  /** 当前任务 id，用于前端区分「当前任务」与「子任务」分组 */
+  taskId: number;
   documents: TaskDocumentEntry[];
   artifacts: TaskArtifactEntry[];
 }
@@ -182,13 +192,24 @@ function artifactName(label: string, url: string): string {
 
 /** 从任务文档正文中提取站内图片与文件（同一 URL 只保留一条） */
 function extractTaskArtifacts(
-  documents: Array<{ name: string; content: string }>,
+  documents: Array<{
+    name: string;
+    content: string;
+    taskId?: number;
+    taskCode?: string;
+    taskTitle?: string;
+  }>,
 ): TaskArtifactEntry[] {
   const found = new Map<string, TaskArtifactEntry>();
   const add = (
     rawUrl: string,
     label: string,
-    sourceDocument: string,
+    source: {
+      name: string;
+      taskId?: number;
+      taskCode?: string;
+      taskTitle?: string;
+    },
     forceImage = false,
   ) => {
     const url = normalizeLocalArtifactUrl(rawUrl);
@@ -199,21 +220,25 @@ function extractTaskArtifacts(
         : 'file';
     const key = `${kind}:${url}`;
     if (found.has(key)) return;
-    found.set(key, {
+    const entry: TaskArtifactEntry = {
       name: artifactName(label, url),
       kind,
       url,
-      sourceDocument,
-    });
+      sourceDocument: source.name,
+    };
+    if (source.taskId !== undefined) entry.taskId = source.taskId;
+    if (source.taskCode !== undefined) entry.taskCode = source.taskCode;
+    if (source.taskTitle !== undefined) entry.taskTitle = source.taskTitle;
+    found.set(key, entry);
   };
 
   for (const document of documents) {
     const body = stripKnowledgeFrontmatter(document.content);
     for (const match of body.matchAll(MARKDOWN_ARTIFACT_LINK)) {
-      add(match[3], match[2] ?? '', document.name, match[1] === '!');
+      add(match[3], match[2] ?? '', document, match[1] === '!');
     }
     for (const match of body.matchAll(HTML_IMAGE)) {
-      add(match[1], '', document.name, true);
+      add(match[1], '', document, true);
     }
   }
   return [...found.values()];
@@ -583,20 +608,68 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       .sort((a, b) => this.compareTaskDocuments(a, b));
   }
 
-  /** 任务详情「文档」Tab：Markdown 文档 + 文档中引用的图片/文件。 */
+  /**
+   * 任务详情「文档」Tab：当前任务 + 全部子任务（递归）的 Markdown 文档与产物。
+   * 不含父任务与兄弟任务；Agent 用的 documents.md 仍只列当前任务自身文档。
+   */
   async taskDocumentsView(task: Task): Promise<TaskDocumentsView> {
-    const { nodes, directory } = await this.directTaskDocumentNodes(task);
-    const direct = nodes.filter((node) => node.parentPath === directory);
-    const documents = direct
-      .map((node) => this.documentEntry(node))
-      .sort((a, b) => this.compareTaskDocuments(a, b));
-    const artifacts = extractTaskArtifacts(
-      direct.map((node) => ({
-        name: documentReadName(node.name),
-        content: node.content ?? '',
-      })),
+    this.assertKnowledge();
+    const tree = await this.collectTaskWithDescendants(task);
+    const perTask = await Promise.all(
+      tree.map(async (current) => {
+        const directory = this.taskDirectory(current);
+        const nodes = await this.knowledge.listArticlesByPrefix(directory);
+        return {
+          task: current,
+          directory,
+          nodes: nodes.filter((node) => node.parentPath === directory),
+        };
+      }),
     );
-    return { directory, documents, artifacts };
+    const documents = perTask.flatMap(({ task: current, nodes }) =>
+      nodes
+        .map((node) => this.documentEntry(node, current))
+        .sort((a, b) => this.compareTaskDocuments(a, b)),
+    );
+    const artifacts = extractTaskArtifacts(
+      perTask.flatMap(({ task: current, nodes }) =>
+        nodes.map((node) => ({
+          name: documentReadName(node.name),
+          content: node.content ?? '',
+          taskId: current.id,
+          taskCode: current.code,
+          taskTitle: current.title,
+        })),
+      ),
+    );
+    return {
+      directory: this.taskDirectory(task),
+      taskId: task.id,
+      documents,
+      artifacts,
+    };
+  }
+
+  /** 当前任务与其全部后代任务（深度优先；不含父任务与兄弟任务）。 */
+  private async collectTaskWithDescendants(task: Task): Promise<Task[]> {
+    const rows = await this.tasks.find({
+      where: { rootId: task.rootId },
+      order: { sortOrder: 'ASC', id: 'ASC' },
+    });
+    const byParent = new Map<number, Task[]>();
+    for (const row of rows) {
+      if (row.parentId == null) continue;
+      const list = byParent.get(row.parentId) ?? [];
+      list.push(row);
+      byParent.set(row.parentId, list);
+    }
+    const collected: Task[] = [];
+    const walk = (current: Task): void => {
+      collected.push(current);
+      for (const child of byParent.get(current.id) ?? []) walk(child);
+    };
+    walk(task);
+    return collected;
   }
 
   /** 读取任务目录下某篇文档的正文（去掉平台 Frontmatter）。 */
@@ -893,8 +966,8 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     return rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'en');
   }
 
-  private documentEntry(node: KnowledgeNode): TaskDocumentEntry {
-    return {
+  private documentEntry(node: KnowledgeNode, task?: Task): TaskDocumentEntry {
+    const entry: TaskDocumentEntry = {
       name: documentReadName(node.name),
       path: node.path,
       url: `/docs/detail/${encodeKnowledgePath(node.path)}`,
@@ -903,6 +976,12 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       description: frontmatterDescription(node.content ?? ''),
       updatedAt: node.updatedAt ? node.updatedAt.toISOString() : null,
     };
+    if (task) {
+      entry.taskId = task.id;
+      entry.taskCode = task.code;
+      entry.taskTitle = task.title;
+    }
+    return entry;
   }
 
   private handoffTitle(task: Task): string {

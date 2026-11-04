@@ -1764,6 +1764,10 @@ export interface TaskDocumentEntry {
   /** 文档 Frontmatter 中的描述 */
   description: string | null
   updatedAt: string | null
+  /** 来源任务（「文档」Tab 聚合子任务文档时携带） */
+  taskId?: number
+  taskCode?: string
+  taskTitle?: string
 }
 
 /** 任务文档中引用的站内图片/文件 */
@@ -1773,11 +1777,17 @@ export interface TaskArtifactEntry {
   url: string
   /** 引用该产物的文档 */
   sourceDocument: string
+  /** 来源任务（「文档」Tab 聚合子任务文档时携带） */
+  taskId?: number
+  taskCode?: string
+  taskTitle?: string
 }
 
-/** 任务详情「文档」Tab 数据 */
+/** 任务详情「文档」Tab 数据（documents 含当前任务与全部子任务文档） */
 export interface TaskDocumentsView {
   directory: string
+  /** 当前任务 id，用于区分「当前任务」与「子任务」分组 */
+  taskId: number
   documents: TaskDocumentEntry[]
   artifacts: TaskArtifactEntry[]
 }
@@ -2780,7 +2790,7 @@ export const api = {
       },
     ),
 
-  /** 管理端工单定义（系统内置，仅测试工单） */
+  /** 管理端工单定义（系统内置：测试工单、发布工单） */
   listTicketWorkflowDefinitions: () =>
     request<TicketWorkflowDefinitionSummary[]>('/ticket-workflow-definitions'),
   getTicketWorkflowDefinition: (id: number) =>

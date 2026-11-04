@@ -37,7 +37,7 @@ function workflowState(row: TicketWorkflowDefinitionSummary): {
   return { label: '已发布', variant: 'success' }
 }
 
-/** 管理端工单定义列表：当前只内置「测试工单」，不开放新建与删除 */
+/** 管理端工单定义列表：内置「测试工单」「发布工单」，不开放新建与删除 */
 export function TicketDefinitionsPage() {
   const [rows, setRows] = useState<TicketWorkflowDefinitionSummary[] | null>(
     null,
@@ -62,7 +62,7 @@ export function TicketDefinitionsPage() {
         <PageBreadcrumb items={[{ label: '管理' }, { label: '工单定义' }]} />
         <h1 className="mt-2 text-2xl font-semibold">工单定义</h1>
         <p className="mt-1 text-sm text-foreground-muted">
-          配置系统内置工单的任务节点、处理机器人与流转规则；当前仅保留「测试工单」用于验证审批流程
+          配置系统内置工单的任务节点、处理机器人与流转规则；当前内置「测试工单」「发布工单」
         </p>
       </div>
 

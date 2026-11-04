@@ -22,7 +22,7 @@ export class WorkflowDefinition {
   @Column({ type: 'varchar', length: 64, unique: true })
   code: string;
 
-  /** 工单类型（当前仅内置「测试工单」） */
+  /** 工单类型（系统内置：测试工单、发布工单） */
   @Column({ type: 'varchar', length: 64 })
   category: string;
 
