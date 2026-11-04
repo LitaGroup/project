@@ -52,8 +52,8 @@ export function TaskInfoPanel({
             <InfoItem label="需求方" value={requesterName ?? '—'} />
             <InfoItem label="类型" value={task.type} />
             <InfoItem label="任务定义" value={task.templateName ?? '未设置'} />
-            <InfoItem label="处理机器人" value={agentName ?? '未分配'} />
-            <InfoItem label="执行方" value={agentOwnerName ?? '—'} />
+            <InfoItem label="执行机器人" value={agentName ?? '未分配'} />
+            <InfoItem label="机器人上级" value={agentOwnerName ?? '—'} />
             <InfoItem label="持续时间" value={formatDuration(durationMs)} />
             <InfoItem label="人工介入" value={`${interventionCount} 次`} />
             <InfoItem
