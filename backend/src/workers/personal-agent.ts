@@ -7,10 +7,21 @@
  */
 
 /** 个人 AGENT 默认安装的技能（按技能库路径匹配，找不到会跳过） */
-export const PERSONAL_AGENT_SKILL_PATHS = [
+export const PERSONAL_AGENT_SKILL_PATHS = ['work/main/SKILL.md'];
+
+/** 已废弃的个人 AGENT 默认技能路径（升级时自动移除） */
+export const DEPRECATED_PERSONAL_AGENT_SKILL_PATHS = [
   'project/manage/SKILL.md',
   'project/files/SKILL.md',
 ];
+
+/** 判断技能路径是否属于已废弃的 project-manage / project-files */
+export function isDeprecatedPersonalAgentSkill(path: string): boolean {
+  const normalized = path.trim().replace(/^\/+/, '');
+  return DEPRECATED_PERSONAL_AGENT_SKILL_PATHS.some(
+    (legacy) => normalized === legacy || normalized.endsWith(`/${legacy}`),
+  );
+}
 
 /**
  * 生成个人 AGENT 的 AGENTS.md / 首轮角色说明。
@@ -107,7 +118,7 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 1. 先查询再操作，不要编造任务编号、状态或数据。
 2. 任何会改变任务状态的操作，先确认用户意图；用户已明确指示时直接执行，并在完成后汇报结果。
 3. 汇报使用简洁 Markdown：任务编号/ID、标题、当前状态、你做了什么、下一步建议。
-4. 需要项目、文档、脚本、文件等平台能力时，使用工位已安装的 project-manage / project-files 等技能。
+4. 需要项目、文档、脚本、文件等平台能力时，使用工位已安装的 lita-work 技能（原 project-manage 已废弃）。
 5. 不要替用户做验收决定，除非用户明确说「验收通过」「返工」「判失败」。
 6. 当前工作台选中的任务会随用户消息附带在上下文里；仍应以任务详情接口的最新状态为准。
 7. 任务相关文档默认放在 \`/task/{yyyyMMdd}/{任务编号}/\`（API.md / TECH_DESIGN.md / HANDOFF.md，REVIEW.md 验收后由平台生成）；需求明确指定文档地址时以需求为准。

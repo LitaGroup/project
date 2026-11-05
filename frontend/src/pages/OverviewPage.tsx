@@ -143,7 +143,7 @@ function CommandBlock({ command }: { command: string }) {
 function SkillInstallSection() {
   const origin = window.location.origin
   const skillUrl = `${origin}/SKILL.md`
-  const installCmd = `mkdir -p ~/.opencode/skills/project-manage && curl -fsSL ${skillUrl} -o ~/.opencode/skills/project-manage/SKILL.md`
+  const installCmd = `mkdir -p ~/.opencode/skills/lita-work && curl -fsSL ${skillUrl} -o ~/.opencode/skills/lita-work/SKILL.md`
   const knowledgeSkillUrl = `${origin}/knowledge/SKILL.md`
   const knowledgeInstallCmd = `mkdir -p ~/.opencode/skills/knowledge-search && curl -fsSL ${knowledgeSkillUrl} -o ~/.opencode/skills/knowledge-search/SKILL.md`
 
@@ -152,7 +152,7 @@ function SkillInstallSection() {
       <h2 className="mb-4 text-xl font-semibold">安装 SKILL（让 Agent 学会操作本平台）</h2>
       <Card>
         <CardHeader>
-          <CardTitle>project-manage 技能</CardTitle>
+          <CardTitle>lita-work 技能</CardTitle>
           <CardDescription>
             技能说明随平台代码维护，涵盖：搜索项目、读取项目详情与文档正文、运行检查/用例/导出/任务并流式获取结果、查看设置与更新脚本仓库。安装后 Agent 会话可直接按技能说明操作本平台。
           </CardDescription>

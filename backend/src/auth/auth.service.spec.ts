@@ -272,7 +272,7 @@ describe('AuthService（飞书登录 + 会话）', () => {
       expect(json).toContain('你好，欢迎登录 project');
       expect(json).toContain('Lita 的项目管理系统');
       expect(json).toContain('http://localhost:5173/SKILL.md');
-      expect(json).toContain('mkdir -p ~/.opencode/skills/project-manage');
+      expect(json).toContain('mkdir -p ~/.opencode/skills/lita-work');
       expect(json).toContain('核心任务流');
       expect(json).toContain('定时任务');
     });

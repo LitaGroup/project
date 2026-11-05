@@ -27,6 +27,7 @@ import { ensureWorkerSequenceFloor } from './system-workers.service';
 import {
   buildPersonalAgentPrompt,
   buildPersonalAgentFirstPrompt,
+  isDeprecatedPersonalAgentSkill,
   PERSONAL_AGENT_SKILL_PATHS,
 } from './personal-agent';
 import { agentTokenShell, shellQuote, workerEnvShell } from './worker-env';
@@ -529,12 +530,19 @@ export class PersonalAgentsService {
   }
 
   /**
-   * 后台初始化个人 AGENT 工位：按默认技能库安装 project-manage 等技能，
+   * 后台初始化个人 AGENT 工位：按默认技能库安装 lita-work 技能，
    * 再调用机器人初始化写入 AGENTS.md。失败只告警，不阻断对话。
    */
   private async bootstrapEnvironment(worker: Worker): Promise<void> {
-    // 1) 技能清单：成功后不再重复；技能库暂不可用时下次对话继续重试
-    if (!this.skillsInstalled.has(worker.id) && !worker.skills?.length) {
+    // 1) 技能清单：成功后不再重复；旧版 project-manage/project-files 自动替换为 lita-work
+    const currentSkills = worker.skills ?? [];
+    const hasDeprecatedSkill = currentSkills.some((skill) =>
+      isDeprecatedPersonalAgentSkill(skill.path),
+    );
+    if (
+      !this.skillsInstalled.has(worker.id) &&
+      (!currentSkills.length || hasDeprecatedSkill)
+    ) {
       try {
         const catalog = await this.skillCatalog.list();
         const wanted = PERSONAL_AGENT_SKILL_PATHS.map((path) =>
@@ -543,7 +551,15 @@ export class PersonalAgentsService {
           ),
         ).filter((item): item is NonNullable<typeof item> => Boolean(item));
         if (wanted.length > 0) {
-          await this.workers.update({ id: worker.id }, { skills: wanted });
+          const kept = currentSkills.filter(
+            (skill) => !isDeprecatedPersonalAgentSkill(skill.path),
+          );
+          const merged = [...kept, ...wanted].filter(
+            (skill, index, all) =>
+              all.findIndex((item) => item.path === skill.path) === index,
+          );
+          await this.workers.update({ id: worker.id }, { skills: merged });
+          worker.skills = merged;
           this.skillsInstalled.add(worker.id);
         }
       } catch (error) {

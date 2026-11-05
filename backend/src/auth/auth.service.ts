@@ -270,7 +270,7 @@ export class AuthService {
       this.config.get<string>('APP_URL') ?? 'http://localhost:5273'
     ).replace(/\/$/, '');
     const skillUrl = `${appUrl}/SKILL.md`;
-    const installCmd = `mkdir -p ~/.opencode/skills/project-manage && curl -fsSL ${skillUrl} -o ~/.opencode/skills/project-manage/SKILL.md`;
+    const installCmd = `mkdir -p ~/.opencode/skills/lita-work && curl -fsSL ${skillUrl} -o ~/.opencode/skills/lita-work/SKILL.md`;
     const md = (content: string) => ({
       tag: 'div',
       text: { tag: 'lark_md', content },

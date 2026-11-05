@@ -52,7 +52,7 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
   - \`LITA_WORK_TOKEN\`：访问项目平台 .md 接口的机器人独立令牌（新名，优先使用），与 .opencode/agent-token 同值，放在 \`X-Agent-Token\` 或 \`X-Worker-Token\` 均可。
   - \`LITA_PROJECT_TOKEN\`：同一机器人令牌的兼容旧名，仅在旧脚本只认旧名时使用；新调用优先 \`LITA_WORK_TOKEN\`。
   - \`LITA_USER_TOKEN\`：访问 Lita 平台的用户令牌，供 lita-api 等技能使用；执行器宿主 ~/.env 也有同名配置。
-- **环境变量优先级（硬性）**：调用 lita-project（lita-work）等技能前，工位 \`.opencode/.env\` 中的环境变量优先级最高，高于当前进程环境变量和执行器宿主 \`~/.env\`；同名变量必须以 \`.opencode/.env\` 为准，不得用 \`~/.env\` 或进程环境中的同名值覆盖。
+- **环境变量优先级（硬性）**：调用 lita-work 等技能前，工位 \`.opencode/.env\` 中的环境变量优先级最高，高于当前进程环境变量和执行器宿主 \`~/.env\`；同名变量必须以 \`.opencode/.env\` 为准，不得用 \`~/.env\` 或进程环境中的同名值覆盖。
 - 每次调用相关技能前，必须在同一个 shell 中先执行：\`set -a; . .opencode/.env; set +a\`，再执行技能或接口调用。
 - 不得把令牌写入聊天、交付物、文档或代码仓库。
 

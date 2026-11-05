@@ -140,7 +140,7 @@ GET /api/docs/detail/guides/deploy/v2.md
 GET /api/docs/detail/project/123/document/456.md
 ```
 
-项目文档在知识库中为只读镜像，修改请回到平台文档详情页或使用 `project-manage` 技能。
+项目文档在知识库中为只读镜像，修改请回到平台文档详情页或使用 `lita-work` 技能。
 
 ## 5. 维护知识（AI 写接口）
 

@@ -139,7 +139,7 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     expect(prompt).toContain('LITA_WORK_TOKEN');
     expect(prompt).toContain('LITA_PROJECT_TOKEN');
     expect(prompt).toContain('set -a; . .opencode/.env; set +a');
-    expect(prompt).toContain('lita-project（lita-work）');
+    expect(prompt).toContain('调用 lita-work 等技能前');
     expect(prompt).toContain('环境变量优先级（硬性）');
     expect(prompt).toContain('优先级最高');
     expect(prompt).toContain('高于当前进程环境变量和执行器宿主 `~/.env`');

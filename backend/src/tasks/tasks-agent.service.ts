@@ -206,7 +206,7 @@ export class TasksAgentService {
       '',
       '- 任务详情：`GET /api/tasks/{id}.md`',
       '- 创建任务：`POST /api/tasks/create.md`',
-      '- 接受 / 拒绝 / 提问 / 答复 / 验收 / 返工 / 失败等：见 `GET /api/tasks/defines.md` 与 `project-manage` 技能',
+      '- 接受 / 拒绝 / 提问 / 答复 / 验收 / 返工 / 失败等：见 `GET /api/tasks/defines.md` 与 `lita-work` 技能',
       '- 参数：`q`（编号/标题模糊搜索）、`status`、`subStatus`、`type`、`rootOnly=true`',
       '',
       '> 只返回当前身份作为需求方、执行方或负责方的任务；需要其它项目上下文时使用项目 / 文档 / 知识相关技能。',

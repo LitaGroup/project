@@ -1,1 +1,1 @@
-../../skills/project-manage/SKILL.md
+../../skills/lita-work/SKILL.md
