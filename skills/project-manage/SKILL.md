@@ -1,6 +1,6 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、工单工作流上下文查询与节点拒绝、机器人/任务定义/任务类型的 Agent 管理
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、工单工作流上下文查询与节点拒绝、工单交付文档的链接/正文交付与更新删除、机器人/任务定义/任务类型的 Agent 管理
 version: 1.25.0
 author: Lita R&D Team
 tags:
@@ -38,7 +38,8 @@ tags:
 16. 上传任意文件（≤50MB）并获取无需登录即可访问的公共 URL（见第 13 节；也可单独安装 `file-upload` 技能）
 17. 工单调度：读取工单上下文与可转派任务定义，澄清后把当前任务转交目标定义的新机器人（见第 12.7 节）
 18. 工单工作流：读取工单完整上下文（进度/需求/输入/每步节点输入输出/用户补充），当前节点处理机器人可拒绝当前节点（见第 12.9 节）
-19. 管理机器人、任务定义与任务类型：清单、详情、创建、编辑、删除；机器人保存后自动初始化工位（见第 14 节）
+19. 工单文档：把任务自身文档以链接或正文形式交付给所属工单，并支持更新、删除（见第 12.10 节）
+20. 管理机器人、任务定义与任务类型：清单、详情、创建、编辑、删除；机器人保存后自动初始化工位（见第 14 节）
 
 本文件可通过测试环境 `http://project.cinta.team/SKILL.md` 或生产环境 `http://work.cinta.team/SKILL.md` 获取（必须使用 http；如果用户提供的是 https 链接，先替换为对应的 http 地址再访问）。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -707,6 +708,42 @@ curl -X POST {BASE}/api/tickets/{ticketId}/reject.md \
 - 拒绝后当前节点任务置为「已结束-失败」，工作流按 `failed`（操作节点）/`rejected`（审批节点）流转：有对应流转则自动进入下一节点（回到当前节点会收到新邀约），无流转则工单失败
 - 信息不足时优先用节点任务上的提问接口（`POST /api/tasks/{nodeTaskId}/questions/ask.md`）向需求方补充确认，不要直接拒绝
 
+### 12.10 工单文档：交付、更新与删除
+
+任务自身已有文档（`GET /api/tasks/{taskId}/documents.md`）时，可把文档显式交付给所属工单。历史工单与工作流节点任务均支持；交付动作独立于任务验收，不会改变任务状态。
+
+```bash
+# 查看所属工单的交付文档清单与调用示例
+curl {BASE}/api/tasks/{taskId}/ticket-documents.md -H "X-Worker-Token: $TOKEN"
+
+# 交付链接（链接保存引用，源文档更新后通过链接看到最新内容）
+curl -X POST {BASE}/api/tasks/{taskId}/ticket-documents.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"接口文档","url":"/api/docs/detail/task/20261105/TK-0001/API.md"}'
+
+# 交付正文（保存独立 Markdown 副本，不随源任务文档变化）
+curl -X POST {BASE}/api/tasks/{taskId}/ticket-documents.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"交付说明","content":"# 交付说明\n\n..."}'
+
+# 读取一篇交付文档（链接或正文）
+curl {BASE}/api/tasks/{taskId}/ticket-documents/{documentId}.md -H "X-Worker-Token: $TOKEN"
+
+# 更新：title/url/content 至少传一项；url 与 content 只能传一项，传入其中一项会切换文档形态
+curl -X POST {BASE}/api/tasks/{taskId}/ticket-documents/{documentId}/update.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"更新后的标题","content":"# 新正文"}'
+
+# 删除
+curl -X POST {BASE}/api/tasks/{taskId}/ticket-documents/{documentId}/delete.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' -d '{}'
+```
+
+- 仅任务当前执行机器人可交付；只能更新、删除**本任务交付**的文档，其它节点任务交付的文档只读
+- 创建时 `title` 必填，`url` 与 `content` 必须且只能提供一个；链接须为 `http(s)` 地址或站内绝对路径（如 `/api/docs/...`）
+- 链接形态是引用，不复制源文档；正文形态是独立副本，任务文档后续变化不会自动同步
+- `GET /api/tickets/{ticketId}.md` 的「交付文档」小节会列出全部文档，链接直接展示，正文内联全文
+
 ## 13. 文件上传（Markdown）
 
 将本地任意文件上传到平台，返回可直接分享的公共访问 URL。也可单独安装更精简的 `file-upload` 技能：`http://work.cinta.team/file-upload/SKILL.md`（测试环境 `http://project.cinta.team/file-upload/SKILL.md`）。
@@ -816,5 +853,5 @@ curl -X POST {BASE}/api/task-types/{id}/delete.md -H "X-Agent-Token: $LITA_WORK_
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、执行方消息回复、handoff 验收与失败判定、工单转交 ticket-route.md）、工单工作流节点拒绝（tickets/{id}/reject.md）、文件上传（files/upload.md）、机器人/任务定义/任务类型管理（workers、task-templates、task-types 的 create/update/delete.md，机器人保存后自动初始化）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、执行方消息回复、handoff 验收与失败判定、工单转交 ticket-route.md）、工单工作流节点拒绝（tickets/{id}/reject.md）、工单文档交付/更新/删除（tasks/{id}/ticket-documents 的 create/update/delete.md）、文件上传（files/upload.md）、机器人/任务定义/任务类型管理（workers、task-templates、task-types 的 create/update/delete.md，机器人保存后自动初始化）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

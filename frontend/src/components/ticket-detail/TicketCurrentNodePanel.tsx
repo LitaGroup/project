@@ -40,6 +40,12 @@ interface TicketCurrentNodePanelProps {
   messages: TaskChatMessage[]
   /** 待回答的机器人提问 */
   pendingQuestions: TaskChatQuestion[]
+  /** 当前审批节点是否允许直接审批通过 */
+  canApprove?: boolean
+  /** 审批提交中 */
+  approving?: boolean
+  /** 当前审批节点直接通过 */
+  onApprove?: () => Promise<void>
   replying: boolean
   onReplyQuestion: (
     questionId: string,
@@ -59,6 +65,9 @@ export function TicketCurrentNodePanel({
   agentName,
   messages,
   pendingQuestions,
+  canApprove = false,
+  approving = false,
+  onApprove,
   replying,
   onReplyQuestion,
   onSend,
@@ -185,6 +194,17 @@ export function TicketCurrentNodePanel({
                     text={node.description}
                     className="text-sm"
                   />
+                )}
+                {node.kind === 'approval' && canApprove && onApprove && (
+                  <div className="flex items-center justify-end">
+                    <Button
+                      size="sm"
+                      disabled={approving}
+                      onClick={() => void onApprove()}
+                    >
+                      {approving ? '审批中…' : '审批通过'}
+                    </Button>
+                  </div>
                 )}
               </div>
             )}

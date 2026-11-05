@@ -21,40 +21,10 @@ import {
   Wrench,
   X,
 } from '@appica/icons-react'
+import { remarkLineBreaks } from '../../lib/markdown-line-breaks'
 import { MermaidDiagram } from '../MermaidDiagram'
 
-interface ChatMdastNode {
-  type: string
-  value?: string
-  children?: ChatMdastNode[]
-}
-
-/** 单换行渲染为硬换行：聊天输入所见即所得，不把换行折叠成空格 */
-function remarkChatLineBreaks() {
-  return (tree: unknown): void => {
-    const walk = (node: ChatMdastNode): void => {
-      if (!node.children) return
-      const next: ChatMdastNode[] = []
-      for (const child of node.children) {
-        walk(child)
-        const { value } = child
-        if (child.type === 'text' && value?.includes('\n')) {
-          const segments = value.split('\n')
-          segments.forEach((segment, index) => {
-            if (index > 0) next.push({ type: 'break' })
-            if (segment) next.push({ type: 'text', value: segment })
-          })
-        } else {
-          next.push(child)
-        }
-      }
-      node.children = next
-    }
-    walk(tree as ChatMdastNode)
-  }
-}
-
-const MARKDOWN_PLUGINS = [remarkGfm, remarkChatLineBreaks]
+const MARKDOWN_PLUGINS = [remarkGfm, remarkLineBreaks]
 const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
   mermaid: { SyntaxHighlighter: MermaidDiagram },
   // 手写/外部 Agent 可能使用大写语言标识，assistant-ui 按原值匹配

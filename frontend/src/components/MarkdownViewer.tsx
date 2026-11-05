@@ -5,9 +5,10 @@ import {
 } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { remarkLineBreaks } from '../lib/markdown-line-breaks'
 import { MermaidDiagram } from './MermaidDiagram'
 
-const MARKDOWN_PLUGINS = [remarkGfm]
+const MARKDOWN_PLUGINS = [remarkGfm, remarkLineBreaks]
 
 /** 链接默认新窗口打开（外部页面不应覆盖当前会话） */
 function MarkdownLink({

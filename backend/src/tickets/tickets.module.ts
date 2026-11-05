@@ -5,9 +5,12 @@ import { Task } from '../tasks/task.entity';
 import { TaskMessage } from '../tasks/task-message.entity';
 import { TasksModule } from '../tasks/tasks.module';
 import { Worker } from '../workers/worker.entity';
+import { WorkersModule } from '../workers/workers.module';
 import { WorkflowDefinition } from '../workflows/workflow-definition.entity';
 import { WorkflowDefinitionVersion } from '../workflows/workflow-definition-version.entity';
 import { TicketConfig } from './ticket-config.entity';
+import { TicketDocument } from './ticket-document.entity';
+import { TicketDocumentsService } from './ticket-documents.service';
 import { Ticket } from './ticket.entity';
 import { TicketWorkflowRun } from './ticket-workflow-run.entity';
 import { TicketWorkflowRuntimeService } from './ticket-workflow-runtime.service';
@@ -23,6 +26,7 @@ import { TicketsService } from './tickets.service';
     TypeOrmModule.forFeature([
       Ticket,
       TicketConfig,
+      TicketDocument,
       TicketWorkflowRun,
       Task,
       TaskMessage,
@@ -32,12 +36,17 @@ import { TicketsService } from './tickets.service';
       WorkflowDefinitionVersion,
     ]),
     TasksModule,
+    WorkersModule,
   ],
   controllers: [
     TicketsController,
     TicketConfigsController,
     TicketTaskController,
   ],
-  providers: [TicketsService, TicketWorkflowRuntimeService],
+  providers: [
+    TicketsService,
+    TicketDocumentsService,
+    TicketWorkflowRuntimeService,
+  ],
 })
 export class TicketsModule {}

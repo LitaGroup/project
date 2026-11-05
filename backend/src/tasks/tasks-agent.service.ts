@@ -335,6 +335,8 @@ export class TasksAgentService {
       '- 创建/更新交付文档：`POST /api/tasks/{id}/handoff/update.md`（body 带 `content` 与 `baseVersion`；首次创建用 0，之后按当前版本更新）',
       '- 任务文档目录：`GET /api/tasks/{id}/documents.md`',
       '- 写入任务文档：`POST /api/tasks/{id}/documents.md`（body 带 `name` 与 `content`，如 `TECH_DESIGN.md`）',
+      '- 工单文档：`GET /api/tasks/{id}/ticket-documents.md`（任务属于工单时查看清单与调用示例）',
+      '- 交付/更新/删除工单文档：`POST /api/tasks/{id}/ticket-documents.md` / `.../{documentId}/update.md` / `.../{documentId}/delete.md`',
       '- 申请验收：`POST /api/tasks/{id}/handoff/apply.md`',
       '- 验收通过：`POST /api/tasks/{id}/handoff/accept.md`',
       '- 验收返工：`POST /api/tasks/{id}/handoff/refuse.md`',

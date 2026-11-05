@@ -1,4 +1,5 @@
 import { TaskStatus, TaskSubStatus } from '../common/enums';
+import type { User } from '../auth/user.entity';
 import { Task } from '../tasks/task.entity';
 import { Worker } from '../workers/worker.entity';
 import {
@@ -204,5 +205,112 @@ describe('TicketWorkflowRuntimeService', () => {
     );
     expect(complete).toHaveBeenCalledWith(run, failedTask, 'rejected');
     expect(result.outcome).toBe('rejected');
+  });
+
+  it('当前审批节点的真人处理人可直接审批通过并推进工作流', async () => {
+    const user = { id: 7, name: '审批人' } as User;
+    const node = {
+      key: 'approval',
+      name: '发布审批',
+      kind: 'approval',
+    };
+    const ticket = {
+      id: 5,
+      code: 'WO-0005',
+      workflowDefinitionId: 1,
+      workflowVersionId: 2,
+      currentNodeKey: node.key,
+    } as Ticket;
+    const activeTask = {
+      id: 30,
+      status: TaskStatus.WAITING,
+      subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+    } as Task;
+    const completedTask = {
+      ...activeTask,
+      status: TaskStatus.FINISHED,
+      subStatus: TaskSubStatus.COMPLETED,
+      acceptedBy: user.name,
+    } as Task;
+    const run = {
+      id: 1,
+      ticketId: ticket.id,
+      nodeKey: node.key,
+      nodeKind: node.kind,
+      taskId: activeTask.id,
+      agentId: 1001,
+      status: '等待中',
+    } as TicketWorkflowRun;
+    tickets.findOne.mockResolvedValue(ticket);
+    versions.findOne.mockResolvedValue({
+      definition: { nodes: [node], edges: [] },
+    });
+    runs.findOne.mockResolvedValue(run);
+    workers.findOne.mockResolvedValue({ id: run.agentId });
+    tasks.findOne
+      .mockResolvedValueOnce(activeTask)
+      .mockResolvedValueOnce(completedTask);
+    const complete = jest
+      .spyOn(
+        service as unknown as {
+          completeRunWithOutcome: (
+            run: TicketWorkflowRun,
+            task: Task,
+            outcome: string,
+          ) => Promise<void>;
+        },
+        'completeRunWithOutcome',
+      )
+      .mockResolvedValue(undefined);
+
+    await service.approveNodeByUser(ticket.id, user);
+
+    expect(tasks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: activeTask.id }),
+      expect.objectContaining({
+        status: TaskStatus.FINISHED,
+        subStatus: TaskSubStatus.COMPLETED,
+        acceptedBy: user.name,
+        missingItems: null,
+        resumePrompt: null,
+      }),
+    );
+    expect(complete).toHaveBeenCalledWith(run, completedTask, 'approved');
+  });
+
+  it('非当前审批任务处理人不能直接审批', async () => {
+    const user = { id: 7, name: '其他用户' } as User;
+    const node = {
+      key: 'approval',
+      name: '发布审批',
+      kind: 'approval',
+    };
+    const ticket = {
+      id: 5,
+      code: 'WO-0005',
+      workflowDefinitionId: 1,
+      workflowVersionId: 2,
+      currentNodeKey: node.key,
+    } as Ticket;
+    const run = {
+      id: 1,
+      ticketId: ticket.id,
+      nodeKey: node.key,
+      nodeKind: node.kind,
+      taskId: 30,
+      agentId: 1002,
+      status: '等待中',
+    } as TicketWorkflowRun;
+    tickets.findOne.mockResolvedValue(ticket);
+    versions.findOne.mockResolvedValue({
+      definition: { nodes: [node], edges: [] },
+    });
+    runs.findOne.mockResolvedValue(run);
+    workers.findOne.mockResolvedValue({ id: 1001 });
+
+    await expect(service.approveNodeByUser(ticket.id, user)).rejects.toThrow(
+      '仅工单发起人、当前审批处理人或管理员可以审批',
+    );
+    expect(tasks.update).not.toHaveBeenCalled();
   });
 });

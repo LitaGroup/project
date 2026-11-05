@@ -53,6 +53,10 @@ describe('TicketsService', () => {
     addEvent: jest.Mock;
   };
   let dispatchService: { assign: jest.Mock };
+  let ticketDocuments: {
+    findTicketForTask: jest.Mock;
+    renderTicketSection: jest.Mock;
+  };
   let workflowRuntime: {
     create: jest.Mock;
     workflowView: jest.Mock;
@@ -109,6 +113,12 @@ describe('TicketsService', () => {
         }),
       ),
     };
+    ticketDocuments = {
+      findTicketForTask: jest.fn().mockResolvedValue(null),
+      renderTicketSection: jest
+        .fn()
+        .mockResolvedValue('## 交付文档\n\n（暂无交付文档）\n'),
+    };
     workflowRuntime = {
       create: jest.fn(),
       workflowView: jest.fn().mockResolvedValue(null),
@@ -124,6 +134,7 @@ describe('TicketsService', () => {
       tasksService as never,
       dispatchService as never,
       {} as never,
+      ticketDocuments as never,
       workflowRuntime as never,
       { get: jest.fn().mockReturnValue(undefined) } as never,
     );

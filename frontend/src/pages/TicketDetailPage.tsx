@@ -22,6 +22,7 @@ import {
   type TaskPipelineStage,
   type TicketDetail,
   type TicketWorkflowRun,
+  type TicketWorkflowView,
   type WorkbenchTask,
 } from '../lib/api'
 import { MarkdownViewer } from '../components/MarkdownViewer'
@@ -36,6 +37,7 @@ import { TaskMarkdownDocumentView } from '../components/task-detail/TaskMarkdown
 import { TaskTreePanel } from '../components/task-detail/TaskTreePanel'
 import { TaskDetailView } from './TaskPackageDetailPage'
 import { visibleEventSource } from '../lib/event-source'
+import { useAuth } from '../context/AuthContext'
 
 type TicketContentTab =
   | 'current'
@@ -63,15 +65,28 @@ const OUTCOME_LABEL: Record<string, string> = {
   rejected: '驳回',
 }
 
+/** 最近一次创建了任务的节点运行（用于事件/文档/复盘等历史内容） */
+function latestTaskId(workflow: TicketWorkflowView | null | undefined) {
+  let latest: TicketWorkflowRun | null = null
+  for (const run of workflow?.runs ?? []) {
+    if (!run.taskId) continue
+    if (!latest || run.id > latest.id) latest = run
+  }
+  return latest?.taskId ?? null
+}
+
 /** 工单详情：新模型展示工作流进度与节点任务；历史工单继续复用任务详情 */
 export function TicketDetailPage() {
   const { ticketId } = useParams<{ ticketId: string }>()
   const navigate = useNavigate()
+  const { user: currentUser } = useAuth()
   const id = Number(ticketId)
   const [ticket, setTicket] = useState<TicketDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [acting, setActing] = useState<'accept' | 'reject' | null>(null)
+  const [acting, setActing] = useState<'accept' | 'reject' | 'approve' | null>(
+    null,
+  )
   const [contentTab, setContentTab] = useState<TicketContentTab>('current')
 
   /** 关联节点任务（最近一次创建的节点任务）的实时数据 */
@@ -84,41 +99,70 @@ export function TicketDetailPage() {
   const [taskError, setTaskError] = useState<string | null>(null)
   const [replying, setReplying] = useState(false)
 
-  const load = useCallback(() => {
-    api
-      .getTicket(id)
-      .then((row) => {
-        setTicket(row)
-        setError(null)
-      })
-      .catch((e: Error) => setError(e.message))
+  const load = useCallback(async () => {
+    try {
+      const row = await api.getTicket(id)
+      setTicket(row)
+      setError(null)
+      return row
+    } catch (e) {
+      setError((e as Error).message)
+      return null
+    }
   }, [id])
 
   useEffect(() => {
-    load()
-    const timer = window.setInterval(load, 10_000)
+    void load()
+    const timer = window.setInterval(() => void load(), 10_000)
     return () => window.clearInterval(timer)
   }, [load])
 
-  const act = (action: 'accept' | 'reject') => {
+  const act = async (action: 'accept' | 'reject') => {
     setActing(action)
     setActionError(null)
-    api
-      .acceptTicketWorkflow(id, action)
-      .then(() => load())
-      .catch((e: Error) => setActionError(e.message))
-      .finally(() => setActing(null))
+    try {
+      await api.acceptTicketWorkflow(id, action)
+      await load()
+    } catch (e) {
+      setActionError((e as Error).message)
+    } finally {
+      setActing(null)
+    }
+  }
+
+  /** 当前审批节点直接通过：发起人、当前审批处理人或管理员可操作 */
+  const approveNode = async () => {
+    setActing('approve')
+    setActionError(null)
+    try {
+      await api.approveTicketWorkflow(id)
+      await load()
+    } catch (e) {
+      setActionError((e as Error).message)
+    } finally {
+      setActing(null)
+    }
   }
 
   /** 节点事件/任务/文档/复盘跟随最近一次创建了任务的节点运行 */
-  const activeTaskId = useMemo(() => {
-    let latest: TicketWorkflowRun | null = null
-    for (const run of ticket?.workflow?.runs ?? []) {
-      if (!run.taskId) continue
-      if (!latest || run.id > latest.id) latest = run
-    }
-    return latest?.taskId ?? null
+  const activeTaskId = useMemo(
+    () => latestTaskId(ticket?.workflow),
+    [ticket],
+  )
+
+  /** 当前节点最新一次运行及其任务；无任务时不得沿用上一节点 */
+  const currentNodeRun = useMemo(() => {
+    const workflow = ticket?.workflow
+    const key = workflow?.currentNodeKey
+    if (!workflow || !key) return null
+    return workflow.runs
+      .filter((run) => run.nodeKey === key)
+      .reduce<TicketWorkflowRun | null>(
+        (latest, run) => (!latest || run.id > latest.id ? run : latest),
+        null,
+      )
   }, [ticket])
+  const currentNodeTaskId = currentNodeRun?.taskId ?? null
 
   const taskSeq = useRef(0)
   const loadTaskData = useCallback(async () => {
@@ -254,15 +298,6 @@ export function TicketDetailPage() {
     }
   }, [activeTaskId, loadTaskData])
 
-  /** 当前节点任务与执行机器人（来自 PIPELINE 阶段快照） */
-  const currentStage = useMemo(
-    () =>
-      taskChat?.pipeline.find((stage) => stage.task.id === activeTaskId) ??
-      null,
-    [taskChat, activeTaskId],
-  )
-  const currentAgentName = currentStage?.agent?.name ?? null
-
   /** 快照与当前节点任务对齐时才交给面板，避免串任务 */
   const interactiveChat: TaskChatSnapshot | null =
     taskChat?.task.id === activeTaskId ? taskChat : null
@@ -275,19 +310,48 @@ export function TicketDetailPage() {
         }
       : null
 
-  const messages = useMemo(
+  /** 当前节点自己的任务数据；当前节点无任务时不得复用上一节点 */
+  const currentNodeChat: TaskChatSnapshot | null =
+    currentNodeTaskId && taskChat?.task.id === currentNodeTaskId
+      ? taskChat
+      : null
+  const currentNodeStage =
+    currentNodeChat?.pipeline.find(
+      (stage) => stage.task.id === currentNodeTaskId,
+    ) ?? null
+  const currentNodeTask: WorkbenchTask | null =
+    currentNodeChat &&
+    (currentNodeChat.task.id === interactiveTask?.id ||
+      currentNodeChat.task.id === workbenchTask?.id)
+      ? {
+          ...currentNodeChat.task,
+          workbenchRoles:
+            interactiveTask?.id === currentNodeChat.task.id
+              ? (interactiveTask.workbenchRoles ?? [])
+              : (workbenchTask?.workbenchRoles ?? []),
+          workbenchAction:
+            interactiveTask?.id === currentNodeChat.task.id
+              ? (interactiveTask.workbenchAction ?? null)
+              : (workbenchTask?.workbenchAction ?? null),
+        }
+      : null
+  const currentAgentName = currentNodeStage?.agent?.name ?? null
+
+  const currentMessages = useMemo(
     () =>
-      (taskChat?.messages ?? []).filter(
-        (message) => message.taskId === activeTaskId,
-      ),
-    [taskChat, activeTaskId],
+      currentNodeTaskId
+        ? (taskChat?.messages ?? []).filter(
+            (message) => message.taskId === currentNodeTaskId,
+          )
+        : [],
+    [taskChat, currentNodeTaskId],
   )
 
   /** 待回答的机器人提问（去重） */
   const pendingQuestions = useMemo(() => {
     return Array.from(
       new Map(
-        messages
+        currentMessages
           .map((message) => message.question)
           .filter(
             (question): question is TaskChatQuestion =>
@@ -296,16 +360,16 @@ export function TicketDetailPage() {
           .map((question) => [question.id, question]),
       ).values(),
     )
-  }, [messages])
+  }, [currentMessages])
 
   /** 回答/跳过当前节点任务的机器人提问 */
   const replyQuestion = useCallback(
     async (questionId: string, answers: string[][] | null) => {
-      if (!activeTaskId) return
+      if (!currentNodeTaskId) return
       setReplying(true)
       try {
         await api.replyTaskQuestion(
-          activeTaskId,
+          currentNodeTaskId,
           questionId,
           answers ? { answers } : { reject: true },
         )
@@ -314,23 +378,25 @@ export function TicketDetailPage() {
         setReplying(false)
       }
     },
-    [activeTaskId, loadTaskData],
+    [currentNodeTaskId, loadTaskData],
   )
 
   /** 提交补充内容：执行中进入发送队列，等待阶段并入恢复提示 */
   const sendSupplement = useCallback(
     async (content: string) => {
-      if (!activeTaskId) return
-      await api.sendTaskMessage(activeTaskId, content)
+      if (!currentNodeTaskId) return
+      await api.sendTaskMessage(currentNodeTaskId, content)
       await loadTaskData()
     },
-    [activeTaskId, loadTaskData],
+    [currentNodeTaskId, loadTaskData],
   )
 
   /** 右侧任务协作操作后刷新工单与节点任务数据 */
   const refreshTicket = useCallback(async () => {
-    await Promise.all([load(), loadTaskData()])
-  }, [load, loadTaskData])
+    const row = await load()
+    const nextTaskId = latestTaskId(row?.workflow)
+    if (nextTaskId && nextTaskId === activeTaskId) await loadTaskData()
+  }, [load, activeTaskId, loadTaskData])
 
   if (!ticket && error) {
     return (
@@ -356,13 +422,22 @@ export function TicketDetailPage() {
     const startFields =
       workflow.nodes.find((node) => node.kind === 'start')?.inputFields ?? []
     const fieldByKey = new Map(startFields.map((field) => [field.key, field]))
-    const nodeTaskCode = interactiveChat?.task.code
+    const nodeTaskCode = currentNodeChat?.task.code
     /** 仅操作/审批节点创建节点任务；起始/验收节点只保留「我的AI」 */
     const currentNode = workflow.nodes.find(
       (node) => node.key === workflow.currentNodeKey,
     )
     const isTaskNode =
       currentNode?.kind === 'operation' || currentNode?.kind === 'approval'
+    const canApprove =
+      currentNode?.kind === 'approval' &&
+      Boolean(currentNodeTaskId) &&
+      !currentNodeRun?.taskStatus?.startsWith('已结束') &&
+      (currentNodeRun?.status === '等待中' ||
+        currentNodeRun?.status === '执行中') &&
+      (Boolean(currentNodeTask?.workbenchRoles.includes('agent')) ||
+        currentUser?.id === ticket.createdById ||
+        currentUser?.role === '管理员')
 
     const pageHeader = (
       <>
@@ -409,13 +484,17 @@ export function TicketDetailPage() {
             aiLabel="任务协作"
             ai={
               <TaskWorkbenchPanel
-                task={isTaskNode ? interactiveTask : null}
-                chat={isTaskNode ? interactiveChat : null}
-                handoffDoc={handoffDoc}
+                task={isTaskNode ? currentNodeTask : null}
+                chat={isTaskNode ? currentNodeChat : null}
+                handoffDoc={
+                  currentNodeTaskId && currentNodeTaskId === activeTaskId
+                    ? handoffDoc
+                    : null
+                }
                 onRefresh={refreshTicket}
                 agent={
                   <DetailAgentPanel
-                    taskId={activeTaskId ?? undefined}
+                    taskId={currentNodeTaskId ?? undefined}
                     embedded
                     emptyTitle={`${nodeTaskCode ?? ticket.code} 的独立 AI 会话`}
                     emptyHint="当前工单的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
@@ -487,11 +566,14 @@ export function TicketDetailPage() {
             {contentTab === 'current' && (
               <TicketCurrentNodePanel
                 workflow={workflow}
-                currentTask={currentStage?.task ?? null}
+                currentTask={currentNodeStage?.task ?? null}
                 agentName={currentAgentName}
-                messages={messages}
+                messages={currentMessages}
                 pendingQuestions={pendingQuestions}
                 replying={replying}
+                canApprove={canApprove}
+                approving={acting === 'approve'}
+                onApprove={approveNode}
                 onReplyQuestion={replyQuestion}
                 onSend={sendSupplement}
               />
@@ -685,8 +767,8 @@ export function TicketDetailPage() {
                   error={!reviewDoc ? taskError : null}
                   emptyText={
                     ticket.status === '已完成'
-                      ? '复盘生成中，完成后自动展示'
-                      : '节点任务验收通过后由平台生成复盘文档'
+                      ? '该工单按工作流完成，未生成复盘文档'
+                      : '工作流节点任务不自动生成复盘文档'
                   }
                   contentKey={reviewDoc?.updatedAt}
                 />

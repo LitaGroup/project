@@ -9,7 +9,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Interval } from '@nestjs/schedule';
 import { In, Not, Repository } from 'typeorm';
 import type { User } from '../auth/user.entity';
-import { TaskStatus, TaskSubStatus, WorkerRole } from '../common/enums';
+import {
+  TaskStatus,
+  TaskSubStatus,
+  UserRole,
+  WorkerRole,
+} from '../common/enums';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Task } from '../tasks/task.entity';
 import { TasksService } from '../tasks/tasks.service';
@@ -373,6 +378,94 @@ export class TicketWorkflowRuntimeService {
     };
   }
 
+  /**
+   * 当前审批节点直接通过：工单发起人、当前审批节点的真人处理人或管理员可用。
+   * 不发起交付申请，不生成 HANDOFF/REVIEW，直接完成任务并按 approved 推进。
+   */
+  async approveNodeByUser(ticketId: number, user: User): Promise<Ticket> {
+    const ticket = await this.mustFind(ticketId);
+    if (!ticket.workflowDefinitionId) {
+      throw new BadRequestException('历史工单不支持工作流节点审批');
+    }
+    const workflow = await this.workflowOf(ticket);
+    const node = workflow.nodes.find(
+      (item) => item.key === ticket.currentNodeKey,
+    );
+    if (!node) {
+      throw new BadRequestException('工单流程已结束，没有可审批的当前节点');
+    }
+    if (node.kind !== 'approval') {
+      throw new BadRequestException('当前节点不是审批节点');
+    }
+    const run = await this.currentRun(ticket.id, node.key);
+    if (!run || !run.taskId) {
+      throw new BadRequestException('当前审批节点没有节点任务');
+    }
+    if (
+      run.status !== RUN_STATUS_WAITING &&
+      run.status !== RUN_STATUS_EXECUTING
+    ) {
+      throw new BadRequestException(
+        `当前节点运行状态「${run.status}」不可审批`,
+      );
+    }
+    const humanWorker = await this.workers.findOne({
+      where: { humanUserId: user.id },
+      select: { id: true },
+    });
+    const isAssignedHuman = Boolean(
+      humanWorker && run.agentId === humanWorker.id,
+    );
+    const isInitiator = ticket.createdById === user.id;
+    const isAdmin = user.role === UserRole.ADMIN;
+    if (!isAssignedHuman && !isInitiator && !isAdmin) {
+      throw new ForbiddenException(
+        '仅工单发起人、当前审批处理人或管理员可以审批',
+      );
+    }
+    const task = await this.tasks.findOne({ where: { id: run.taskId } });
+    if (!task) {
+      await this.failTicket(ticket.id, `节点任务 #${run.taskId} 不存在`);
+      throw new BadRequestException('节点任务不存在，工单已失败');
+    }
+    if (task.status === TaskStatus.FINISHED) {
+      throw new BadRequestException('节点任务已结束，不能重复审批');
+    }
+    const previousStatus = `${task.status}-${task.subStatus}`;
+    const now = new Date();
+    const updated = await this.tasks.update(
+      { id: task.id, status: Not(TaskStatus.FINISHED) },
+      {
+        status: TaskStatus.FINISHED,
+        subStatus: TaskSubStatus.COMPLETED,
+        acceptedAt: now,
+        acceptedBy: user.name,
+        deliveredAt: now,
+        missingItems: null,
+        resumePrompt: null,
+      },
+    );
+    if (!updated.affected) {
+      throw new BadRequestException('节点任务已结束，不能重复审批');
+    }
+    const completed = await this.tasks.findOne({ where: { id: task.id } });
+    await this.tasksService.addEvent(
+      task.id,
+      '状态变更',
+      `状态变更：${previousStatus} → 已结束-完成（${user.name} 直接审批通过节点「${node.name}」）`,
+      user.name,
+      {
+        ticketId: ticket.id,
+        ticketCode: ticket.code,
+        nodeKey: node.key,
+        nodeKind: node.kind,
+        approval: true,
+      },
+    );
+    await this.completeRunWithOutcome(run, completed ?? task, 'approved');
+    return this.mustFind(ticketId);
+  }
+
   /** 验收节点人工操作；仅发起机器人（或其绑定用户）可用 */
   async acceptNode(
     ticketId: number,
@@ -591,11 +684,16 @@ export class TicketWorkflowRuntimeService {
     const description = [
       `# 工单节点：${node.name}`,
       '',
-      `- 工单：${ticket.code} ${ticket.title}`,
+      `- 工单：${ticket.code} ${ticket.title}（ID=${ticket.id}）`,
       `- 节点类型：${node.kind === 'approval' ? '审批' : '操作'}`,
       `- 处理机器人：${agent.name}`,
       '',
       node.description?.trim() ? `## 节点说明\n\n${node.description}` : '',
+      '',
+      '## 工单文档',
+      '',
+      '本任务属于上述工单。查看、交付、更新或删除工单文档：`GET /api/tasks/{当前任务ID}/ticket-documents.md`（清单中附带调用示例）。',
+      '任务自身文档使用 `GET /api/tasks/{当前任务ID}/documents.md` 查看；链接形态保留引用，正文形态保存独立副本。',
       '',
       '## 工单输入',
       '',

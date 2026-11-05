@@ -87,6 +87,9 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 - 答复提问：\`POST ${base}/tasks/{taskId}/questions/{questionId}/answer.md\`
 - 任务文档目录：\`GET ${base}/tasks/{taskId}/documents.md\`
 - 写入任务文档：\`POST ${base}/tasks/{taskId}/documents.md\`（body 带 name 与 content，如 TECH_DESIGN.md）
+- 工单文档清单：\`GET ${base}/tasks/{taskId}/ticket-documents.md\`（任务属于工单时可用）
+- 交付工单文档：\`POST ${base}/tasks/{taskId}/ticket-documents.md\`（body 提供 title + url 或 content 二选一）
+- 更新/删除工单文档：\`POST ${base}/tasks/{taskId}/ticket-documents/{documentId}/update.md\` / \`delete.md\`
 - 交付文档：\`GET ${base}/tasks/{taskId}/handoff.md\`
 - 创建/更新交付文档：\`POST ${base}/tasks/{taskId}/handoff/update.md\`（body 带完整 content 与 baseVersion；首次创建用 baseVersion=0，之后按当前版本更新）
 - 申请验收：\`POST ${base}/tasks/{taskId}/handoff/apply.md\`

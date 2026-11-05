@@ -2325,6 +2325,7 @@ export class TaskDispatchService
         '```',
         '',
         '5. 需求指定的是项目文档时用 `POST /api/documents/upsert.md`（按 `projectId + fileName`），指定的是其它知识路径时用 `POST /api/docs/nodes/create.md`。',
+        '6. 若本任务属于工单，可用 `GET /api/tasks/{当前任务ID}/ticket-documents.md` 查看工单交付文档与调用示例，按需把任务文档以链接或正文形式显式交付给工单；工单文档交付不影响任务验收。',
       ].join('\n'),
     );
     sections.push(

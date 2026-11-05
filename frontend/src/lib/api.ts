@@ -2927,6 +2927,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ remark }),
     }),
+  /** 审批节点直接通过（仅当前审批节点的真人处理人） */
+  approveTicketWorkflow: (id: number) =>
+    request<Ticket>(`/tickets/${id}/workflow/approve`, { method: 'POST' }),
   /** 工单类型配置（旧模型兼容，仅供历史工单详情展示） */
   listTicketConfigs: () => request<TicketConfig[]>('/ticket-configs'),
   updateTicketConfig: (category: string, allowedTemplateIds: number[]) =>

@@ -94,6 +94,10 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 - task-question-answer：POST /api/tasks/{taskId}/questions/{questionId}/answer.md
 - task-documents-list：GET /api/tasks/{taskId}/documents.md
 - task-documents-update：POST /api/tasks/{taskId}/documents.md
+- ticket-documents-list：GET /api/tasks/{taskId}/ticket-documents.md（所属工单的交付文档清单与调用示例）
+- ticket-documents-create：POST /api/tasks/{taskId}/ticket-documents.md（body 提供 title + url 或 content 二选一）
+- ticket-documents-update：POST /api/tasks/{taskId}/ticket-documents/{documentId}/update.md
+- ticket-documents-delete：POST /api/tasks/{taskId}/ticket-documents/{documentId}/delete.md
 - task-handoff-read：GET /api/tasks/{taskId}/handoff.md
 - task-handoff-update：POST /api/tasks/{taskId}/handoff/update.md
 - task-handoff-apply：POST /api/tasks/{taskId}/handoff/apply.md

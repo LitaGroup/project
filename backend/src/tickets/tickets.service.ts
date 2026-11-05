@@ -29,6 +29,7 @@ import { TaskMessage } from '../tasks/task-message.entity';
 import { Worker } from '../workers/worker.entity';
 import { findTicketCategory, TICKET_CATEGORIES } from './ticket-categories';
 import { TicketConfig } from './ticket-config.entity';
+import { TicketDocumentsService } from './ticket-documents.service';
 import { Ticket } from './ticket.entity';
 import {
   renderInputValues,
@@ -135,6 +136,7 @@ export class TicketsService implements OnModuleInit {
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
     private readonly taskDocuments: TaskDocumentService,
+    private readonly ticketDocuments: TicketDocumentsService,
     private readonly workflowRuntime: TicketWorkflowRuntimeService,
     config: ConfigService,
   ) {
@@ -480,6 +482,21 @@ export class TicketsService implements OnModuleInit {
     };
   }
 
+  /**
+   * 当前审批节点直接通过（真人处理人）：完成任务并推进工单，
+   * 不生成交付文档与复盘文档。
+   */
+  async approveWorkflow(id: number, user: User): Promise<TicketView> {
+    const ticket = await this.workflowRuntime.approveNodeByUser(id, user);
+    const workflow = await this.workflowRuntime.workflowView(ticket);
+    return {
+      ...ticket,
+      task: null,
+      status: ticket.workflowStatus ?? '处理中',
+      workflow,
+    };
+  }
+
   async listConfigs(): Promise<TicketConfigView[]> {
     const rows = await this.configs.find();
     return Promise.all(
@@ -668,7 +685,7 @@ export class TicketsService implements OnModuleInit {
   /** 机器人读取工单上下文、可转派定义和调用方式 */
   async taskTicketMarkdown(taskId: number): Promise<string> {
     const task = await this.mustFindTask(taskId);
-    const ticket = await this.tickets.findOne({ where: { taskId } });
+    const ticket = await this.ticketDocuments.findTicketForTask(task);
     if (!ticket) {
       return [
         mdFrontmatter({ update: task.updatedAt, title: task.title }),
@@ -677,6 +694,9 @@ export class TicketsService implements OnModuleInit {
         `任务 ${task.code} 未关联工单，请按普通任务流程处理。`,
         '',
       ].join('\n');
+    }
+    if (ticket.workflowDefinitionId) {
+      return this.workflowTaskTicketMarkdown(task, ticket);
     }
     const config = await this.mustFindConfig(ticket.category);
     // 历史工单的处理机器人若是个人 AGENT，对外统一显示其主人姓名
@@ -713,6 +733,13 @@ export class TicketsService implements OnModuleInit {
       '## 工单描述',
       '',
       markdownText(ticket.description),
+      '',
+      '## 工单文档',
+      '',
+      `- 文档清单与调用示例：\`GET ${this.apiUrl}/tasks/${task.id}/ticket-documents.md\``,
+      `- 交付链接或正文：\`POST ${this.apiUrl}/tasks/${task.id}/ticket-documents.md\`（url 与 content 二选一）`,
+      `- 更新或删除：\`POST ${this.apiUrl}/tasks/${task.id}/ticket-documents/{documentId}/update.md\` / \`delete.md\``,
+      '- 只有本任务当前执行机器人可以交付；只能维护本任务交付的文档。',
       '',
       '## 当前识别结果',
       '',
@@ -770,6 +797,51 @@ export class TicketsService implements OnModuleInit {
     return lines.join('\n');
   }
 
+  /** 工作流节点任务的工单上下文与文档操作指引 */
+  private workflowTaskTicketMarkdown(task: Task, ticket: Ticket): string {
+    const currentNode =
+      ticket.currentNodeKey && ticket.currentNodeName
+        ? `${ticket.currentNodeName}（key=${ticket.currentNodeKey}）`
+        : '流程已结束';
+    return [
+      mdFrontmatter({ update: task.updatedAt, title: ticket.title }),
+      `# ${ticket.code} ${ticket.title}`,
+      '',
+      '## 工单信息',
+      '',
+      `- 编号：${ticket.code}`,
+      `- 类型：${ticket.category}`,
+      `- 状态：${ticket.workflowStatus ?? '处理中'}`,
+      `- 当前节点：${currentNode}`,
+      `- 发起机器人：${ticket.initiatorWorkerName ?? ticket.createdByName}`,
+      `- 关联任务：${task.code}（${task.status}-${task.subStatus}）`,
+      `- 当前任务定义：${task.templateName ?? '未设置'}`,
+      '',
+      '## 工单描述',
+      '',
+      markdownText(ticket.description),
+      '',
+      '## 工单文档',
+      '',
+      `- 文档清单与调用示例：\`GET ${this.apiUrl}/tasks/${task.id}/ticket-documents.md\``,
+      `- 交付链接：\`POST ${this.apiUrl}/tasks/${task.id}/ticket-documents.md\`，body \`{"title":"文档标题","url":"https://... 或 /api/docs/detail/..."}\``,
+      `- 交付正文：同一接口，body \`{"title":"文档标题","content":"# Markdown 正文"}\``,
+      `- 更新：\`POST ${this.apiUrl}/tasks/${task.id}/ticket-documents/{documentId}/update.md\``,
+      `- 删除：\`POST ${this.apiUrl}/tasks/${task.id}/ticket-documents/{documentId}/delete.md\``,
+      '- 只有本任务当前执行机器人可以交付；只能更新、删除本任务交付的文档。',
+      '- 任务自身文档先通过 `GET /api/tasks/{taskId}/documents.md` 查看；链接形态不会复制源文档，正文形态保存独立副本。',
+      '',
+      '## 其它操作',
+      '',
+      `- 完整工单上下文：\`GET ${this.apiUrl}/tickets/${ticket.id}.md\``,
+      `- 向需求方提问：\`POST ${this.apiUrl}/tasks/${task.id}/questions/ask.md\``,
+      ticket.currentNodeKey
+        ? `- 拒绝当前节点：\`POST ${this.apiUrl}/tickets/${ticket.id}/reject.md\`，body \`{"nodeKey":"${ticket.currentNodeKey}","reason":"拒绝原因"}\``
+        : '',
+      '',
+    ].join('\n');
+  }
+
   /**
    * AI 读取工单完整上下文：工单信息、需求正文、工单输入、流程进度、
    * 每一步节点任务的输入/输出与用户补充输入。
@@ -815,6 +887,8 @@ export class TicketsService implements OnModuleInit {
       '## 需求正文',
       '',
       markdownText(ticket.description),
+      '',
+      await this.ticketDocuments.renderTicketSection(ticket),
       '',
     );
 
