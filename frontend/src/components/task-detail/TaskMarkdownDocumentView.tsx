@@ -150,7 +150,7 @@ export function TaskMarkdownDocumentView({
     [content, contentKey, editing],
   )
   return (
-    <section className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <section className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-none border border-border bg-background">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground-intense">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Outlet, Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   Navigation,
@@ -31,7 +31,6 @@ import {
   Briefcase,
   Bug,
   CalendarClock,
-  ChartPie,
   CircleCheck,
   ClipboardList,
   Cpu,
@@ -57,6 +56,7 @@ import {
 import type { IconComponent } from '@appica/icons-react'
 import { LayoutGroup, m } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
+import { api, type TicketWorkflowDefinitionSummary } from '../lib/api'
 import { PageTransition } from './PageTransition'
 import { KnowledgeSearchDialog } from './KnowledgeSearchDialog'
 import { navIndicatorTransition } from '../lib/motion'
@@ -125,23 +125,9 @@ const NAV_SECTIONS: NavSection[] = [
   {
     key: 'tickets',
     label: '工单',
-    to: '/tickets/tech',
+    to: '/tickets',
     match: (p) => p.startsWith('/tickets'),
-    items: [
-      // 已开放的工单类型排在前面，未开放/已关闭的排在后面
-      { to: '/tickets/tech', label: '技术工单', icon: Settings, ready: true },
-      { to: '/tickets/data', label: '数据工单', icon: ChartPie, ready: true },
-      {
-        to: '/tickets/solution',
-        label: '方案工单',
-        icon: FileText,
-        ready: false,
-        badge: '已关闭',
-      },
-      { to: '/tickets/ops', label: '运维工单', icon: Cpu, ready: false },
-      { to: '/tickets/requirement', label: '需求工单', icon: ClipboardList, ready: false },
-      { to: '/tickets/bug', label: 'BUG反馈', icon: Bug, ready: false },
-    ],
+    items: [],
   },
   {
     key: 'knowledge',
@@ -161,8 +147,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
       { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
-      { to: '/admin/ticket-definitions', label: '工单定义', icon: TimelineEvent, ready: true },
       { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
+      { to: '/admin/github-access', label: 'GitHub 权限', icon: Settings, ready: true },
       { to: '/admin/task-types', label: '任务类型', icon: Label, ready: true },
       { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },
       { to: '/admin/workers', label: '机器人', icon: Robot, ready: true },
@@ -264,17 +250,68 @@ function UserArea() {
 export function Layout() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [searchOpen, setSearchOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [ticketWorkflows, setTicketWorkflows] = useState<
+    TicketWorkflowDefinitionSummary[]
+  >([])
   const isWorkbench = pathname.startsWith('/workbench')
   const isRobotChat = pathname.startsWith('/robots')
   const isProfile = pathname.startsWith('/profile')
+  // 只有启用且已发布的工单配置进入左侧导航；顶部默认进入第一个可用配置
+  const availableTicketWorkflows = ticketWorkflows.filter(
+    (item) => item.enabled && item.latestPublishedVersion > 0,
+  )
+  const sections = useMemo<NavSection[]>(
+    () =>
+      NAV_SECTIONS.map((section) =>
+        section.key === 'tickets'
+          ? {
+              ...section,
+              items:
+                availableTicketWorkflows.length > 0
+                  ? availableTicketWorkflows.map((workflow) => ({
+                      to: `/tickets/wf/${workflow.id}`,
+                      label: workflow.name,
+                      icon: ClipboardList,
+                      ready: true,
+                    }))
+                  : [
+                      {
+                        to: '/admin/ticket-config',
+                        label: '暂无可用工单配置',
+                        icon: ClipboardList,
+                        ready: false,
+                        badge: '去配置',
+                      },
+                    ],
+            }
+          : section,
+      ),
+    [availableTicketWorkflows],
+  )
+
+  useEffect(() => {
+    if (!user) return
+    let alive = true
+    api
+      .listTicketWorkflowDefinitions()
+      .then((rows) => {
+        if (alive) setTicketWorkflows(rows)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [user])
+
   // 工作台/机器人/个人中心不归属任何顶级分区（避免高亮「项目」），个人中心使用独立左侧导航
   const activeSection = isWorkbench || isRobotChat
     ? undefined
     : isProfile
       ? PROFILE_SECTION
-      : (NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0])
+      : (sections.find((s) => s.match(pathname)) ?? sections[0])
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -307,7 +344,7 @@ export function Layout() {
         <div className="flex h-full min-w-0 items-center pl-3">
           <LayoutGroup id="top-navigation">
             <nav className="flex items-center gap-1">
-              {NAV_SECTIONS.map((section) => {
+              {sections.map((section) => {
                 const active = section.key === activeSection?.key
                 return (
                   <Link
@@ -394,14 +431,26 @@ export function Layout() {
                 <ClipboardList size={16} />
                 新建任务
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate('/tickets/tech/new')}>
-                <Settings size={16} />
-                新建技术工单
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate('/tickets/data/new')}>
-                <ChartPie size={16} />
-                新建数据工单
-              </DropdownMenuItem>
+              {availableTicketWorkflows.length > 0 ? (
+                availableTicketWorkflows.slice(0, 5).map((workflow) => (
+                  <DropdownMenuItem
+                    key={workflow.id}
+                    onClick={() =>
+                      navigate(`/tickets/wf/${workflow.id}/new`)
+                    }
+                  >
+                    <ClipboardList size={16} />
+                    新建{workflow.name}
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => navigate('/admin/ticket-config')}
+                >
+                  <ClipboardList size={16} />
+                  暂无工单配置，去配置
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
           <Link

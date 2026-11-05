@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { WorkerRole, WorkerRuntime } from '../common/enums';
+import {
+  WorkerGithubPermission,
+  WorkerRole,
+  WorkerRuntime,
+} from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
 import { markdownCell, markdownLabel } from '../common/markdown-table';
 import { WorkerEnvironmentService } from './worker-environment.service';
@@ -39,16 +43,18 @@ export class WorkersMarkdownService {
       '',
       `共 ${workers.length} 个机器人${filter?.role ? `（角色：${filter.role}）` : ''}。`,
       '',
-      '| ID | 名称 | 归属 | 角色 | 运行时 | 实时状态 | 启用 | 执行器 | 模型 | 负责人 | 当前任务 |',
-      '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| ID | 名称 | 归属 | 角色 | 运行时 | GitHub 权限 | 实时状态 | 启用 | 执行器 | 模型 | 负责人 | 当前任务 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ];
     for (const worker of workers) {
       lines.push(
-        `| [${worker.id}](/api/workers/${worker.id}.md) | ${markdownCell(worker.name)} | ${this.workerKind(worker)} | ${worker.role} | ${worker.runtime} | ${worker.liveStatus} | ${worker.enabled ? '是' : '否'} | ${worker.executorId ?? '-'} | ${markdownCell(worker.modelId)} | ${markdownCell(worker.ownerName)} | ${markdownCell(this.activeTaskLabel(worker))} |`,
+        `| [${worker.id}](/api/workers/${worker.id}.md) | ${markdownCell(worker.name)} | ${this.workerKind(worker)} | ${worker.role} | ${worker.runtime} | ${this.githubPermissionLabel(worker.githubPermission)} | ${worker.liveStatus} | ${worker.enabled ? '是' : '否'} | ${worker.executorId ?? '-'} | ${markdownCell(worker.modelId)} | ${markdownCell(worker.ownerName)} | ${markdownCell(this.activeTaskLabel(worker))} |`,
       );
     }
     if (workers.length === 0) {
-      lines.push('| - | （暂无机器人） | - | - | - | - | - | - | - | - | - |');
+      lines.push(
+        '| - | （暂无机器人） | - | - | - | - | - | - | - | - | - | - |',
+      );
     }
     lines.push(
       '',
@@ -77,6 +83,7 @@ export class WorkersMarkdownService {
       `- 归属：${this.workerKind(worker)}`,
       `- 角色：${worker.role}`,
       `- 运行时：${worker.runtime}`,
+      `- GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}`,
       `- 启用：${worker.enabled ? '是' : '否'}`,
       `- 实时状态：${worker.liveStatus}`,
       `- 当前任务：${this.activeTaskLabel(worker)}`,
@@ -222,6 +229,7 @@ export class WorkersMarkdownService {
       `- 归属：${this.workerKind(worker)}`,
       `- 角色：${worker.role}`,
       `- 运行时：${worker.runtime}`,
+      `- GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}`,
       `- 启用：${worker.enabled ? '是' : '否'}`,
       `- 执行器：${worker.executorId ?? '—'}`,
       `- 供应商：${worker.providerId ?? '—'}`,
@@ -251,6 +259,14 @@ export class WorkersMarkdownService {
     if (worker.humanUserId) return '真人';
     if (worker.personalAgentUserId) return '个人 AGENT';
     return '自定义';
+  }
+
+  private githubPermissionLabel(
+    permission: WorkerView['githubPermission'],
+  ): string {
+    if (permission === WorkerGithubPermission.RELEASE) return '发布权限';
+    if (permission === WorkerGithubPermission.NONE) return '无权限';
+    return '开发权限';
   }
 
   private activeTaskLabel(worker: WorkerView): string {

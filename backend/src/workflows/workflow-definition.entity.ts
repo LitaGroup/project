@@ -2,7 +2,6 @@ import {
   Column,
   CreateDateColumn,
   Entity,
-  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -13,7 +12,6 @@ import type { WorkflowDefinitionJson } from './workflow.types';
  * 当前只允许使用系统内置定义，不开放网页新建/删除。
  */
 @Entity('workflow_definitions')
-@Index('IDX_workflow_definitions_category', ['category'], { unique: true })
 export class WorkflowDefinition {
   @PrimaryGeneratedColumn()
   id: number;

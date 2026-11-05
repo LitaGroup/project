@@ -198,7 +198,7 @@ function RequirementSection({
     <section className="min-w-0">
       <SectionTitle title={title} />
       <div
-        className={`rounded-[var(--radius-md)] px-3 py-2.5 text-sm text-foreground-emphasis ${
+        className={`rounded-none px-3 py-2.5 text-sm text-foreground-emphasis ${
           emphasized
             ? 'border border-border bg-background'
             : 'bg-background-muted'

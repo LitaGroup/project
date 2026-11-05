@@ -11,6 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import { In, Repository } from 'typeorm';
 import type { User } from '../auth/user.entity';
+import type { AuthedRequest } from '../auth/auth.guard';
 import { TaskStatus, TaskSubStatus, WorkerRole } from '../common/enums';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { unescapeMarkdown } from '../common/markdown-escape';
@@ -23,15 +24,24 @@ import {
   TICKET_TASK_TYPE,
 } from '../tasks/system-task-templates';
 import { TasksService } from '../tasks/tasks.service';
+import { TaskDocumentService } from '../tasks/task-document.service';
+import { TaskMessage } from '../tasks/task-message.entity';
 import { Worker } from '../workers/worker.entity';
 import { findTicketCategory, TICKET_CATEGORIES } from './ticket-categories';
 import { TicketConfig } from './ticket-config.entity';
 import { Ticket } from './ticket.entity';
+import {
+  renderInputValues,
+  TicketWorkflowRuntimeService,
+} from './ticket-workflow-runtime.service';
 
 export interface CreateTicketInput {
-  category: string;
+  category?: string;
   title?: string;
   description?: string;
+  /** 新工作流工单：指定工单配置并按起始节点字段提交 */
+  workflowDefinitionId?: number;
+  inputValues?: Record<string, unknown>;
 }
 
 export interface RouteTicketInput {
@@ -50,6 +60,8 @@ export interface TicketView extends Ticket {
   /** 推导状态：待分配/待接受/待反馈/待继续/待申请验收/待验收/处理中/已完成/已失败/已取消 */
   status: string;
   task: Task | null;
+  /** 工作流工单的运行视图；历史工单为空 */
+  workflow?: Awaited<ReturnType<TicketWorkflowRuntimeService['workflowView']>>;
 }
 
 export interface TicketConfigView {
@@ -65,6 +77,22 @@ export interface TicketConfigView {
 function markdownText(value: string | null | undefined): string {
   return value?.trim() || '（暂无）';
 }
+
+const NODE_KIND_LABEL: Record<string, string> = {
+  start: '起始',
+  operation: '操作',
+  approval: '审批',
+  acceptance: '验收',
+};
+
+const OUTCOME_LABEL: Record<string, string> = {
+  succeeded: '执行成功',
+  failed: '执行失败',
+  approved: '审批通过',
+  rejected: '审批驳回',
+};
+
+const TICKET_STATUS_FAILED = '已失败';
 
 function escapeCell(value: string): string {
   return value.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
@@ -98,12 +126,16 @@ export class TicketsService implements OnModuleInit {
     private readonly configs: Repository<TicketConfig>,
     @InjectRepository(Task)
     private readonly tasks: Repository<Task>,
+    @InjectRepository(TaskMessage)
+    private readonly taskMessages: Repository<TaskMessage>,
     @InjectRepository(TaskTemplate)
     private readonly templates: Repository<TaskTemplate>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
+    private readonly taskDocuments: TaskDocumentService,
+    private readonly workflowRuntime: TicketWorkflowRuntimeService,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -138,9 +170,14 @@ export class TicketsService implements OnModuleInit {
     category?: string;
     status?: string;
     q?: string;
+    workflowDefinitionId?: number;
   }): Promise<TicketView[]> {
     const qb = this.tickets.createQueryBuilder('t');
-    if (params.category) {
+    if (params.workflowDefinitionId) {
+      qb.andWhere('t.workflowDefinitionId = :workflowDefinitionId', {
+        workflowDefinitionId: params.workflowDefinitionId,
+      });
+    } else if (params.category) {
       const category = findTicketCategory(params.category);
       if (!category) return [];
       qb.andWhere('t.category = :category', { category: category.category });
@@ -155,9 +192,15 @@ export class TicketsService implements OnModuleInit {
       .orderBy('t.createdAt', 'DESC')
       .addOrderBy('t.id', 'DESC')
       .getMany();
-    const tasks = rows.length
+    const tasks = rows.some((row) => row.taskId)
       ? await this.tasks.find({
-          where: { id: In(rows.map((row) => row.taskId)) },
+          where: {
+            id: In(
+              rows
+                .map((row) => row.taskId)
+                .filter((id): id is number => Boolean(id)),
+            ),
+          },
         })
       : [];
     const taskById = new Map(tasks.map((task) => [task.id, task]));
@@ -176,27 +219,35 @@ export class TicketsService implements OnModuleInit {
       : [];
     const agentById = new Map(agents.map((agent) => [agent.id, agent]));
     const status = params.status?.trim();
-    return rows
-      .map((ticket) => {
-        const task = taskById.get(ticket.taskId) ?? null;
+    const views = await Promise.all(
+      rows.map(async (ticket) => {
+        const task = ticket.taskId
+          ? (taskById.get(ticket.taskId) ?? null)
+          : null;
         const agent = agentById.get(ticket.assigneeId);
         const assigneeName =
           agent?.personalAgentUserId && agent.ownerName
             ? agent.ownerName
             : ticket.assigneeName;
+        const workflow = ticket.workflowDefinitionId
+          ? await this.workflowRuntime.workflowView(ticket)
+          : null;
+        const workflowStatus = workflow?.status;
         return {
           ...ticket,
           assigneeName,
           task,
-          status: deriveTicketStatus(task),
+          status: workflowStatus ?? deriveTicketStatus(task),
+          workflow,
         };
-      })
-      .filter((ticket) => !status || ticket.status === status);
+      }),
+    );
+    return views.filter((ticket) => !status || ticket.status === status);
   }
 
   async findOne(id: number): Promise<
     TicketView & {
-      config: TicketConfigView;
+      config: TicketConfigView | null;
       allowedTemplates: Array<{
         id: number;
         name: string;
@@ -207,10 +258,16 @@ export class TicketsService implements OnModuleInit {
     }
   > {
     const ticket = await this.mustFind(id);
-    const [task, config] = await Promise.all([
-      this.tasks.findOne({ where: { id: ticket.taskId } }),
-      this.configView(ticket.category),
-    ]);
+    const workflow = ticket.workflowDefinitionId
+      ? await this.workflowRuntime.workflowView(ticket)
+      : null;
+    const task = ticket.taskId
+      ? await this.tasks.findOne({ where: { id: ticket.taskId } })
+      : null;
+    // 工作流工单不再绑定旧的类型调度配置；历史工单保留兼容视图
+    const config = ticket.workflowDefinitionId
+      ? null
+      : await this.configView(ticket.category);
     // 历史工单的处理机器人若是个人 AGENT，对外统一显示其主人姓名
     const assignee = await this.workers.findOne({
       where: { id: ticket.assigneeId },
@@ -220,16 +277,19 @@ export class TicketsService implements OnModuleInit {
       assignee?.personalAgentUserId && assignee.ownerName
         ? assignee.ownerName
         : ticket.assigneeName;
-    const allowedTemplates = await this.templates.find({
-      where: { id: In(config.allowedTemplateIds) },
-    });
+    const allowedTemplates = config
+      ? await this.templates.find({
+          where: { id: In(config.allowedTemplateIds) },
+        })
+      : [];
     return {
       ...ticket,
       assigneeName,
       task,
-      status: deriveTicketStatus(task),
+      status: workflow?.status ?? deriveTicketStatus(task),
+      workflow,
       config,
-      allowedTemplates: config.allowedTemplateIds
+      allowedTemplates: (config?.allowedTemplateIds ?? [])
         .map((templateId) =>
           allowedTemplates.find((template) => template.id === templateId),
         )
@@ -245,6 +305,23 @@ export class TicketsService implements OnModuleInit {
   }
 
   async create(input: CreateTicketInput, user: User): Promise<TicketView> {
+    if (input.workflowDefinitionId) {
+      const ticket = await this.workflowRuntime.create(
+        {
+          workflowDefinitionId: input.workflowDefinitionId,
+          title: input.title,
+          inputValues: input.inputValues ?? {},
+        },
+        user,
+      );
+      const workflow = await this.workflowRuntime.workflowView(ticket);
+      return {
+        ...ticket,
+        task: null,
+        status: ticket.workflowStatus ?? '处理中',
+        workflow,
+      };
+    }
     const category = findTicketCategory(input.category);
     if (!category) throw new BadRequestException('工单类型不存在');
     const config = await this.configs.findOne({
@@ -372,6 +449,28 @@ export class TicketsService implements OnModuleInit {
         this.logger.warn(`工单 ${saved.code} 创建事件写入失败：${e.message}`),
       );
     return { ...saved, task, status: deriveTicketStatus(task) };
+  }
+
+  /** 工作流工单验收（通过/驳回）；历史工单由运行时拒绝 */
+  async acceptWorkflow(
+    id: number,
+    outcome: 'approved' | 'rejected',
+    req: AuthedRequest,
+    remark?: string,
+  ): Promise<TicketView> {
+    const ticket = await this.workflowRuntime.acceptNode(
+      id,
+      outcome,
+      { user: req.user ?? null, worker: req.worker ?? null },
+      remark,
+    );
+    const workflow = await this.workflowRuntime.workflowView(ticket);
+    return {
+      ...ticket,
+      task: null,
+      status: ticket.workflowStatus ?? '处理中',
+      workflow,
+    };
   }
 
   async listConfigs(): Promise<TicketConfigView[]> {
@@ -662,6 +761,282 @@ export class TicketsService implements OnModuleInit {
       '',
     );
     return lines.join('\n');
+  }
+
+  /**
+   * AI 读取工单完整上下文：工单信息、需求正文、工单输入、流程进度、
+   * 每一步节点任务的输入/输出与用户补充输入。
+   */
+  async ticketMarkdown(id: number): Promise<string> {
+    const ticket = await this.mustFind(id);
+    const workflow = ticket.workflowDefinitionId
+      ? await this.workflowRuntime.workflowView(ticket)
+      : null;
+    const lines: string[] = [
+      mdFrontmatter({
+        update: ticket.updatedAt,
+        title: `${ticket.code} ${ticket.title}`,
+        filename: ticket.code,
+      }),
+      `# ${ticket.code} ${ticket.title}`,
+      '',
+      '## 工单信息',
+      '',
+      `- 编号：${ticket.code}`,
+      `- 标题：${ticket.title}`,
+      `- 类型：${ticket.category}`,
+    ];
+    if (workflow) {
+      lines.push(
+        `- 工单配置：${workflow.definitionName} v${workflow.version}`,
+        `- 状态：${workflow.status}`,
+        `- 当前节点：${
+          workflow.currentNodeName
+            ? `${workflow.currentNodeName}（key=${workflow.currentNodeKey}）`
+            : '流程已结束'
+        }`,
+        `- 发起机器人：${ticket.initiatorWorkerName ?? ticket.createdByName}`,
+      );
+    } else {
+      lines.push(`- 状态：${ticket.workflowStatus ?? '-'}`);
+    }
+    lines.push(
+      `- 创建人：${ticket.createdByName}`,
+      `- 创建时间：${beijingTime(ticket.createdAt)}`,
+      `- 更新时间：${beijingTime(ticket.updatedAt)}`,
+      '',
+      '## 需求正文',
+      '',
+      markdownText(ticket.description),
+      '',
+    );
+
+    if (!workflow) {
+      lines.push(
+        '## 关联任务',
+        '',
+        ticket.taskId
+          ? `历史工单按普通任务流程处理，任务上下文请读取 \`GET ${this.apiUrl}/tasks/${ticket.taskId}.md\`。`
+          : '工单没有关联任务。',
+        '',
+      );
+      return lines.join('\n');
+    }
+
+    const startFields =
+      workflow.nodes.find((node) => node.kind === 'start')?.inputFields ?? [];
+    lines.push(
+      '## 工单输入（起始节点）',
+      '',
+      renderInputValues(startFields, workflow.inputValues),
+      '',
+      '## 流程进度',
+      '',
+      '| 顺序 | 节点 | 类型 | 处理机器人 | 状态 | 结果 | 任务 | 开始时间 | 结束时间 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    );
+    const nodeTaskIds = workflow.runs
+      .map((run) => run.taskId)
+      .filter((taskId): taskId is number => Boolean(taskId));
+    const nodeTasks = nodeTaskIds.length
+      ? await this.tasks.find({ where: { id: In(nodeTaskIds) } })
+      : [];
+    const taskById = new Map(nodeTasks.map((task) => [task.id, task]));
+    workflow.runs.forEach((run, index) => {
+      const task = run.taskId ? taskById.get(run.taskId) : null;
+      lines.push(
+        `| ${index + 1} | ${escapeCell(run.nodeName)} | ${
+          NODE_KIND_LABEL[run.nodeKind] ?? run.nodeKind
+        } | ${escapeCell(run.agentName ?? '-')} | ${run.status} | ${
+          run.outcome ? (OUTCOME_LABEL[run.outcome] ?? run.outcome) : '-'
+        } | ${task ? escapeCell(task.code) : '-'} | ${
+          run.startedAt ? beijingTime(run.startedAt) : '-'
+        } | ${run.finishedAt ? beijingTime(run.finishedAt) : '-'} |`,
+      );
+    });
+    lines.push('');
+
+    // 每一步节点任务的输入与输出（含用户补充输入）
+    lines.push('## 节点输入与输出', '');
+    for (const [index, run] of workflow.runs.entries()) {
+      const task = run.taskId ? taskById.get(run.taskId) : null;
+      lines.push(
+        `### ${index + 1}. ${run.nodeName}（第 ${run.attempt} 次 · ${
+          NODE_KIND_LABEL[run.nodeKind] ?? run.nodeKind
+        }）`,
+        '',
+        `- 运行状态：${run.status}${
+          run.outcome
+            ? `（结果：${OUTCOME_LABEL[run.outcome] ?? run.outcome}）`
+            : ''
+        }`,
+        `- 处理机器人：${run.agentName ?? '-'}`,
+        task
+          ? `- 节点任务：${task.code}（${task.status}-${task.subStatus}）`
+          : '- 节点任务：无（自动完成）',
+        '',
+      );
+      if (!task) continue;
+      lines.push(
+        '#### 节点输入',
+        '',
+        '**需求内容**',
+        '',
+        markdownText(task.content),
+        '',
+        '**交付要求**',
+        '',
+        markdownText(task.outputSpec),
+        '',
+      );
+      if (task.workPlan?.trim()) {
+        lines.push('**工作计划**', '', task.workPlan, '');
+      }
+      const supplements = await this.taskMessages.find({
+        where: { taskId: task.id, role: 'user', kind: 'message' },
+        order: { id: 'ASC' },
+      });
+      lines.push('#### 用户补充输入', '');
+      if (supplements.length === 0) {
+        lines.push('（暂无用户补充）', '');
+      } else {
+        for (const message of supplements) {
+          lines.push(
+            `- ${beijingTime(message.createdAt)} ${message.sender?.name ?? '发起人'}：${message.content.replace(/\s*\n\s*/g, ' ')}`,
+          );
+        }
+        lines.push('');
+      }
+      const pendingQuestions = await this.taskMessages.find({
+        where: { taskId: task.id, kind: 'question' },
+        order: { id: 'ASC' },
+      });
+      const unanswered = pendingQuestions.filter(
+        (message) => message.question?.state === 'pending',
+      );
+      if (unanswered.length > 0) {
+        lines.push('#### 待回答问题', '');
+        for (const message of unanswered) {
+          for (const item of message.question?.questions ?? []) {
+            lines.push(`- ${item.question}`);
+          }
+        }
+        lines.push('');
+      }
+      lines.push('#### 节点输出', '');
+      if (task.status === TaskStatus.FINISHED && task.failureReason?.trim()) {
+        lines.push('**失败原因**', '', task.failureReason, '');
+      }
+      const handoff = await this.taskDocuments.readHandoff(task);
+      if (handoff.exists && handoff.content.trim()) {
+        lines.push(
+          `**交付文档**（${handoff.path}，v${handoff.version}）`,
+          '',
+          handoff.content,
+          '',
+        );
+      } else if (!task.failureReason?.trim()) {
+        lines.push('（暂无节点输出）', '');
+      }
+    }
+
+    // 当前节点的 AI 操作指引
+    const currentNode = workflow.nodes.find(
+      (node) => node.key === workflow.currentNodeKey,
+    );
+    const currentRun = workflow.currentNodeKey
+      ? [...workflow.runs]
+          .filter((run) => run.nodeKey === workflow.currentNodeKey)
+          .reduce<(typeof workflow.runs)[number] | null>(
+            (latest, run) => (!latest || run.id > latest.id ? run : latest),
+            null,
+          )
+      : null;
+    const currentTask =
+      currentRun?.taskId != null
+        ? (taskById.get(currentRun.taskId) ?? null)
+        : null;
+    lines.push('## AI 操作', '');
+    if (
+      currentNode &&
+      (currentNode.kind === 'operation' || currentNode.kind === 'approval') &&
+      currentTask
+    ) {
+      lines.push(
+        '### 拒绝当前节点',
+        '',
+        `当前工单处于节点「${currentNode.name}」（key=${currentNode.key}）。若确认需求不符合要求、当前节点无法完成，调用以下接口拒绝（当前节点任务将置为失败，工作流按「failed/rejected」流转）：`,
+        '',
+        '```bash',
+        'TOKEN=$(cat .opencode/agent-token)',
+        `curl -sS -X POST '${this.apiUrl}/tickets/${ticket.id}/reject.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN" \\',
+        '  -H "Content-Type: application/json" \\',
+        `  -d '{"nodeKey":"${currentNode.key}","reason":"拒绝原因（必填，说明为何不符合要求）"}'`,
+        '```',
+        '',
+        '校验规则：调用者必须是当前节点的处理机器人（X-Worker-Token），`nodeKey` 必须与当前节点一致。',
+        '',
+        '### 向需求方提问',
+        '',
+        '缺少信息时优先提问而不是拒绝：',
+        '',
+        '```bash',
+        `curl -sS -X POST '${this.apiUrl}/tasks/${currentTask.id}/questions/ask.md' \\`,
+        '  -H "X-Worker-Token: $TOKEN" \\',
+        '  -H "Content-Type: application/json" \\',
+        `  -d '{"questions":[{"title":"问题标题","custom":true}]}'`,
+        '```',
+        '',
+      );
+    }
+    lines.push(
+      '### 其它',
+      '',
+      `- 重新读取本工单：\`GET ${this.apiUrl}/tickets/${ticket.id}.md\``,
+      currentTask
+        ? `- 读取当前节点交付文档：\`GET ${this.apiUrl}/tasks/${currentTask.id}/handoff.md\``
+        : '',
+      '',
+    );
+    return lines.join('\n');
+  }
+
+  /** 机器人拒绝当前节点（工作流工单）；返回操作结果 Markdown */
+  async rejectMarkdown(
+    id: number,
+    worker: Worker,
+    input: { nodeKey?: string; reason?: string },
+  ): Promise<string> {
+    const { ticket, node, task, outcome } =
+      await this.workflowRuntime.rejectNodeByWorker(
+        id,
+        worker,
+        String(input?.nodeKey ?? ''),
+        String(input?.reason ?? ''),
+      );
+    const flowResult =
+      ticket.workflowStatus === TICKET_STATUS_FAILED
+        ? '工单已失败（该节点没有可用流转）'
+        : ticket.currentNodeName
+          ? `流程推进到下一节点「${ticket.currentNodeName}」（key=${ticket.currentNodeKey}）`
+          : `工单${ticket.workflowStatus ?? '已结束'}`;
+    return [
+      mdFrontmatter({
+        update: ticket.updatedAt,
+        title: `${ticket.code} 节点已拒绝`,
+      }),
+      '# 工单节点已拒绝',
+      '',
+      `- 工单：${ticket.code} ${ticket.title}（状态：${ticket.workflowStatus ?? '-'}）`,
+      `- 拒绝节点：「${node.name}」（key=${node.key} · ${NODE_KIND_LABEL[node.kind] ?? node.kind}）`,
+      `- 节点任务：${task.code} → 已结束-失败`,
+      `- 拒绝原因：${task.failureReason ?? '-'}`,
+      `- 流转结果：${flowResult}（节点结果：${OUTCOME_LABEL[outcome] ?? outcome}）`,
+      '',
+      '请结束本轮，不要继续执行原任务或申请验收；工作流已按拒绝结果自动推进，若回到当前节点会收到新的任务邀约。',
+      '',
+    ].join('\n');
   }
 
   async routeMarkdown(

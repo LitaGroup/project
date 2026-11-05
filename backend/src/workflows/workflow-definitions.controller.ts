@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -10,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { AuthedRequest } from '../auth/auth.guard';
 import {
+  CreateWorkflowDefinitionInput,
   SaveWorkflowDefinitionInput,
   WorkflowActor,
   WorkflowDefinitionsService,
@@ -23,13 +25,19 @@ class SaveWorkflowDefinitionDto implements SaveWorkflowDefinitionInput {
   definition: WorkflowDefinitionJson;
 }
 
+class CreateWorkflowDefinitionDto implements CreateWorkflowDefinitionInput {
+  name: string;
+  description?: string | null;
+  definition?: WorkflowDefinitionJson;
+}
+
 function resolveActor(req: AuthedRequest): WorkflowActor {
   if (req.user) return { id: req.user.id, name: req.user.name };
   if (req.worker) return { id: null, name: req.worker.name };
   return { id: null, name: '公共 Agent' };
 }
 
-/** 管理端「工单定义」：系统内置工单类型的工作流配置与发布 */
+/** 管理端「工单配置」：工单工作流配置、草稿与发布版本 */
 @Controller('ticket-workflow-definitions')
 export class WorkflowDefinitionsController {
   constructor(private readonly definitions: WorkflowDefinitionsService) {}
@@ -37,6 +45,11 @@ export class WorkflowDefinitionsController {
   @Get()
   findAll() {
     return this.definitions.findAll();
+  }
+
+  @Post()
+  create(@Body() dto: CreateWorkflowDefinitionDto, @Req() req: AuthedRequest) {
+    return this.definitions.create(dto, resolveActor(req));
   }
 
   @Get(':id')
@@ -59,5 +72,10 @@ export class WorkflowDefinitionsController {
     @Req() req: AuthedRequest,
   ) {
     return this.definitions.publish(id, dto, resolveActor(req));
+  }
+
+  @Delete(':id')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.definitions.remove(id);
   }
 }

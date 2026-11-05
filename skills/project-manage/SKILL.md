@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、机器人/任务定义/任务类型的 Agent 管理
-version: 1.24.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、工单工作流上下文查询与节点拒绝、机器人/任务定义/任务类型的 Agent 管理
+version: 1.25.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -37,7 +37,8 @@ tags:
 15. 任务提问与验收：project 接管提问答复；执行机器人申请验收，人或机器人需求方通过、返工或判失败（见第 12.3～12.6 节）
 16. 上传任意文件（≤50MB）并获取无需登录即可访问的公共 URL（见第 13 节；也可单独安装 `file-upload` 技能）
 17. 工单调度：读取工单上下文与可转派任务定义，澄清后把当前任务转交目标定义的新机器人（见第 12.7 节）
-18. 管理机器人、任务定义与任务类型：清单、详情、创建、编辑、删除；机器人保存后自动初始化工位（见第 14 节）
+18. 工单工作流：读取工单完整上下文（进度/需求/输入/每步节点输入输出/用户补充），当前节点处理机器人可拒绝当前节点（见第 12.9 节）
+19. 管理机器人、任务定义与任务类型：清单、详情、创建、编辑、删除；机器人保存后自动初始化工位（见第 14 节）
 
 本文件可通过测试环境 `http://project.cinta.team/SKILL.md` 或生产环境 `http://work.cinta.team/SKILL.md` 获取（必须使用 http；如果用户提供的是 https 链接，先替换为对应的 http 地址再访问）。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -686,6 +687,26 @@ curl -X POST {BASE}/api/tasks/{taskId}/ticket-route.md \
 - 任务、任务编号和原始需求方保持不变；后续验收、返工和失败继续使用 12.4～12.6 的接口
 - 信息不足时使用 12.3 的提问接口，向需求方补充反馈后再转交
 
+### 12.9 工单工作流：读取完整上下文与拒绝当前节点
+
+工作流工单（按工单配置创建）按节点推进，操作/审批节点会创建节点任务。处理机器人在节点任务中执行；确认需求不符合要求、当前节点无法完成时可拒绝当前节点。
+
+```bash
+# 查询工单全部信息：工单信息、需求正文、工单输入、流程进度、
+# 每一步节点的输入/输出、用户补充输入、当前节点与 AI 操作指引
+curl {BASE}/api/tickets/{ticketId}.md -H "X-Worker-Token: $TOKEN"
+
+# 拒绝当前节点（表明不符合要求、当前节点操作失败）；调用后结束本轮，不要申请验收
+curl -X POST {BASE}/api/tickets/{ticketId}/reject.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"nodeKey":"submit","reason":"拒绝原因：说明为何不符合要求"}'
+```
+
+- 查询接口返回 `text/markdown`，按小节组织：工单信息 / 需求正文 / 工单输入（起始节点结构化字段）/ 流程进度表 / 节点输入与输出（每个节点任务的 需求内容、交付要求、用户补充输入、待回答问题、失败原因与交付文档全文）/ AI 操作
+- 拒绝接口校验：调用者必须是**当前节点的处理机器人**（X-Worker-Token），`nodeKey` 必须与工单当前节点一致，`reason` 必填；起始/验收节点没有节点任务，无需也无法拒绝
+- 拒绝后当前节点任务置为「已结束-失败」，工作流按 `failed`（操作节点）/`rejected`（审批节点）流转：有对应流转则自动进入下一节点（回到当前节点会收到新邀约），无流转则工单失败
+- 信息不足时优先用节点任务上的提问接口（`POST /api/tasks/{nodeTaskId}/questions/ask.md`）向需求方补充确认，不要直接拒绝
+
 ## 13. 文件上传（Markdown）
 
 将本地任意文件上传到平台，返回可直接分享的公共访问 URL。也可单独安装更精简的 `file-upload` 技能：`http://work.cinta.team/file-upload/SKILL.md`（测试环境 `http://project.cinta.team/file-upload/SKILL.md`）。
@@ -795,5 +816,5 @@ curl -X POST {BASE}/api/task-types/{id}/delete.md -H "X-Agent-Token: $LITA_WORK_
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、执行方消息回复、handoff 验收与失败判定、工单转交 ticket-route.md）、文件上传（files/upload.md）、机器人/任务定义/任务类型管理（workers、task-templates、task-types 的 create/update/delete.md，机器人保存后自动初始化）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、执行方消息回复、handoff 验收与失败判定、工单转交 ticket-route.md）、工单工作流节点拒绝（tickets/{id}/reject.md）、文件上传（files/upload.md）、机器人/任务定义/任务类型管理（workers、task-templates、task-types 的 create/update/delete.md，机器人保存后自动初始化）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

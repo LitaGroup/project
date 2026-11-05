@@ -582,31 +582,33 @@ export function TaskDetailView({
           </p>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div
-            role="tablist"
-            aria-label="任务详情正文"
-            className="flex w-fit max-w-full shrink-0 gap-1 overflow-x-auto rounded-[var(--radius-md)] bg-background-muted p-1"
-          >
-            {TASK_CONTENT_TABS.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={contentTab === key}
-                onClick={() => setContentTab(key)}
-                className={`shrink-0 rounded-[var(--radius-sm)] px-3 py-1 text-sm transition-colors ${
-                  contentTab === key
-                    ? 'bg-background font-medium text-foreground-intense shadow-sm'
-                    : 'text-foreground-muted hover:text-foreground-intense'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+          <div className="shrink-0 px-3 py-2">
+            <div
+              role="tablist"
+              aria-label="任务详情正文"
+              className="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--radius-lg)] bg-background-muted p-1"
+            >
+              {TASK_CONTENT_TABS.map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={contentTab === key}
+                  onClick={() => setContentTab(key)}
+                  className={`shrink-0 rounded-[var(--radius-md)] px-3 py-1.5 text-sm transition-colors ${
+                    contentTab === key
+                      ? 'bg-background font-medium text-foreground-intense shadow-sm'
+                      : 'text-foreground-muted hover:bg-background/60 hover:text-foreground-intense'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col pt-3">
+          <div className="flex min-h-0 flex-1 flex-col p-3">
             {contentTab === 'handoff' && (
               <TaskMarkdownDocumentView
                 title="交付文档"
@@ -840,30 +842,24 @@ function TaskDetailSkeleton({
           <Skeleton className="h-4 w-[28rem] max-w-full" />
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex w-fit gap-1 rounded-[var(--radius-md)] bg-background-muted p-1">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+          <div className="flex w-full shrink-0 gap-1 overflow-x-auto border-b border-border bg-background-muted px-2 py-1.5">
             {TASK_CONTENT_TABS.map(([key]) => (
               <Skeleton
                 key={key}
-                className="h-8 w-14 rounded-[var(--radius-sm)]"
+                className="h-7 w-14 shrink-0 rounded-[var(--radius-sm)]"
               />
             ))}
           </div>
-          <section className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-5 w-24 rounded-full" />
-            </div>
-            <div className="flex flex-1 flex-col gap-3 px-4 py-4">
-              <Skeleton className="h-6 w-2/3" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-11/12" />
-              <Skeleton className="h-3 w-4/5" />
-              <Skeleton className="mt-3 h-6 w-1/2" />
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-10/12" />
-            </div>
-          </section>
+          <div className="flex flex-1 flex-col gap-3 p-4">
+            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-11/12" />
+            <Skeleton className="h-3 w-4/5" />
+            <Skeleton className="mt-3 h-6 w-1/2" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-10/12" />
+          </div>
         </div>
       </div>
     </DetailPageLayout>

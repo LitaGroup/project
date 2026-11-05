@@ -32,11 +32,14 @@ import {
 } from '@appica/ui-react/dialog'
 import {
   api,
+  WORKER_GITHUB_PERMISSIONS,
+  WORKER_GITHUB_PERMISSION_LABELS,
   type Executor,
   type PlatformUser,
   type Worker,
   type WorkerDebugModelCatalog,
   type WorkerDebugModelSelection,
+  type WorkerGithubPermission,
   type WorkerInitializeSnapshot,
   type WorkerInitializeStatus,
   type WorkerOptimizeSnapshot,
@@ -112,6 +115,8 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const [standardPickerOpen, setStandardPickerOpen] = useState(false)
   const [ownerUserId, setOwnerUserId] = useState('')
   const [enabled, setEnabled] = useState(true)
+  const [githubPermission, setGithubPermission] =
+    useState<WorkerGithubPermission>('develop')
   const [error, setError] = useState<string | null>(null)
   /** 配置已落库但工作环境初始化失败时的提示（重试保存不会再重复创建） */
   const [initError, setInitError] = useState<string | null>(null)
@@ -249,6 +254,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
         )
         setOwnerUserId(w.ownerUserId ? String(w.ownerUserId) : '')
         setEnabled(w.enabled)
+        setGithubPermission(w.githubPermission ?? 'develop')
       })
       .catch((e: Error) => setLoadError(e.message))
       .finally(() => {
@@ -420,6 +426,8 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       standards,
       ownerUserId: ownerUserId ? Number(ownerUserId) : null,
       enabled,
+      // 真人机器人与个人 AGENT 不提交该字段；后端固定为 none
+      ...(personal || worker?.runtime === 'human' ? {} : { githubPermission }),
     }
     let stage: 'save' | 'init' = 'save'
     setSaving(true)
@@ -656,7 +664,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
 
       {/* 左右两栏：左侧机器人定义 AGENTS.md（撑满剩余高度），右侧基础信息（独立滚动） */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <Card className="min-h-64 min-w-0 flex-1">
+        <Card className="min-h-64 min-w-0 flex-1 rounded-none">
           <CardHeader className="flex-none">
             <CardTitle>机器人定义 AGENTS.md</CardTitle>
             <CardDescription>
@@ -840,6 +848,31 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
                       ))}
                     </SelectContent>
                   </Select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  GitHub 权限
+                  <Select
+                    value={githubPermission}
+                    onValueChange={(v) =>
+                      setGithubPermission(v as WorkerGithubPermission)
+                    }
+                    items={WORKER_GITHUB_PERMISSION_LABELS}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WORKER_GITHUB_PERMISSIONS.map((permission) => (
+                        <SelectItem key={permission} value={permission}>
+                          {WORKER_GITHUB_PERMISSION_LABELS[permission]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-foreground-muted">
+                    开发权限可拉代码、push 普通分支和提 PR；发布权限额外允许写
+                    main/stable、审批与合并 PR。保存后会重新初始化工位说明。
+                  </span>
                 </label>
               </>
             )}

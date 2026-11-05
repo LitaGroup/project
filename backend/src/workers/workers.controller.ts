@@ -18,6 +18,7 @@ import { Observable } from 'rxjs';
 import type { AuthedRequest } from '../auth/auth.guard';
 import {
   UserRole,
+  WorkerGithubPermission,
   WorkerLiveStatus,
   WorkerRole,
   WorkerRuntime,
@@ -59,6 +60,7 @@ class CreateWorkerDto implements CreateWorkerInput {
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
   enabled?: boolean;
+  githubPermission?: WorkerGithubPermission;
 }
 
 class UpdateWorkerDto implements UpdateWorkerInput {
@@ -77,6 +79,7 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
   enabled?: boolean;
+  githubPermission?: WorkerGithubPermission;
 }
 
 class OptimizePromptDto implements OptimizePromptInput {

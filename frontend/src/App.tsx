@@ -18,6 +18,7 @@ import { ResourcesPage } from './pages/ResourcesPage'
 import { MilestonesPage } from './pages/MilestonesPage'
 import { CommitsPage } from './pages/CommitsPage'
 import { ReposPage } from './pages/ReposPage'
+import { GithubAccessPage } from './pages/GithubAccessPage'
 import { ScriptLibraryPage } from './pages/ScriptLibraryPage'
 import { ScriptLibraryDetailPage } from './pages/ScriptLibraryDetailPage'
 import { SchedulesPage } from './pages/SchedulesPage'
@@ -48,7 +49,7 @@ import { UserListPage } from './pages/UserListPage'
 import { TicketsPage } from './pages/TicketsPage'
 import { TicketCreatePage } from './pages/TicketCreatePage'
 import { TicketDetailPage } from './pages/TicketDetailPage'
-import { TicketConfigPage } from './pages/TicketConfigPage'
+import { TicketHomePage } from './pages/TicketHomePage'
 import { TicketDefinitionsPage } from './pages/TicketDefinitionsPage'
 import { TicketDefinitionEditPage } from './pages/TicketDefinitionEditPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
@@ -60,6 +61,14 @@ function RequireAuth() {
   if (loading) return null
   if (!user) return <Navigate to="/login" replace />
   return <Outlet />
+}
+
+/** 工单列表按 URL 中的工单配置 ID 加载 */
+function TicketsPageWithDefinition() {
+  const { definitionId } = useParams<{ definitionId: string }>()
+  const id = Number(definitionId)
+  if (!Number.isInteger(id) || id <= 0) return <Navigate to="/tickets" replace />
+  return <TicketsPage definitionId={id} />
 }
 
 /** 旧「调度器」路由兼容：调度器已合并进机器人 */
@@ -232,32 +241,28 @@ function App() {
           />
           <Route path="/admin/executors" element={<ExecutorsPage />} />
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
+          <Route path="/tickets" element={<TicketHomePage />} />
           <Route
-            path="/tickets/solution"
-            element={<TicketsPage category="方案工单" />}
+            path="/tickets/wf/:definitionId"
+            element={<TicketsPageWithDefinition />}
           />
           <Route
-            path="/tickets/solution"
-            element={<TicketsPage category="方案工单" />}
+            path="/tickets/wf/:definitionId/new"
+            element={<TicketCreatePage />}
           />
           <Route
             path="/tickets/tech"
-            element={<TicketsPage category="技术工单" />}
-          />
-          <Route
-            path="/tickets/tech/new"
-            element={<TicketCreatePage category="技术工单" />}
+            element={<Navigate to="/tickets" replace />}
           />
           <Route
             path="/tickets/data"
-            element={<TicketsPage category="数据工单" />}
+            element={<Navigate to="/tickets" replace />}
           />
           <Route
-            path="/tickets/data/new"
-            element={<TicketCreatePage category="数据工单" />}
+            path="/tickets/solution"
+            element={<Navigate to="/tickets" replace />}
           />
           <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
-          <Route path="/tickets" element={<Navigate to="/tickets/tech" replace />} />
           <Route path="/apps" element={<AppsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -267,13 +272,21 @@ function App() {
             element={<ProfileTaskDefinitionsPage />}
           />
           <Route path="/admin/users" element={<UserListPage />} />
-          <Route path="/admin/ticket-config" element={<TicketConfigPage />} />
-          <Route path="/admin/ticket-definitions" element={<TicketDefinitionsPage />} />
+          <Route path="/admin/ticket-config" element={<TicketDefinitionsPage />} />
           <Route
-            path="/admin/ticket-definitions/:definitionId"
+            path="/admin/ticket-config/:definitionId"
             element={<TicketDefinitionEditPage />}
           />
+          <Route
+            path="/admin/ticket-definitions"
+            element={<Navigate to="/admin/ticket-config" replace />}
+          />
+          <Route
+            path="/admin/ticket-definitions/:definitionId"
+            element={<Navigate to="/admin/ticket-config" replace />}
+          />
           <Route path="/admin/repos" element={<ReposPage />} />
+          <Route path="/admin/github-access" element={<GithubAccessPage />} />
           </Route>
         </Route>
       </Routes>

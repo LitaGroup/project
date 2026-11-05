@@ -7,6 +7,8 @@ import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Worker } from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
+import { GithubPermissionCredential } from '../github-gateway/github-permission-credential.entity';
+import { GithubPermissionCredentialService } from './github-permission-credential.service';
 import { SystemWorkersService } from './system-workers.service';
 import { WorkerAiService } from './worker-ai.service';
 import { WorkerEnvironmentService } from './worker-environment.service';
@@ -36,6 +38,7 @@ import { WorkersService } from './workers.service';
       User,
       Executor,
       WorkerDebugSession,
+      GithubPermissionCredential,
     ]),
     ExecutorsModule,
   ],
@@ -49,6 +52,7 @@ import { WorkersService } from './workers.service';
   providers: [
     WorkersService,
     WorkersMarkdownService,
+    GithubPermissionCredentialService,
     SystemWorkersService,
     WorkerAiService,
     WorkerOptimizeService,
@@ -59,6 +63,10 @@ import { WorkersService } from './workers.service';
     WorkerChatService,
     PersonalAgentsService,
   ],
-  exports: [WorkersService, PersonalAgentsService],
+  exports: [
+    WorkersService,
+    PersonalAgentsService,
+    GithubPermissionCredentialService,
+  ],
 })
 export class WorkersModule {}

@@ -936,6 +936,18 @@ export type WorkerRuntime = (typeof WORKER_RUNTIMES)[number]
 export const WORKER_LIVE_STATUSES = ['空闲中', '工作中', '等待中', '验收中'] as const
 export type WorkerLiveStatus = (typeof WORKER_LIVE_STATUSES)[number]
 
+/** 机器人 GitHub 权限：可配置档位为 develop（开发权限，默认）/ release（发布权限）；none 为真人/个人 AGENT 内部兜底，不作为配置项 */
+export const WORKER_GITHUB_PERMISSIONS = ['develop', 'release'] as const
+export type WorkerGithubPermission =
+  | 'none'
+  | (typeof WORKER_GITHUB_PERMISSIONS)[number]
+
+export const WORKER_GITHUB_PERMISSION_LABELS: Record<WorkerGithubPermission, string> = {
+  none: '无权限',
+  develop: '开发权限',
+  release: '发布权限',
+}
+
 /** 任务类型名称（动态字典，来源 /api/task-types） */
 export type TaskType = string
 
@@ -1082,6 +1094,8 @@ export interface Worker {
   humanUserName: string | null
   /** 个人 AI AGENT 的归属用户；工作台「我的 AGENT」使用该机器人 */
   personalAgentUserId: number | null
+  /** GitHub 权限：none（内部兜底）/ develop（开发权限）/ release（发布权限） */
+  githubPermission: WorkerGithubPermission
   enabled: boolean
   /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
@@ -1420,10 +1434,10 @@ export const TICKET_CATEGORY_DEFINITIONS = [
   },
 ] as const
 
-export type TicketCategory = (typeof TICKET_CATEGORY_DEFINITIONS)[number]['category']
+export type TicketCategory = string
 export type TicketAssigneeType = 'user' | 'worker'
 
-/** 工单推导状态：工作流子状态 + 已完成/已失败/已取消 */
+/** 工单状态：工作流状态优先，历史工单沿用任务推导状态 */
 export type TicketStatus =
   | '待分配'
   | '待接受'
@@ -1432,14 +1446,61 @@ export type TicketStatus =
   | '待申请验收'
   | '待验收'
   | '处理中'
+  | '待人工验收'
   | '已完成'
   | '已失败'
   | '已取消'
 
+export interface TicketWorkflowInputField {
+  key: string
+  label: string
+  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'file'
+  required: boolean
+  options?: string[]
+  placeholder?: string | null
+  defaultValue?: string | number | null
+}
+
+export interface TicketWorkflowRun {
+  id: number
+  ticketId: number
+  nodeKey: string
+  nodeName: string
+  nodeKind: 'start' | 'operation' | 'approval' | 'acceptance'
+  attempt: number
+  taskTemplateId: number | null
+  taskTemplateName: string | null
+  agentId: number | null
+  agentName: string | null
+  taskId: number | null
+  status: string
+  outcome: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+  updatedAt: string
+  taskStatus: string | null
+}
+
+export interface TicketWorkflowView {
+  definitionId: number
+  definitionName: string
+  versionId: number
+  version: number
+  status: string
+  currentNodeKey: string | null
+  currentNodeName: string | null
+  autoAcceptance: boolean
+  inputValues: Record<string, unknown>
+  nodes: WorkflowNodeDefinition[]
+  edges: WorkflowEdgeDefinition[]
+  runs: TicketWorkflowRun[]
+}
+
 export interface Ticket {
   id: number
   code: string
-  category: TicketCategory
+  category: string
   title: string
   description: string | null
   createdById: number
@@ -1447,10 +1508,18 @@ export interface Ticket {
   assigneeType: TicketAssigneeType
   assigneeId: number
   assigneeName: string
-  taskId: number
-  /** 按关联任务实时推导的工单状态 */
+  taskId: number | null
+  /** 工作流状态或按关联任务实时推导的历史工单状态 */
   status: TicketStatus
   task: TaskPackage | null
+  workflowDefinitionId: number | null
+  workflowVersion: number | null
+  initiatorWorkerId: number | null
+  initiatorWorkerName: string | null
+  workflowStatus: string | null
+  currentNodeKey: string | null
+  currentNodeName: string | null
+  workflow?: TicketWorkflowView | null
   createdAt: string
   updatedAt: string
 }
@@ -1464,7 +1533,7 @@ export interface TicketAllowedTemplate {
 }
 
 export interface TicketDetail extends Ticket {
-  config: TicketConfig
+  config: TicketConfig | null
   allowedTemplates: TicketAllowedTemplate[]
 }
 
@@ -1478,8 +1547,13 @@ export interface TicketConfig {
   description: string
 }
 
-/** 工单工作流节点类型：操作 / 审批 / 验收 */
-export const WORKFLOW_NODE_KINDS = ['operation', 'approval', 'acceptance'] as const
+/** 工单工作流节点类型：起始 / 审批 / 操作 / 验收 */
+export const WORKFLOW_NODE_KINDS = [
+  'start',
+  'operation',
+  'approval',
+  'acceptance',
+] as const
 export type WorkflowNodeKind = (typeof WORKFLOW_NODE_KINDS)[number]
 
 /** 节点执行结果；审批节点使用 approved/rejected，其它节点使用 succeeded/failed */
@@ -1491,7 +1565,7 @@ export const WORKFLOW_OUTCOMES = [
 ] as const
 export type WorkflowOutcome = (typeof WORKFLOW_OUTCOMES)[number]
 
-/** 流程结束的虚拟节点 */
+/** 流程结束的虚拟节点；验收通过或操作节点的成功/失败流转可以指向它 */
 export const WORKFLOW_END_NODE = '$end'
 
 export interface WorkflowNodeDefinition {
@@ -1499,8 +1573,12 @@ export interface WorkflowNodeDefinition {
   name: string
   kind: WorkflowNodeKind
   taskTemplateId: number | null
-  executorWorkerId: number | null
-  approverWorkerId: number | null
+  /** 审批节点负责机器人；操作节点按任务定义自动分配 */
+  responsibleWorkerId: number | null
+  /** 仅起始节点：工单发起时的结构化输入字段 */
+  inputFields: TicketWorkflowInputField[] | null
+  /** 仅验收节点：前序成功到达时直接验收通过 */
+  autoAccept: boolean
   description: string | null
 }
 
@@ -1838,6 +1916,43 @@ export interface TaskTemplate {
   createdAt: string
   updatedAt: string
 }
+
+/** 管理区 GitHub 档位凭证（不含任何 PAT / 密文）；全平台仅 开发权限 / 发布权限 两条 */
+export interface GithubAccessCredential {
+  permission: WorkerGithubPermission
+  configured: boolean
+  githubAccount: string | null
+  enabled: boolean
+  rotatedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** OP Gateway 可获取的凭证类型（第一期仅 GitHub PAT） */
+export const GATEWAY_CREDENTIAL_TYPES = ['github.pat'] as const
+export type GatewayCredentialType = (typeof GATEWAY_CREDENTIAL_TYPES)[number]
+
+/** OP Gateway 凭证租用 */
+export interface GatewayCredentialLease {
+  leaseId: string
+  workerId: number
+  credential: {
+    type: GatewayCredentialType
+    data: Record<string, string | number | boolean>
+  }
+  issuedAt: string
+  expiresAt: string
+}
+
+/** 通用凭证操作（第一期仅 GitHub 动作） */
+export const GATEWAY_GITHUB_ACTIONS = [
+  'git.read',
+  'git.write',
+  'gh.pr.create',
+  'gh.pr.approve',
+  'gh.pr.merge',
+] as const
+export type GatewayGithubAction = (typeof GATEWAY_GITHUB_ACTIONS)[number]
 
 export const api = {
   listProjects: () => request<Project[]>('/projects'),
@@ -2585,6 +2700,22 @@ export const api = {
   getExecutorProviders: (id: number) =>
     request<ExecutorProvider[]>(`/executors/${id}/providers`),
 
+  /** 管理区 GitHub 档位凭证清单（仅管理员；固定两条，不含 PAT） */
+  listGithubAccess: () =>
+    request<GithubAccessCredential[]>('/github-access'),
+  /** 配置权限档位 PAT；pat 只写不读 */
+  saveGithubAccess: (input: {
+    permission: WorkerGithubPermission
+    pat: string
+    enabled?: boolean
+  }) =>
+    request<{ ok: true }>('/github-access', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  deleteGithubAccess: (permission: WorkerGithubPermission) =>
+    request<void>(`/github-access/${permission}`, { method: 'DELETE' }),
+
   /** 机器人列表（role 筛选） */
   listWorkers: (params?: { role?: WorkerRole }) => {
     const qs = new URLSearchParams()
@@ -2609,6 +2740,7 @@ export const api = {
     taskDefs?: WorkerTaskDef[] | null
     ownerUserId?: number | null
     enabled?: boolean
+    githubPermission?: WorkerGithubPermission
   }) =>
     request<Worker>('/workers', {
       method: 'POST',
@@ -2632,6 +2764,7 @@ export const api = {
       taskDefs: WorkerTaskDef[] | null
       ownerUserId: number | null
       enabled: boolean
+      githubPermission: WorkerGithubPermission
     }>,
   ) =>
     request<Worker>(`/workers/${id}`, {
@@ -2761,9 +2894,12 @@ export const api = {
     category?: string
     status?: string
     q?: string
+    workflowDefinitionId?: number
   }) => {
     const qs = new URLSearchParams()
     if (params?.category) qs.set('category', params.category)
+    if (params?.workflowDefinitionId)
+      qs.set('workflowDefinitionId', String(params.workflowDefinitionId))
     if (params?.status) qs.set('status', params.status)
     if (params?.q) qs.set('q', params.q)
     const q = qs.toString()
@@ -2771,17 +2907,25 @@ export const api = {
   },
   /** 工单详情：工单 + 关联任务 + 可转派定义 */
   getTicket: (id: number) => request<TicketDetail>(`/tickets/${id}`),
-  /** 创建工单：按类型固定默认任务定义派发，处理机器人自动取该定义的启用机器人 */
+  /** 创建工单：工作流工单按配置起始字段提交；历史类型工单保留 category/description */
   createTicket: (input: {
-    category: TicketCategory
+    category?: string
+    workflowDefinitionId?: number
     title?: string
-    description: string
+    description?: string
+    inputValues?: Record<string, unknown>
   }) =>
     request<Ticket>('/tickets', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  /** 工单类型配置（管理端） */
+  /** 工单工作流验收（仅发起机器人/发起人） */
+  acceptTicketWorkflow: (id: number, action: 'accept' | 'reject', remark?: string) =>
+    request<Ticket>(`/tickets/${id}/workflow/${action}`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
+  /** 工单类型配置（旧模型兼容，仅供历史工单详情展示） */
   listTicketConfigs: () => request<TicketConfig[]>('/ticket-configs'),
   updateTicketConfig: (category: string, allowedTemplateIds: number[]) =>
     request<TicketConfig>(
@@ -2792,9 +2936,20 @@ export const api = {
       },
     ),
 
-  /** 管理端工单定义（系统内置：测试工单、发布工单） */
+  /** 管理端工单配置（工单工作流） */
   listTicketWorkflowDefinitions: () =>
     request<TicketWorkflowDefinitionSummary[]>('/ticket-workflow-definitions'),
+  createTicketWorkflowDefinition: (input: {
+    name: string
+    description?: string | null
+    definition?: WorkflowDefinitionJson
+  }) =>
+    request<TicketWorkflowDefinitionDetail>('/ticket-workflow-definitions', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  deleteTicketWorkflowDefinition: (id: number) =>
+    request<void>(`/ticket-workflow-definitions/${id}`, { method: 'DELETE' }),
   getTicketWorkflowDefinition: (id: number) =>
     request<TicketWorkflowDefinitionDetail>(`/ticket-workflow-definitions/${id}`),
   saveTicketWorkflowDraft: (

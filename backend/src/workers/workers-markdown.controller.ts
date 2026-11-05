@@ -12,7 +12,12 @@ import {
   Req,
 } from '@nestjs/common';
 import type { AuthedRequest } from '../auth/auth.guard';
-import { UserRole, WorkerRole, WorkerRuntime } from '../common/enums';
+import {
+  UserRole,
+  WorkerGithubPermission,
+  WorkerRole,
+  WorkerRuntime,
+} from '../common/enums';
 import { Worker } from './worker.entity';
 import {
   CreateWorkerInput,
@@ -37,6 +42,7 @@ class CreateWorkerMarkdownDto implements CreateWorkerInput {
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
   enabled?: boolean;
+  githubPermission?: WorkerGithubPermission;
 }
 
 class UpdateWorkerMarkdownDto implements UpdateWorkerInput {
@@ -55,6 +61,7 @@ class UpdateWorkerMarkdownDto implements UpdateWorkerInput {
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
   enabled?: boolean;
+  githubPermission?: WorkerGithubPermission;
 }
 
 /** GET /api/workers.md：Agent 用的机器人清单 */

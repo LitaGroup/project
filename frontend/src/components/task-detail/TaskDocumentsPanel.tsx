@@ -59,7 +59,7 @@ export function TaskDocumentsPanel({
   const files = artifacts.filter((artifact) => artifact.kind === 'file')
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-none border border-border bg-background">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-foreground-intense">

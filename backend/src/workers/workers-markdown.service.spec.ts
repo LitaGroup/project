@@ -1,4 +1,9 @@
-import { WorkerLiveStatus, WorkerRole, WorkerRuntime } from '../common/enums';
+import {
+  WorkerGithubPermission,
+  WorkerLiveStatus,
+  WorkerRole,
+  WorkerRuntime,
+} from '../common/enums';
 import type { WorkerView, WorkersService } from './workers.service';
 import type { WorkerEnvironmentService } from './worker-environment.service';
 import { WorkersMarkdownService } from './workers-markdown.service';
@@ -26,6 +31,7 @@ function workerView(over: Partial<WorkerView> = {}): WorkerView {
     ownerUserId: null,
     ownerName: null,
     agentToken: 'must-not-leak',
+    githubPermission: WorkerGithubPermission.DEVELOP,
     enabled: true,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-02T00:00:00Z'),

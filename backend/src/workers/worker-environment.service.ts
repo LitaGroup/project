@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,7 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
-import { WorkerRuntime } from '../common/enums';
+import { WorkerRuntime, WorkerGithubPermission } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeEventHub } from '../executors/opencode-event-hub.service';
 import type { OpencodeEvent } from '../executors/opencode-event-hub.service';
@@ -18,6 +19,8 @@ import { isFreshOutcome, OpencodeClient } from '../executors/opencode-client';
 import { Worker } from './worker.entity';
 import { agentTokenShell, workerEnvShell } from './worker-env';
 import { WorkersService } from './workers.service';
+import { GithubPermissionCredentialService } from './github-permission-credential.service';
+import { GithubCredentialStatus } from '../github-gateway/github-permission-credential.entity';
 import {
   ManagedStandardFiles,
   WorkerStandardCatalogService,
@@ -175,6 +178,8 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
     private readonly standardCatalog: WorkerStandardCatalogService,
     private readonly eventHub: OpencodeEventHub,
     private readonly config: ConfigService,
+    @Optional()
+    private readonly githubCredentials?: GithubPermissionCredentialService,
   ) {}
 
   /**
@@ -323,8 +328,26 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       await this.writeAgentToken(client, worker.id, workdir);
       this.pushLine(job, '· 注入 Lita 用户令牌…');
       await this.writeLitaUserToken(client, workdir);
+      const githubCredentialStatus = (await this.githubCredentials?.statusOf(
+        worker.githubPermission,
+      )) ?? {
+        configured: false,
+        enabled: false,
+        githubAccount: null,
+        rotatedAt: null,
+      };
+      this.pushLine(
+        job,
+        `· GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}；凭证：${
+          githubCredentialStatus.configured
+            ? githubCredentialStatus.enabled
+              ? '已配置'
+              : '已停用'
+            : '未配置'
+        }`,
+      );
       this.pushLine(job, '· 生成初始化指令（AGENTS.md + 技能 + 规范）…');
-      const prompt = await this.buildPrompt(worker);
+      const prompt = await this.buildPrompt(worker, githubCredentialStatus);
       this.pushLine(
         job,
         `· 创建执行器会话（${worker.providerId}/${worker.modelId}）…`,
@@ -529,7 +552,15 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
   }
 
   /** 初始化任务指令：AGENTS.md 原文 + 技能库链接 + 规范目录同步要求 + 工位结构约定 */
-  private async buildPrompt(worker: Worker): Promise<string> {
+  private async buildPrompt(
+    worker: Worker,
+    githubCredentialStatus: GithubCredentialStatus = {
+      configured: false,
+      enabled: false,
+      githubAccount: null,
+      rotatedAt: null,
+    },
+  ): Promise<string> {
     const agents = worker.prompt ?? '';
     const skills = worker.skills ?? [];
     const standards = await this.resolveStandardFiles(worker.standards);
@@ -616,6 +647,11 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
         ].join('\n')
       : '## 规范与规则\n\n本次未选择规范。';
 
+    const githubSection = this.buildGithubAgentsSection(
+      worker,
+      githubCredentialStatus,
+    );
+
     return `接下来，更新当前的工作环境：
 
 ## 根据以下信息更新AGENTS.md 以下为AGENTS.md 内容
@@ -628,6 +664,14 @@ ${agents}
 ### 平台固定协同协议
 \`\`\`\`markdown
 ${TASK_COLLABORATION_AGENTS}
+\`\`\`\`
+
+### GitHub 操作权限（必须写入 AGENTS.md）
+
+把以下内容原样写入 AGENTS.md 的「## GitHub 操作权限」小节，权限、允许/禁止事项与凭证状态不得删减或改写：
+
+\`\`\`\`markdown
+${githubSection}
 \`\`\`\`
 
 ### 规范与规则（必须写入 AGENTS.md）
@@ -652,18 +696,19 @@ ${rulesSection}
 ### 更新要求
 
 1. 把「工作职责定义」和「平台固定协同协议」中的 Markdown 原文完整写入当前工作目录的 AGENTS.md；不要改写、缩写或额外发挥。协同协议放在工作职责定义之后。
-2. 把「规范与规则（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 规范与规则」小节；规范名称、说明、工位目录与文档清单不得删减。
-3. 确保 AGENTS.md 中包含上面的目录结构说明。
-4. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
-5. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
-6. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
-7. .opencode/rules/ 中的规范文档以本次规范清单为准：
+2. 把「GitHub 操作权限（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## GitHub 操作权限」小节；权限、允许/禁止事项与凭证状态不得删减。
+3. 把「规范与规则（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 规范与规则」小节；规范名称、说明、工位目录与文档清单不得删减。
+4. 确保 AGENTS.md 中包含上面的目录结构说明。
+5. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
+6. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
+7. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
+8. .opencode/rules/ 中的规范文档以本次规范清单为准：
    - 如果 .opencode/rules/.standards-manifest.json 存在，先读取其中 files 数组作为旧受管文件清单；不存在或内容非法时旧受管清单视为空。
    - 如果旧的 .opencode/docs/.standards-manifest.json 存在：先按其 files 清单删除 .opencode/docs/ 下对应的旧受管文件，再删除该旧清单；这是目录从 docs 迁移到 rules 的一次性清理，其他 docs 文档不要动。
    - 按下方「需存在的规范文件」下载并写入 .opencode/rules/ 下同名相对路径；保持文件内容与链接内容一致，不要改写或摘要。
    - 只删除「旧受管文件清单中存在、但本次需存在清单中没有」的文件；不要删除 .opencode/docs/ 或其他流程产生的文档。
    - 同步完成后把本次需存在的全部相对路径写入 .opencode/rules/.standards-manifest.json，格式为 {"version":1,"files":[...]}，路径按字典序排序；manifest 自身不要写入 files。
-8. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
+9. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
 
 ## 从以下链接中，安装或更新技能
 
@@ -687,8 +732,82 @@ ${requiredFileLines}
 `;
   }
 
-  /** 解析本次需同步的规范目录与文件清单；规范库不可访问时初始化直接失败 */
-  private async resolveStandardFiles(
+  /**
+   * 生成写入工位 AGENTS.md 的 GitHub 权限说明。
+   * 只描述权限、允许/禁止事项与凭证可用性；不得出现 PAT、密文或 SecretRef。
+   */
+  private buildGithubAgentsSection(
+    worker: Worker,
+    status: GithubCredentialStatus,
+  ): string {
+    const permission = worker.githubPermission;
+    const credentialText = !status.configured
+      ? '未配置'
+      : status.enabled
+        ? `已配置${status.githubAccount ? `（GitHub 账号：${status.githubAccount}）` : ''}`
+        : `已停用${status.githubAccount ? `（GitHub 账号：${status.githubAccount}）` : ''}`;
+
+    if (permission === WorkerGithubPermission.NONE) {
+      return `## GitHub 操作权限
+
+当前权限：无权限。
+凭证状态：${credentialText}。
+
+禁止事项：
+- 不要调用 OP Gateway 获取 GitHub 凭证。
+- 不要 clone、fetch、pull 平台私有仓库，也不要 push 或创建 PR。
+- 不要尝试审批或合并 PR。
+
+如果当前任务确实需要 GitHub 操作，应向需求方说明：机器人尚未配置 GitHub 权限，需管理员在机器人配置页调整权限。`;
+    }
+
+    if (permission === WorkerGithubPermission.RELEASE) {
+      return `## GitHub 操作权限
+
+当前权限：发布权限。
+凭证状态：${credentialText}。
+
+允许事项：
+- 通过 OP Gateway clone、fetch、pull 仓库。
+- 创建任务分支、开发并提交代码。
+- push 普通分支。
+- 创建目标为 main、stable 的 PR。
+- 在确认符合当前任务要求后，直接 push main、stable。
+- 在确认符合当前任务要求后，审批 PR、合并 PR。
+
+禁止事项：
+- 修改仓库权限、Secret、Ruleset 或删除仓库。
+- 试图读取、展示、导出或绕过 OP Gateway 获取 GitHub PAT。
+- 执行与当前任务无关的写操作。`;
+    }
+
+    return `## GitHub 操作权限
+
+当前权限：开发权限。
+凭证状态：${credentialText}。
+
+允许事项：
+- 通过 OP Gateway clone、fetch、pull 仓库。
+- 创建任务分支、开发并提交代码。
+- push 普通分支。
+- 创建目标为 main、stable 的 PR。
+
+禁止事项：
+- 直接 push main、stable。
+- 审批或合并 PR。
+- 修改仓库权限、Secret、Ruleset 或删除仓库。
+- 试图读取、展示、导出或绕过 OP Gateway 获取 GitHub PAT。`;
+  }
+
+  private githubPermissionLabel(
+    permission: Worker['githubPermission'],
+  ): string {
+    if (permission === WorkerGithubPermission.RELEASE) return '发布权限';
+    if (permission === WorkerGithubPermission.NONE) return '无权限';
+    return '开发权限';
+  }
+
+  /** 解析本次需同步的规范目录与文件清单；规范库不可访问时初始化直接失败 */ private async resolveStandardFiles(
     standards: Worker['standards'],
   ): Promise<ManagedStandardFiles> {
     try {

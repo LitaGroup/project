@@ -180,7 +180,7 @@ export function TaskCreatePage() {
 
       {/* 布局参考「新建机器人」：左侧 Markdown 编辑区撑满剩余高度，右侧基础信息独立滚动 */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <Card className="min-h-64 min-w-0 flex-1">
+        <Card className="min-h-64 min-w-0 flex-1 rounded-none">
           <CardHeader className="flex-none">
             <CardTitle>任务描述</CardTitle>
             <CardDescription>

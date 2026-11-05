@@ -65,7 +65,7 @@ export function TaskConversationView({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-none border border-border bg-background">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <h2 className="text-sm font-semibold text-foreground-intense">
@@ -149,7 +149,7 @@ function ConversationMessage({ message }: { message: TaskChatMessage }) {
         <div
           className={`min-w-0 max-w-full text-sm leading-relaxed ${
             isUser
-              ? 'rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-primary-foreground'
+              ? 'rounded-none bg-primary px-4 py-2.5 text-primary-foreground'
               : 'task-chat-markdown text-foreground-emphasis'
           }`}
         >

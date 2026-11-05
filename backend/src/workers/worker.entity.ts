@@ -6,7 +6,11 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { WorkerRole, WorkerRuntime } from '../common/enums';
+import {
+  WorkerGithubPermission,
+  WorkerRole,
+  WorkerRuntime,
+} from '../common/enums';
 
 /** 智能体的任务定义：接什么类型的任务、要什么输入、产出什么、怎么完成 */
 export interface WorkerTaskDefInput {
@@ -161,6 +165,17 @@ export class Worker {
   @Index('IDX_workers_agentToken', { unique: true })
   @Column({ type: 'varchar', length: 64, nullable: true, select: false })
   agentToken: string | null;
+
+  /**
+   * GitHub 权限：none（未配置）/ develop（开发权限，默认）/ release（发布权限）；全部机器人可配置。
+   * 权限在机器人配置页维护；是否可用还取决于对应档位是否已配置 github_permission_credentials。
+   */
+  @Column({
+    type: 'enum',
+    enum: WorkerGithubPermission,
+    default: WorkerGithubPermission.DEVELOP,
+  })
+  githubPermission: WorkerGithubPermission;
 
   @Column({ default: true })
   enabled: boolean;

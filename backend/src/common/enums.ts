@@ -211,6 +211,17 @@ export enum WorkerRuntime {
   PI = 'pi',
 }
 
+/**
+ * 机器人 GitHub 权限：可配置档位为 开发权限（默认）/ 发布权限；none 表示未配置。
+ * 所有机器人（含真人机器人）均可在管理区「GitHub 权限」页配置；
+ * 权限存在 workers 表并由机器人配置页维护；PAT 只决定使用的 GitHub 身份，不重复保存权限。
+ */
+export enum WorkerGithubPermission {
+  NONE = 'none',
+  DEVELOP = 'develop',
+  RELEASE = 'release',
+}
+
 /** 机器人实时状态（不落库，由名下任务实时推导，见 workers.service） */
 export enum WorkerLiveStatus {
   IDLE = '空闲中',

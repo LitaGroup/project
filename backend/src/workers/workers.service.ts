@@ -12,6 +12,7 @@ import { In, IsNull, Repository } from 'typeorm';
 import {
   TaskStatus,
   TaskSubStatus,
+  WorkerGithubPermission,
   WorkerLiveStatus,
   WorkerRole,
   WorkerRuntime,
@@ -49,6 +50,7 @@ export interface CreateWorkerInput {
   taskDefs?: WorkerTaskDef[] | null;
   ownerUserId?: number | null;
   enabled?: boolean;
+  githubPermission?: WorkerGithubPermission;
 }
 
 export type UpdateWorkerInput = Partial<CreateWorkerInput>;
@@ -63,6 +65,26 @@ function normalizeAvatarUrl(value: string | null | undefined): string | null {
     );
   }
   return trimmed;
+}
+
+/**
+ * GitHub 权限归一：开发权限 / 发布权限 / 无权限（未配置）均可设置，机器人类型不限制；
+ * 未传时缺省为开发权限（真人机器人创建时显式从未配置起步）。
+ */
+function normalizeGithubPermission(value: unknown): WorkerGithubPermission {
+  if (value === undefined || value === null || value === '') {
+    return WorkerGithubPermission.DEVELOP;
+  }
+  if (
+    value === WorkerGithubPermission.NONE ||
+    value === WorkerGithubPermission.DEVELOP ||
+    value === WorkerGithubPermission.RELEASE
+  ) {
+    return value;
+  }
+  throw new BadRequestException(
+    'GitHub 权限仅支持 none（无权限）/ develop（开发权限）/ release（发布权限）',
+  );
 }
 
 /** 机器人视图：实体 + 工位路径 + 实时状态 + 当前任务（均不落库实时推导） */
@@ -316,6 +338,7 @@ export class WorkersService implements OnApplicationBootstrap {
       standards,
       taskDefs: input.taskDefs?.length ? input.taskDefs : null,
       enabled: input.enabled ?? true,
+      githubPermission: normalizeGithubPermission(input.githubPermission),
     });
     await this.assertConfig(worker);
     await this.resolveOwner(worker, input.ownerUserId ?? null);
@@ -396,6 +419,11 @@ export class WorkersService implements OnApplicationBootstrap {
       worker.taskDefs = input.taskDefs?.length ? input.taskDefs : null;
     }
     if (input.enabled !== undefined) worker.enabled = input.enabled;
+    if (input.githubPermission !== undefined) {
+      worker.githubPermission = normalizeGithubPermission(
+        input.githubPermission,
+      );
+    }
     await this.assertConfig(worker);
     if (input.ownerUserId !== undefined) {
       await this.resolveOwner(worker, input.ownerUserId ?? null);
@@ -569,6 +597,7 @@ export class WorkersService implements OnApplicationBootstrap {
       humanUserId: user.id,
       humanUserName: user.name,
       enabled: user.enabled,
+      githubPermission: WorkerGithubPermission.DEVELOP,
     });
     const saved = await this.workers.save(worker);
     this.logger.log(

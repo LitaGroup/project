@@ -98,6 +98,7 @@ import { WorkbenchService } from './workbench.service';
     TasksService,
     TaskChatService,
     TaskDispatchService,
+    TaskDocumentService,
     TaskHandoffService,
     TaskLoopService,
     TaskNotifyService,
