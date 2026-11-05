@@ -37,13 +37,28 @@ import {
 import {
   api,
   WORKER_LIVE_STATUSES,
-  WORKER_ROLES,
   type Executor,
   type Worker,
 } from '../lib/api'
 import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { WorkerLiveBadge } from '../components/StatusBadge'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
+
+/**
+ * 机器人类型筛选：真人（用户绑定的真人机器人）、系统（代码内置）、普通（网页创建的自定义 AI 机器人）。
+ */
+const WORKER_TYPE_ITEMS: Record<string, string> = {
+  all: '不限类型',
+  human: '真人',
+  system: '系统',
+  normal: '普通',
+}
+
+function workerType(worker: Worker): 'human' | 'system' | 'normal' {
+  if (worker.humanUserId) return 'human'
+  if (worker.system) return 'system'
+  return 'normal'
+}
 
 /**
  * 机器人管理：系统机器人（id < 1000，代码内置）+ 自定义机器人（id >= 1000）。
@@ -54,7 +69,7 @@ export function WorkersPage() {
   const [executors, setExecutors] = useState<Executor[]>([])
   const [error, setError] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
-  const [roleFilter, setRoleFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [executorFilter, setExecutorFilter] = useState('all')
   const [enabledFilter, setEnabledFilter] = useState('all')
@@ -87,7 +102,7 @@ export function WorkersPage() {
       ) {
         return false
       }
-      if (roleFilter !== 'all' && worker.role !== roleFilter) return false
+      if (typeFilter !== 'all' && workerType(worker) !== typeFilter) return false
       if (statusFilter !== 'all' && worker.liveStatus !== statusFilter) return false
       if (executorFilter === 'none') {
         if (worker.executorId != null) return false
@@ -101,7 +116,7 @@ export function WorkersPage() {
   }, [
     workers,
     keyword,
-    roleFilter,
+    typeFilter,
     statusFilter,
     executorFilter,
     enabledFilter,
@@ -109,13 +124,13 @@ export function WorkersPage() {
 
   const hasFilter =
     keyword.trim() !== '' ||
-    roleFilter !== 'all' ||
+    typeFilter !== 'all' ||
     statusFilter !== 'all' ||
     executorFilter !== 'all' ||
     enabledFilter !== 'all'
   const clearFilters = () => {
     setKeyword('')
-    setRoleFilter('all')
+    setTypeFilter('all')
     setStatusFilter('all')
     setExecutorFilter('all')
     setEnabledFilter('all')
@@ -156,12 +171,9 @@ export function WorkersPage() {
         />
         <ToolbarGroup aria-label="筛选">
           <Select
-            value={roleFilter}
-            onValueChange={(value) => setRoleFilter(value as string)}
-            items={{
-              all: '不限类型',
-              ...Object.fromEntries(WORKER_ROLES.map((role) => [role, role])),
-            }}
+            value={typeFilter}
+            onValueChange={(value) => setTypeFilter(value as string)}
+            items={WORKER_TYPE_ITEMS}
           >
             <ToolbarButton
               className="w-32"
@@ -172,10 +184,9 @@ export function WorkersPage() {
               }
             />
             <SelectContent>
-              <SelectItem value="all">不限类型</SelectItem>
-              {WORKER_ROLES.map((role) => (
-                <SelectItem key={role} value={role}>
-                  {role}
+              {Object.entries(WORKER_TYPE_ITEMS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
                 </SelectItem>
               ))}
             </SelectContent>
