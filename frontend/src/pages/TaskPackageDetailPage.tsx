@@ -502,113 +502,119 @@ export function TaskDetailView({
   const openRelatedTask =
     onOpenTask ?? ((id: number) => navigate(`/tasks/${id}`))
 
-  return (
-    <DetailPageLayout
-      aiLabel="任务协作"
-      ai={
-        <TaskWorkbenchPanel
-          task={interactiveTask}
-          chat={interactiveChat}
-          handoffDoc={handoffDoc}
-          handoffEditing={handoffEditing}
-          onRefresh={refreshTaskPanel}
-          agent={
-            <DetailAgentPanel
-              taskId={currentTask.id}
-              embedded
-              emptyTitle={`${currentTask.code} 的独立 AI 会话`}
-              emptyHint="当前任务的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
-              placeholder={`让 AI 处理 ${currentTask.code}，或输入其它指令…`}
-              onRunFinished={() => {
-                void refreshTaskPanel()
-              }}
-            />
+  const pageHeader = (
+    <>
+      {!hideBreadcrumb && (
+        <PageBreadcrumb
+          items={
+            breadcrumb ?? [
+              { label: '任务', to: '/tasks/list' },
+              { label: currentTask.title },
+            ]
           }
         />
-      }
-    >
-      <div className="flex h-full min-h-0 flex-col gap-4">
-        {!hideBreadcrumb && (
-          <PageBreadcrumb
-            items={
-              breadcrumb ?? [
-                { label: '任务', to: '/tasks/list' },
-                { label: currentTask.title },
-              ]
-            }
-          />
-        )}
+      )}
 
-        <header className="shrink-0">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-semibold text-foreground-intense">
-                {title ?? `${currentTask.code} ${currentTask.title}`}
-              </h1>
-              {extraBadges}
-              <TaskStatusBadge
-                status={currentTask.status}
-                subStatus={currentTask.subStatus}
-                showMain
-              />
-              <Badge variant="soft" size="sm">
-                类型 · {currentTask.type}
-              </Badge>
-              <Badge variant="secondary" size="sm">
-                定义 · {currentTask.templateName ?? '未设置'}
-              </Badge>
-            </div>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
-              <span>
-                创建于 {new Date(currentTask.createdAt).toLocaleString()}
-              </span>
-              <span>·</span>
-              <span>
-                {currentTask.status === '已结束' ? '持续时间' : '已运行'}{' '}
-                {formatDuration(durationMs)}
-              </span>
-              <span>·</span>
-              <span>人工介入 {interventionCount} 次</span>
-            </p>
+      <header className="shrink-0">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-xl font-semibold text-foreground-intense">
+              {title ?? `${currentTask.code} ${currentTask.title}`}
+            </h1>
+            {extraBadges}
+            <TaskStatusBadge
+              status={currentTask.status}
+              subStatus={currentTask.subStatus}
+              showMain
+            />
+            <Badge variant="soft" size="sm">
+              类型 · {currentTask.type}
+            </Badge>
+            <Badge variant="secondary" size="sm">
+              定义 · {currentTask.templateName ?? '未设置'}
+            </Badge>
           </div>
-        </header>
-
-        {error && (
-          <p
-            role="alert"
-            className="shrink-0 rounded-[var(--radius-md)] bg-error-soft px-3 py-2 text-sm text-error-foreground"
-          >
-            {error}
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
+            <span>
+              创建于 {new Date(currentTask.createdAt).toLocaleString()}
+            </span>
+            <span>·</span>
+            <span>
+              {currentTask.status === '已结束' ? '持续时间' : '已运行'}{' '}
+              {formatDuration(durationMs)}
+            </span>
+            <span>·</span>
+            <span>人工介入 {interventionCount} 次</span>
           </p>
-        )}
+        </div>
+      </header>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-          <div className="shrink-0 px-3 py-2">
-            <div
-              role="tablist"
-              aria-label="任务详情正文"
-              className="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--radius-lg)] bg-background-muted p-1"
-            >
-              {TASK_CONTENT_TABS.map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="tab"
-                  aria-selected={contentTab === key}
-                  onClick={() => setContentTab(key)}
-                  className={`shrink-0 rounded-[var(--radius-md)] px-3 py-1.5 text-sm transition-colors ${
-                    contentTab === key
-                      ? 'bg-background font-medium text-foreground-intense shadow-sm'
-                      : 'text-foreground-muted hover:bg-background/60 hover:text-foreground-intense'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+      {error && (
+        <p
+          role="alert"
+          className="shrink-0 rounded-[var(--radius-md)] bg-error-soft px-3 py-2 text-sm text-error-foreground"
+        >
+          {error}
+        </p>
+      )}
+    </>
+  )
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      {pageHeader}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <DetailPageLayout
+          aiLabel="任务协作"
+          ai={
+            <TaskWorkbenchPanel
+              task={interactiveTask}
+              chat={interactiveChat}
+              handoffDoc={handoffDoc}
+              handoffEditing={handoffEditing}
+              onRefresh={refreshTaskPanel}
+              agent={
+                <DetailAgentPanel
+                  taskId={currentTask.id}
+                  embedded
+                  emptyTitle={`${currentTask.code} 的独立 AI 会话`}
+                  emptyHint="当前任务的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
+                  placeholder={`让 AI 处理 ${currentTask.code}，或输入其它指令…`}
+                  onRunFinished={() => {
+                    void refreshTaskPanel()
+                  }}
+                />
+              }
+            />
+          }
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+            <div className="shrink-0 overflow-x-auto px-3 py-2">
+              <div
+                role="tablist"
+                aria-label="任务详情正文"
+                className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-lg)] bg-background-muted p-1"
+              >
+                {TASK_CONTENT_TABS.map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={contentTab === key}
+                    onClick={() => setContentTab(key)}
+                    className={`shrink-0 whitespace-nowrap rounded-[var(--radius-md)] px-3 py-1.5 text-sm transition-colors ${
+                      contentTab === key
+                        ? 'bg-background font-medium text-foreground-intense shadow-sm'
+                        : 'text-foreground-muted hover:bg-background/60 hover:text-foreground-intense'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="flex min-h-0 flex-1 flex-col p-3">
+            <div className="flex min-h-0 flex-1 flex-col p-3">
             {contentTab === 'handoff' && (
               <TaskMarkdownDocumentView
                 title="交付文档"
@@ -763,8 +769,9 @@ export function TaskDetailView({
             )}
           </div>
         </div>
+        </DetailPageLayout>
       </div>
-    </DetailPageLayout>
+    </div>
   )
 }
 
@@ -810,59 +817,63 @@ function TaskDetailSkeleton({
   hideBreadcrumb?: boolean
 }) {
   return (
-    <DetailPageLayout
-      aiLabel="任务协作"
-      ai={
-        <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-          <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-5 w-12 rounded-full" />
-          </div>
-          <div className="flex flex-1 flex-col justify-end gap-4 px-4 py-4">
-            <ChatBubbleSkeleton />
-            <ChatBubbleSkeleton align="right" />
-            <ChatBubbleSkeleton />
-          </div>
-        </section>
-      }
-    >
-      <div className="flex h-full min-h-0 flex-col gap-4">
-        {!hideBreadcrumb && (
-          <PageBreadcrumb
-            items={[{ label: '任务', to: '/tasks/list' }, { label: '加载中' }]}
-          />
-        )}
-        <header className="shrink-0 space-y-2">
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-7 w-72 max-w-full" />
-            <Skeleton className="h-5 w-24 rounded-full" />
-            <Skeleton className="h-5 w-16 rounded-full" />
-            <Skeleton className="h-5 w-20 rounded-full" />
-          </div>
-          <Skeleton className="h-4 w-[28rem] max-w-full" />
-        </header>
-
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-          <div className="flex w-full shrink-0 gap-1 overflow-x-auto border-b border-border bg-background-muted px-2 py-1.5">
-            {TASK_CONTENT_TABS.map(([key]) => (
-              <Skeleton
-                key={key}
-                className="h-7 w-14 shrink-0 rounded-[var(--radius-sm)]"
-              />
-            ))}
-          </div>
-          <div className="flex flex-1 flex-col gap-3 p-4">
-            <Skeleton className="h-6 w-2/3" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-11/12" />
-            <Skeleton className="h-3 w-4/5" />
-            <Skeleton className="mt-3 h-6 w-1/2" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-10/12" />
-          </div>
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      {!hideBreadcrumb && (
+        <PageBreadcrumb
+          items={[{ label: '任务', to: '/tasks/list' }, { label: '加载中' }]}
+        />
+      )}
+      <header className="shrink-0 space-y-2">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-7 w-72 max-w-full" />
+          <Skeleton className="h-5 w-24 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-20 rounded-full" />
         </div>
+        <Skeleton className="h-4 w-[28rem] max-w-full" />
+      </header>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        <DetailPageLayout
+          aiLabel="任务协作"
+          ai={
+            <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+              <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-5 w-12 rounded-full" />
+              </div>
+              <div className="flex flex-1 flex-col justify-end gap-4 px-4 py-4">
+                <ChatBubbleSkeleton />
+                <ChatBubbleSkeleton align="right" />
+                <ChatBubbleSkeleton />
+              </div>
+            </section>
+          }
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+            <div className="shrink-0 overflow-x-auto px-3 py-2">
+              <div className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-lg)] bg-background-muted p-1">
+                {TASK_CONTENT_TABS.map(([key]) => (
+                  <Skeleton
+                    key={key}
+                    className="h-7 w-14 shrink-0 rounded-[var(--radius-md)]"
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-1 flex-col gap-3 p-4">
+              <Skeleton className="h-6 w-2/3" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-11/12" />
+              <Skeleton className="h-3 w-4/5" />
+              <Skeleton className="mt-3 h-6 w-1/2" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-10/12" />
+            </div>
+          </div>
+        </DetailPageLayout>
       </div>
-    </DetailPageLayout>
+    </div>
   )
 }
 

@@ -37,7 +37,7 @@ export function TaskInfoPanel({
   const finished = task.status === '已结束'
 
   return (
-    <section className="h-full min-h-0 overflow-y-auto rounded-none border border-border bg-background">
+    <section className="h-full min-h-0 overflow-y-auto rounded-none bg-background">
       <div className="flex flex-col gap-5 p-4">
         <section>
           <div className="mb-3 flex items-center justify-between gap-2">

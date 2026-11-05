@@ -3,12 +3,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@appica/ui-react/card'
-import {
   Table,
   TableBody,
   TableCell,
@@ -369,117 +363,127 @@ export function TicketDetailPage() {
     )
     const isTaskNode =
       currentNode?.kind === 'operation' || currentNode?.kind === 'approval'
+
+    const pageHeader = (
+      <>
+        <div>
+          <nav className="flex items-center gap-1 text-sm text-foreground-muted">
+            <Link to="/tickets" className="hover:text-foreground">工单</Link>
+            <span>/</span>
+            <Link to={listPath} className="hover:text-foreground">
+              {workflow.definitionName}
+            </Link>
+            <span>/</span>
+            <span className="text-foreground">{ticket.code}</span>
+          </nav>
+          <h1 className="mt-2 text-2xl font-semibold">
+            {ticket.code} {ticket.title}
+          </h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <TicketStatusBadge status={ticket.status} />
+            <Badge variant="outline" size="sm">
+              {workflow.definitionName} v{workflow.version}
+            </Badge>
+            <Badge variant="secondary" size="sm">
+              发起机器人 · {ticket.initiatorWorkerName ?? ticket.createdByName}
+            </Badge>
+            {workflow.autoAcceptance && (
+              <Badge variant="soft" size="sm">含自动验收</Badge>
+            )}
+          </div>
+        </div>
+
+        {(actionError || error) && (
+          <p className="rounded-[var(--radius-md)] bg-error-muted px-3 py-2 text-sm text-error-foreground">
+            {actionError ?? error}
+          </p>
+        )}
+      </>
+    )
+
     return (
-      <DetailPageLayout
-        aiLabel="任务协作"
-        ai={
-          <TaskWorkbenchPanel
-            task={isTaskNode ? interactiveTask : null}
-            chat={isTaskNode ? interactiveChat : null}
-            handoffDoc={handoffDoc}
-            onRefresh={refreshTicket}
-            agent={
-              <DetailAgentPanel
-                taskId={activeTaskId ?? undefined}
-                embedded
-                emptyTitle={`${nodeTaskCode ?? ticket.code} 的独立 AI 会话`}
-                emptyHint="当前工单的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
-                placeholder={`让 AI 处理 ${nodeTaskCode ?? ticket.code}，或输入其它指令…`}
-                onRunFinished={() => {
-                  void refreshTicket()
-                }}
+      <div className="flex h-full min-h-0 flex-col gap-4">
+        {pageHeader}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <DetailPageLayout
+            aiLabel="任务协作"
+            ai={
+              <TaskWorkbenchPanel
+                task={isTaskNode ? interactiveTask : null}
+                chat={isTaskNode ? interactiveChat : null}
+                handoffDoc={handoffDoc}
+                onRefresh={refreshTicket}
+                agent={
+                  <DetailAgentPanel
+                    taskId={activeTaskId ?? undefined}
+                    embedded
+                    emptyTitle={`${nodeTaskCode ?? ticket.code} 的独立 AI 会话`}
+                    emptyHint="当前工单的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
+                    placeholder={`让 AI 处理 ${nodeTaskCode ?? ticket.code}，或输入其它指令…`}
+                    onRunFinished={() => {
+                      void refreshTicket()
+                    }}
+                  />
+                }
               />
             }
-          />
-        }
-      >
-        <div className="flex h-full min-h-0 flex-col gap-4">
-          <div>
-            <nav className="flex items-center gap-1 text-sm text-foreground-muted">
-              <Link to="/tickets" className="hover:text-foreground">工单</Link>
-              <span>/</span>
-              <Link to={listPath} className="hover:text-foreground">
-                {workflow.definitionName}
-              </Link>
-              <span>/</span>
-              <span className="text-foreground">{ticket.code}</span>
-            </nav>
-            <h1 className="mt-2 text-2xl font-semibold">
-              {ticket.code} {ticket.title}
-            </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <TicketStatusBadge status={ticket.status} />
-              <Badge variant="outline" size="sm">
-                {workflow.definitionName} v{workflow.version}
-              </Badge>
-              <Badge variant="secondary" size="sm">
-                发起机器人 · {ticket.initiatorWorkerName ?? ticket.createdByName}
-              </Badge>
-              {workflow.autoAcceptance && (
-                <Badge variant="soft" size="sm">含自动验收</Badge>
-              )}
-            </div>
-          </div>
-
-          {(actionError || error) && (
-            <p className="rounded-[var(--radius-md)] bg-error-muted px-3 py-2 text-sm text-error-foreground">
-              {actionError ?? error}
-            </p>
-          )}
-
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div
-              role="tablist"
-              aria-label="工单详情正文"
-              className="flex w-fit max-w-full shrink-0 gap-1 overflow-x-auto rounded-[var(--radius-md)] bg-background-muted p-1"
-            >
-              {TICKET_CONTENT_TABS.map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="tab"
-                  aria-selected={contentTab === key}
-                  onClick={() => setContentTab(key)}
-                  className={`shrink-0 rounded-[var(--radius-sm)] px-3 py-1 text-sm transition-colors ${
-                    contentTab === key
-                      ? 'bg-background font-medium text-foreground-intense shadow-sm'
-                      : 'text-foreground-muted hover:text-foreground-intense'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {canAccept && (
-              <div className="flex shrink-0 items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={acting !== null}
-                  onClick={() => act('reject')}
-                >
-                  验收驳回
-                </Button>
-                <Button size="sm" disabled={acting !== null} onClick={() => act('accept')}>
-                  验收通过
-                </Button>
+          >
+            <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+              <div className="shrink-0 overflow-x-auto px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div
+                    role="tablist"
+                    aria-label="工单详情正文"
+                    className="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--radius-lg)] bg-background-muted p-1"
+                  >
+                    {TICKET_CONTENT_TABS.map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        role="tab"
+                        aria-selected={contentTab === key}
+                        onClick={() => setContentTab(key)}
+                        className={`shrink-0 whitespace-nowrap rounded-[var(--radius-md)] px-3 py-1.5 text-sm transition-colors ${
+                          contentTab === key
+                            ? 'bg-background font-medium text-foreground-intense shadow-sm'
+                            : 'text-foreground-muted hover:bg-background/60 hover:text-foreground-intense'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {canAccept && (
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={acting !== null}
+                        onClick={() => act('reject')}
+                      >
+                        验收驳回
+                      </Button>
+                      <Button size="sm" disabled={acting !== null} onClick={() => act('accept')}>
+                        验收通过
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
 
-          {(contentTab === 'current' ||
-            contentTab === 'events' ||
-            contentTab === 'tasks') &&
-            taskError && (
-              <p
-                role="alert"
-                className="shrink-0 rounded-[var(--radius-md)] bg-error-muted px-3 py-2 text-sm text-error-foreground"
-              >
-                加载失败：{taskError}
-              </p>
-            )}
+              {(contentTab === 'current' ||
+                contentTab === 'events' ||
+                contentTab === 'tasks') &&
+                taskError && (
+                  <p
+                    role="alert"
+                    className="mx-3 mb-2 shrink-0 rounded-[var(--radius-md)] bg-error-muted px-3 py-2 text-sm text-error-foreground"
+                  >
+                    加载失败：{taskError}
+                  </p>
+                )}
 
-          <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex min-h-0 flex-1 flex-col p-3">
             {contentTab === 'current' && (
               <TicketCurrentNodePanel
                 workflow={workflow}
@@ -494,133 +498,147 @@ export function TicketDetailPage() {
             )}
 
             {contentTab === 'progress' && (
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>流程进度</CardTitle>
-                    <CardDescription>
-                      当前节点：{ticket.currentNodeName || '流程已结束'}
-                    </CardDescription>
-                  </CardHeader>
-                  <div className="px-4 pb-4">
-                    <Table hoverableRows>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-16">顺序</TableHead>
-                          <TableHead className="w-40">节点</TableHead>
-                          <TableHead className="w-36">处理机器人</TableHead>
-                          <TableHead className="w-24">状态</TableHead>
-                          <TableHead className="w-24">结果</TableHead>
-                          <TableHead>任务</TableHead>
+              <section className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+                <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+                  <h2 className="text-sm font-semibold text-foreground-intense">
+                    流程进度
+                  </h2>
+                  <span className="text-xs text-foreground-muted">
+                    当前节点：{ticket.currentNodeName || '流程已结束'}
+                  </span>
+                </header>
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <Table hoverableRows>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16">顺序</TableHead>
+                        <TableHead className="w-40">节点</TableHead>
+                        <TableHead className="w-36">处理机器人</TableHead>
+                        <TableHead className="w-24">状态</TableHead>
+                        <TableHead className="w-24">结果</TableHead>
+                        <TableHead>任务</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {workflow.runs.map((run, index) => (
+                        <TableRow key={run.id}>
+                          <TableCell>{index + 1}</TableCell>
+                          <TableCell>
+                            <span className="font-medium">{run.nodeName}</span>
+                            <span className="ml-1 text-xs text-foreground-muted">
+                              第 {run.attempt} 次
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            {run.agentName ??
+                              ticket.initiatorWorkerName ??
+                              '发起机器人'}
+                          </TableCell>
+                          <TableCell>{run.status}</TableCell>
+                          <TableCell>
+                            {run.outcome
+                              ? OUTCOME_LABEL[run.outcome] ?? run.outcome
+                              : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {run.taskId ? (
+                              <Link
+                                to={`/tasks/${run.taskId}`}
+                                className="font-mono text-xs hover:underline"
+                              >
+                                TK-{String(run.taskId).padStart(4, '0')}
+                                {run.taskStatus ? ` · ${run.taskStatus}` : ''}
+                              </Link>
+                            ) : (
+                              '—'
+                            )}
+                          </TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {workflow.runs.map((run, index) => (
-                          <TableRow key={run.id}>
-                            <TableCell>{index + 1}</TableCell>
-                            <TableCell>
-                              <span className="font-medium">{run.nodeName}</span>
-                              <span className="ml-1 text-xs text-foreground-muted">
-                                第 {run.attempt} 次
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              {run.agentName ??
-                                ticket.initiatorWorkerName ??
-                                '发起机器人'}
-                            </TableCell>
-                            <TableCell>{run.status}</TableCell>
-                            <TableCell>
-                              {run.outcome
-                                ? OUTCOME_LABEL[run.outcome] ?? run.outcome
-                                : '—'}
-                            </TableCell>
-                            <TableCell>
-                              {run.taskId ? (
-                                <Link
-                                  to={`/tasks/${run.taskId}`}
-                                  className="font-mono text-xs hover:underline"
-                                >
-                                  TK-{String(run.taskId).padStart(4, '0')}
-                                  {run.taskStatus ? ` · ${run.taskStatus}` : ''}
-                                </Link>
-                              ) : (
-                                '—'
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        {workflow.runs.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={6} className="text-foreground-muted">
-                              暂无节点运行记录
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </Card>
-              </div>
+                      ))}
+                      {workflow.runs.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-foreground-muted">
+                            暂无节点运行记录
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </section>
             )}
 
             {contentTab === 'info' && (
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <div className="flex flex-col gap-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>需求正文</CardTitle>
-                      <CardDescription>发起工单时填写的工单描述</CardDescription>
-                    </CardHeader>
-                    <div className="px-4 pb-4 text-sm">
-                      {ticket.description?.trim() ? (
-                        <MarkdownViewer text={ticket.description} />
-                      ) : (
-                        <p className="text-foreground-muted">无需求正文</p>
-                      )}
-                    </div>
-                  </Card>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>工单输入</CardTitle>
-                      <CardDescription>起始节点提交的结构化信息</CardDescription>
-                    </CardHeader>
-                    <div className="flex flex-col gap-2 px-4 pb-4 text-sm">
-                      {inputEntries.length === 0 && (
-                        <p className="text-foreground-muted">无结构化输入</p>
-                      )}
-                      {inputEntries.map(([key, value]) => {
-                        const field = fieldByKey.get(key)
-                        const text =
-                          typeof value === 'object' && value !== null
-                            ? JSON.stringify(value)
-                            : String(value ?? '')
-                        return (
-                          <div
-                            key={key}
-                            className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2"
-                          >
-                            <p className="text-xs text-foreground-muted">
-                              {field?.label ?? key}
-                            </p>
-                            {field?.type === 'textarea' ? (
-                              text ? (
-                                <MarkdownViewer text={text} className="mt-1" />
-                              ) : (
-                                <p className="mt-1 text-foreground-muted">—</p>
-                              )
-                            ) : (
-                              <p className="mt-1 break-all whitespace-pre-wrap">
-                                {text || '—'}
+              <section className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+                <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+                  <h2 className="text-sm font-semibold text-foreground-intense">
+                    工单信息
+                  </h2>
+                  <span className="font-mono text-xs text-foreground-muted">
+                    {ticket.code}
+                  </span>
+                </header>
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <div className="flex flex-col gap-5">
+                    <section>
+                      <h3 className="text-sm font-semibold text-foreground-intense">
+                        需求正文
+                      </h3>
+                      <p className="mt-1 text-xs text-foreground-muted">
+                        发起工单时填写的工单描述
+                      </p>
+                      <div className="mt-2 text-sm">
+                        {ticket.description?.trim() ? (
+                          <MarkdownViewer text={ticket.description} />
+                        ) : (
+                          <p className="text-foreground-muted">无需求正文</p>
+                        )}
+                      </div>
+                    </section>
+                    <section>
+                      <h3 className="text-sm font-semibold text-foreground-intense">
+                        工单输入
+                      </h3>
+                      <p className="mt-1 text-xs text-foreground-muted">
+                        起始节点提交的结构化信息
+                      </p>
+                      <div className="mt-2 flex flex-col gap-2 text-sm">
+                        {inputEntries.length === 0 && (
+                          <p className="text-foreground-muted">无结构化输入</p>
+                        )}
+                        {inputEntries.map(([key, value]) => {
+                          const field = fieldByKey.get(key)
+                          const text =
+                            typeof value === 'object' && value !== null
+                              ? JSON.stringify(value)
+                              : String(value ?? '')
+                          return (
+                            <div
+                              key={key}
+                              className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2"
+                            >
+                              <p className="text-xs text-foreground-muted">
+                                {field?.label ?? key}
                               </p>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </Card>
+                              {field?.type === 'textarea' ? (
+                                text ? (
+                                  <MarkdownViewer text={text} className="mt-1" />
+                                ) : (
+                                  <p className="mt-1 text-foreground-muted">—</p>
+                                )
+                              ) : (
+                                <p className="mt-1 break-all whitespace-pre-wrap">
+                                  {text || '—'}
+                                </p>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </section>
+                  </div>
                 </div>
-              </div>
+              </section>
             )}
 
             {contentTab === 'events' &&
@@ -676,8 +694,10 @@ export function TicketDetailPage() {
                 <EmptyTabPanel text="节点任务完成后由平台生成复盘文档" />
               ))}
           </div>
-        </div>
-      </DetailPageLayout>
+          </div>
+        </DetailPageLayout>
+      </div>
+    </div>
     )
   }
 
@@ -717,7 +737,7 @@ export function TicketDetailPage() {
 /** 无节点任务时的空态占位（与任务文档等面板同款外框样式） */
 function EmptyTabPanel({ text }: { text: string }) {
   return (
-    <section className="flex h-full min-h-0 flex-col items-center justify-center rounded-[var(--radius-lg)] border border-border bg-background">
+    <section className="flex h-full min-h-0 flex-col items-center justify-center bg-background">
       <p className="text-sm text-foreground-muted">{text}</p>
     </section>
   )

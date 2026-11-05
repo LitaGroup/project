@@ -115,7 +115,7 @@ export function TicketCurrentNodePanel({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-5 p-4">
           {/* 当前节点 */}
