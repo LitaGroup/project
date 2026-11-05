@@ -65,7 +65,12 @@ const TICKET_STATUS_FAILED = '已失败';
 const TICKET_STATUS_CANCELED = '已取消';
 
 function outcomeForNode(kind: string, finished: Task): string {
-  if (finished.subStatus === TaskSubStatus.FAILED) {
+  // 节点任务「失败」或「已拒绝」均视为当前节点失败：
+  // 审批节点按驳回流转，操作节点按执行失败流转。
+  if (
+    finished.subStatus === TaskSubStatus.FAILED ||
+    finished.subStatus === TaskSubStatus.REFUSED
+  ) {
     return kind === 'approval' ? 'rejected' : 'failed';
   }
   return kind === 'approval' ? 'approved' : 'succeeded';
