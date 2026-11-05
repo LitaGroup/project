@@ -5,8 +5,8 @@ export type ProjectType = (typeof PROJECT_TYPES)[number]
 export const PROJECT_STATUSES = ['待分配', '开发中', '已关闭', '暂停中', '测试中', '已发布'] as const
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
 
-/** 提测记录状态（与后端 ReleaseStatus 对应）：提测默认待冒烟，由测试同学判定 已通过/未通过 */
-export const RELEASE_STATUSES = ['待冒烟', '已通过', '未通过'] as const
+/** 提测记录状态（与后端 ReleaseStatus 对应）：待冒烟（默认）/ 进行中 / 已通过 / 未通过 */
+export const RELEASE_STATUSES = ['待冒烟', '进行中', '已通过', '未通过'] as const
 export type ReleaseStatus = (typeof RELEASE_STATUSES)[number]
 
 /** 与后端 DefectStatus 对应，平台侧统一为 开放/修复/关闭 */export const DEFECT_STATUSES = ['开放', '修复', '关闭'] as const
@@ -608,13 +608,17 @@ export interface ProjectRelease {
   branches: ReleaseBranch[] | null
   /** 测试人员姓名（至少 1 个，均为用户系统内用户） */
   testers: string[]
-  /** 提测人姓名 */
+  /** 提测人姓名（机器人提测时为机器人名称） */
   operator: string | null
-  /** 提测状态：待冒烟（默认）/ 已通过 / 未通过（由测试同学判定） */
+  /** 发起提测的机器人（人工提测为空） */
+  workerId: number | null
+  /** 发起提测时机器人正在执行的任务 */
+  sourceTaskId: number | null
+  /** 提测状态：待冒烟（默认）/ 进行中 / 已通过 / 未通过 */
   status: ReleaseStatus
-  /** 判定人姓名（已通过/未通过时记录，待冒烟为空） */
+  /** 判定人姓名（已通过/未通过时记录，待冒烟/进行中为空） */
   verifier: string | null
-  /** 判定时间（已通过/未通过时记录，待冒烟为空） */
+  /** 判定时间（已通过/未通过时记录，待冒烟/进行中为空） */
   verifiedAt: string | null
   /** 提测时间 */
   createdAt: string
@@ -677,6 +681,10 @@ export interface Defect {
   fixedAt: string | null
   /** 验证时间（人工二次确认，改为"关闭"时记录） */
   verifiedAt: string | null
+  /** 来源提测记录（机器人提测后的新缺陷自动关联） */
+  releaseId: number | null
+  /** 自动创建的缺陷处理任务 */
+  followupTaskId: number | null
   createdAt: string
   updatedAt: string
 }
@@ -878,6 +886,11 @@ function agentPageContextBody(
   }
 }
 
+/** 顶部「机器人」一对一聊天 SSE 地址 */
+export function workerChatStreamUrl(workerId: number): string {
+  return `/api/worker-chats/${workerId}/stream`
+}
+
 /** 我的 AI SSE 地址（工作台/详情页共用） */
 export function workbenchAgentStreamUrl(
   taskId?: number | null,
@@ -923,6 +936,18 @@ export type WorkerRuntime = (typeof WORKER_RUNTIMES)[number]
 export const WORKER_LIVE_STATUSES = ['空闲中', '工作中', '等待中', '验收中'] as const
 export type WorkerLiveStatus = (typeof WORKER_LIVE_STATUSES)[number]
 
+/** 机器人 GitHub 权限：可配置档位为 develop（开发权限，默认）/ release（发布权限）；none 为真人/个人 AGENT 内部兜底，不作为配置项 */
+export const WORKER_GITHUB_PERMISSIONS = ['develop', 'release'] as const
+export type WorkerGithubPermission =
+  | 'none'
+  | (typeof WORKER_GITHUB_PERMISSIONS)[number]
+
+export const WORKER_GITHUB_PERMISSION_LABELS: Record<WorkerGithubPermission, string> = {
+  none: '无权限',
+  develop: '开发权限',
+  release: '发布权限',
+}
+
 /** 任务类型名称（动态字典，来源 /api/task-types） */
 export type TaskType = string
 
@@ -939,12 +964,13 @@ export interface TaskTypeDef {
 export const TASK_STATUSES = ['等待中', '进行中', '已结束'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
-/** 任务子状态：与主状态严格对应（等待中：待分配/待接受/待反馈/待继续/待验收；进行中：执行中；已结束：完成/已拒绝/失败/取消） */
+/** 任务子状态：与主状态严格对应（等待中：待分配/待接受/待反馈/待继续/待申请验收/待验收；进行中：执行中；已结束：完成/已拒绝/失败/取消） */
 export const TASK_SUB_STATUSES = [
   '待分配',
   '待接受',
   '待反馈',
   '待继续',
+  '待申请验收',
   '待验收',
   '执行中',
   '完成',
@@ -1068,6 +1094,8 @@ export interface Worker {
   humanUserName: string | null
   /** 个人 AI AGENT 的归属用户；工作台「我的 AGENT」使用该机器人 */
   personalAgentUserId: number | null
+  /** GitHub 权限：none（内部兜底）/ develop（开发权限）/ release（发布权限） */
+  githubPermission: WorkerGithubPermission
   enabled: boolean
   /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
@@ -1077,6 +1105,13 @@ export interface Worker {
   activeTask: { id: number; code: string; title: string; status: string } | null
   createdAt: string
   updatedAt: string
+}
+
+/** 顶部「机器人」聊天会话摘要 */
+export interface WorkerChatSession {
+  worker: WorkerDebugOption
+  /** 会话创建时间，即首条消息时间 */
+  startedAt: string
 }
 
 /** 可调试 Agent（仅启用、执行器在线且模型配置完整的机器人） */
@@ -1182,15 +1217,10 @@ export interface WorkerDebugTodo {
 }
 
 /** 调试对话快照；同一用户 + 机器人固定绑定一个 sessionId，7 天不活跃才重置 */
-/** opencode 主 Agent 模式：build=可修改执行，plan=只分析规划 */
-export type WorkerDebugMode = 'build' | 'plan'
-
 export interface WorkerDebugSnapshot {
   worker: WorkerDebugOption
   /** 当前选择/生效的模型与思考等级 */
   model: WorkerDebugModelSelection
-  /** 当前主 Agent 模式（build / plan） */
-  mode: WorkerDebugMode
   sessionId: string | null
   status: 'idle' | 'running'
   messages: WorkerDebugMessage[]
@@ -1295,12 +1325,14 @@ export interface TaskPackage {
   /** 最近一次分配时间（操作台按此倒序；可能为空） */
   assignedAt: string | null
   status: TaskStatus
-  /** 子状态：待分配 / 待接受 / 待反馈 / 待继续 / 待验收 / 执行中 / 完成 / 已拒绝 / 失败 / 取消 */
+  /** 子状态：待分配 / 待接受 / 待反馈 / 待继续 / 待申请验收 / 待验收 / 执行中 / 完成 / 已拒绝 / 失败 / 取消 */
   subStatus: TaskSubStatus
-  /** 需求方类型：user=人类用户 / worker=父任务机器人 */
+  /** 需求方类型：user=人类用户（历史）/ worker=真人机器人 */
   requesterType: 'user' | 'worker' | null
   /** 需求方 id（users.id 或 workers.id，与 requesterType 联合解释） */
   requesterId: number | null
+  /** 需求方展示名（列表接口/看板 SSE 附带；worker 显示机器人名，历史个人 AGENT 显示主人） */
+  requesterName?: string | null
   /** 待继续时下一次派发需要补充的上下文（答复/返工/子任务事件） */
   resumePrompt: string | null
   /** 最近一次任务邀约时间（待接受重试节流） */
@@ -1318,7 +1350,7 @@ export interface TaskPackage {
   executorId: number | null
   opencodeSessionId: string | null
   result: string | null
-  /** 任务交付文档知识路径（任务创建时生成） */
+  /** 任务交付文档知识路径（执行方首次显式创建后登记） */
   handoffPath: string | null
   /** 交付文档当前版本（平台维护） */
   handoffVersion: number
@@ -1402,25 +1434,73 @@ export const TICKET_CATEGORY_DEFINITIONS = [
   },
 ] as const
 
-export type TicketCategory = (typeof TICKET_CATEGORY_DEFINITIONS)[number]['category']
+export type TicketCategory = string
 export type TicketAssigneeType = 'user' | 'worker'
 
-/** 工单推导状态：工作流子状态 + 已完成/已失败/已取消 */
+/** 工单状态：工作流状态优先，历史工单沿用任务推导状态 */
 export type TicketStatus =
   | '待分配'
   | '待接受'
   | '待反馈'
   | '待继续'
+  | '待申请验收'
   | '待验收'
   | '处理中'
+  | '待人工验收'
   | '已完成'
   | '已失败'
   | '已取消'
 
+export interface TicketWorkflowInputField {
+  key: string
+  label: string
+  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'file'
+  required: boolean
+  options?: string[]
+  placeholder?: string | null
+  defaultValue?: string | number | null
+}
+
+export interface TicketWorkflowRun {
+  id: number
+  ticketId: number
+  nodeKey: string
+  nodeName: string
+  nodeKind: 'start' | 'operation' | 'approval' | 'acceptance'
+  attempt: number
+  taskTemplateId: number | null
+  taskTemplateName: string | null
+  agentId: number | null
+  agentName: string | null
+  taskId: number | null
+  status: string
+  outcome: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  createdAt: string
+  updatedAt: string
+  taskStatus: string | null
+}
+
+export interface TicketWorkflowView {
+  definitionId: number
+  definitionName: string
+  versionId: number
+  version: number
+  status: string
+  currentNodeKey: string | null
+  currentNodeName: string | null
+  autoAcceptance: boolean
+  inputValues: Record<string, unknown>
+  nodes: WorkflowNodeDefinition[]
+  edges: WorkflowEdgeDefinition[]
+  runs: TicketWorkflowRun[]
+}
+
 export interface Ticket {
   id: number
   code: string
-  category: TicketCategory
+  category: string
   title: string
   description: string | null
   createdById: number
@@ -1428,10 +1508,18 @@ export interface Ticket {
   assigneeType: TicketAssigneeType
   assigneeId: number
   assigneeName: string
-  taskId: number
-  /** 按关联任务实时推导的工单状态 */
+  taskId: number | null
+  /** 工作流状态或按关联任务实时推导的历史工单状态 */
   status: TicketStatus
   task: TaskPackage | null
+  workflowDefinitionId: number | null
+  workflowVersion: number | null
+  initiatorWorkerId: number | null
+  initiatorWorkerName: string | null
+  workflowStatus: string | null
+  currentNodeKey: string | null
+  currentNodeName: string | null
+  workflow?: TicketWorkflowView | null
   createdAt: string
   updatedAt: string
 }
@@ -1445,7 +1533,7 @@ export interface TicketAllowedTemplate {
 }
 
 export interface TicketDetail extends Ticket {
-  config: TicketConfig
+  config: TicketConfig | null
   allowedTemplates: TicketAllowedTemplate[]
 }
 
@@ -1458,6 +1546,84 @@ export interface TicketConfig {
   enabled: boolean
   description: string
 }
+
+/** 工单工作流节点类型：起始 / 审批 / 操作 / 验收 */
+export const WORKFLOW_NODE_KINDS = [
+  'start',
+  'operation',
+  'approval',
+  'acceptance',
+] as const
+export type WorkflowNodeKind = (typeof WORKFLOW_NODE_KINDS)[number]
+
+/** 节点执行结果；审批节点使用 approved/rejected，其它节点使用 succeeded/failed */
+export const WORKFLOW_OUTCOMES = [
+  'succeeded',
+  'failed',
+  'approved',
+  'rejected',
+] as const
+export type WorkflowOutcome = (typeof WORKFLOW_OUTCOMES)[number]
+
+/** 流程结束的虚拟节点；验收通过或操作节点的成功/失败流转可以指向它 */
+export const WORKFLOW_END_NODE = '$end'
+
+export interface WorkflowNodeDefinition {
+  key: string
+  name: string
+  kind: WorkflowNodeKind
+  taskTemplateId: number | null
+  /** 审批节点负责机器人；操作节点按任务定义自动分配 */
+  responsibleWorkerId: number | null
+  /** 仅起始节点：工单发起时的结构化输入字段 */
+  inputFields: TicketWorkflowInputField[] | null
+  /** 仅验收节点：前序成功到达时直接验收通过 */
+  autoAccept: boolean
+  description: string | null
+}
+
+export interface WorkflowEdgeDefinition {
+  from: string
+  to: string
+  outcome: WorkflowOutcome | null
+  label: string | null
+}
+
+export interface WorkflowDefinitionJson {
+  startNode: string
+  nodes: WorkflowNodeDefinition[]
+  edges: WorkflowEdgeDefinition[]
+}
+
+export interface TicketWorkflowDefinitionSummary {
+  id: number
+  code: string
+  category: string
+  name: string
+  description: string | null
+  builtIn: boolean
+  enabled: boolean
+  latestPublishedVersion: number
+  latestPublishedAt: string | null
+  draftUpdatedAt: string | null
+  updatedAt: string
+}
+
+export interface TicketWorkflowPublishedVersion {
+  version: number
+  name: string
+  description: string | null
+  definition: WorkflowDefinitionJson
+  publishedById: number | null
+  publishedByName: string | null
+  publishedAt: string
+}
+
+export interface TicketWorkflowDefinitionDetail extends TicketWorkflowDefinitionSummary {
+  draft: WorkflowDefinitionJson
+  published: TicketWorkflowPublishedVersion | null
+}
+
 
 /** 任务看板 SSE（GET /api/tasks/stream）：初始快照 + 增量事件 */
 export type TaskRealtimeMessage =
@@ -1595,8 +1761,8 @@ export interface TaskChatSnapshot {
   events: TaskEvent[]
 }
 
-/** 工作台角色：我执行 / 我的 AGENT 执行 / 我是需求方 / 我是执行方 */
-export type WorkbenchRole = 'agent' | 'owner' | 'requester' | 'responsible'
+/** 工作台角色：我执行 / 我是需求方 / 我是执行方 */
+export type WorkbenchRole = 'agent' | 'requester' | 'responsible'
 
 /** 操作台任务：任务本体 + 当前用户角色与下一步动作 */
 export interface WorkbenchTask extends TaskPackage {
@@ -1651,6 +1817,8 @@ export interface WorkbenchSummary {
 
 /** 任务交付文档（正文由作者维护，版本与更新时间由平台维护） */
 export interface TaskHandoffDocument {
+  /** 文档是否已由执行方/需求方显式创建 */
+  exists: boolean
   path: string
   url: string
   title: string
@@ -1676,6 +1844,10 @@ export interface TaskDocumentEntry {
   /** 文档 Frontmatter 中的描述 */
   description: string | null
   updatedAt: string | null
+  /** 来源任务（「文档」Tab 聚合子任务文档时携带） */
+  taskId?: number
+  taskCode?: string
+  taskTitle?: string
 }
 
 /** 任务文档中引用的站内图片/文件 */
@@ -1685,11 +1857,17 @@ export interface TaskArtifactEntry {
   url: string
   /** 引用该产物的文档 */
   sourceDocument: string
+  /** 来源任务（「文档」Tab 聚合子任务文档时携带） */
+  taskId?: number
+  taskCode?: string
+  taskTitle?: string
 }
 
-/** 任务详情「文档」Tab 数据 */
+/** 任务详情「文档」Tab 数据（documents 含当前任务与全部子任务文档） */
 export interface TaskDocumentsView {
   directory: string
+  /** 当前任务 id，用于区分「当前任务」与「子任务」分组 */
+  taskId: number
   documents: TaskDocumentEntry[]
   artifacts: TaskArtifactEntry[]
 }
@@ -1738,6 +1916,43 @@ export interface TaskTemplate {
   createdAt: string
   updatedAt: string
 }
+
+/** 管理区 GitHub 档位凭证（不含任何 PAT / 密文）；全平台仅 开发权限 / 发布权限 两条 */
+export interface GithubAccessCredential {
+  permission: WorkerGithubPermission
+  configured: boolean
+  githubAccount: string | null
+  enabled: boolean
+  rotatedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** OP Gateway 可获取的凭证类型（第一期仅 GitHub PAT） */
+export const GATEWAY_CREDENTIAL_TYPES = ['github.pat'] as const
+export type GatewayCredentialType = (typeof GATEWAY_CREDENTIAL_TYPES)[number]
+
+/** OP Gateway 凭证租用 */
+export interface GatewayCredentialLease {
+  leaseId: string
+  workerId: number
+  credential: {
+    type: GatewayCredentialType
+    data: Record<string, string | number | boolean>
+  }
+  issuedAt: string
+  expiresAt: string
+}
+
+/** 通用凭证操作（第一期仅 GitHub 动作） */
+export const GATEWAY_GITHUB_ACTIONS = [
+  'git.read',
+  'git.write',
+  'gh.pr.create',
+  'gh.pr.approve',
+  'gh.pr.merge',
+] as const
+export type GatewayGithubAction = (typeof GATEWAY_GITHUB_ACTIONS)[number]
 
 export const api = {
   listProjects: () => request<Project[]>('/projects'),
@@ -2131,11 +2346,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ packageId, platform }),
     }),
-  /** 缺陷列表：传 projectId 按项目过滤，不传返回全部。不含 description/images */
-  listDefects: (projectId?: number) =>
-    request<Defect[]>(
-      `/defects${projectId === undefined ? '' : `?projectId=${projectId}`}`,
-    ),
+  /** 缺陷列表：可按项目 / 提测 ID 过滤，不传返回全部。不含大字段 */
+  listDefects: (projectId?: number, releaseId?: number) => {
+    const query = [
+      projectId !== undefined && `projectId=${projectId}`,
+      releaseId !== undefined && `releaseId=${releaseId}`,
+    ]
+      .filter(Boolean)
+      .join('&')
+    return request<Defect[]>(`/defects${query ? `?${query}` : ''}`)
+  },
   getDefect: (id: number) => request<Defect>(`/defects/${id}`),
   /** 缺陷变更记录列表（倒序） */
   listDefectRecords: (id: number) =>
@@ -2155,6 +2375,8 @@ export const api = {
     priority?: DefectPriority
     images?: string[]
     testScript?: string
+    /** 关联提测 ID；不传走自动关联，null 表示明确不关联 */
+    releaseId?: number | null
   }) =>
     request<Defect>('/defects', {
       method: 'POST',
@@ -2171,6 +2393,8 @@ export const api = {
       actual: string
       images: string[]
       testScript: string
+      /** 关联提测 ID；null 清除关联 */
+      releaseId: number | null
       /** 变更内容：状态变更时并入状态记录，否则单独记一条内容变更记录 */
       changeContent: string
       /** 本次变更的备注信息（写入变更记录） */
@@ -2399,6 +2623,8 @@ export const api = {
       urls?: string[]
       branches?: ReleaseBranch[]
       testers: string[]
+      /** 来源任务（机器人调用时可显式指定；网页提测一般不传） */
+      taskId?: number
     },
   ) =>
     request<ProjectRelease>(`/projects/${projectId}/release`, {
@@ -2408,7 +2634,7 @@ export const api = {
   /** 提测记录列表（倒序） */
   listReleases: (projectId: number) =>
     request<ProjectRelease[]>(`/projects/${projectId}/releases`),
-  /** 判定提测结果（测试同学操作）：待冒烟 → 已通过 / 未通过，改回待冒烟清空判定人/时间 */
+  /** 推进提测状态（测试同学操作）：待冒烟 → 进行中 → 已通过 / 未通过；待冒烟/进行中不保留判定人/时间 */
   updateReleaseStatus: (releaseId: number, status: ReleaseStatus) =>
     request<ProjectRelease>(`/releases/${releaseId}/status`, {
       method: 'PATCH',
@@ -2474,6 +2700,22 @@ export const api = {
   getExecutorProviders: (id: number) =>
     request<ExecutorProvider[]>(`/executors/${id}/providers`),
 
+  /** 管理区 GitHub 档位凭证清单（仅管理员；固定两条，不含 PAT） */
+  listGithubAccess: () =>
+    request<GithubAccessCredential[]>('/github-access'),
+  /** 配置权限档位 PAT；pat 只写不读 */
+  saveGithubAccess: (input: {
+    permission: WorkerGithubPermission
+    pat: string
+    enabled?: boolean
+  }) =>
+    request<{ ok: true }>('/github-access', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  deleteGithubAccess: (permission: WorkerGithubPermission) =>
+    request<void>(`/github-access/${permission}`, { method: 'DELETE' }),
+
   /** 机器人列表（role 筛选） */
   listWorkers: (params?: { role?: WorkerRole }) => {
     const qs = new URLSearchParams()
@@ -2498,6 +2740,7 @@ export const api = {
     taskDefs?: WorkerTaskDef[] | null
     ownerUserId?: number | null
     enabled?: boolean
+    githubPermission?: WorkerGithubPermission
   }) =>
     request<Worker>('/workers', {
       method: 'POST',
@@ -2521,6 +2764,7 @@ export const api = {
       taskDefs: WorkerTaskDef[] | null
       ownerUserId: number | null
       enabled: boolean
+      githubPermission: WorkerGithubPermission
     }>,
   ) =>
     request<Worker>(`/workers/${id}`, {
@@ -2573,6 +2817,45 @@ export const api = {
     request<WorkerInitializeSnapshot>(`/workers/${id}/initialize`),
   /** 工作概览卡片数据（实时状态，前端轮询） */
   listWorkersLive: () => request<Worker[]>('/workers/live'),
+  /** 顶部「机器人」：可对话机器人清单，按名称/简介/ID 联想 */
+  listWorkerChatWorkers: (q?: string) => {
+    const query = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
+    return request<WorkerDebugOption[]>(`/worker-chats/workers${query}`)
+  },
+  /** 顶部「机器人」：当前用户已有会话，按首条消息时间倒序，最多 20 条 */
+  listWorkerChatSessions: () =>
+    request<WorkerChatSession[]>('/worker-chats/sessions'),
+  /** 顶部「机器人」：当前用户与指定机器人的唯一聊天会话 */
+  getWorkerChatSnapshot: (workerId: number) =>
+    request<WorkerDebugSnapshot>(`/worker-chats/${workerId}`),
+  /** 顶部「机器人」：发送文字与附件 */
+  sendWorkerChatMessage: (
+    workerId: number,
+    content: string,
+    files?: WorkerDebugAttachment[],
+  ) =>
+    request<WorkerDebugSnapshot>(`/worker-chats/${workerId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content, files }),
+    }),
+  /** 顶部「机器人」：回答（answers）或跳过（null）提问 */
+  replyWorkerChatQuestion: (
+    workerId: number,
+    questionId: string,
+    answers: string[][] | null,
+  ) =>
+    request<WorkerDebugSnapshot>(
+      `/worker-chats/${workerId}/questions/${encodeURIComponent(questionId)}/reply`,
+      {
+        method: 'POST',
+        body: JSON.stringify(answers ? { answers } : { reject: true }),
+      },
+    ),
+  /** 顶部「机器人」：清空消息并解绑 opencode 会话 */
+  resetWorkerChat: (workerId: number) =>
+    request<WorkerDebugSnapshot>(`/worker-chats/${workerId}/reset`, {
+      method: 'POST',
+    }),
   /** 当前用户与机器人的调试会话快照（含最近一次 todowrite 待办） */
   getWorkerDebugSnapshot: (workerId: number) =>
     request<WorkerDebugSnapshot>(`/workers/${workerId}/debug`),
@@ -2606,32 +2889,45 @@ export const api = {
       method: 'POST',
     }),
 
-  /** 工单列表（category/status/q 可选） */
+  /** 工单列表（category/status/q/workflowDefinitionId/scope 可选；scope=mine 仅当前用户提出） */
   listTickets: (params?: {
     category?: string
     status?: string
     q?: string
+    workflowDefinitionId?: number
+    scope?: 'mine'
   }) => {
     const qs = new URLSearchParams()
     if (params?.category) qs.set('category', params.category)
+    if (params?.workflowDefinitionId)
+      qs.set('workflowDefinitionId', String(params.workflowDefinitionId))
     if (params?.status) qs.set('status', params.status)
     if (params?.q) qs.set('q', params.q)
+    if (params?.scope) qs.set('scope', params.scope)
     const q = qs.toString()
     return request<Ticket[]>(`/tickets${q ? `?${q}` : ''}`)
   },
   /** 工单详情：工单 + 关联任务 + 可转派定义 */
   getTicket: (id: number) => request<TicketDetail>(`/tickets/${id}`),
-  /** 创建工单：按类型固定默认任务定义派发，处理机器人自动取该定义的启用机器人 */
+  /** 创建工单：工作流工单按配置起始字段提交；历史类型工单保留 category/description */
   createTicket: (input: {
-    category: TicketCategory
+    category?: string
+    workflowDefinitionId?: number
     title?: string
-    description: string
+    description?: string
+    inputValues?: Record<string, unknown>
   }) =>
     request<Ticket>('/tickets', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  /** 工单类型配置（管理端） */
+  /** 工单工作流验收（仅发起机器人/发起人） */
+  acceptTicketWorkflow: (id: number, action: 'accept' | 'reject', remark?: string) =>
+    request<Ticket>(`/tickets/${id}/workflow/${action}`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
+  /** 工单类型配置（旧模型兼容，仅供历史工单详情展示） */
   listTicketConfigs: () => request<TicketConfig[]>('/ticket-configs'),
   updateTicketConfig: (category: string, allowedTemplateIds: number[]) =>
     request<TicketConfig>(
@@ -2642,10 +2938,62 @@ export const api = {
       },
     ),
 
+  /** 管理端工单配置（工单工作流） */
+  listTicketWorkflowDefinitions: () =>
+    request<TicketWorkflowDefinitionSummary[]>('/ticket-workflow-definitions'),
+  createTicketWorkflowDefinition: (input: {
+    name: string
+    description?: string | null
+    definition?: WorkflowDefinitionJson
+  }) =>
+    request<TicketWorkflowDefinitionDetail>('/ticket-workflow-definitions', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  deleteTicketWorkflowDefinition: (id: number) =>
+    request<void>(`/ticket-workflow-definitions/${id}`, { method: 'DELETE' }),
+  getTicketWorkflowDefinition: (id: number) =>
+    request<TicketWorkflowDefinitionDetail>(`/ticket-workflow-definitions/${id}`),
+  saveTicketWorkflowDraft: (
+    id: number,
+    input: {
+      name?: string
+      description?: string | null
+      enabled?: boolean
+      definition: WorkflowDefinitionJson
+    },
+  ) =>
+    request<TicketWorkflowDefinitionDetail>(
+      `/ticket-workflow-definitions/${id}/draft`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      },
+    ),
+  publishTicketWorkflow: (
+    id: number,
+    input: {
+      name?: string
+      description?: string | null
+      enabled?: boolean
+      definition: WorkflowDefinitionJson
+    },
+  ) =>
+    request<TicketWorkflowDefinitionDetail>(
+      `/ticket-workflow-definitions/${id}/publish`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+
   /** 任务定义列表 */
   listTaskTemplates: () => request<TaskTemplate[]>('/task-templates'),
   getTaskTemplate: (id: number) =>
     request<TaskTemplate>(`/task-templates/${id}`),
+  /** 任务定义最近匹配的任务（最多 5 个，含根任务与子任务，按更新时间倒序） */
+  listTaskTemplateTasks: (id: number) =>
+    request<TaskPackage[]>(`/task-templates/${id}/tasks`),
   createTaskTemplate: (input: {
     name: string
     type?: string | null
@@ -2720,6 +3068,9 @@ export const api = {
   getTaskPackage: (id: number) => request<TaskPackage>(`/tasks/${id}`),
   /** 操作台：绑定机器人 + 我执行/待我处理的任务 */
   getWorkbench: () => request<WorkbenchSummary>('/workbench'),
+  /** 单个任务在当前用户视角下的工作台角色 */
+  getWorkbenchTask: (id: number) =>
+    request<WorkbenchTask>(`/workbench/tasks/${id}`),
   workbenchAccept: (id: number) =>
     request<TaskPackage>(`/workbench/tasks/${id}/accept`, { method: 'POST' }),
   workbenchRefuse: (id: number, reason: string, suggestion?: string) =>
@@ -2858,20 +3209,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({
         ...input,
-        taskId: taskId ?? null,
-        ...agentPageContextBody(context),
-      }),
-    }),
-  /** 我的 AGENT：切换 build / plan 模式（返回最新快照） */
-  setWorkbenchAgentMode: (
-    mode: WorkerDebugMode,
-    taskId?: number | null,
-    context?: AgentPageContext | null,
-  ) =>
-    request<WorkerDebugSnapshot>('/workbench/agent/mode', {
-      method: 'POST',
-      body: JSON.stringify({
-        mode,
         taskId: taskId ?? null,
         ...agentPageContextBody(context),
       }),

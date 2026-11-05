@@ -33,6 +33,7 @@ export function DefectsPage() {
   const [defects, setDefects] = useState<Defect[] | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [keyword, setKeyword] = useState('')
+  const [releaseFilter, setReleaseFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [error, setError] = useState<string | null>(null)
@@ -49,9 +50,15 @@ export function DefectsPage() {
 
   const projectName = new Map(projects.map((p) => [p.id, p.name]))
   const q = keyword.trim().toLowerCase()
+  const releaseKeyword = releaseFilter.trim().replace(/^#/, '')
+  const releaseIdFilter =
+    releaseKeyword === '' ? null : Number(releaseKeyword)
   const filtered = (defects ?? []).filter(
     (d) =>
       (projectFilter === 'all' || String(d.projectId) === projectFilter) &&
+      (releaseIdFilter === null ||
+        (Number.isInteger(releaseIdFilter) &&
+          d.releaseId === releaseIdFilter)) &&
       (!q ||
         d.expected.toLowerCase().includes(q) ||
         d.actual.toLowerCase().includes(q)) &&
@@ -70,6 +77,9 @@ export function DefectsPage() {
   // Markdown 视图带当前筛选参数（'all'/空串不传）
   const mdQuery = [
     projectFilter !== 'all' && `projectId=${projectFilter}`,
+    releaseIdFilter !== null &&
+      Number.isInteger(releaseIdFilter) &&
+      `releaseId=${releaseIdFilter}`,
     statusFilter !== 'all' && `status=${encodeURIComponent(statusFilter)}`,
     priorityFilter !== 'all' &&
       `priority=${encodeURIComponent(priorityFilter)}`,
@@ -107,6 +117,19 @@ export function DefectsPage() {
               onChange={(e) => setKeyword(e.target.value)}
               onClear={() => setKeyword('')}
               aria-label="搜索预期或实际描述"
+            />
+          }
+        />
+        <ToolbarInput
+          className="w-32"
+          render={
+            <Input
+              placeholder="提测 ID"
+              clearable
+              value={releaseFilter}
+              onChange={(e) => setReleaseFilter(e.target.value)}
+              onClear={() => setReleaseFilter('')}
+              aria-label="按提测 ID 筛选"
             />
           }
         />
@@ -165,6 +188,7 @@ export function DefectsPage() {
         <TableHeader>
           <TableRow>
             <TableHead>预期功能描述</TableHead>
+            <TableHead className="w-24 text-center">提测 ID</TableHead>
             <TableHead className="w-24 text-center">端</TableHead>
             <TableHead className="w-24 text-center">优先级</TableHead>
             <TableHead className="w-24 text-center">状态</TableHead>
@@ -185,6 +209,9 @@ export function DefectsPage() {
                 >
                   {d.expected}
                 </Link>
+              </TableCell>
+              <TableCell className="text-center">
+                {d.releaseId ? `#${d.releaseId}` : '—'}
               </TableCell>
               <TableCell className="text-center">{d.platform ?? '—'}</TableCell>
               <TableCell className="text-center">
@@ -208,7 +235,7 @@ export function DefectsPage() {
           ))}
           {defects !== null && filtered.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6}>
+              <TableCell colSpan={7}>
                 {defects.length === 0
                   ? '暂无缺陷，点击"新建缺陷"创建'
                   : '无匹配的缺陷'}

@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -57,6 +58,16 @@ export class Defect {
   /** 验证时间：脚本回归通过自动关闭、或人工确认关闭时记录 */
   @Column({ type: 'timestamptz', nullable: true })
   verifiedAt: Date | null;
+
+  /** 来源提测记录（项目最新一条有效提测：待冒烟/进行中/未通过；无提测时为空） */
+  @Index('IDX_defects_releaseId')
+  @Column({ type: 'int', nullable: true })
+  releaseId: number | null;
+
+  /** 自动创建的缺陷处理任务（tasks.id；未触发/创建失败时为空） */
+  @Index('IDX_defects_followupTaskId')
+  @Column({ type: 'int', nullable: true })
+  followupTaskId: number | null;
 
   // 测试库账号无 REFERENCES 权限，暂不建物理外键；获得授权后可移除该选项
   @ManyToOne(() => Project, (project) => project.defects, {

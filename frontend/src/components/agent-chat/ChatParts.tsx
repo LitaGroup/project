@@ -57,6 +57,8 @@ function remarkChatLineBreaks() {
 const MARKDOWN_PLUGINS = [remarkGfm, remarkChatLineBreaks]
 const MARKDOWN_COMPONENTS_BY_LANGUAGE = {
   mermaid: { SyntaxHighlighter: MermaidDiagram },
+  // 手写/外部 Agent 可能使用大写语言标识，assistant-ui 按原值匹配
+  Mermaid: { SyntaxHighlighter: MermaidDiagram },
 }
 
 /** 连续工具调用折叠成一组，避免 shell 等调用刷屏 */

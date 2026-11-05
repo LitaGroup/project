@@ -46,7 +46,11 @@ import {
   CreateSubtaskInput,
   TaskCollaborationService,
 } from './task-collaboration.service';
-import type { TaskActor } from './task-requester';
+import {
+  isTaskRequester,
+  type TaskActor,
+  workerRequesterActor,
+} from './task-requester';
 import { TasksAgentService } from './tasks-agent.service';
 import { PersonalAgentsService } from '../workers/personal-agents.service';
 
@@ -87,6 +91,11 @@ class MessageDto {
   content?: string;
   /** 双角色用户显式指定发送身份；缺省按需求方兼容旧调用 */
   perspective?: TaskChatPerspective;
+}
+
+/** 需求方机器人/用户在子任务对话中回复执行方消息 */
+class ReplyTaskMessageDto {
+  content?: string;
 }
 
 /** 验收不通过：反馈原因与返工要求（必填） */
@@ -415,6 +424,25 @@ export class TasksController {
   }
 
   /**
+   * task-message-reply：需求方（机器人/用户）回复子任务执行方消息。
+   * 只写入对话不改任务状态，供父机器人处理收件箱 message 事件。
+   */
+  @Post(':id/messages/reply.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async replyTaskMessage(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReplyTaskMessageDto,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const task = await this.collaboration.replyMessage(
+      id,
+      await this.requireRequesterActor(req, id),
+      dto.content ?? '',
+    );
+    return this.collaboration.actionMarkdown('消息已回复', task);
+  }
+
+  /**
    * 任务文档目录清单（含 HANDOFF，验收后含 REVIEW）。
    * 任务相关文档默认归档到 /task/{yyyyMMdd}/{任务编号}/。
    */
@@ -424,7 +452,6 @@ export class TasksController {
     @Param('id', ParseIntPipe) id: number,
   ): Promise<string> {
     const task = await this.tasksService.mustFind(id);
-    await this.taskDocuments.ensureHandoff(task);
     const documents = await this.taskDocuments.listTaskDocuments(task);
     return this.taskDocuments.taskDocumentsMarkdown(task, documents);
   }
@@ -441,12 +468,12 @@ export class TasksController {
     @Req() req: AuthedRequest,
   ): Promise<string> {
     const task = await this.tasksService.mustFind(id);
-    this.assertTaskDocumentAuthor(task, req);
+    const updatedBy = await this.assertTaskDocumentAuthor(task, req);
     const entry = await this.taskDocuments.upsertTaskDocument(task, {
       name: dto.name ?? '',
       content: dto.content,
       title: dto.title,
-      updatedBy: req.worker?.name ?? req.user?.name ?? '系统',
+      updatedBy,
     });
     return [
       mdFrontmatter({
@@ -470,10 +497,9 @@ export class TasksController {
   taskDocumentsView(
     @Param('id', ParseIntPipe) id: number,
   ): Promise<TaskDocumentsView> {
-    return this.tasksService.mustFind(id).then(async (task) => {
-      await this.taskDocuments.ensureHandoff(task);
-      return this.taskDocuments.taskDocumentsView(task);
-    });
+    return this.tasksService
+      .mustFind(id)
+      .then((task) => this.taskDocuments.taskDocumentsView(task));
   }
 
   /** 任务详情「文档」Tab：读取某篇任务文档的 Markdown 正文。 */
@@ -809,16 +835,29 @@ export class TasksController {
   }
 
   /** 机器人令牌只能维护自己执行或自己作为需求方的任务文档；用户令牌按平台既有权限处理。 */
-  private assertTaskDocumentAuthor(task: Task, req: AuthedRequest): void {
-    if (!req.worker) return;
-    const isExecutor = task.agentId === req.worker.id;
-    const isRequester =
-      task.requesterType === 'worker' && task.requesterId === req.worker.id;
+  private async assertTaskDocumentAuthor(
+    task: Task,
+    req: AuthedRequest,
+  ): Promise<string> {
+    if (!req.worker) return req.user?.name ?? '系统';
+    // 个人 AGENT 仅是用户的 AI 对话通道：文档作者统一按主人的真人机器人身份校验
+    const actorWorker = req.worker.personalAgentUserId
+      ? ((await this.workersService.findByHumanUserId(
+          req.worker.personalAgentUserId,
+        )) ?? req.worker)
+      : req.worker;
+    const actor = workerRequesterActor(
+      actorWorker,
+      req.worker.personalAgentUserId ? req.worker : null,
+    );
+    const isExecutor = task.agentId === actorWorker.id;
+    const isRequester = isTaskRequester(task, actor);
     if (!isExecutor && !isRequester) {
       throw new ForbiddenException(
         '仅任务执行机器人或需求方机器人可以维护任务文档',
       );
     }
+    return actorWorker.name;
   }
 
   /**
@@ -829,7 +868,18 @@ export class TasksController {
     req: AuthedRequest,
     taskId: number,
   ): Promise<TaskActor> {
-    if (req.worker) return { type: 'worker', worker: req.worker };
+    if (req.worker) {
+      // 个人 AGENT 只作「我的 AI」通道：需求方动作统一按主人的真人机器人执行
+      if (req.worker.personalAgentUserId) {
+        const human = await this.workersService.findByHumanUserId(
+          req.worker.personalAgentUserId,
+        );
+        if (human) {
+          return workerRequesterActor(human, req.worker);
+        }
+      }
+      return workerRequesterActor(req.worker);
+    }
     if (!req.user) throw new ForbiddenException('缺少任务需求方身份');
     const task = await this.tasksService.mustFind(taskId);
     const humanWorker = await this.workersService.findByHumanUserId(
@@ -840,7 +890,7 @@ export class TasksController {
       task.requesterType === 'worker' &&
       task.requesterId === humanWorker.id
     ) {
-      return { type: 'worker', worker: humanWorker };
+      return workerRequesterActor(humanWorker);
     }
     const personalAgent = await this.personalAgents.findForUser(req.user.id);
     if (
@@ -848,7 +898,11 @@ export class TasksController {
       task.requesterType === 'worker' &&
       task.requesterId === personalAgent.id
     ) {
-      return { type: 'worker', worker: personalAgent };
+      // 历史任务需求方是个人 AGENT：由主人的真人机器人操作，
+      // 并保留个人 AGENT Worker ID 作为需求方归属校验别名。
+      return humanWorker
+        ? workerRequesterActor(humanWorker, personalAgent)
+        : workerRequesterActor(personalAgent);
     }
     return { type: 'user', user: req.user };
   }

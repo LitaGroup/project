@@ -322,7 +322,7 @@ export function DocumentDetailPage() {
             <div className="flex min-h-0 flex-1 gap-4">
               <div
                 ref={editorBoxRef}
-                className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-background"
+                className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border border-border-strong bg-background"
               >
                 {meta.length > 0 && (
                   <div className="shrink-0 border-b border-border-strong bg-background-muted px-4 py-2">

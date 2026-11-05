@@ -7,12 +7,19 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { In, Repository } from 'typeorm';
-import { ProjectStatus, ReleaseStatus } from '../common/enums';
+import {
+  ProjectStatus,
+  ReleaseStatus,
+  TaskStatus,
+  TaskSubStatus,
+} from '../common/enums';
 import { splitMemberNames } from '../common/names';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { FeishuService } from '../feishu/feishu.service';
 import { Project } from '../projects/project.entity';
 import { User } from '../auth/user.entity';
+import { Task } from '../tasks/task.entity';
+import { TaskWorkerInboxService } from '../tasks/task-worker-inbox.service';
 import { ProjectRelease, ReleaseBranch } from './project-release.entity';
 
 /** 提测通知群「H5 Release | 提测上线」的群机器人 webhook（固定） */
@@ -22,7 +29,7 @@ const RELEASE_WEBHOOK =
 /** 卡片内提测内容截断长度（lark_md 卡片过长会被飞书折叠/截断） */
 const CONTENT_CARD_MAX = 800;
 
-/** 提测状态可选值（待冒烟 / 已通过 / 未通过） */
+/** 提测状态可选值（待冒烟 / 进行中 / 已通过 / 未通过） */
 export const RELEASE_STATUS_VALUES: string[] = Object.values(ReleaseStatus);
 
 /** 读库状态归一：历史行或异常值为空时按「待冒烟」处理 */
@@ -37,7 +44,18 @@ export interface SubmitReleaseInput {
   urls?: string[];
   branches?: { repo: string; branch: string }[];
   testers: string[];
+  /** 来源任务（机器人可直接传入；缺省自动取该机器人当前执行中的任务） */
+  taskId?: number;
 }
+
+/** 提测操作人：网页用户或机器人。兼容历史调用中的纯操作人姓名。 */
+export interface ReleaseActor {
+  operator?: string | null;
+  workerId?: number | null;
+  sourceTaskId?: number | null;
+}
+
+export type ReleaseActorInput = ReleaseActor | string | null | undefined;
 
 @Injectable()
 export class ReleasesService {
@@ -51,6 +69,9 @@ export class ReleasesService {
     private readonly projects: Repository<Project>,
     @InjectRepository(User)
     private readonly users: Repository<User>,
+    @InjectRepository(Task)
+    private readonly tasks: Repository<Task>,
+    private readonly workerInbox: TaskWorkerInboxService,
     private readonly feishu: FeishuService,
     config: ConfigService,
   ) {
@@ -65,7 +86,7 @@ export class ReleasesService {
   async submit(
     projectId: number,
     input: SubmitReleaseInput,
-    operator?: string | null,
+    actorInput?: ReleaseActorInput,
   ): Promise<ProjectRelease> {
     const project = await this.projects.findOne({ where: { id: projectId } });
     if (!project) throw new NotFoundException(`Project ${projectId} not found`);
@@ -76,6 +97,11 @@ export class ReleasesService {
     }
     await this.assertNamesInUserSystem(testers, '测试人员');
 
+    const actor = this.normalizeActor(actorInput);
+    const sourceTask = await this.resolveSourceTask(
+      actor.workerId ?? null,
+      input.taskId ?? actor.sourceTaskId ?? null,
+    );
     const content = input.content?.trim() || null;
     const urls = this.normalizeUrls(input.urls);
     const branches = this.normalizeBranches(input.branches);
@@ -87,7 +113,9 @@ export class ReleasesService {
         urls: urls.length > 0 ? urls : null,
         branches: branches.length > 0 ? branches : null,
         testers,
-        operator: operator?.trim() || null,
+        operator: actor.operator?.trim() || null,
+        workerId: actor.workerId ?? null,
+        sourceTaskId: sourceTask?.id ?? null,
         // 新提测一律「待冒烟」，由测试同学判定通过与否
         status: ReleaseStatus.PENDING,
         verifier: null,
@@ -115,8 +143,9 @@ export class ReleasesService {
   }
 
   /**
-   * 测试同学判定提测结果：待冒烟 → 已通过 / 未通过（也可改回待冒烟重新冒烟）。
-   * 判定为已通过/未通过时记录判定人与判定时间；改回待冒烟时清空。
+   * 测试同学推进提测状态：待冒烟 → 进行中 → 已通过 / 未通过。
+   * 已通过表示测试完成且缺陷全部修复并通过测试，未通过表示未达到验收要求；
+   * 仅这两个终态记录判定人与判定时间，切回待冒烟/进行中时清空。
    * 状态未变化幂等返回（不刷新判定时间）。
    */
   async updateStatus(
@@ -134,16 +163,38 @@ export class ReleasesService {
 
     if (releaseStatusOf(release.status) === status) return release;
 
+    const previousStatus = releaseStatusOf(release.status);
     const now = new Date();
     release.status = status;
-    if (status === ReleaseStatus.PENDING) {
+    if (
+      status === ReleaseStatus.PENDING ||
+      status === ReleaseStatus.IN_PROGRESS
+    ) {
       release.verifier = null;
       release.verifiedAt = null;
     } else {
       release.verifier = operator?.trim() || null;
       release.verifiedAt = now;
     }
-    return this.releases.save(release);
+    const saved = await this.releases.save(release);
+
+    // 状态变化写入提测机器人收件箱；项目读取或入队失败均不影响状态变更结果。
+    try {
+      const project = await this.projects.findOne({
+        where: { id: saved.projectId },
+        select: { id: true, name: true },
+      });
+      await this.workerInbox.enqueueReleaseStatus(
+        saved,
+        previousStatus,
+        project?.name ?? null,
+      );
+    } catch (e) {
+      this.logger.warn(
+        `提测状态通知入队失败（release ${saved.id}）：${(e as Error).message}`,
+      );
+    }
+    return saved;
   }
 
   /** AI 用：判定提测结果并返回 Markdown 结果 */
@@ -183,9 +234,9 @@ export class ReleasesService {
   async submitMarkdown(
     projectId: number,
     input: SubmitReleaseInput,
-    operator?: string | null,
+    actor?: ReleaseActorInput,
   ): Promise<string> {
-    const release = await this.submit(projectId, input, operator);
+    const release = await this.submit(projectId, input, actor);
     const project = await this.projects.findOne({
       where: { id: release.projectId },
     });
@@ -198,6 +249,8 @@ export class ReleasesService {
       '',
       `- 项目：${project?.name ?? `#${release.projectId}`}（#${release.projectId}），状态已流转为「${ProjectStatus.IN_TEST}」`,
       `- 提测人：${release.operator ?? '—'}`,
+      release.workerId ? `- 提测机器人：\`#${release.workerId}\`` : null,
+      release.sourceTaskId ? `- 来源任务：#${release.sourceTaskId}` : null,
       `- 提测时间：${beijingTime(release.createdAt)}`,
       `- 测试人员：${release.testers.join('、')}`,
       `- 访问地址：${release.urls?.length ? release.urls.join('、') : '—'}`,
@@ -209,12 +262,17 @@ export class ReleasesService {
           : '—'
       }`,
       `- 提测内容：${release.content ? '已记录（见项目详情）' : '—'}`,
-      `- 提测状态：**${releaseStatusOf(release.status)}**（由测试同学判定「已通过 / 未通过」）`,
+      `- 提测状态：**${releaseStatusOf(release.status)}**（待冒烟 / 进行中 / 已通过 / 未通过）`,
       `- 已通知：提测群「H5 Release | 提测上线」+ 项目人员私聊（发送失败仅告警，不影响提测）`,
       `- 阅读地址：GET /api/projects/${release.projectId}.md`,
       `- 提测记录：GET /api/releases.md?projectId=${release.projectId}`,
+      release.workerId
+        ? `- 后续缺陷派单：该提测处于 待冒烟 / 进行中 / 未通过 时，新缺陷会自动创建处理任务并指派给该机器人`
+        : null,
       '',
-    ].join('\n');
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n');
   }
 
   /** 提测记录清单 Markdown（GET /api/releases.md?projectId=） */
@@ -227,6 +285,8 @@ export class ReleasesService {
       const head = `- **${beijingTime(r.createdAt)}**（id：${r.id}）提测人 ${r.operator ?? '—'} — 状态：**${status}**`;
       const detail = [
         `测试人员：${r.testers.join('、')}`,
+        r.workerId ? `提测机器人：#${r.workerId}` : null,
+        r.sourceTaskId ? `来源任务：#${r.sourceTaskId}` : null,
         r.verifier ? `判定人：${r.verifier}` : null,
         r.verifiedAt ? `判定时间：${beijingTime(r.verifiedAt)}` : null,
         r.urls?.length ? `访问地址：${r.urls.join('、')}` : null,
@@ -241,8 +301,8 @@ export class ReleasesService {
       mdFrontmatter({ title }),
       `# ${title}`,
       '',
-      `共 ${items.length} 条（按提测时间倒序）。提测：\`POST /api/projects/{projectId}/release.md\`，body \`{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}]}\`（仅 testers 必填且须为用户系统内用户）`,
-      `判定提测结果（由测试同学操作）：\`POST /api/releases/{id}/status.md\`，body \`{"status": "已通过" | "未通过" | "待冒烟"}\`——新提测默认「待冒烟」，改回「待冒烟」会清空判定人/判定时间以便重新冒烟`,
+      `共 ${items.length} 条（按提测时间倒序）。提测：\`POST /api/projects/{projectId}/release.md\`，body \`{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}], "taskId": 123}\`（仅 testers 必填且须为用户系统内用户；机器人令牌会记录提测机器人，taskId 可选，缺省自动取当前执行中的任务）`,
+      `推进提测状态（由测试同学操作）：\`POST /api/releases/{id}/status.md\`，body \`{"status": "待冒烟" | "进行中" | "已通过" | "未通过"}\`——新提测默认「待冒烟」，开始测试后改为「进行中」；仅「已通过 / 未通过」记录判定人/判定时间，切回「待冒烟 / 进行中」会清空`,
       '',
       ...(lines.length > 0 ? lines : ['（暂无提测记录）']),
       '',
@@ -273,6 +333,43 @@ export class ReleasesService {
   }
 
   // ---- 内部 ----
+
+  /** 兼容旧的纯姓名字符串入参，统一成带机器人/来源任务的 actor。 */
+  private normalizeActor(actor?: ReleaseActorInput): ReleaseActor {
+    if (typeof actor === 'string') return { operator: actor };
+    return actor ?? {};
+  }
+
+  /**
+   * 解析提测来源任务。
+   * 显式传入时校验任务属于当前机器人；未传时取该机器人当前执行中的任务。
+   * 网页人工提测没有机器人身份，不自动关联任务。
+   */
+  private async resolveSourceTask(
+    workerId: number | null,
+    taskId: number | null,
+  ): Promise<Task | null> {
+    if (taskId !== null) {
+      if (!Number.isInteger(taskId) || taskId < 1) {
+        throw new BadRequestException('来源任务 ID 必须为正整数');
+      }
+      const task = await this.tasks.findOne({ where: { id: taskId } });
+      if (!task) throw new BadRequestException('来源任务不存在');
+      if (workerId !== null && task.agentId !== workerId) {
+        throw new BadRequestException('来源任务不是当前机器人执行的任务');
+      }
+      return task;
+    }
+    if (workerId === null) return null;
+    return this.tasks.findOne({
+      where: {
+        agentId: workerId,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      order: { assignedAt: 'DESC', id: 'DESC' },
+    });
+  }
 
   /** 访问地址：trim 去空（格式宽松，允许内网地址） */
   private normalizeUrls(urls?: string[]): string[] {

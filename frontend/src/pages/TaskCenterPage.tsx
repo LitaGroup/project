@@ -42,7 +42,14 @@ const STAGE_GROUPS: {
   {
     label: '等待中',
     status: '等待中',
-    subStatuses: ['待分配', '待接受', '待反馈', '待继续', '待验收'],
+    subStatuses: [
+      '待分配',
+      '待接受',
+      '待反馈',
+      '待继续',
+      '待申请验收',
+      '待验收',
+    ],
   },
   { label: '进行中', status: '进行中', subStatuses: ['执行中'] },
   {

@@ -13,6 +13,7 @@ import { markdownCell, markdownLabel } from '../common/markdown-table';
 import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 import { TaskTypesService } from '../task-types/task-types.service';
 import { Worker } from '../workers/worker.entity';
+import { Task } from './task.entity';
 import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import {
@@ -54,6 +55,8 @@ export class TaskTemplatesService implements OnModuleInit {
   constructor(
     @InjectRepository(TaskTemplate)
     private readonly templates: Repository<TaskTemplate>,
+    @InjectRepository(Task)
+    private readonly tasks: Repository<Task>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
     @InjectRepository(TaskTemplateFollow)
@@ -195,6 +198,16 @@ export class TaskTemplatesService implements OnModuleInit {
     return template;
   }
 
+  /** 任务定义详情侧数据：匹配该定义的最近任务（最多 5 个，含根任务与子任务，按更新时间倒序） */
+  async findRecentTasks(id: number): Promise<Task[]> {
+    await this.findOne(id);
+    return this.tasks.find({
+      where: { templateId: id },
+      order: { updatedAt: 'DESC', id: 'DESC' },
+      take: 5,
+    });
+  }
+
   /** Agent 清单：GET /api/task-templates.md */
   async listMarkdown(): Promise<string> {
     const templates = await this.findAll();
@@ -322,7 +335,15 @@ export class TaskTemplatesService implements OnModuleInit {
     );
     if (ids.length === 0) return new Map();
     const workers = await this.workers.find({ where: { id: In(ids) } });
-    return new Map(workers.map((worker) => [worker.id, worker.name]));
+    return new Map(
+      workers.map((worker) => [
+        worker.id,
+        // 存量定义若仍引用个人 AGENT，展示时统一用其主人姓名
+        worker.personalAgentUserId
+          ? (worker.ownerName ?? worker.name)
+          : worker.name,
+      ]),
+    );
   }
 
   private agentLabel(
@@ -420,12 +441,13 @@ export class TaskTemplatesService implements OnModuleInit {
     }
   }
 
-  /** 处理机器人须存在、启用且为工作者（调度机器人不承接任务），并去重 */
+  /** 处理机器人须存在、启用且为工作者（调度机器人/个人 AGENT 不承接任务），并去重 */
   private async normalizeAgents(
     agentIds: number[] | null | undefined,
   ): Promise<number[]> {
     if (!agentIds || agentIds.length === 0) return [];
     const unique = [...new Set(agentIds)];
+    const kept: number[] = [];
     for (const agentId of unique) {
       if (!Number.isInteger(agentId) || agentId < 1) {
         throw new BadRequestException('处理机器人 ID 必须为正整数');
@@ -436,7 +458,11 @@ export class TaskTemplatesService implements OnModuleInit {
       if (worker.role === WorkerRole.SCHEDULER) {
         throw new BadRequestException('调度机器人不承接任务，请选择工作者');
       }
+      // 个人 AGENT 只承载「我的 AI」对话：存量引用在保存时静默剔除，
+      // 避免它出现在任务定义等对外场景。
+      if (worker.personalAgentUserId) continue;
+      kept.push(agentId);
     }
-    return unique;
+    return kept;
   }
 }

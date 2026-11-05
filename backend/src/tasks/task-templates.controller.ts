@@ -12,6 +12,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { AuthedRequest } from '../auth/auth.guard';
+import { Task } from './task.entity';
 import { TaskTemplate } from './task-template.entity';
 import {
   CreateTaskTemplateInput,
@@ -42,6 +43,12 @@ export class TaskTemplatesController {
   @Get()
   findAll(@Req() req: AuthedRequest): Promise<TaskTemplateWithFollow[]> {
     return this.templatesService.findAll(req.user?.id);
+  }
+
+  /** 任务定义详情侧数据：匹配该定义的最近任务（最多 5 个，含根任务与子任务） */
+  @Get(':id/tasks')
+  findRecentTasks(@Param('id', ParseIntPipe) id: number): Promise<Task[]> {
+    return this.templatesService.findRecentTasks(id);
   }
 
   @Get(':id')

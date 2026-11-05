@@ -27,7 +27,6 @@ import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
 import { deriveTaskTitle } from './task-title';
 import { TaskDispatchService } from './task-dispatch.service';
-import { TaskDocumentService } from './task-document.service';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
 import {
   TaskRealtimeEvent,
@@ -126,7 +125,6 @@ export class TasksService {
     private readonly dispatchService: TaskDispatchService,
     private readonly workerInbox: TaskWorkerInboxService,
     private readonly taskRealtime: TaskRealtimeService,
-    private readonly taskDocuments: TaskDocumentService,
   ) {}
 
   /**
@@ -139,7 +137,9 @@ export class TasksService {
     subStatus?: TaskSubStatus;
     type?: string;
     rootOnly?: boolean;
-  }): Promise<Array<Task & { children?: Task[] }>> {
+  }): Promise<
+    Array<Task & { children?: Task[]; requesterName: string | null }>
+  > {
     const qb = this.tasks.createQueryBuilder('t');
     if (params.rootOnly !== false) {
       qb.where('t.parentId IS NULL');
@@ -172,30 +172,109 @@ export class TasksService {
         list.push(c);
         byParent.set(c.parentId!, list);
       }
+      const nameOf = await this.requesterNameResolver([...roots, ...children]);
       return roots.map((r) => {
         const children = byParent.get(r.id) ?? [];
         for (const child of children) {
-          Object.assign(child, { liveLines: this.recentLiveLines(child.id) });
+          Object.assign(child, {
+            liveLines: this.recentLiveLines(child.id),
+            requesterName: nameOf(child),
+          });
         }
         return Object.assign(r, {
           children,
           liveLines: this.recentLiveLines(r.id),
+          requesterName: nameOf(r),
         });
       });
     }
     // 平铺列表（看板用）：附带执行中任务的实时输出，避免前端逐个拉详情
+    const nameOf = await this.requesterNameResolver(roots);
     return roots.map((r) =>
-      Object.assign(r, { liveLines: this.recentLiveLines(r.id) }),
+      Object.assign(r, {
+        liveLines: this.recentLiveLines(r.id),
+        requesterName: nameOf(r),
+      }),
     );
   }
 
   /** 单个任务列表快照（SSE 任务变更推送用，不含详情事件时间线） */
   async findOneForList(
     id: number,
-  ): Promise<(Task & { liveLines: string[] }) | null> {
+  ): Promise<
+    (Task & { liveLines: string[]; requesterName: string | null }) | null
+  > {
     const task = await this.tasks.findOne({ where: { id } });
     if (!task) return null;
-    return Object.assign(task, { liveLines: this.recentLiveLines(id) });
+    const nameOf = await this.requesterNameResolver([task]);
+    return Object.assign(task, {
+      liveLines: this.recentLiveLines(id),
+      requesterName: nameOf(task),
+    });
+  }
+
+  /**
+   * 批量解析任务需求方展示名：worker 取机器人名（历史个人 AGENT 显示其主人），
+   * user 取用户姓名；需求方缺省时回退任务创建人。
+   */
+  private async requesterNameResolver(
+    tasks: Task[],
+  ): Promise<(task: Task) => string | null> {
+    const workerIds = new Set<number>();
+    const userIds = new Set<number>();
+    const requesterOf = (
+      task: Task,
+    ): { type: 'user' | 'worker' | null; id: number | null } => {
+      const type = task.requesterType ?? (task.createdById ? 'user' : null);
+      const id = task.requesterId ?? task.createdById;
+      return { type, id };
+    };
+    for (const task of tasks) {
+      const { type, id } = requesterOf(task);
+      if (!id) continue;
+      if (type === 'worker') workerIds.add(id);
+      else if (type === 'user') userIds.add(id);
+    }
+    const workers = workerIds.size
+      ? await this.workers.find({
+          where: { id: In([...workerIds]) },
+          select: {
+            id: true,
+            name: true,
+            ownerName: true,
+            personalAgentUserId: true,
+          },
+        })
+      : [];
+    for (const worker of workers) {
+      if (worker.personalAgentUserId) userIds.add(worker.personalAgentUserId);
+    }
+    const users = userIds.size
+      ? await this.users.find({
+          where: { id: In([...userIds]) },
+          select: { id: true, name: true },
+        })
+      : [];
+    const userNames = new Map(users.map((user) => [user.id, user.name]));
+    const workerNames = new Map<number, string>();
+    for (const worker of workers) {
+      workerNames.set(
+        worker.id,
+        worker.personalAgentUserId
+          ? (userNames.get(worker.personalAgentUserId) ??
+              worker.ownerName ??
+              worker.name)
+          : worker.name,
+      );
+    }
+    return (task) => {
+      const { type, id } = requesterOf(task);
+      if (!id) return null;
+      if (type === 'worker') {
+        return workerNames.get(id) ?? `机器人 #${id}`;
+      }
+      return userNames.get(id) ?? `用户 #${id}`;
+    };
   }
 
   /** 列表快照只保留最近 60 行输出，完整输出仍走详情/任务级 SSE */
@@ -424,6 +503,9 @@ export class TasksService {
         createdById: input.createdById ?? null,
         requesterType,
         requesterId,
+        handoffPath: null,
+        handoffVersion: 0,
+        handoffSubmittedVersion: null,
         status: TaskStatus.WAITING,
         subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
       }),
@@ -434,17 +516,7 @@ export class TasksService {
       input.operatorName ??
       (await this.operatorName(input.createdById ?? null));
     const saved = await this.tasks.save(task);
-    // 交付文档从任务创建时开始维护；知识库异常不阻断任务创建，后续读取/派发会重试。
-    const handoff = await this.taskDocuments.initializeHandoff(saved);
-    if (handoff) {
-      saved.handoffPath = handoff.path;
-      saved.handoffVersion = handoff.version;
-      saved.handoffSubmittedVersion = handoff.submittedVersion;
-      saved.handoffUpdatedAt = handoff.updatedAt
-        ? new Date(handoff.updatedAt)
-        : null;
-      saved.handoffUpdatedBy = handoff.updatedBy;
-    }
+    // 交付文档由执行方开始处理后显式创建，平台不在任务创建时生成。
     await this.addEvent(
       saved.id,
       '操作',
@@ -455,12 +527,6 @@ export class TasksService {
         description: saved.description,
         ...(saved.templateId
           ? { templateId: saved.templateId, templateName: saved.templateName }
-          : {}),
-        ...(handoff
-          ? {
-              handoffPath: handoff.path,
-              handoffVersion: handoff.version,
-            }
           : {}),
       },
     );
@@ -847,6 +913,8 @@ export class TasksService {
         TaskSubStatus.PENDING_ASSIGNMENT,
         TaskSubStatus.PENDING_ACCEPTANCE,
         TaskSubStatus.PENDING_FEEDBACK,
+        TaskSubStatus.PENDING_RESUME,
+        TaskSubStatus.PENDING_APPLY,
       ].includes(task.subStatus);
     if (usesIdentify) {
       return this.supplement(id, text, operator, options);
@@ -877,6 +945,8 @@ export class TasksService {
         TaskSubStatus.PENDING_ASSIGNMENT,
         TaskSubStatus.PENDING_ACCEPTANCE,
         TaskSubStatus.PENDING_FEEDBACK,
+        TaskSubStatus.PENDING_RESUME,
+        TaskSubStatus.PENDING_APPLY,
       ].includes(task.subStatus);
     if (!allowed) {
       throw new BadRequestException(
@@ -886,15 +956,29 @@ export class TasksService {
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
     const from = `${task.status}-${task.subStatus}`;
+    const previousSubStatus = task.subStatus;
     task.description = [task.description?.trim(), text]
       .filter(Boolean)
       .join('\n\n');
     task.status = TaskStatus.WAITING;
-    if (task.subStatus === TaskSubStatus.PENDING_FEEDBACK) {
+    if (previousSubStatus === TaskSubStatus.PENDING_FEEDBACK) {
       task.subStatus = task.agentId
         ? TaskSubStatus.PENDING_RESUME
         : TaskSubStatus.PENDING_ASSIGNMENT;
       task.resumePrompt = task.agentId ? `# 需求方补充反馈\n\n${text}` : null;
+    } else if (
+      previousSubStatus === TaskSubStatus.PENDING_RESUME ||
+      previousSubStatus === TaskSubStatus.PENDING_APPLY
+    ) {
+      // 已在等待机器人继续：补充消息并入恢复提示，机器人恢复时一并读取。
+      // 待申请验收收到新消息时转为待继续，机器人空闲后立即恢复原任务。
+      task.subStatus = TaskSubStatus.PENDING_RESUME;
+      task.resumePrompt = [
+        task.resumePrompt?.trim(),
+        `# 需求方补充消息\n\n${text}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n---\n\n');
     }
     task.missingItems = null;
     task.remindCount = 0;

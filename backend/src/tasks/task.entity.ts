@@ -155,7 +155,7 @@ export class Task {
   @Column({ type: 'text', nullable: true })
   result: string | null;
 
-  /** 任务交付文档知识路径（任务创建时生成，HANDOFF 全生命周期固定） */
+  /** 任务交付文档知识路径（执行方首次显式创建后登记，全生命周期固定） */
   @Column({ type: 'varchar', length: 300, nullable: true })
   handoffPath: string | null;
 

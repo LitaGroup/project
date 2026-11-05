@@ -465,6 +465,45 @@
   scrollbar-gutter: stable;
 }
 
+/* Mermaid：聊天、文档编辑预览和通用 Markdown 查看器共用 */
+.mermaid-diagram {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  justify-content: center;
+  margin: 0.5rem 0;
+  overflow-x: auto;
+}
+.mermaid-diagram > svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-preview-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  color: var(--foreground-muted);
+  font-size: 0.75rem;
+}
+.mermaid-preview-error {
+  color: var(--foreground);
+  font-size: 0.75rem;
+}
+.mermaid-preview-error pre {
+  margin: 0.5rem 0;
+  padding: 0.65rem 0.8rem;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  background: var(--background-muted);
+  font-family: var(--font-mono);
+}
+.mermaid-preview-error p {
+  margin: 0.4rem 0;
+  color: var(--foreground-muted);
+}
+
 /* 任务详情页聊天 Markdown（assistant-ui MarkdownTextPrimitive 输出原生 HTML）：
    与 Milkdown 只读视图保持一致的排版，颜色/圆角全部走 Appica 角色 token */
 .task-chat-markdown {
@@ -472,6 +511,11 @@
   font-size: 0.875rem;
   line-height: 1.65;
   overflow-wrap: anywhere;
+}
+/* 工作台任务上下文沿用原来的紧凑字号 */
+.task-chat-markdown.workbench-markdown {
+  font-size: 0.75rem;
+  line-height: 1.55;
 }
 .task-chat-markdown > :first-child {
   margin-top: 0;

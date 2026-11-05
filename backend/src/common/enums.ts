@@ -44,11 +44,13 @@ export enum ProjectStatus {
 }
 
 /**
- * 提测记录状态：提测后默认「待冒烟」，由测试同学判定「已通过 / 未通过」
- * （可从已通过/未通过改回待冒烟重新冒烟，判定人/判定时间随之清空）。
+ * 提测记录状态：提测后默认「待冒烟」，测试开始后改为「进行中」，
+ * 测试完成且缺陷全部修复并通过测试为「已通过」，未达到验收要求为「未通过」。
+ * 仅已通过/未通过记录判定人/判定时间，切回待冒烟或进行中时清空。
  */
 export enum ReleaseStatus {
   PENDING = '待冒烟',
+  IN_PROGRESS = '进行中',
   PASSED = '已通过',
   FAILED = '未通过',
 }
@@ -209,6 +211,17 @@ export enum WorkerRuntime {
   PI = 'pi',
 }
 
+/**
+ * 机器人 GitHub 权限：可配置档位为 开发权限（默认）/ 发布权限；none 表示未配置。
+ * 所有机器人（含真人机器人）均可在管理区「GitHub 权限」页配置；
+ * 权限存在 workers 表并由机器人配置页维护；PAT 只决定使用的 GitHub 身份，不重复保存权限。
+ */
+export enum WorkerGithubPermission {
+  NONE = 'none',
+  DEVELOP = 'develop',
+  RELEASE = 'release',
+}
+
 /** 机器人实时状态（不落库，由名下任务实时推导，见 workers.service） */
 export enum WorkerLiveStatus {
   IDLE = '空闲中',
@@ -229,7 +242,7 @@ export enum TaskStatus {
 
 /**
  * 任务子状态（与主状态严格对应）：
- * - 等待中：待分配 / 待接受 / 待反馈 / 待继续 / 待验收
+ * - 等待中：待分配 / 待接受 / 待反馈 / 待继续 / 待申请验收 / 待验收
  * - 进行中：执行中
  * - 已结束：完成 / 已拒绝 / 失败 / 取消
  *
@@ -240,6 +253,8 @@ export enum TaskSubStatus {
   PENDING_ACCEPTANCE = '待接受',
   PENDING_FEEDBACK = '待反馈',
   PENDING_RESUME = '待继续',
+  /** 本轮会话已结束、机器人已释放，但执行机器人尚未申请验收（不占用机器人） */
+  PENDING_APPLY = '待申请验收',
   PENDING_ACCEPT = '待验收',
   EXECUTING = '执行中',
   COMPLETED = '完成',

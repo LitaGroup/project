@@ -3,6 +3,7 @@ import { TaskStatus, TaskSubStatus } from '../common/enums';
 import type { User } from '../auth/user.entity';
 import type { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
+import type { AskQuestionInput } from './task-collaboration.service';
 import { TaskCollaborationService } from './task-collaboration.service';
 
 describe('TaskCollaborationService 多机器人协同动作', () => {
@@ -52,8 +53,13 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
   let taskChat: {
     questionAsked: jest.Mock;
     questionSettled: jest.Mock;
+    postRequesterMessage: jest.Mock;
   };
-  let inbox: { enqueue: jest.Mock; completeForChild: jest.Mock };
+  let inbox: {
+    enqueue: jest.Mock;
+    completeForChild: jest.Mock;
+    completeDeliveredForChild: jest.Mock;
+  };
   let service: TaskCollaborationService;
 
   beforeEach(() => {
@@ -88,10 +94,21 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
     taskChat = {
       questionAsked: jest.fn().mockResolvedValue(true),
       questionSettled: jest.fn(),
+      postRequesterMessage: jest.fn().mockResolvedValue({
+        id: 'chat:1:requester:1',
+        taskId: 1,
+        role: 'user',
+        sender: { id: 'worker:1001', name: '父机器人', kind: 'worker' },
+        content: '回复内容',
+        createdAt: new Date().toISOString(),
+        status: 'complete',
+        kind: 'message',
+      }),
     };
     inbox = {
       enqueue: jest.fn().mockResolvedValue(null),
       completeForChild: jest.fn().mockResolvedValue(undefined),
+      completeDeliveredForChild: jest.fn().mockResolvedValue(undefined),
     };
     service = new TaskCollaborationService(
       tasksRepo as never,
@@ -171,6 +188,82 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
       'question',
       expect.objectContaining({ referenceId: result.questionId }),
     );
+  });
+
+  it('project 提问归一化字符串与 value 形式的选项', async () => {
+    task.status = TaskStatus.RUNNING;
+    task.subStatus = TaskSubStatus.EXECUTING;
+
+    const requests: unknown[] = [];
+    const enqueuedEntries: unknown[] = [];
+    taskChat.questionAsked.mockImplementation(
+      (_taskId: number, request: unknown) => {
+        requests.push(request);
+        return Promise.resolve(true);
+      },
+    );
+    inbox.enqueue.mockImplementation(
+      (_task: unknown, _kind: unknown, entry: unknown) => {
+        enqueuedEntries.push(entry);
+        return Promise.resolve(null);
+      },
+    );
+
+    await service.ask(1, worker, {
+      questions: [
+        {
+          header: '时间范围',
+          question: '按日趋势还是区间汇总？',
+          options: ['按日趋势', { value: '区间汇总', description: '整体统计' }],
+        },
+      ],
+    } as unknown as AskQuestionInput);
+
+    const request = requests[0] as {
+      questions: Array<{
+        options?: Array<{ label: string; description?: string }>;
+      }>;
+    };
+    expect(request.questions[0].options).toEqual([
+      { label: '按日趋势' },
+      { label: '区间汇总', description: '整体统计' },
+    ]);
+    const entry = enqueuedEntries[0] as {
+      payload: { questions: typeof request.questions };
+    };
+    expect(entry.payload.questions[0].options).toEqual(
+      request.questions[0].options,
+    );
+  });
+
+  it('仅限选项但选项全部无效时回退为允许自由输入', async () => {
+    task.status = TaskStatus.RUNNING;
+    task.subStatus = TaskSubStatus.EXECUTING;
+
+    const requests: unknown[] = [];
+    taskChat.questionAsked.mockImplementation(
+      (_taskId: number, request: unknown) => {
+        requests.push(request);
+        return Promise.resolve(true);
+      },
+    );
+
+    await service.ask(1, worker, {
+      questions: [
+        {
+          header: '确认',
+          question: '使用哪个方案？',
+          options: ['', { foo: 'bar' }],
+          custom: false,
+        },
+      ],
+    } as unknown as AskQuestionInput);
+
+    const request = requests[0] as {
+      questions: Array<{ options?: unknown[]; custom?: boolean }>;
+    };
+    expect(request.questions[0].options).toBeUndefined();
+    expect(request.questions[0].custom).toBe(true);
   });
 
   it('需求方答复后进入待继续并结算问题', async () => {
@@ -258,6 +351,82 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
         { answers: [['继续']] },
       ),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('需求方回复执行方消息时写入对话并结算已投递的收件箱事件', async () => {
+    task.status = TaskStatus.RUNNING;
+    task.subStatus = TaskSubStatus.EXECUTING;
+    task.requesterType = 'worker';
+    task.requesterId = worker.id;
+
+    const saved = await service.replyMessage(
+      1,
+      { type: 'worker', worker },
+      '  方案已确认，请继续  ',
+    );
+
+    expect(saved.id).toBe(1);
+    expect(taskChat.postRequesterMessage).toHaveBeenCalledWith(
+      1,
+      '方案已确认，请继续',
+      expect.objectContaining({
+        id: 'worker:1001',
+        name: '父机器人',
+        roleLabel: '需求方',
+      }) as unknown,
+    );
+    expect(tasksService.addEvent).toHaveBeenCalledWith(
+      1,
+      '操作',
+      '需求方回复执行方消息',
+      '父机器人',
+      expect.objectContaining({
+        perspective: 'requester',
+        requesterMessage: true,
+      }) as unknown,
+    );
+    expect(inbox.completeDeliveredForChild).toHaveBeenCalledWith(1, 'message');
+  });
+
+  it('非需求方不能回复执行方消息', async () => {
+    task.requesterType = 'user';
+    task.requesterId = 8;
+    await expect(
+      service.replyMessage(
+        1,
+        { type: 'user', user: { id: 9, name: '李四' } as User },
+        '回复内容',
+      ),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('待验收任务需求方仍可回复执行方消息', async () => {
+    task.status = TaskStatus.WAITING;
+    task.subStatus = TaskSubStatus.PENDING_ACCEPT;
+    task.requesterType = 'worker';
+    task.requesterId = worker.id;
+
+    const saved = await service.replyMessage(
+      1,
+      { type: 'worker', worker },
+      '交付后补充说明',
+    );
+
+    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_ACCEPT);
+    expect(taskChat.postRequesterMessage).toHaveBeenCalledWith(
+      1,
+      '交付后补充说明',
+      expect.objectContaining({ roleLabel: '需求方' }) as unknown,
+    );
+    expect(inbox.completeDeliveredForChild).toHaveBeenCalledWith(1, 'message');
+  });
+
+  it('已结束任务不允许需求方回复消息', async () => {
+    task.status = TaskStatus.FINISHED;
+    task.subStatus = TaskSubStatus.COMPLETED;
+    await expect(
+      service.replyMessage(1, { type: 'user', user }, '回复内容'),
+    ).rejects.toThrow('任务已结束，不能回复消息');
   });
 
   it('仅需求方可将待验收任务判为失败', async () => {

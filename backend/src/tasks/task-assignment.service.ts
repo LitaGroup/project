@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { WorkerRole } from '../common/enums';
 import {
   TASK_TYPE_DEFAULT,
@@ -48,7 +48,12 @@ export class TaskAssignmentService {
       template?.type ??
       (taskType && taskType !== TASK_TYPE_DEFAULT ? taskType : '');
     const enabledWorkers = await this.workers.find({
-      where: { role: WorkerRole.WORKER, enabled: true },
+      // 个人 AGENT 只承载「我的 AI」对话，不承接任务
+      where: {
+        role: WorkerRole.WORKER,
+        enabled: true,
+        personalAgentUserId: IsNull(),
+      },
       order: { updatedAt: 'DESC', id: 'DESC' },
     });
     const workerById = new Map(

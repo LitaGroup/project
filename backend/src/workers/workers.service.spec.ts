@@ -141,6 +141,36 @@ describe('WorkersService 真人机器人', () => {
   });
 });
 
+describe('WorkersService 工作令牌', () => {
+  it('个人 AGENT 使用其主人真人机器人的令牌', async () => {
+    const { service } = createHarness([
+      { id: 2000, personalAgentUserId: 1 },
+      { id: 1000, humanUserId: 1, agentToken: 'human-token' },
+    ]);
+    const human = { id: 1000 } as Worker;
+    const findByHumanUserId = jest
+      .spyOn(service, 'findByHumanUserId')
+      .mockResolvedValue(human);
+    const ensureAgentToken = jest
+      .spyOn(service, 'ensureAgentToken')
+      .mockResolvedValue('human-token');
+
+    await expect(service.ensureWorkToken(2000)).resolves.toBe('human-token');
+    expect(findByHumanUserId).toHaveBeenCalledWith(1);
+    expect(ensureAgentToken).toHaveBeenCalledWith(1000);
+  });
+
+  it('普通机器人使用自身令牌', async () => {
+    const { service } = createHarness([{ id: 1000, humanUserId: null }]);
+    const ensureAgentToken = jest
+      .spyOn(service, 'ensureAgentToken')
+      .mockResolvedValue('worker-token');
+
+    await expect(service.ensureWorkToken(1000)).resolves.toBe('worker-token');
+    expect(ensureAgentToken).toHaveBeenCalledWith(1000);
+  });
+});
+
 describe('WorkersService 工位目录', () => {
   it('生产环境使用 worker 目录', () => {
     const { service } = createHarness([], {

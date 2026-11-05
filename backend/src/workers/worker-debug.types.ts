@@ -121,8 +121,6 @@ export interface WorkerDebugSnapshot {
   worker: WorkerDebugOption;
   /** 当前选择/生效的模型与思考等级（我的 AGENT 选择器用） */
   model: WorkerDebugModelSelection;
-  /** 当前主 Agent 模式（build / plan） */
-  mode: WorkerDebugMode;
   /** opencode 会话在首条消息发送时创建，7 天内复用同一会话续聊 */
   sessionId: string | null;
   status: 'idle' | 'running';

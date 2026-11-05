@@ -32,6 +32,7 @@ import {
   type TaskTypeDef,
   type Worker,
 } from '../lib/api'
+import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import {
   MarkdownEditor,
@@ -226,7 +227,7 @@ export function TaskTemplateEditPage() {
 
       {/* 布局参考「新建机器人」：左侧 Markdown 编辑区撑满剩余高度，右侧基础信息独立滚动 */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <Card className="min-h-64 min-w-0 flex-1">
+        <Card className="min-h-64 min-w-0 flex-1 rounded-none">
           <CardHeader className="flex-none">
             <CardTitle>任务定义描述</CardTitle>
             <CardDescription>
@@ -301,6 +302,9 @@ export function TaskTemplateEditPage() {
                 items={agentItems}
                 value={agentIds}
                 onValueChange={(value) => setAgentIds(value as string[])}
+                filter={(worker: AgentOption, query: string) =>
+                  matchesPinyinSearch(query, [worker.name])
+                }
               >
                 <ComboboxChips
                   className="w-full"
@@ -329,7 +333,7 @@ export function TaskTemplateEditPage() {
                 </ComboboxContent>
               </Combobox>
               <span className="text-xs text-foreground-muted">
-                可添加多个；不选择时平台按任务类型继续匹配，仍无法匹配则归入未知任务
+                可添加多个，支持名称、全拼或首字母搜索；不选择时平台按任务类型继续匹配，仍无法匹配则归入未知任务
               </span>
             </label>
           </div>

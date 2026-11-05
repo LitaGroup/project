@@ -8,6 +8,38 @@ export const TASK_REMIND_TIMEOUT_DAYS = 7;
 export const TASK_REMIND_TIMEOUT_MS =
   TASK_REMIND_TIMEOUT_DAYS * 24 * 60 * 60 * 1000;
 
+/** 子任务事件超过该时间仍未消费，视为陈旧并由 LOOP 主动恢复 */
+export const TASK_INBOX_STALE_MS = 60 * 1000;
+
+/** 主动唤醒达到该次数仍未通过动作接口处理，转人工需求方，避免无限循环 */
+export const TASK_INBOX_MAX_ATTEMPTS = 3;
+
+/** 每次主动唤醒失败后的退避间隔（按已尝试次数取） */
+export const TASK_INBOX_RETRY_DELAYS_MS = [
+  2 * 60_000,
+  10 * 60_000,
+  30 * 60_000,
+];
+
+export function nextInboxRetryDelay(attempts: number): number {
+  const index = Math.max(
+    0,
+    Math.min(attempts, TASK_INBOX_RETRY_DELAYS_MS.length - 1),
+  );
+  return TASK_INBOX_RETRY_DELAYS_MS[index];
+}
+
+/** 待继续恢复失败后的重试退避（LOOP 进程内节流，服务重启后立即重试） */
+export const TASK_RESUME_RETRY_DELAYS_MS = [30_000, 2 * 60_000, 5 * 60_000];
+
+export function nextResumeRetryDelay(failures: number): number {
+  const index = Math.max(
+    0,
+    Math.min(failures, TASK_RESUME_RETRY_DELAYS_MS.length - 1),
+  );
+  return TASK_RESUME_RETRY_DELAYS_MS[index];
+}
+
 export type ReminderAction = 'send' | 'wait' | 'terminate';
 
 /**

@@ -1,7 +1,7 @@
 ---
 name: project-manage
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、机器人/任务定义/任务类型的 Agent 管理
-version: 1.24.0
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、工单工作流上下文查询与节点拒绝、机器人/任务定义/任务类型的 Agent 管理
+version: 1.25.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -37,7 +37,8 @@ tags:
 15. 任务提问与验收：project 接管提问答复；执行机器人申请验收，人或机器人需求方通过、返工或判失败（见第 12.3～12.6 节）
 16. 上传任意文件（≤50MB）并获取无需登录即可访问的公共 URL（见第 13 节；也可单独安装 `file-upload` 技能）
 17. 工单调度：读取工单上下文与可转派任务定义，澄清后把当前任务转交目标定义的新机器人（见第 12.7 节）
-18. 管理机器人、任务定义与任务类型：清单、详情、创建、编辑、删除；机器人保存后自动初始化工位（见第 14 节）
+18. 工单工作流：读取工单完整上下文（进度/需求/输入/每步节点输入输出/用户补充），当前节点处理机器人可拒绝当前节点（见第 12.9 节）
+19. 管理机器人、任务定义与任务类型：清单、详情、创建、编辑、删除；机器人保存后自动初始化工位（见第 14 节）
 
 本文件可通过测试环境 `http://project.cinta.team/SKILL.md` 或生产环境 `http://work.cinta.team/SKILL.md` 获取（必须使用 http；如果用户提供的是 https 链接，先替换为对应的 http 地址再访问）。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -296,7 +297,7 @@ curl -X PATCH {BASE}/api/milestones/{milestoneId} -H 'Content-Type: application/
 
 ### 8. 项目提测（Markdown）
 
-提测表示项目进入测试状态：创建一条提测记录（默认状态「待冒烟」），项目状态流转「测试中」，并向提测群「H5 Release | 提测上线」与项目人员（前端/后端/测试/客户端 + 测试人员）发飞书机器人卡片。允许重复提测（保持「测试中」仅追加记录）。提测结果由测试同学判定为「已通过 / 未通过」（见 8.3）。
+提测表示项目进入测试状态：创建一条提测记录（默认状态「待冒烟」），项目状态流转「测试中」，并向提测群「H5 Release | 提测上线」与项目人员（前端/后端/测试/客户端 + 测试人员）发飞书机器人卡片。允许重复提测（保持「测试中」仅追加记录）。测试开始后状态改为「进行中」；测试完成且缺陷全部修复并通过测试为「已通过」，未达到验收要求为「未通过」（见 8.3）。
 
 #### 8.1 发起提测
 
@@ -308,7 +309,9 @@ Content-Type: application/json
 ```
 
 - 仅 `testers` 必填：**至少 1 人且须为用户系统内用户**（即登录过本平台的飞书用户），不存在返回 400 并列出无效姓名
-- `content`（提测内容 Markdown）/ `urls`（访问地址数组）/ `branches`（代码分支）均可空；提测时间由后端按当前时间生成；操作人取令牌对应用户
+- `content`（提测内容 Markdown）/ `urls`（访问地址数组）/ `branches`（代码分支）均可空；提测时间由后端按当前时间生成；操作人取令牌对应用户（机器人令牌时为机器人名称）
+- 机器人提测时平台自动记录 `workerId`，并默认关联该机器人当前执行中的任务为 `sourceTaskId`；也可在 body 传 `taskId` 显式指定来源任务（须为该机器人执行的任务）
+- **提测后的缺陷派单**：先取项目最新一条提测，仅当它处于「待冒烟 / 进行中 / 未通过」时，新缺陷会自动关联该提测，并创建一个处理任务指派给原提测机器人；任务需求方优先为缺陷创建人（或其真人机器人），最新提测已通过、人工提测、机器人停用时不派单（不回退到更早的提测）。新建缺陷时显式传 `releaseId`（含 `null`）则以选择为准，不再自动关联/派单
 - 响应为 text/markdown：提测结果（项目/状态/人员/地址/分支/内容）+ 项目详情与提测记录清单地址；通知发送失败仅告警，不影响提测
 
 #### 8.2 查询提测记录（清单）
@@ -328,21 +331,21 @@ Content-Type: application/json
 {"status": "已通过"}
 ```
 
-- 状态枚举：`待冒烟`（提测默认）/ `已通过` / `未通过`；`{releaseId}` 取自 8.2 清单的 `id`
-- 改为「已通过 / 未通过」时记录判定人（令牌对应用户）与判定时间；改回「待冒烟」会清空判定人/判定时间（重新冒烟），状态未变化时幂等返回
+- 状态枚举：`待冒烟`（提测默认）/ `进行中`（本次提测正在测试）/ `已通过`（测试完成且缺陷全部修复并通过测试）/ `未通过`（未达到验收要求）；`{releaseId}` 取自 8.2 清单的 `id`
+- 仅改为「已通过 / 未通过」时记录判定人（令牌对应用户）与判定时间；切回「待冒烟 / 进行中」会清空判定人/判定时间，状态未变化时幂等返回
 - 响应为 text/markdown：项目 / 提测记录 / 提测人 / 测试人员 / 当前状态 / 判定人 / 判定时间 + 清单地址
 
 ### 9. 缺陷（Markdown）
 
-缺陷归属项目，**仅平台内维护**（接口/人工创建，不与飞书同步）。属性：端 / 优先级（高/中/低）/ 预期功能描述 / 实际结果描述 / 图片（多张）/ 用例脚本 / 状态（开放 / 修复 / 关闭）。
+缺陷归属项目，**仅平台内维护**（接口/人工创建，不与飞书同步）。属性：端 / 优先级（高/中/低）/ 预期功能描述 / 实际结果描述 / 图片（多张）/ 用例脚本 / 提测 ID / 状态（开放 / 修复 / 关闭）。
 
 #### 9.1 查询缺陷（清单）
 
 ```
-GET /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|中|低][&q=关键词]
+GET /api/defects.md?projectId={id}[&releaseId={提测ID}][&status=开放|修复|关闭][&priority=高|中|低][&q=关键词]
 ```
 
-- 返回 Markdown 表格：`ID | 预期 | 端 | 状态 | 优先级 | 项目`；`projectId` 可选（不传返回全部项目），`q` 模糊匹配 预期 + 实际，`status`/`priority` 按枚举筛选（可组合）
+- 返回 Markdown 表格：`ID | 提测 ID | 预期 | 端 | 状态 | 优先级 | 项目`；`projectId` 可选（不传返回全部项目），`releaseId` 按提测 ID 精确查询，`q` 模糊匹配 预期 + 实际，`status`/`priority` 按枚举筛选（可组合）
 - 表格的 `ID` 列即详情链接，直接点开 `GET /api/defects/{defectId}.md` 查看单条
 
 #### 9.2 获取缺陷详情
@@ -351,7 +354,8 @@ GET /api/defects.md?projectId={id}[&status=开放|修复|关闭][&priority=高|�
 GET /api/defects/{defectId}.md
 ```
 
-- 返回：元信息（ID/项目/状态/端/优先级/用例/创建·修复·验证·更新时间）+ 预期功能描述 + 实际结果描述 + 图片（`/images/...` 链接）+ 变更记录表（时间/状态/来源/操作人/变更内容/备注）+ "AI 操作"小节（各端点示例）
+- 返回：元信息（ID/项目/状态/端/优先级/用例/提测 ID/处理任务/创建·修复·验证·更新时间）+ 预期功能描述 + 实际结果描述 + 图片（`/images/...` 链接）+ 变更记录表（时间/状态/来源/操作人/变更内容/备注）+ "AI 操作"小节（各端点示例）
+- 缺陷详情会展示提测 ID 与处理任务链接；机器人提测后的新缺陷若触发自动派单，派单失败原因会写入变更记录（来源 `自动`）
 - 图片为 `/images/...` 相对链接，拼基础地址即可访问
 
 #### 9.3 编辑缺陷（创建 / 更新 / 状态变更 / 变更记录 / 删除）
@@ -359,11 +363,11 @@ GET /api/defects/{defectId}.md
 写入类操作均返回 Markdown 结果：
 
 ```bash
-# 新建（expected/actual 必填；platform 前端|后端|APP端|未知；priority 高|中|低；images 传上传接口返回的 /images/... 数组；testScript 可选）
+# 新建（expected/actual 必填；platform 前端|后端|APP端|未知；priority 高|中|低；images 传上传接口返回的 /images/... 数组；testScript/releaseId 可选）
 curl -X POST {BASE}/api/defects/create.md -H 'Content-Type: application/json' \
-  -d '{"projectId": 123, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高", "images": ["/images/uploads/20261014/xxx.png"], "testScript": "xxx/xxx.test.ts"}'
+  -d '{"projectId": 123, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高", "images": ["/images/uploads/20261014/xxx.png"], "testScript": "xxx/xxx.test.ts", "releaseId": 45}'
 
-# 更新字段（可改 platform/priority/status/expected/actual/images/testScript；changeContent/changeRemark 写入变更记录）
+# 更新字段（可改 platform/priority/status/expected/actual/images/testScript/releaseId；changeContent/changeRemark 写入变更记录；releaseId 传 null 清除关联）
 curl -X POST {BASE}/api/defects/{defectId}/update.md -H 'Content-Type: application/json' \
   -d '{"priority": "高", "actual": "新的实际结果", "changeContent": "补充信息", "changeRemark": "原因"}'
 
@@ -478,7 +482,7 @@ curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json'
 
 ## 12. 多机器人任务协同（Markdown）
 
-任务创建后进入「等待中-待分配」，LOOP 按任务定义分配机器人并发送邀约。机器人必须在「等待中-待接受」明确接受或拒绝；接受后才进入「进行中-执行中」。一个机器人最多一个进行中任务，待接受、待反馈、待继续和待验收均可接受其他任务。
+任务创建后进入「等待中-待分配」，LOOP 按任务定义分配机器人并发送邀约。机器人必须在「等待中-待接受」明确接受或拒绝；接受后才进入「进行中-执行中」。一个机器人最多一个进行中任务，待接受、待反馈、待继续、待申请验收和待验收均可接受其他任务。一轮答复结束且当前任务没有排队消息时，平台释放机器人并把任务转为「等待中-待申请验收」，稍后按 2/10/30 分钟唤醒催办；收到补充消息或子任务事件时转待继续。
 
 ### 12.0 task-list / task-detail / task-create：我的任务、详情与创建
 
@@ -524,7 +528,7 @@ curl -X POST {BASE}/api/tasks/{parentTaskId}/subtasks/create.md \
 
 - 先根据父任务定义判断是否需要协同，不要无目的拆分
 - 只有父任务当前执行机器人可在执行中创建子任务；子任务初始为待分配
-- 子任务提问、待验收或被拒绝时，平台写入父机器人收件箱，并在父机器人空闲时唤醒父任务会话
+- 子任务提问、执行方消息、待验收或被拒绝时，平台写入父机器人收件箱，并在父机器人空闲时唤醒父任务会话
 
 ### 12.2 task-accept / task-refuse：接受或拒绝邀约
 
@@ -545,7 +549,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/refuse.md \
 # 执行机器人提问；调用后停止本轮，等待平台恢复
 curl -X POST {BASE}/api/tasks/{taskId}/questions/ask.md \
   -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"questions":[{"header":"方案确认","question":"使用哪个方案？","custom":true}]}'
+  -d '{"questions":[{"header":"方案确认","question":"使用哪个方案？","options":[{"label":"方案 A","description":"改动最小"},{"label":"方案 B"}],"custom":true}]}'
 
 # 人或机器人需求方答复；答案顺序与问题一致
 curl -X POST {BASE}/api/tasks/{taskId}/questions/{questionId}/answer.md \
@@ -553,10 +557,26 @@ curl -X POST {BASE}/api/tasks/{taskId}/questions/{questionId}/answer.md \
   -d '{"answers":[["使用方案 A"]]}'
 ```
 
+- `options` 为 `{label, description?}` 对象数组（label 必填，不要传字符串）；`multiple:true` 表示多选，`custom:false` 表示仅限选项
 - 提问使用 project 生成的问题 ID，不再依赖 opencode 原生 question；答复后任务进入待继续，LOOP 空闲时恢复
 - 人类需求方使用 `X-Agent-Token`，机器人需求方使用 `X-Worker-Token`；跳过答复用 `{"reject":true}`
 
-### 12.3.1 task-documents：任务文档目录（API.md / TECH_DESIGN.md）
+### 12.3.1 task-message-reply：需求方回复执行方消息
+
+子任务由真人机器人执行时，真人在操作台「任务-执行方」TAB 发送的消息会写入机器人需求方的收件箱；父机器人被平台唤醒后必须调用本接口回复，回复立即进入子任务对话供执行方继续跟进（可多轮往返，不改变任务状态）。
+
+```bash
+# 需求方（机器人/用户）回复子任务执行方消息
+curl -X POST {BASE}/api/tasks/{taskId}/messages/reply.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"content":"方案已确认，请按此继续；有疑问随时再发消息。"}'
+```
+
+- 仅任务需求方（机器人/用户）可调用；任务未结束均可回复（含待验收），已结束返回 400
+- 回复只写入对话，不推进任务状态机；验收仍需走 12.4 的 handoff 接口
+- 平台唤醒提示中会附消息正文与收件箱事件 ID，处理后必须调用回复接口，不要只在父任务里自行记录
+
+### 12.3.2 task-documents：任务文档目录（API.md / TECH_DESIGN.md）
 
 任务相关文档默认归档到任务目录 `/task/{yyyyMMdd}/{任务编号}/`；**需求中明确指定文档地址时，按需求指定的地址写入**，没有指定才使用该目录。
 
@@ -581,7 +601,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/documents.md \
 
 ### 12.4 task-handoff-read / task-handoff-update：维护交付文档
 
-任务创建时就生成 `HANDOFF.md` 交付文档（位于任务文档目录下），执行机器人应在执行过程中持续维护，便于需求方实时查看。
+平台不在任务创建时自动生成 `HANDOFF.md`。执行机器人接受任务并开始处理后，应立即通过 `handoff/update.md` 创建交付文档（首次 `baseVersion=0`），并在执行过程中持续维护，便于需求方实时查看。
 
 ```bash
 # 读取当前正文与 Frontmatter（version 为平台维护的当前版本）
@@ -595,10 +615,12 @@ curl -X POST {BASE}/api/tasks/{taskId}/handoff/update.md \
   -d '{"baseVersion":3,"content":"# 任务交付文档\n\n## 当前进展\n\n...\n\n## 最终交付\n\n..."}'
 ```
 
-- 只允许执行中的当前机器人更新；正文完全由机器人根据任务内容、任务定义和实际进展编写，平台不拼接固定章节
+- 只允许当前执行机器人更新（执行中或待申请验收）；正文完全由机器人根据任务内容、任务定义和实际进展编写，平台不拼接固定章节
 - `content` 是完整正文；需要快速追加进展时可用 `append` 代替 `content`
 - 不要提交 YAML Frontmatter，平台会自动写入 `document/task/version/updated_by/update`
-- 开始处理后可先替换“正在处理中”，每个重要阶段更新一次；申请验收前必须是最终内容
+- 首次创建使用 `baseVersion=0`；已有文档按读取到的 `version` 更新
+- 开始处理后立即创建，每个重要阶段、关键产物或验证结果变化后及时更新；申请验收前必须是最终内容
+- 未创建交付文档时 `GET handoff.md` 返回 404；申请验收会提示先创建
 - 返回 `409` 表示需求方或其他人已更新文档，必须重新读取最新正文，保留人工修改后再合并提交
 - 平台维护版本号；需求方人工修改后会收到包含新版本号的通知，按通知读取最新版本并继续
 
@@ -611,9 +633,9 @@ curl -X POST {BASE}/api/tasks/{taskId}/handoff/apply.md \
   -d '{}'
 ```
 
-- 只允许执行中的当前机器人；平台校验交付文档已有有效正文并锁定当前版本，然后进入待验收
+- 允许执行中的当前机器人，或本轮已结束、任务处于「等待中-待申请验收」的当前机器人；平台校验交付文档已有有效正文并锁定当前版本，然后进入待验收
 - 申请验收不会重新生成交付文档；待验收期间文档锁定，撤销交付或验收返工后才能继续编辑
-- 会话成功不会自动申请验收；交付文档没有有效内容或写入失败时任务保持执行中
+- 会话成功不会自动申请验收；没有排队消息时任务进入待申请验收并释放机器人，但仍须调用本接口；交付文档没有有效内容或写入失败时不能申请
 - 申请成功后必须在最终回复中告知需求方：交付内容、申请接口返回的交付文档链接（原样使用，不要自行拼接 `.md`）、其它需要告知的事项（没有则写“无”）
 
 ### 12.6 task-handoff-accept / task-handoff-refuse：需求方验收
@@ -631,6 +653,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/handoff/refuse.md \
 ```
 
 - 机器人需求方改用 `X-Worker-Token`；只有显式需求方可操作，管理员不能绕过
+- 根任务需求方是 AI 机器人时，平台会用该机器人的工位自动创建一次性验收会话（读取交付文档后调用本接口），无需父任务唤醒；连续 3 次未推进会通知机器人负责人转人工
 - 累计第 1～3 次返工退回原机器人，第 4 次起转执行机器人负责人处理
 - 返工消息会明确携带退回原因，并提示：修改完成后如需继续验收，必须重新调用 `handoff/apply.md`；此前的验收申请已失效，不能视为新一轮交付已申请验收
 
@@ -663,6 +686,26 @@ curl -X POST {BASE}/api/tasks/{taskId}/ticket-route.md \
 - 转交会保存澄清后的标题/需求/交付要求/工作计划，更新任务定义与类型，结束当前会话并让目标定义的机器人重新接受任务
 - 任务、任务编号和原始需求方保持不变；后续验收、返工和失败继续使用 12.4～12.6 的接口
 - 信息不足时使用 12.3 的提问接口，向需求方补充反馈后再转交
+
+### 12.9 工单工作流：读取完整上下文与拒绝当前节点
+
+工作流工单（按工单配置创建）按节点推进，操作/审批节点会创建节点任务。处理机器人在节点任务中执行；确认需求不符合要求、当前节点无法完成时可拒绝当前节点。
+
+```bash
+# 查询工单全部信息：工单信息、需求正文、工单输入、流程进度、
+# 每一步节点的输入/输出、用户补充输入、当前节点与 AI 操作指引
+curl {BASE}/api/tickets/{ticketId}.md -H "X-Worker-Token: $TOKEN"
+
+# 拒绝当前节点（表明不符合要求、当前节点操作失败）；调用后结束本轮，不要申请验收
+curl -X POST {BASE}/api/tickets/{ticketId}/reject.md \
+  -H "X-Worker-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"nodeKey":"submit","reason":"拒绝原因：说明为何不符合要求"}'
+```
+
+- 查询接口返回 `text/markdown`，按小节组织：工单信息 / 需求正文 / 工单输入（起始节点结构化字段）/ 流程进度表 / 节点输入与输出（每个节点任务的 需求内容、交付要求、用户补充输入、待回答问题、失败原因与交付文档全文）/ AI 操作
+- 拒绝接口校验：调用者必须是**当前节点的处理机器人**（X-Worker-Token），`nodeKey` 必须与工单当前节点一致，`reason` 必填；起始/验收节点没有节点任务，无需也无法拒绝
+- 拒绝后当前节点任务置为「已结束-失败」，工作流按 `failed`（操作节点）/`rejected`（审批节点）流转：有对应流转则自动进入下一节点（回到当前节点会收到新邀约），无流转则工单失败
+- 信息不足时优先用节点任务上的提问接口（`POST /api/tasks/{nodeTaskId}/questions/ask.md`）向需求方补充确认，不要直接拒绝
 
 ## 13. 文件上传（Markdown）
 
@@ -773,5 +816,5 @@ curl -X POST {BASE}/api/task-types/{id}/delete.md -H "X-Agent-Token: $LITA_WORK_
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、handoff 验收与失败判定、工单转交 ticket-route.md）、文件上传（files/upload.md）、机器人/任务定义/任务类型管理（workers、task-templates、task-types 的 create/update/delete.md，机器人保存后自动初始化）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、执行方消息回复、handoff 验收与失败判定、工单转交 ticket-route.md）、工单工作流节点拒绝（tickets/{id}/reject.md）、文件上传（files/upload.md）、机器人/任务定义/任务类型管理（workers、task-templates、task-types 的 create/update/delete.md，机器人保存后自动初始化）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

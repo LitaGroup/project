@@ -1,4 +1,6 @@
 import { Repository } from 'typeorm';
+import { WorkerRole } from '../common/enums';
+import { Task } from './task.entity';
 import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskTemplatesService } from './task-templates.service';
@@ -14,6 +16,9 @@ describe('TaskTemplatesService', () => {
     create: jest.fn((input: Partial<TaskTemplate>) => input),
     remove: jest.fn(),
   };
+  const tasks = {
+    find: jest.fn(),
+  };
   const follows = {
     find: jest.fn(),
     createQueryBuilder: jest.fn(),
@@ -24,6 +29,7 @@ describe('TaskTemplatesService', () => {
   };
   const workers = {
     find: jest.fn(),
+    findOne: jest.fn(),
   };
   let service: TaskTemplatesService;
 
@@ -44,6 +50,7 @@ describe('TaskTemplatesService', () => {
     workers.find.mockResolvedValue([]);
     service = new TaskTemplatesService(
       templates as unknown as Repository<TaskTemplate>,
+      tasks as unknown as Repository<Task>,
       workers as unknown as Repository<Worker>,
       follows as unknown as Repository<TaskTemplateFollow>,
       taskTypes as unknown as TaskTypesService,
@@ -112,6 +119,61 @@ describe('TaskTemplatesService', () => {
     await service.remove(5);
 
     expect(follows.delete).toHaveBeenCalledWith({ templateId: 5 });
+  });
+
+  it('最近任务按定义过滤并最多返回 5 条', async () => {
+    templates.findOne.mockResolvedValue(template(9));
+    tasks.find.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+
+    const result = await service.findRecentTasks(9);
+
+    expect(tasks.find).toHaveBeenCalledWith({
+      where: { templateId: 9 },
+      order: { updatedAt: 'DESC', id: 'DESC' },
+      take: 5,
+    });
+    expect(result).toHaveLength(2);
+  });
+
+  it('定义不存在时最近任务查询直接 404 且不查任务', async () => {
+    templates.findOne.mockResolvedValue(null);
+
+    await expect(service.findRecentTasks(999)).rejects.toThrow();
+
+    expect(tasks.find).not.toHaveBeenCalled();
+  });
+
+  it('保存任务定义时剔除个人 AGENT 处理机器人', async () => {
+    templates.findOne.mockResolvedValue(null);
+    taskTypes.assertExists.mockResolvedValue('其它');
+    templates.save.mockImplementation((value: TaskTemplate) =>
+      Promise.resolve({ ...value, id: 1001 }),
+    );
+    workers.findOne.mockImplementation(({ where }: { where: { id: number } }) =>
+      Promise.resolve(
+        where.id === 2001
+          ? {
+              id: 2001,
+              name: '张三的AGENT',
+              enabled: true,
+              role: WorkerRole.WORKER,
+              personalAgentUserId: 7,
+            }
+          : {
+              id: 2002,
+              name: '机器人',
+              enabled: true,
+              role: WorkerRole.WORKER,
+              personalAgentUserId: null,
+            },
+      ),
+    );
+
+    await service.create({ name: '新定义', agentIds: [2001, 2002] });
+
+    expect(templates.create).toHaveBeenCalledWith(
+      expect.objectContaining({ agentIds: [2002] }),
+    );
   });
 
   describe('Agent Markdown', () => {

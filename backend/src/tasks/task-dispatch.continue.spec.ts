@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { OpencodeClient } from '../executors/opencode-client';
 import { Task } from './task.entity';
 import { TaskDispatchService } from './task-dispatch.service';
@@ -32,6 +32,8 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
 
   let tasksRepo: { findOne: jest.Mock; update: jest.Mock };
   let executorsRepo: { findOne: jest.Mock };
+  let workersRepo: { findOne: jest.Mock };
+  let inbox: { enqueue: jest.Mock; requeueDelivered: jest.Mock };
   let eventsRepo: { create: jest.Mock; save: jest.Mock };
   let taskChat: {
     isRunning: jest.Mock;
@@ -79,11 +81,16 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       finishTask: jest.fn().mockResolvedValue(undefined),
     };
     taskRealtime = { taskChanged: jest.fn() };
+    workersRepo = { findOne: jest.fn() };
+    inbox = {
+      enqueue: jest.fn().mockResolvedValue(null),
+      requeueDelivered: jest.fn().mockResolvedValue(undefined),
+    };
     service = new TaskDispatchService(
       tasksRepo as never,
       eventsRepo as never,
       executorsRepo as never,
-      { findOne: jest.fn() } as never,
+      workersRepo as never,
       { findOne: jest.fn() } as never,
       { workdirOf: jest.fn() } as never,
       { onEvent: jest.fn() } as never,
@@ -92,10 +99,7 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       taskChat as never,
       {} as never,
       {} as never,
-      {
-        enqueue: jest.fn(),
-        requeueDelivered: jest.fn(),
-      } as never,
+      inbox as never,
       { transaction: jest.fn() } as never,
       { get: jest.fn() } as never,
     );
@@ -369,5 +373,73 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       new BadRequestException('等待任务必须先由 LOOP 或验收返工占用机器人'),
     );
     expect(dispatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('子任务 AI 机器人需求方会收到执行方消息收件箱事件', async () => {
+    workersRepo.findOne.mockResolvedValue({
+      id: 1001,
+      runtime: WorkerRuntime.OPENCODE,
+      personalAgentUserId: null,
+    });
+    const task = baseTask({
+      parentId: 9,
+      requesterType: 'worker',
+      requesterId: 1001,
+    });
+
+    await service.notifyRequesterWorkerMessage(
+      task,
+      '  请确认方案  ',
+      'chat:1:assistant:2',
+    );
+
+    expect(inbox.enqueue).toHaveBeenCalledWith(task, 'message', {
+      referenceId: 'chat:1:assistant:2',
+      payload: { content: '请确认方案' },
+    });
+  });
+
+  it('根任务 AI 机器人需求方会收到执行方消息收件箱事件', async () => {
+    workersRepo.findOne.mockResolvedValue({
+      id: 1001,
+      runtime: WorkerRuntime.OPENCODE,
+      personalAgentUserId: null,
+    });
+    const rootTask = baseTask({ parentId: null, requesterId: 1001 });
+    rootTask.requesterType = 'worker';
+
+    await service.notifyRequesterWorkerMessage(
+      rootTask,
+      '  根任务消息  ',
+      'chat:1:assistant:9',
+    );
+
+    expect(inbox.enqueue).toHaveBeenCalledWith(rootTask, 'message', {
+      referenceId: 'chat:1:assistant:9',
+      payload: { content: '根任务消息' },
+    });
+  });
+
+  it('真人需求方与个人 AGENT 需求方不进入收件箱', async () => {
+    workersRepo.findOne.mockResolvedValue({
+      id: 1001,
+      runtime: WorkerRuntime.HUMAN,
+      personalAgentUserId: null,
+    });
+    const humanTask = baseTask({
+      parentId: 9,
+      requesterType: 'worker',
+      requesterId: 1001,
+    });
+    await service.notifyRequesterWorkerMessage(humanTask, '消息');
+    expect(inbox.enqueue).not.toHaveBeenCalled();
+
+    workersRepo.findOne.mockResolvedValue({
+      id: 1001,
+      runtime: WorkerRuntime.OPENCODE,
+      personalAgentUserId: 8,
+    });
+    await service.notifyRequesterWorkerMessage(humanTask, '消息');
+    expect(inbox.enqueue).not.toHaveBeenCalled();
   });
 });

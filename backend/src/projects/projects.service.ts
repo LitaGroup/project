@@ -402,6 +402,11 @@ export class ProjectsService {
       if (d.platform) parts.push(`端：${d.platform}`);
       if (d.priority) parts.push(`优先级：${d.priority}`);
       if (d.testScript) parts.push(`测试脚本：${d.testScript}`);
+      if (d.followupTaskId) {
+        parts.push(
+          `处理任务：[#${d.followupTaskId}](/api/tasks/${d.followupTaskId}.md)`,
+        );
+      }
       return `- ${parts.join(' — ')}`;
     });
     const resourceLines = project.projectResources.map((r) => {
@@ -437,6 +442,8 @@ export class ProjectsService {
         `**${beijingTime(r.createdAt)}**（id：${r.id}）提测人 ${r.operator ?? '—'} — 状态：**${r.status ?? '待冒烟'}**`,
         `测试人员：${r.testers.join('、')}`,
       ];
+      if (r.workerId) parts.push(`提测机器人：#${r.workerId}`);
+      if (r.sourceTaskId) parts.push(`来源任务：#${r.sourceTaskId}`);
       if (r.verifier) parts.push(`判定人：${r.verifier}`);
       if (r.verifiedAt) parts.push(`判定时间：${beijingTime(r.verifiedAt)}`);
       if (r.urls?.length) parts.push(`访问地址：${r.urls.join('、')}`);
@@ -566,12 +573,14 @@ export class ProjectsService {
       '缺陷（仅平台内维护，经接口/人工创建）：',
       '',
       '```bash',
-      `curl '/api/defects.md?projectId=${project.id}'  # 缺陷清单（Markdown，可按 status/priority/q 过滤）`,
-      `curl -X POST /api/defects/create.md -H 'Content-Type: application/json' -d '{"projectId": ${project.id}, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高"}'  # 新建（预期与实际必填；priority 高/中/低；images 传 /images/... 数组，testScript 可选）`,
+      `curl '/api/defects.md?projectId=${project.id}'  # 缺陷清单（Markdown，可按 releaseId/status/priority/q 过滤）`,
+      `curl -X POST /api/defects/create.md -H 'Content-Type: application/json' -d '{"projectId": ${project.id}, "expected": "登录按钮点击后正常进入首页", "actual": "点击无响应", "platform": "前端", "priority": "高", "releaseId": 45}'  # 新建（预期与实际必填；priority 高/中/低；images 传 /images/... 数组；testScript/releaseId 可选）`,
       'curl /api/defects/{defectId}.md  # 缺陷详情（含预期/实际/图片/变更记录）',
       'curl -X POST /api/defects/{defectId}/status.md -H \'Content-Type: application/json\' -d \'{"status": "修复", "remark": "备注"}\'  # 状态变更（开放/修复/关闭；置"修复"表示研发已修复，脚本回归通过后自动关闭）',
       'curl -X POST /api/defects/{defectId}/delete.md  # 删除（仅本地）',
       '```',
+      '',
+      '机器人提测后的新缺陷：平台先取项目最新一条提测，仅当它处于 待冒烟 / 进行中 / 未通过 且由机器人发起时，自动创建缺陷处理任务并指派原提测机器人（最新提测已通过或人工提测时不回退到更早记录）；任务与提测记录写入缺陷详情（`releaseId` / `followupTaskId`），派单失败原因写入变更记录。新建/更新缺陷可显式传 `releaseId` 关联指定提测（须同项目；显式传 `null` 表示不关联），显式关联时平台不自动派单。',
       '',
       '节点（某个时间点需完成的事项；状态由 达成+实际达成日期+日期 推导：准备中/提前达成/达成/延期/取消）：',
       '',
@@ -592,11 +601,11 @@ export class ProjectsService {
       '项目提测（创建提测记录，状态流转「测试中」，并通知提测群「H5 Release | 提测上线」+ 项目人员私聊；仅 testers 必填——至少 1 人且须为用户系统内用户，content/urls/branches 可空）：',
       '',
       '```bash',
-      `curl -X POST /api/projects/${project.id}/release.md -H 'Content-Type: application/json' -d '{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}]}'`,
+      `curl -X POST /api/projects/${project.id}/release.md -H 'Content-Type: application/json' -d '{"testers": ["张三"], "content": "提测内容 Markdown", "urls": ["https://..."], "branches": [{"repo": "LitaGroup/xxx", "branch": "test"}], "taskId": 123}'  # 机器人可显式传 taskId，缺省自动关联当前执行中的任务`,
       `curl '/api/releases.md?projectId=${project.id}'  # 提测记录清单（时间倒序，含状态/判定人/判定时间）`,
       '```',
       '',
-      '判定提测结果（由测试同学操作；新提测默认「待冒烟」，可改为「已通过」/「未通过」，改回「待冒烟」会清空判定人/判定时间以便重新冒烟）：',
+      '推进提测状态（由测试同学操作；新提测默认「待冒烟」，开始测试后改为「进行中」，仅「已通过」/「未通过」记录判定人/判定时间，切回「待冒烟」/「进行中」会清空）：',
       '',
       '```bash',
       `curl -X POST /api/releases/{releaseId}/status.md -H 'Content-Type: application/json' -d '{"status": "已通过"}'`,

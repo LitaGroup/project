@@ -26,6 +26,8 @@ export interface TaskDocumentResult {
 
 /** 交付文档：正文由作者完全维护，平台只维护路径、版本与更新时间。 */
 export interface TaskHandoffDocument extends TaskDocumentResult {
+  /** 文档是否已由执行方/需求方显式创建 */
+  exists: boolean;
   version: number;
   submittedVersion: number | null;
   content: string;
@@ -56,6 +58,10 @@ export interface TaskDocumentEntry {
   /** 文档 Frontmatter 中的描述（可空） */
   description: string | null;
   updatedAt: string | null;
+  /** 来源任务（「文档」Tab 聚合子任务文档时携带） */
+  taskId?: number;
+  taskCode?: string;
+  taskTitle?: string;
 }
 
 export interface TaskAuxDocumentInput {
@@ -81,11 +87,17 @@ export interface TaskArtifactEntry {
   url: string;
   /** 引用该产物的任务文档 */
   sourceDocument: string;
+  /** 来源任务（「文档」Tab 聚合子任务文档时携带） */
+  taskId?: number;
+  taskCode?: string;
+  taskTitle?: string;
 }
 
-/** 任务详情「文档」Tab 的完整数据 */
+/** 任务详情「文档」Tab 的完整数据（documents 含当前任务与全部子任务文档） */
 export interface TaskDocumentsView {
   directory: string;
+  /** 当前任务 id，用于前端区分「当前任务」与「子任务」分组 */
+  taskId: number;
   documents: TaskDocumentEntry[];
   artifacts: TaskArtifactEntry[];
 }
@@ -97,8 +109,8 @@ interface LegacyReviewDocument {
   version: number;
 }
 
-/** 新任务交付文档的初始正文（正文被编辑后即失效） */
-const INITIAL_HANDOFF_BODY = '> 正在处理中……';
+/** 旧任务自动生成的占位正文；不再创建，仅用于拦截历史空交付 */
+const LEGACY_HANDOFF_PLACEHOLDER = '> 正在处理中……';
 const HANDOFF_DOCUMENT = 'HANDOFF';
 const REVIEW_DOCUMENT = 'REVIEW';
 
@@ -180,13 +192,24 @@ function artifactName(label: string, url: string): string {
 
 /** 从任务文档正文中提取站内图片与文件（同一 URL 只保留一条） */
 function extractTaskArtifacts(
-  documents: Array<{ name: string; content: string }>,
+  documents: Array<{
+    name: string;
+    content: string;
+    taskId?: number;
+    taskCode?: string;
+    taskTitle?: string;
+  }>,
 ): TaskArtifactEntry[] {
   const found = new Map<string, TaskArtifactEntry>();
   const add = (
     rawUrl: string,
     label: string,
-    sourceDocument: string,
+    source: {
+      name: string;
+      taskId?: number;
+      taskCode?: string;
+      taskTitle?: string;
+    },
     forceImage = false,
   ) => {
     const url = normalizeLocalArtifactUrl(rawUrl);
@@ -197,21 +220,25 @@ function extractTaskArtifacts(
         : 'file';
     const key = `${kind}:${url}`;
     if (found.has(key)) return;
-    found.set(key, {
+    const entry: TaskArtifactEntry = {
       name: artifactName(label, url),
       kind,
       url,
-      sourceDocument,
-    });
+      sourceDocument: source.name,
+    };
+    if (source.taskId !== undefined) entry.taskId = source.taskId;
+    if (source.taskCode !== undefined) entry.taskCode = source.taskCode;
+    if (source.taskTitle !== undefined) entry.taskTitle = source.taskTitle;
+    found.set(key, entry);
   };
 
   for (const document of documents) {
     const body = stripKnowledgeFrontmatter(document.content);
     for (const match of body.matchAll(MARKDOWN_ARTIFACT_LINK)) {
-      add(match[3], match[2] ?? '', document.name, match[1] === '!');
+      add(match[3], match[2] ?? '', document, match[1] === '!');
     }
     for (const match of body.matchAll(HTML_IMAGE)) {
-      add(match[1], '', document.name, true);
+      add(match[1], '', document, true);
     }
   }
   return [...found.values()];
@@ -246,7 +273,7 @@ function frontmatterDescription(markdown: string): string | null {
 
 /**
  * 任务文档（统一放在 /task/{yyyyMMdd}/{任务编号}/）：
- * - HANDOFF：任务创建时生成，执行机器人/需求方持续维护，申请验收时锁定版本
+ * - HANDOFF：执行方开始处理后显式创建并持续维护，申请验收时锁定版本
  * - REVIEW：验收通过后生成/覆盖的复盘文档，与 HANDOFF 同目录
  * - API / TECH_DESIGN 等：执行过程中由任务接口读写的普通文档
  * 知识路径不带 `.md` 后缀（`.md` 是知识接口的 Markdown 视图后缀）。
@@ -280,40 +307,22 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     timer.unref();
   }
 
-  /** 任务创建时初始化交付文档；失败只告警，后续读取/派发/验收会惰性补齐。 */
-  async initializeHandoff(task: Task): Promise<TaskHandoffDocument | null> {
-    try {
-      // 新任务没有历史文档，跳过全量 /task 扫描，避免每次创建任务都遍历知识库。
-      return await this.ensureHandoff(task, { legacy: false });
-    } catch (error) {
-      this.logger.warn(
-        `任务 ${task.code} 初始化交付文档失败：${(error as Error).message}`,
-      );
-      return null;
-    }
-  }
-
   /**
-   * 确保任务有可用的 HANDOFF：
-   * 先按任务登记路径查找，再兼容历史日期路径；均不存在时创建初始文档。
+   * 读取 HANDOFF：只查找已有文档，不创建。
+   * 兼容历史日期目录与旧占位文档；不存在时返回 exists=false 的路径描述。
    */
-  async ensureHandoff(
-    task: Task,
-    options: { legacy?: boolean } = {},
-  ): Promise<TaskHandoffDocument> {
+  async readHandoff(task: Task): Promise<TaskHandoffDocument> {
     this.assertKnowledge();
     const plannedPath = this.handoffPath(task);
     let node = await this.knowledge.findNodeByPath(plannedPath);
-    if (!node && options.legacy !== false) {
+    if (!node) {
       node = await this.findLegacyHandoff(task);
     }
-    let body = node
-      ? stripKnowledgeFrontmatter(node.content ?? '').trim()
-      : INITIAL_HANDOFF_BODY;
+    let body = node ? stripKnowledgeFrontmatter(node.content ?? '').trim() : '';
 
     // 历史任务可能因早期读取在派生路径生成了占位文档，而真实 HANDOFF 位于
     // 其它日期目录。只要当前仍是占位正文，就尝试回收同任务的真实交付文档。
-    if (options.legacy !== false && (!node || !this.hasHandoffBody(body))) {
+    if (!node || !this.hasHandoffBody(body)) {
       const recovered = await this.findLegacyHandoff(task);
       if (recovered && recovered.id !== node?.id) {
         node = recovered;
@@ -326,28 +335,27 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       throw new BadRequestException(`任务文档路径 ${path} 已被目录占用`);
     }
 
+    if (!node) {
+      return {
+        exists: false,
+        path,
+        url: this.handoffUrl(path),
+        title: this.handoffTitle(task),
+        version: 0,
+        submittedVersion: task.handoffSubmittedVersion ?? null,
+        content: '',
+        updatedAt: null,
+        updatedBy: null,
+      };
+    }
+
     const now = new Date();
     let version = task.handoffVersion > 0 ? task.handoffVersion : 0;
     if (!version) {
-      version = node ? (frontmatterVersion(node.content ?? '') ?? 1) : 1;
+      version = frontmatterVersion(node.content ?? '') ?? 1;
     }
 
-    if (!node) {
-      const created = await this.knowledge.createArticleAtPath({
-        path,
-        title: this.handoffTitle(task),
-        content: this.renderHandoffContent({
-          task,
-          path,
-          version,
-          body: INITIAL_HANDOFF_BODY,
-          updatedAt: now,
-          updatedBy: '系统',
-        }),
-      });
-      node = created;
-      body = INITIAL_HANDOFF_BODY;
-    } else if (!hasYamlFrontmatter(node.content ?? '')) {
+    if (!hasYamlFrontmatter(node.content ?? '')) {
       // 历史交付文档补齐平台元信息；正文保持不变。
       node = await this.knowledge.update(node.id, {
         title: this.handoffTitle(task),
@@ -355,7 +363,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
           task,
           path,
           version,
-          body: body || INITIAL_HANDOFF_BODY,
+          body,
           updatedAt: node.updatedAt ?? now,
           updatedBy: task.handoffUpdatedBy ?? '系统',
         }),
@@ -385,6 +393,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     }
 
     return {
+      exists: true,
       path,
       url: this.handoffUrl(path),
       title: this.handoffTitle(task),
@@ -394,10 +403,6 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       updatedAt: updatedAt ? new Date(updatedAt).toISOString() : null,
       updatedBy,
     };
-  }
-
-  async readHandoff(task: Task): Promise<TaskHandoffDocument> {
-    return this.ensureHandoff(task);
   }
 
   /** 平台维护版本号；作者提交完整正文，Frontmatter 由平台覆盖。 */
@@ -413,11 +418,17 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     return this.withHandoffLock(taskId, async () => {
       const task = await this.mustFind(taskId);
       this.assertHandoffEditable(task);
-      const current = await this.ensureHandoff(task);
+      const current = await this.readHandoff(task);
       if (!Number.isInteger(input.baseVersion)) {
         throw new BadRequestException('baseVersion 必须是整数');
       }
-      if (input.baseVersion !== current.version) {
+      if (!current.exists) {
+        if (input.baseVersion !== 0) {
+          throw new ConflictException(
+            '交付文档尚未创建；首次写入必须使用 baseVersion=0',
+          );
+        }
+      } else if (input.baseVersion !== current.version) {
         throw new ConflictException(
           `交付文档已更新（当前 v${current.version}，提交基于 v${input.baseVersion}），请重新读取后再修改`,
         );
@@ -430,11 +441,14 @@ export class TaskDocumentService implements OnApplicationBootstrap {
         appended !== null
           ? [current.content.trim(), appended].filter(Boolean).join('\n\n')
           : stripKnowledgeFrontmatter(input.content ?? '').trim();
+      if (!current.exists && !body) {
+        throw new BadRequestException('交付文档正文不能为空');
+      }
       if (body === current.content.trim()) {
         return { task, document: current, changed: false };
       }
       const now = new Date();
-      const version = current.version + 1;
+      const version = Math.max(current.version, task.handoffVersion ?? 0) + 1;
       const previous = {
         handoffVersion: task.handoffVersion,
         handoffUpdatedAt: task.handoffUpdatedAt,
@@ -444,7 +458,10 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       const claimed = await this.tasks.update(
         {
           id: task.id,
-          handoffVersion: current.version,
+          // 首次创建允许任务版本仍为 0；已有文档按读取到的版本做乐观锁。
+          handoffVersion: current.exists
+            ? current.version
+            : task.handoffVersion,
         },
         {
           handoffPath: current.path,
@@ -488,6 +505,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
         task: saved,
         document: {
           ...current,
+          exists: true,
           version,
           submittedVersion: saved.handoffSubmittedVersion ?? null,
           content: body,
@@ -499,12 +517,14 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     });
   }
 
-  /** 申请验收：校验正文已维护并锁定当前版本。 */
+  /** 申请验收：校验正文已显式创建并维护，锁定当前版本。 */
   async prepareForAcceptance(task: Task): Promise<TaskHandoffDocument> {
-    const document = await this.ensureHandoff(task);
-    if (!this.hasHandoffBody(document.content)) {
+    const document = await this.readHandoff(task);
+    if (!document.exists || !this.hasHandoffBody(document.content)) {
       throw new BadRequestException(
-        '交付文档还没有有效内容，请先调用 handoff/update.md 维护交付文档后再申请验收',
+        document.exists
+          ? '交付文档还没有有效内容，请先调用 handoff/update.md 维护交付文档后再申请验收'
+          : '交付文档尚未创建，请先调用 handoff/update.md（baseVersion=0）写入交付内容后再申请验收',
       );
     }
     const claimed = await this.tasks.update(
@@ -523,6 +543,11 @@ export class TaskDocumentService implements OnApplicationBootstrap {
 
   /** 任务详情 / AI 读取：平台重新生成 Frontmatter，正文保持作者原文。 */
   renderHandoffMarkdown(task: Task, document: TaskHandoffDocument): string {
+    if (!document.exists) {
+      throw new NotFoundException(
+        `任务 ${task.code} 尚未创建交付文档，请先调用 handoff/update.md（baseVersion=0）`,
+      );
+    }
     return this.renderHandoffContent({
       task,
       path: document.path,
@@ -583,20 +608,68 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       .sort((a, b) => this.compareTaskDocuments(a, b));
   }
 
-  /** 任务详情「文档」Tab：Markdown 文档 + 文档中引用的图片/文件。 */
+  /**
+   * 任务详情「文档」Tab：当前任务 + 全部子任务（递归）的 Markdown 文档与产物。
+   * 不含父任务与兄弟任务；Agent 用的 documents.md 仍只列当前任务自身文档。
+   */
   async taskDocumentsView(task: Task): Promise<TaskDocumentsView> {
-    const { nodes, directory } = await this.directTaskDocumentNodes(task);
-    const direct = nodes.filter((node) => node.parentPath === directory);
-    const documents = direct
-      .map((node) => this.documentEntry(node))
-      .sort((a, b) => this.compareTaskDocuments(a, b));
-    const artifacts = extractTaskArtifacts(
-      direct.map((node) => ({
-        name: documentReadName(node.name),
-        content: node.content ?? '',
-      })),
+    this.assertKnowledge();
+    const tree = await this.collectTaskWithDescendants(task);
+    const perTask = await Promise.all(
+      tree.map(async (current) => {
+        const directory = this.taskDirectory(current);
+        const nodes = await this.knowledge.listArticlesByPrefix(directory);
+        return {
+          task: current,
+          directory,
+          nodes: nodes.filter((node) => node.parentPath === directory),
+        };
+      }),
     );
-    return { directory, documents, artifacts };
+    const documents = perTask.flatMap(({ task: current, nodes }) =>
+      nodes
+        .map((node) => this.documentEntry(node, current))
+        .sort((a, b) => this.compareTaskDocuments(a, b)),
+    );
+    const artifacts = extractTaskArtifacts(
+      perTask.flatMap(({ task: current, nodes }) =>
+        nodes.map((node) => ({
+          name: documentReadName(node.name),
+          content: node.content ?? '',
+          taskId: current.id,
+          taskCode: current.code,
+          taskTitle: current.title,
+        })),
+      ),
+    );
+    return {
+      directory: this.taskDirectory(task),
+      taskId: task.id,
+      documents,
+      artifacts,
+    };
+  }
+
+  /** 当前任务与其全部后代任务（深度优先；不含父任务与兄弟任务）。 */
+  private async collectTaskWithDescendants(task: Task): Promise<Task[]> {
+    const rows = await this.tasks.find({
+      where: { rootId: task.rootId },
+      order: { sortOrder: 'ASC', id: 'ASC' },
+    });
+    const byParent = new Map<number, Task[]>();
+    for (const row of rows) {
+      if (row.parentId == null) continue;
+      const list = byParent.get(row.parentId) ?? [];
+      list.push(row);
+      byParent.set(row.parentId, list);
+    }
+    const collected: Task[] = [];
+    const walk = (current: Task): void => {
+      collected.push(current);
+      for (const child of byParent.get(current.id) ?? []) walk(child);
+    };
+    walk(task);
+    return collected;
   }
 
   /** 读取任务目录下某篇文档的正文（去掉平台 Frontmatter）。 */
@@ -893,8 +966,8 @@ export class TaskDocumentService implements OnApplicationBootstrap {
     return rank(a.name) - rank(b.name) || a.name.localeCompare(b.name, 'en');
   }
 
-  private documentEntry(node: KnowledgeNode): TaskDocumentEntry {
-    return {
+  private documentEntry(node: KnowledgeNode, task?: Task): TaskDocumentEntry {
+    const entry: TaskDocumentEntry = {
       name: documentReadName(node.name),
       path: node.path,
       url: `/docs/detail/${encodeKnowledgePath(node.path)}`,
@@ -903,6 +976,12 @@ export class TaskDocumentService implements OnApplicationBootstrap {
       description: frontmatterDescription(node.content ?? ''),
       updatedAt: node.updatedAt ? node.updatedAt.toISOString() : null,
     };
+    if (task) {
+      entry.taskId = task.id;
+      entry.taskCode = task.code;
+      entry.taskTitle = task.title;
+    }
+    return entry;
   }
 
   private handoffTitle(task: Task): string {
@@ -915,7 +994,7 @@ export class TaskDocumentService implements OnApplicationBootstrap {
 
   private hasHandoffBody(content: string): boolean {
     const text = content.trim();
-    return Boolean(text) && text !== INITIAL_HANDOFF_BODY;
+    return Boolean(text) && text !== LEGACY_HANDOFF_PLACEHOLDER;
   }
 
   private renderHandoffContent(input: {

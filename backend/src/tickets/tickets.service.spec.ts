@@ -53,6 +53,11 @@ describe('TicketsService', () => {
     addEvent: jest.Mock;
   };
   let dispatchService: { assign: jest.Mock };
+  let workflowRuntime: {
+    create: jest.Mock;
+    workflowView: jest.Mock;
+    acceptNode: jest.Mock;
+  };
   let service: TicketsService;
 
   const config = {
@@ -104,14 +109,22 @@ describe('TicketsService', () => {
         }),
       ),
     };
+    workflowRuntime = {
+      create: jest.fn(),
+      workflowView: jest.fn().mockResolvedValue(null),
+      acceptNode: jest.fn(),
+    };
     service = new TicketsService(
       tickets as never,
       configs as never,
       tasks as never,
+      {} as never,
       templates as never,
       workers as never,
       tasksService as never,
       dispatchService as never,
+      {} as never,
+      workflowRuntime as never,
       { get: jest.fn().mockReturnValue(undefined) } as never,
     );
   });
@@ -316,5 +329,22 @@ describe('TicketsService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(dispatchService.assign).not.toHaveBeenCalled();
+  });
+
+  it('查询我的工单时按 createdById 过滤', async () => {
+    const query = {
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+    tickets.createQueryBuilder.mockReturnValue(query);
+
+    await service.findAll({ createdById: 7 });
+
+    expect(query.andWhere).toHaveBeenCalledWith(
+      't.createdById = :createdById',
+      { createdById: 7 },
+    );
   });
 });

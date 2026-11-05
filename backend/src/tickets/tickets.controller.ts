@@ -20,9 +20,11 @@ import {
 } from './tickets.service';
 
 class CreateTicketDto implements CreateTicketInput {
-  category: string;
+  category?: string;
   title?: string;
   description?: string;
+  workflowDefinitionId?: number;
+  inputValues?: Record<string, unknown>;
 }
 
 class RouteTicketDto implements RouteTicketInput {
@@ -43,11 +45,34 @@ export class TicketsController {
 
   @Get()
   findAll(
+    @Req() req: AuthedRequest,
     @Query('category') category?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
+    @Query('workflowDefinitionId') workflowDefinitionId?: string,
+    @Query('scope') scope?: string,
   ) {
-    return this.tickets.findAll({ category, status, q });
+    const definitionId = Number(workflowDefinitionId);
+    const mine = scope?.trim() === 'mine';
+    if (mine && !req.user) {
+      throw new ForbiddenException('查看我的工单需要用户身份');
+    }
+    return this.tickets.findAll({
+      category,
+      status,
+      q,
+      workflowDefinitionId:
+        Number.isInteger(definitionId) && definitionId > 0
+          ? definitionId
+          : undefined,
+      createdById: mine ? req.user?.id : undefined,
+    });
+  }
+
+  @Get(':id.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  ticketMarkdown(@Param('id', ParseIntPipe) id: number) {
+    return this.tickets.ticketMarkdown(id);
   }
 
   @Get(':id')
@@ -59,6 +84,40 @@ export class TicketsController {
   create(@Body() dto: CreateTicketDto, @Req() req: AuthedRequest) {
     if (!req.user) throw new ForbiddenException('创建工单需要用户身份');
     return this.tickets.create(dto, req.user);
+  }
+
+  /** 机器人拒绝当前节点：nodeKey 须与当前节点一致，仅当前节点处理机器人可用 */
+  @Post(':id/reject.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  rejectMarkdown(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { nodeKey?: string; reason?: string },
+    @Req() req: AuthedRequest,
+  ) {
+    if (!req.worker) {
+      throw new ForbiddenException(
+        '工单节点拒绝仅接受机器人身份（X-Worker-Token）',
+      );
+    }
+    return this.tickets.rejectMarkdown(id, req.worker, dto);
+  }
+
+  @Post(':id/workflow/accept')
+  acceptWorkflow(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { remark?: string },
+    @Req() req: AuthedRequest,
+  ) {
+    return this.tickets.acceptWorkflow(id, 'approved', req, dto?.remark);
+  }
+
+  @Post(':id/workflow/reject')
+  rejectWorkflow(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { remark?: string },
+    @Req() req: AuthedRequest,
+  ) {
+    return this.tickets.acceptWorkflow(id, 'rejected', req, dto?.remark);
   }
 }
 

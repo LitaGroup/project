@@ -15,19 +15,26 @@ export type TaskConversationConnection =
   | 'live'
   | 'reconnecting'
 
+/** 距离底部小于该值时仍视为停留在底部，实时内容继续跟随 */
+const FOLLOW_BOTTOM_THRESHOLD = 24
+
 /**
  * 任务详情「会话」：只读、实时展示多方交互内容。
  * 不渲染输入框、发送队列、操作按钮、工具调用和思考过程；
  * question 以普通时间线文本展示问题与回答结果，不使用交互式问答组件。
  */
 export function TaskConversationView({
+  taskId,
   messages,
   connection,
 }: {
+  taskId: number
   messages: TaskChatMessage[]
   connection: TaskConversationConnection
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
+  /** 用户停留在底部时跟随最新消息；向上翻阅后保留当前位置 */
+  const followBottomRef = useRef(true)
   const visibleMessages = useMemo(
     () =>
       messages.filter((message) =>
@@ -39,13 +46,26 @@ export function TaskConversationView({
   )
 
   useEffect(() => {
+    // 切换任务后重新定位到新任务的最新消息
+    followBottomRef.current = true
+  }, [taskId])
+
+  useEffect(() => {
     const box = boxRef.current
-    if (!box) return
+    if (!box || !followBottomRef.current) return
     box.scrollTop = box.scrollHeight
   }, [visibleMessages])
 
+  const handleScroll = () => {
+    const box = boxRef.current
+    if (!box) return
+    followBottomRef.current =
+      box.scrollHeight - box.scrollTop - box.clientHeight <=
+      FOLLOW_BOTTOM_THRESHOLD
+  }
+
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-none bg-background">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <h2 className="text-sm font-semibold text-foreground-intense">
@@ -75,6 +95,7 @@ export function TaskConversationView({
 
       <div
         ref={boxRef}
+        onScroll={handleScroll}
         className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-4"
       >
         {visibleMessages.length === 0 ? (
@@ -128,7 +149,7 @@ function ConversationMessage({ message }: { message: TaskChatMessage }) {
         <div
           className={`min-w-0 max-w-full text-sm leading-relaxed ${
             isUser
-              ? 'rounded-[var(--radius-lg)] rounded-tr-sm bg-primary px-4 py-2.5 text-primary-foreground'
+              ? 'rounded-none bg-primary px-4 py-2.5 text-primary-foreground'
               : 'task-chat-markdown text-foreground-emphasis'
           }`}
         >

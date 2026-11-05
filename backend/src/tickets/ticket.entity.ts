@@ -53,9 +53,45 @@ export class Ticket {
   @Column({ type: 'varchar', length: 100 })
   assigneeName: string;
 
-  /** 关联调度任务（tasks.id，无物理外键） */
-  @Column({ type: 'int' })
-  taskId: number;
+  /** 关联调度任务（tasks.id，旧模型一对一；工作流工单为空） */
+  @Column({ type: 'int', nullable: true })
+  taskId: number | null;
+
+  /** 工单工作流配置（workflow_definitions.id；旧工单为空） */
+  @Column({ type: 'int', nullable: true })
+  workflowDefinitionId: number | null;
+
+  /** 创建时锁定的发布版本（workflow_definition_versions.id） */
+  @Column({ type: 'int', nullable: true })
+  workflowVersionId: number | null;
+
+  /** 创建时锁定的发布版本号 */
+  @Column({ type: 'int', nullable: true })
+  workflowVersion: number | null;
+
+  /** 发起机器人（workers.id，通常是用户绑定的真人机器人） */
+  @Column({ type: 'int', nullable: true })
+  initiatorWorkerId: number | null;
+
+  /** 发起机器人名称快照 */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  initiatorWorkerName: string | null;
+
+  /** 起始节点结构化输入 */
+  @Column({ type: 'simple-json', nullable: true })
+  inputValues: Record<string, unknown> | null;
+
+  /** 工作流状态：处理中 / 待验收 / 已完成 / 已失败 / 已取消 */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  workflowStatus: string | null;
+
+  /** 当前节点 key */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  currentNodeKey: string | null;
+
+  /** 当前节点名称快照 */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  currentNodeName: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

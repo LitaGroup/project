@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import { api, type CheckRun, type ProjectCheck } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import {
   RunDetailView,
@@ -89,7 +90,7 @@ export function CheckRunPage() {
   useEffect(() => {
     if (selectedRunId === null) return
     let finished = false
-    const es = new EventSource(`/api/checks/runs/${selectedRunId}/stream`)
+    const es = visibleEventSource(`/api/checks/runs/${selectedRunId}/stream`)
     es.onmessage = (e: MessageEvent<string>) => {
       const r = JSON.parse(e.data) as CheckRun
       setRunData(r)

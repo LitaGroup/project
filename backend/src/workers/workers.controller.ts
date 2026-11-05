@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   Param,
@@ -9,11 +10,19 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Sse,
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
 import { Observable } from 'rxjs';
-import { WorkerLiveStatus, WorkerRole, WorkerRuntime } from '../common/enums';
+import type { AuthedRequest } from '../auth/auth.guard';
+import {
+  UserRole,
+  WorkerGithubPermission,
+  WorkerLiveStatus,
+  WorkerRole,
+  WorkerRuntime,
+} from '../common/enums';
 import { Worker } from './worker.entity';
 import type { OptimizePromptInput } from './worker-ai.service';
 import { WorkerEnvironmentService } from './worker-environment.service';
@@ -51,6 +60,7 @@ class CreateWorkerDto implements CreateWorkerInput {
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
   enabled?: boolean;
+  githubPermission?: WorkerGithubPermission;
 }
 
 class UpdateWorkerDto implements UpdateWorkerInput {
@@ -69,6 +79,7 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   taskDefs?: Worker['taskDefs'];
   ownerUserId?: number | null;
   enabled?: boolean;
+  githubPermission?: WorkerGithubPermission;
 }
 
 class OptimizePromptDto implements OptimizePromptInput {
@@ -182,9 +193,11 @@ export class WorkersController {
    * （如 ALB 60s）以 504 掐断而后端继续跑完，故刻意异步化。
    */
   @Post(':id/initialize')
-  initialize(
+  async initialize(
     @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
   ): Promise<WorkerInitializeSnapshot> {
+    await this.assertPersonalAgentAccess(id, req);
     return this.workerEnvironment.start(id);
   }
 
@@ -205,7 +218,11 @@ export class WorkersController {
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number): Promise<WorkerView> {
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+  ): Promise<WorkerView> {
+    await this.assertPersonalAgentAccess(id, req);
     return this.workersService.findOneView(id);
   }
 
@@ -215,10 +232,12 @@ export class WorkersController {
   }
 
   @Patch(':id')
-  update(
+  async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateWorkerDto,
+    @Req() req: AuthedRequest,
   ): Promise<WorkerView> {
+    await this.assertPersonalAgentAccess(id, req);
     return this.workersService.update(id, dto);
   }
 
@@ -226,5 +245,20 @@ export class WorkersController {
   @HttpCode(204)
   remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
     return this.workersService.remove(id);
+  }
+
+  /** 个人 AGENT 只用于「我的 AI」与个人中心配置：仅本人或管理员可访问详情/修改 */
+  private async assertPersonalAgentAccess(
+    id: number,
+    req: AuthedRequest,
+  ): Promise<void> {
+    const worker = await this.workersService.findOne(id);
+    if (
+      worker.personalAgentUserId &&
+      req.user?.role !== UserRole.ADMIN &&
+      worker.personalAgentUserId !== req.user?.id
+    ) {
+      throw new ForbiddenException('无权访问该个人 AGENT');
+    }
   }
 }

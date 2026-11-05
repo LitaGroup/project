@@ -28,11 +28,9 @@ import {
   DropdownMenuItem,
 } from '@appica/ui-react/dropdown-menu'
 import {
-  Activity,
   Briefcase,
   Bug,
   CalendarClock,
-  ChartPie,
   CircleCheck,
   ClipboardList,
   Cpu,
@@ -58,6 +56,7 @@ import {
 import type { IconComponent } from '@appica/icons-react'
 import { LayoutGroup, m } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
+import { api, type TicketWorkflowDefinitionSummary } from '../lib/api'
 import { PageTransition } from './PageTransition'
 import { KnowledgeSearchDialog } from './KnowledgeSearchDialog'
 import { navIndicatorTransition } from '../lib/motion'
@@ -74,6 +73,12 @@ interface NavItem {
   end?: boolean
 }
 
+/** 左侧导航分组：组标题 + 组内导航项 */
+interface NavGroup {
+  label?: string
+  items: NavItem[]
+}
+
 /** 顶级导航分区：顶部 Tab 切换，各分区有独立的左侧导航 */
 interface NavSection {
   key: string
@@ -83,6 +88,10 @@ interface NavSection {
   /** 路径归属判定（决定顶部 Tab / 左侧导航高亮） */
   match: (pathname: string) => boolean
   items: NavItem[]
+  /** 需要分组展示时使用；存在时优先于 items */
+  groups?: NavGroup[]
+  /** 仅管理员可见（管理区） */
+  adminOnly?: boolean
 }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -95,6 +104,7 @@ const NAV_SECTIONS: NavSection[] = [
       !p.startsWith('/tasks') &&
       !p.startsWith('/tickets') &&
       !p.startsWith('/docs') &&
+      !p.startsWith('/robots') &&
       !p.startsWith('/workbench'),
     items: [
       { to: '/', label: '概览', icon: LayoutDashboard, ready: true },
@@ -115,33 +125,30 @@ const NAV_SECTIONS: NavSection[] = [
   {
     key: 'tasks',
     label: '任务',
-    to: '/tasks',
+    to: '/tasks/list',
     match: (p) => p.startsWith('/tasks'),
     items: [
       { to: '/tasks/list', label: '任务', icon: ClipboardList, ready: true },
-      { to: '/tasks', label: '任务概览', icon: ChartPie, ready: true },
-      { to: '/tasks/live', label: '工作概览', icon: Activity, ready: true },
+      { to: '/tasks/definitions', label: '定义', icon: Package, ready: true },
     ],
   },
   {
     key: 'tickets',
     label: '工单',
-    to: '/tickets/tech',
+    to: '/tickets',
     match: (p) => p.startsWith('/tickets'),
-    items: [
-      // 已开放的工单类型排在前面，未开放/已关闭的排在后面
-      { to: '/tickets/tech', label: '技术工单', icon: Settings, ready: true },
-      { to: '/tickets/data', label: '数据工单', icon: ChartPie, ready: true },
+    items: [],
+    groups: [
       {
-        to: '/tickets/solution',
-        label: '方案工单',
-        icon: FileText,
-        ready: false,
-        badge: '已关闭',
+        label: '我的',
+        items: [
+          { to: '/tickets/mine', label: '我的工单', icon: ClipboardList, ready: true },
+        ],
       },
-      { to: '/tickets/ops', label: '运维工单', icon: Cpu, ready: false },
-      { to: '/tickets/requirement', label: '需求工单', icon: ClipboardList, ready: false },
-      { to: '/tickets/bug', label: 'BUG反馈', icon: Bug, ready: false },
+      {
+        label: '全部',
+        items: [],
+      },
     ],
   },
   {
@@ -158,11 +165,13 @@ const NAV_SECTIONS: NavSection[] = [
     key: 'admin',
     label: '管理',
     to: '/admin/users',
+    adminOnly: true,
     match: (p) => p.startsWith('/admin'),
     items: [
       { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
       { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
       { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
+      { to: '/admin/github-access', label: 'GitHub 权限', icon: Settings, ready: true },
       { to: '/admin/task-types', label: '任务类型', icon: Label, ready: true },
       { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },
       { to: '/admin/workers', label: '机器人', icon: Robot, ready: true },
@@ -185,7 +194,7 @@ const PROFILE_SECTION: NavSection = {
       ready: true,
       end: true,
     },
-    { to: '/profile/robot', label: '我的代理', icon: Robot, ready: true },
+    { to: '/profile/robot', label: '助理配置', icon: Robot, ready: true },
     {
       to: '/profile/task-definitions',
       label: '任务定义',
@@ -250,7 +259,7 @@ function UserArea() {
           个人中心
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => navigate('/profile/robot')}>
-          我的代理
+          助理配置
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => navigate('/profile/task-definitions')}>
           任务定义
@@ -261,19 +270,102 @@ function UserArea() {
   )
 }
 
+/** 左侧导航链接列表（普通分区与分组分区共用） */
+function SidebarNavList({ items }: { items: NavItem[] }) {
+  return (
+    <NavigationList className="gap-1">
+      {items.map((item) => (
+        <NavigationItem key={item.to}>
+          <NavigationLink
+            value={item.to}
+            disabled={!item.ready}
+            render={
+              <NavLink
+                to={item.to}
+                end={item.end ?? item.to === '/'}
+              />
+            }
+          >
+            <span className="flex w-full items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2.5">
+                <item.icon size={18} className="shrink-0" />
+                <span className="truncate">{item.label}</span>
+              </span>
+              {!item.ready && (
+                <Badge variant="soft">{item.badge ?? '待补充'}</Badge>
+              )}
+            </span>
+          </NavigationLink>
+        </NavigationItem>
+      ))}
+    </NavigationList>
+  )
+}
+
 export function Layout() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [searchOpen, setSearchOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [ticketWorkflows, setTicketWorkflows] = useState<
+    TicketWorkflowDefinitionSummary[]
+  >([])
   const isWorkbench = pathname.startsWith('/workbench')
+  const isRobotChat = pathname.startsWith('/robots')
   const isProfile = pathname.startsWith('/profile')
-  // 工作台/个人中心不归属任何顶级分区（避免高亮「项目」），个人中心使用独立左侧导航
-  const activeSection = isWorkbench
+  const isAdmin = user?.role === '管理员'
+  // 管理区仅管理员可见：非管理员过滤掉管理 Tab（路由层另有 RequireAdmin 兜底）
+  const visibleSections = isAdmin
+    ? NAV_SECTIONS
+    : NAV_SECTIONS.filter((section) => !section.adminOnly)
+  // 只有启用且已发布的工单配置进入顶部「+」新建入口
+  const availableTicketWorkflows = ticketWorkflows.filter(
+    (item) => item.enabled && item.latestPublishedVersion > 0,
+  )
+
+  useEffect(() => {
+    if (!user) return
+    let alive = true
+    api
+      .listTicketWorkflowDefinitions()
+      .then((rows) => {
+        if (alive) setTicketWorkflows(rows)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [user])
+
+  // 工作台/机器人/个人中心不归属任何顶级分区（避免高亮「项目」），个人中心使用独立左侧导航
+  const activeSection = isWorkbench || isRobotChat
     ? undefined
     : isProfile
       ? PROFILE_SECTION
-      : (NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0])
+      : (visibleSections.find((s) => s.match(pathname)) ?? visibleSections[0])
+  // 工单分区「全部」分组下追加所有启用且已发布的工单定义，点击进入对应工单列表
+  const sidebarSection: NavSection | undefined =
+    activeSection?.key === 'tickets' && activeSection.groups
+      ? {
+          ...activeSection,
+          groups: activeSection.groups
+            .map((group) =>
+              group.label === '全部'
+                ? {
+                    ...group,
+                    items: availableTicketWorkflows.map((workflow) => ({
+                      to: `/tickets/wf/${workflow.id}`,
+                      label: workflow.name,
+                      icon: ClipboardList,
+                      ready: true,
+                    })),
+                  }
+                : group,
+            )
+            .filter((group) => group.items.length > 0),
+        }
+      : activeSection
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -306,7 +398,7 @@ export function Layout() {
         <div className="flex h-full min-w-0 items-center pl-3">
           <LayoutGroup id="top-navigation">
             <nav className="flex items-center gap-1">
-              {NAV_SECTIONS.map((section) => {
+              {visibleSections.map((section) => {
                 const active = section.key === activeSection?.key
                 return (
                   <Link
@@ -393,16 +485,39 @@ export function Layout() {
                 <ClipboardList size={16} />
                 新建任务
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate('/tickets/tech/new')}>
-                <Settings size={16} />
-                新建技术工单
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate('/tickets/data/new')}>
-                <ChartPie size={16} />
-                新建数据工单
-              </DropdownMenuItem>
+              {availableTicketWorkflows.length > 0 ? (
+                availableTicketWorkflows.slice(0, 5).map((workflow) => (
+                  <DropdownMenuItem
+                    key={workflow.id}
+                    onClick={() =>
+                      navigate(`/tickets/wf/${workflow.id}/new`)
+                    }
+                  >
+                    <ClipboardList size={16} />
+                    新建{workflow.name}
+                  </DropdownMenuItem>
+                ))
+              ) : isAdmin ? (
+                <DropdownMenuItem
+                  onClick={() => navigate('/admin/ticket-config')}
+                >
+                  <ClipboardList size={16} />
+                  暂无工单配置，去配置
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
+          <Link
+            to="/robots"
+            aria-current={isRobotChat ? 'page' : undefined}
+            className={`rounded-[var(--radius-md)] px-3 py-1.5 text-sm ${
+              isRobotChat
+                ? 'bg-background-muted font-medium text-foreground-intense'
+                : 'text-foreground-muted hover:text-foreground-intense'
+            }`}
+          >
+            机器人
+          </Link>
           <Link
             to="/workbench"
             aria-current={isWorkbench ? 'page' : undefined}
@@ -424,36 +539,26 @@ export function Layout() {
 
       <div className="flex h-[calc(100vh-3.5rem)]">
         {/* 普通页面：左侧 20% 导航，右侧 80% 浅色圆角内容画布 */}
-        {!isWorkbench && activeSection && (
+        {!isWorkbench && !isRobotChat && sidebarSection && (
           <>
             <aside className="w-[20%] shrink-0 overflow-y-auto bg-background p-3">
               <Navigation orientation="vertical" activeLink={pathname}>
-                <NavigationList className="gap-1">
-                  {activeSection.items.map((item) => (
-                    <NavigationItem key={item.to}>
-                      <NavigationLink
-                        value={item.to}
-                        disabled={!item.ready}
-                        render={
-                          <NavLink
-                            to={item.to}
-                            end={item.end ?? item.to === '/'}
-                          />
-                        }
-                      >
-                        <span className="flex w-full items-center justify-between gap-2">
-                          <span className="flex min-w-0 items-center gap-2.5">
-                            <item.icon size={18} className="shrink-0" />
-                            <span className="truncate">{item.label}</span>
-                          </span>
-                          {!item.ready && (
-                            <Badge variant="soft">{item.badge ?? '待补充'}</Badge>
-                          )}
-                        </span>
-                      </NavigationLink>
-                    </NavigationItem>
-                  ))}
-                </NavigationList>
+                {sidebarSection.groups ? (
+                  <div className="flex flex-col gap-4">
+                    {sidebarSection.groups.map((group, index) => (
+                      <div key={group.label ?? index}>
+                        {group.label && (
+                          <p className="px-3 pb-1 text-xs font-medium text-foreground-muted">
+                            {group.label}
+                          </p>
+                        )}
+                        <SidebarNavList items={group.items} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <SidebarNavList items={sidebarSection.items} />
+                )}
               </Navigation>
             </aside>
 
@@ -469,6 +574,13 @@ export function Layout() {
 
         {/* 工作台：页面自身渲染 20% 宽度任务列表（与普通页左侧导航同宽）+ 自适应内容画布 */}
         {isWorkbench && (
+          <main className="h-full w-full min-w-0 text-foreground-intense">
+            <Outlet />
+          </main>
+        )}
+
+        {/* 机器人：页面自身渲染 20% 会话/全部导航 + 80% 聊天画布 */}
+        {isRobotChat && (
           <main className="h-full w-full min-w-0 text-foreground-intense">
             <Outlet />
           </main>

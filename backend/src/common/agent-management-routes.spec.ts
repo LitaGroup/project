@@ -37,6 +37,7 @@ describe('Agent 管理接口路由', () => {
   };
   const workers = {
     findAll: jest.fn(),
+    findOne: jest.fn(),
     findOneView: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
@@ -92,6 +93,10 @@ describe('Agent 管理接口路由', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    workers.findOne.mockResolvedValue({
+      id: 1001,
+      personalAgentUserId: null,
+    });
     workersMarkdown.listMarkdown.mockResolvedValue('# 机器人清单');
     workersMarkdown.findOneMarkdown.mockResolvedValue('# 机器人详情');
     workersMarkdown.createMarkdown.mockResolvedValue('# 机器人已创建');

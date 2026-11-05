@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
+import type { ProjectRelease } from '../releases/project-release.entity';
 import type { Task } from './task.entity';
 import {
   TaskWorkerInbox,
@@ -10,6 +11,9 @@ import { isWorkerRequester } from './task-requester';
 
 const OPEN_STATUSES = ['pending', 'queued', 'delivered'] as const;
 
+/** 单次扫描最多读取的开放收件箱记录（避免异常堆积拖慢 LOOP） */
+const ACTIONABLE_SCAN_LIMIT = 200;
+
 /** 父子任务机器人事件的持久化收件箱，LOOP 负责把 pending 事件排入父任务。 */
 @Injectable()
 export class TaskWorkerInboxService {
@@ -18,7 +22,11 @@ export class TaskWorkerInboxService {
     private readonly inbox: Repository<TaskWorkerInbox>,
   ) {}
 
-  /** 仅机器人需求方需要收件箱；同一开放事件幂等。 */
+  /**
+   * 仅机器人需求方需要收件箱；同一开放事件幂等。
+   * 根任务没有父任务，消息事件以任务自身作为 parentTaskId，
+   * 由 LOOP 用需求方机器人执行器创建一次性回复会话。
+   */
   async enqueue(
     child: Task,
     kind: TaskWorkerInboxKind,
@@ -27,9 +35,10 @@ export class TaskWorkerInboxService {
       payload?: Record<string, unknown>;
     },
   ): Promise<TaskWorkerInbox | null> {
-    if (!isWorkerRequester(child) || !child.parentId || !child.requesterId) {
+    if (!isWorkerRequester(child) || !child.requesterId) {
       return null;
     }
+    if (!child.parentId && kind !== 'message') return null;
     const referenceId = options?.referenceId ?? null;
     const existing = await this.inbox.findOne({
       where: {
@@ -42,7 +51,7 @@ export class TaskWorkerInboxService {
     if (existing) return existing;
     return this.inbox.save(
       this.inbox.create({
-        parentTaskId: child.parentId,
+        parentTaskId: child.parentId ?? child.id,
         workerId: child.requesterId,
         childTaskId: child.id,
         kind,
@@ -53,6 +62,81 @@ export class TaskWorkerInboxService {
     );
   }
 
+  /**
+   * 提测状态变化通知：提测机器人作为收件人，来源任务仅作为上下文。
+   * 机器人提测时若无当前执行任务，来源任务用 0 占位，由 LOOP 的提测通知分支处理。
+   */
+  async enqueueReleaseStatus(
+    release: ProjectRelease,
+    previousStatus: string,
+    projectName?: string | null,
+  ): Promise<TaskWorkerInbox | null> {
+    if (!release.workerId) return null;
+    const taskId = release.sourceTaskId ?? 0;
+    // 同一次状态流转只入队一次；后续相同状态组合再次变化会生成新 referenceId。
+    const referenceId = `release:${release.id}:${previousStatus}:${
+      release.status
+    }:${Date.now()}`;
+    const existing = await this.inbox.findOne({
+      where: {
+        childTaskId: taskId,
+        kind: 'release',
+        referenceId,
+        status: In([...OPEN_STATUSES]),
+      },
+    });
+    if (existing) return existing;
+    return this.inbox.save(
+      this.inbox.create({
+        parentTaskId: taskId,
+        workerId: release.workerId,
+        childTaskId: taskId,
+        kind: 'release',
+        referenceId,
+        payload: {
+          releaseId: release.id,
+          projectId: release.projectId,
+          projectName: projectName ?? null,
+          fromStatus: previousStatus,
+          toStatus: release.status,
+          operator: release.operator ?? null,
+          verifier: release.verifier ?? null,
+          verifiedAt: release.verifiedAt?.toISOString() ?? null,
+          testers: release.testers ?? [],
+          sourceTaskId: release.sourceTaskId ?? null,
+        },
+        status: 'pending',
+      }),
+    );
+  }
+
+  /** 是否已存在同一来源的事件（不区分状态，用于补建去重）。 */
+  async hasReference(
+    childTaskId: number,
+    kind: TaskWorkerInboxKind,
+    referenceId: string,
+  ): Promise<boolean> {
+    const row = await this.inbox.findOne({
+      where: { childTaskId, kind, referenceId },
+      select: { id: true },
+    });
+    return Boolean(row);
+  }
+
+  findById(id: number): Promise<TaskWorkerInbox | null> {
+    return this.inbox.findOne({ where: { id } });
+  }
+
+  /** 一次性回复会话已启动，标记事件已投递；回复接口成功后会结算为 done。 */
+  async markEventDelivered(id: number): Promise<boolean> {
+    const now = new Date();
+    const result = await this.inbox.update(
+      { id, status: In([...OPEN_STATUSES]) },
+      { status: 'delivered', deliveredAt: now, lastAttemptAt: now },
+    );
+    return Boolean(result.affected);
+  }
+
   listPending(take = 20): Promise<TaskWorkerInbox[]> {
     return this.inbox.find({
       where: { status: 'pending' },
@@ -61,19 +145,92 @@ export class TaskWorkerInboxService {
     });
   }
 
+  /**
+   * LOOP 可处理的开放事件：pending 立即处理；queued/delivered 只在超过
+   * 陈旧阈值后重新纳入，避免父机器人当前回合仍在正常消费时被重复唤醒。
+   * nextRetryAt 未到的记录跳过，由退避策略防止每秒重试。
+   */
+  async listActionable(
+    now = new Date(),
+    staleMs = 60_000,
+    take = 20,
+  ): Promise<TaskWorkerInbox[]> {
+    const rows = await this.inbox.find({
+      where: { status: In([...OPEN_STATUSES]) },
+      order: { id: 'ASC' },
+      take: ACTIONABLE_SCAN_LIMIT,
+    });
+    const staleBefore = now.getTime() - staleMs;
+    return rows
+      .filter((row) => {
+        const retryAt = row.nextRetryAt
+          ? new Date(row.nextRetryAt).getTime()
+          : 0;
+        if (retryAt > now.getTime()) return false;
+        if (row.status === 'pending') return true;
+        const updatedAt = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+        return !Number.isFinite(updatedAt) || updatedAt <= staleBefore;
+      })
+      .slice(0, take);
+  }
+
+  /** 重新打开陈旧事件；仅当仍处于开放状态时生效，避免覆盖并发完成。 */
+  async reopen(id: number, reason: string): Promise<boolean> {
+    const now = new Date();
+    const result = await this.inbox.update(
+      { id, status: In([...OPEN_STATUSES]) },
+      {
+        status: 'pending',
+        deliveredAt: null,
+        nextRetryAt: null,
+        attempts: () => '"attempts" + 1',
+        lastAttemptAt: now,
+        lastError: reason,
+      },
+    );
+    return Boolean(result.affected);
+  }
+
+  /** 暂缓处理并记录一次失败尝试；达到阈值后由 LOOP 转人工。 */
+  async defer(id: number, nextRetryAt: Date, reason: string): Promise<void> {
+    await this.inbox.update(
+      { id, status: In([...OPEN_STATUSES]) },
+      {
+        nextRetryAt,
+        attempts: () => '"attempts" + 1',
+        lastAttemptAt: new Date(),
+        lastError: reason,
+      },
+    );
+  }
+
+  async markDone(id: number): Promise<void> {
+    await this.inbox.update(
+      { id, status: In([...OPEN_STATUSES]) },
+      { status: 'done', processedAt: new Date() },
+    );
+  }
+
   async markQueued(id: number): Promise<void> {
-    await this.inbox.update({ id, status: 'pending' }, { status: 'queued' });
+    await this.inbox.update(
+      { id, status: 'pending' },
+      { status: 'queued', nextRetryAt: null },
+    );
   }
 
   async markDelivered(parentTaskId: number): Promise<void> {
     await this.inbox.update(
       { parentTaskId, status: 'queued' },
-      { status: 'delivered', deliveredAt: new Date() },
+      {
+        status: 'delivered',
+        deliveredAt: new Date(),
+        nextRetryAt: null,
+      },
     );
   }
 
   /**
-   * 父会话结束但未处理的事件：提问/验收需要显式动作，重新排队；
+   * 父会话结束但未处理的事件：提问/验收/消息需要显式动作，重新排队；
    * 拒绝/取消提醒不要求固定动作，直接视为处理完成。
    * 同时覆盖 queued（已写入 resumePrompt 但尚未投递）与 delivered（已投递但会话异常结束），
    * 避免会话失败、人工中断或进程重启后事件永久滞留。
@@ -82,10 +239,17 @@ export class TaskWorkerInboxService {
     await this.inbox.update(
       {
         parentTaskId,
-        kind: In(['question', 'handoff']),
+        kind: In(['question', 'handoff', 'message']),
         status: In(['queued', 'delivered']),
       },
-      { status: 'pending', deliveredAt: null },
+      {
+        status: 'pending',
+        deliveredAt: null,
+        nextRetryAt: null,
+        attempts: () => '"attempts" + 1',
+        lastAttemptAt: new Date(),
+        lastError: '父机器人本轮已结束，但事件尚未通过动作接口处理',
+      },
     );
     await this.inbox.update(
       {
@@ -109,6 +273,20 @@ export class TaskWorkerInboxService {
         ...(referenceId ? { referenceId } : {}),
         status: In([...OPEN_STATUSES]),
       },
+      { status: 'done', processedAt: new Date() },
+    );
+  }
+
+  /**
+   * 需求方回复消息后完成「已投递」的消息事件。
+   * 父机器人处理期间新到的 pending 消息保留，等待下一轮唤醒再回复。
+   */
+  async completeDeliveredForChild(
+    childTaskId: number,
+    kind: TaskWorkerInboxKind,
+  ): Promise<void> {
+    await this.inbox.update(
+      { childTaskId, kind, status: In(['queued', 'delivered']) },
       { status: 'done', processedAt: new Date() },
     );
   }
@@ -196,6 +374,7 @@ export function taskInboxPrompt(
   const failUrl = endpoint(`/tasks/${child.id}/fail.md`);
   const detailUrl = endpoint(`/tasks/${child.id}.md`);
   const handoffReadUrl = endpoint(`/tasks/${child.id}/handoff.md`);
+  const replyUrl = endpoint(`/tasks/${child.id}/messages/reply.md`);
   const answerUrl = endpoint(
     `/tasks/${child.id}/questions/${encodeURIComponent(
       entry.referenceId ?? '',
@@ -261,9 +440,29 @@ export function taskInboxPrompt(
             '',
             '验收前必须确认交付物满足子任务输出要求；通过后该子任务即结束。',
           ].join('\n')
-        : entry.kind === 'refused'
-          ? `子机器人拒绝承接。理由：${child.refusalReason ?? '未填写'}；分发建议：${child.dispatchSuggestion ?? '无'}。请决定是否创建新的子任务。`
-          : '子任务已取消，请评估对父任务的影响并继续处理。';
+        : entry.kind === 'message'
+          ? [
+              '子任务执行方发来一条消息，请以需求方身份阅读并回复。处理后必须调用回复接口（不能只回复本条提示）：',
+              `- 子任务详情：GET ${detailUrl}`,
+              '',
+              '**消息正文**',
+              '',
+              payloadText(payload, 'content') ??
+                '（事件未携带消息正文，请先读取子任务详情与对话记录。）',
+              '',
+              '```bash',
+              'TOKEN=$(cat .opencode/agent-token)',
+              `curl -sS -X POST '${replyUrl}' \\`,
+              '  -H "X-Worker-Token: $TOKEN" \\',
+              '  -H "Content-Type: application/json" \\',
+              `  -d '{"content":"回复内容"}'`,
+              '```',
+              '',
+              '回复会立即出现在子任务对话中供执行方继续跟进；如无需补充，也要说明处理结论。',
+            ].join('\n')
+          : entry.kind === 'refused'
+            ? `子机器人拒绝承接。理由：${child.refusalReason ?? '未填写'}；分发建议：${child.dispatchSuggestion ?? '无'}。请决定是否创建新的子任务。`
+            : '子任务已取消，请评估对父任务的影响并继续处理。';
   return [
     '# 子任务协同事件',
     '',

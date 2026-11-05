@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { Viewer } from '@bytemd/react'
-import gfm from '@bytemd/plugin-gfm'
-import 'bytemd/dist/index.css'
-import 'github-markdown-css/github-markdown.css'
+import { Link, useParams } from 'react-router-dom'
 import {
   Card,
   CardHeader,
@@ -46,12 +42,15 @@ import {
   type DefectChangeRecord,
   type DefectPriority,
   type DefectStatus,
+  type ProjectRelease,
   type ProjectTest,
   type TestRun,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { DefectStatusBadge, DefectPriorityBadge } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
+import { MarkdownViewer } from '../components/MarkdownViewer'
 import { Terminal } from '../components/Terminal'
 import { DefectImagesField } from '../components/DefectImagesField'
 
@@ -86,8 +85,6 @@ function formatDuration(run: TestRun, now: number): string {
 function formatTime(value: string | null): string {
   return value ? new Date(value).toLocaleString() : '—'
 }
-
-const plugins = [gfm()]
 
 /** 明细文本内联：折行折叠为空格，避免破坏 Markdown 结构 */
 function inline(value: string): string {
@@ -206,7 +203,7 @@ export function DefectDetailPage() {
     let finished = false
     // 本次订阅期间是否出现过活跃状态：初始加载即已结束的历史运行不弹确认窗
     let sawActive = false
-    const es = new EventSource(`/api/tests/runs/${runId}/stream`)
+    const es = visibleEventSource(`/api/tests/runs/${runId}/stream`)
     es.onmessage = (e: MessageEvent<string>) => {
       const r = JSON.parse(e.data) as TestRun
       setRun(r)
@@ -325,9 +322,9 @@ export function DefectDetailPage() {
                     {showRaw ? '隐藏原始输出' : '显示原始输出'}
                   </button>
                 </div>
-                <div className="markdown-body px-6 py-4 text-sm">
+                <div className="px-6 py-4 text-sm">
                   {runMarkdown ? (
-                    <Viewer value={runMarkdown} plugins={plugins} />
+                    <MarkdownViewer text={runMarkdown} />
                   ) : (
                     <p className="text-foreground-muted">
                       （本次运行未产生文本描述，可查看原始输出）
@@ -467,6 +464,23 @@ export function DefectDetailPage() {
               <dt>验证时间</dt>
               <dd>{formatTime(defect.verifiedAt)}</dd>
             </div>
+            <div className="flex justify-between">
+              <dt>提测 ID</dt>
+              <dd>{defect.releaseId ? `#${defect.releaseId}` : '—'}</dd>
+            </div>
+            {defect.followupTaskId && (
+              <div className="flex justify-between">
+                <dt>处理任务</dt>
+                <dd>
+                  <Link
+                    to={`/tasks/${defect.followupTaskId}`}
+                    className="underline"
+                  >
+                    #{defect.followupTaskId}
+                  </Link>
+                </dd>
+              </div>
+            )}
           </dl>
           <div className="flex flex-col gap-2 px-6 pb-6">
             <EditContentDialog defect={defect} onSaved={reload} />
@@ -674,6 +688,8 @@ function EditContentDialog({
   const [images, setImages] = useState<string[]>([])
   const [testScript, setTestScript] = useState('')
   const [tests, setTests] = useState<ProjectTest[]>([])
+  const [releaseId, setReleaseId] = useState<number | null>(null)
+  const [releases, setReleases] = useState<ProjectRelease[]>([])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -686,11 +702,16 @@ function EditContentDialog({
       setActual(defect.actual)
       setImages(defect.images ?? [])
       setTestScript(defect.testScript ?? '')
+      setReleaseId(defect.releaseId)
       setError(null)
       api
         .listTests(defect.projectId)
         .then(setTests)
         .catch(() => setTests([]))
+      api
+        .listReleases(defect.projectId)
+        .then(setReleases)
+        .catch(() => setReleases([]))
     }
   }
 
@@ -713,6 +734,7 @@ function EditContentDialog({
         actual,
         images,
         testScript,
+        releaseId,
       })
       .then(() => {
         setOpen(false)
@@ -720,6 +742,16 @@ function EditContentDialog({
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setSaving(false))
+  }
+
+  const releaseItems = {
+    none: '不关联提测',
+    ...Object.fromEntries(
+      releases.map((r) => [
+        String(r.id),
+        `#${r.id} · ${r.status} · ${new Date(r.createdAt).toLocaleString()} · ${r.operator ?? '—'}`,
+      ]),
+    ),
   }
 
   return (
@@ -790,6 +822,27 @@ function EditContentDialog({
                 onChange={(e) => setActual(e.target.value)}
                 rows={3}
               />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              提测 ID（可留空）
+              <Select
+                value={releaseId === null ? 'none' : String(releaseId)}
+                onValueChange={(v) =>
+                  setReleaseId(v === 'none' ? null : Number(v))
+                }
+                items={releaseItems}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择提测" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.keys(releaseItems).map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {releaseItems[key as keyof typeof releaseItems]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </label>
             <DefectImagesField value={images} onChange={setImages} />
             <label className="flex flex-col gap-1 text-sm">

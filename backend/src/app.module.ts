@@ -28,12 +28,14 @@ import { ResourcesModule } from './resources/resources.module';
 import { MilestonesModule } from './milestones/milestones.module';
 import { FeishuModule } from './feishu/feishu.module';
 import { GithubModule } from './github/github.module';
+import { GithubGatewayModule } from './github-gateway/github-gateway.module';
 import { ScriptsModule } from './scripts/scripts.module';
 import { SettingsModule } from './settings/settings.module';
 import { FilesModule } from './files/files.module';
 import { ImagesModule } from './images/images.module';
 import { ReleasesModule } from './releases/releases.module';
 import { TicketsModule } from './tickets/tickets.module';
+import { WorkflowsModule } from './workflows/workflows.module';
 
 @Module({
   imports: [
@@ -84,9 +86,11 @@ import { TicketsModule } from './tickets/tickets.module';
     TaskTypesModule,
     TasksModule,
     TicketsModule,
+    WorkflowsModule,
     ScriptsModule,
     FeishuModule,
     GithubModule,
+    GithubGatewayModule,
     SettingsModule,
     FilesModule,
     ImagesModule,

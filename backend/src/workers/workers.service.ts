@@ -10,10 +10,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import { homedir } from 'os';
 import { join } from 'path';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import {
   TaskStatus,
   TaskSubStatus,
+  WorkerGithubPermission,
   WorkerLiveStatus,
   WorkerRole,
   WorkerRuntime,
@@ -51,6 +52,7 @@ export interface CreateWorkerInput {
   taskDefs?: WorkerTaskDef[] | null;
   ownerUserId?: number | null;
   enabled?: boolean;
+  githubPermission?: WorkerGithubPermission;
 }
 
 export type UpdateWorkerInput = Partial<CreateWorkerInput>;
@@ -67,6 +69,26 @@ function normalizeAvatarUrl(value: string | null | undefined): string | null {
   return trimmed;
 }
 
+/**
+ * GitHub 权限归一：开发权限 / 发布权限 / 无权限（未配置）均可设置，机器人类型不限制；
+ * 未传时缺省为开发权限（真人机器人创建时显式从未配置起步）。
+ */
+function normalizeGithubPermission(value: unknown): WorkerGithubPermission {
+  if (value === undefined || value === null || value === '') {
+    return WorkerGithubPermission.DEVELOP;
+  }
+  if (
+    value === WorkerGithubPermission.NONE ||
+    value === WorkerGithubPermission.DEVELOP ||
+    value === WorkerGithubPermission.RELEASE
+  ) {
+    return value;
+  }
+  throw new BadRequestException(
+    'GitHub 权限仅支持 none（无权限）/ develop（开发权限）/ release（发布权限）',
+  );
+}
+
 /** 机器人视图：实体 + 工位路径 + 实时状态 + 当前任务（均不落库实时推导） */
 export interface WorkerView extends Worker {
   /** 系统机器人（systemKey 或系统 ID 段，由代码内置，网页不可新增/删除） */
@@ -74,7 +96,7 @@ export interface WorkerView extends Worker {
   /** 工位路径：生产 {WORKER_BASE_DIR}/worker/{id}，开发 {WORKER_BASE_DIR}/worker-dev/{id}；生产未配置 WORKER_BASE_DIR 为 null */
   workdir: string | null;
   liveStatus: WorkerLiveStatus;
-  /** 当前活跃任务（执行中/等待派发/待验收中最新一条） */
+  /** 当前占用机器人的活跃任务（执行中/待接受/待反馈等待处理；待申请验收不占用） */
   activeTask: {
     id: number;
     code: string;
@@ -164,11 +186,12 @@ export class WorkersService implements OnApplicationBootstrap {
     return `${this.workerBaseDir.replace(/\/+$/, '')}/${this.workerDirSegment}/${id}`;
   }
 
-  /** 列表（role 筛选），附实时状态与工位路径 */
+  /** 列表（role 筛选），附实时状态与工位路径；个人 AGENT 不进入对外机器人清单 */
   async findAll(filter?: { role?: WorkerRole }): Promise<WorkerView[]> {
     const workers = await this.workers.find({
       where: {
         ...(filter?.role ? { role: filter.role } : {}),
+        personalAgentUserId: IsNull(),
       },
       order: { id: 'ASC' },
     });
@@ -203,6 +226,23 @@ export class WorkersService implements OnApplicationBootstrap {
   }
 
   /**
+   * 确保机器人用于访问平台的工作令牌并返回明文。
+   * 普通机器人使用自身独立令牌；个人 AGENT 使用其主人真人机器人的令牌，
+   * 保证「我的 AI」以该用户真人机器人的身份访问平台。
+   */
+  async ensureWorkToken(workerId: number): Promise<string> {
+    const worker = await this.workers.findOne({
+      where: { id: workerId },
+      select: { id: true, personalAgentUserId: true },
+    });
+    if (worker?.personalAgentUserId) {
+      const human = await this.findByHumanUserId(worker.personalAgentUserId);
+      if (human) return this.ensureAgentToken(human.id);
+    }
+    return this.ensureAgentToken(workerId);
+  }
+
+  /**
    * 确保机器人有独立令牌并返回明文（仅服务端内部使用）。
    * 首次派发时生成；之后直接复用，不轮换。
    */
@@ -220,7 +260,7 @@ export class WorkersService implements OnApplicationBootstrap {
     return token;
   }
 
-  /** 实时状态：只有进行中任务占用机器人；待验收 > 其他等待 > 空闲。 */
+  /** 实时状态：只有进行中任务占用机器人；待接受/待反馈等待处理 > 空闲。待申请验收/待验收不占用机器人。 */
   private async liveByWorker(
     workers: Worker[],
   ): Promise<Map<number, { status: WorkerLiveStatus; task: Task | null }>> {
@@ -319,6 +359,7 @@ export class WorkersService implements OnApplicationBootstrap {
       standards,
       taskDefs: input.taskDefs?.length ? input.taskDefs : null,
       enabled: input.enabled ?? true,
+      githubPermission: normalizeGithubPermission(input.githubPermission),
     });
     await this.assertConfig(worker);
     await this.resolveOwner(worker, input.ownerUserId ?? null);
@@ -399,6 +440,11 @@ export class WorkersService implements OnApplicationBootstrap {
       worker.taskDefs = input.taskDefs?.length ? input.taskDefs : null;
     }
     if (input.enabled !== undefined) worker.enabled = input.enabled;
+    if (input.githubPermission !== undefined) {
+      worker.githubPermission = normalizeGithubPermission(
+        input.githubPermission,
+      );
+    }
     await this.assertConfig(worker);
     if (input.ownerUserId !== undefined) {
       await this.resolveOwner(worker, input.ownerUserId ?? null);
@@ -572,6 +618,7 @@ export class WorkersService implements OnApplicationBootstrap {
       humanUserId: user.id,
       humanUserName: user.name,
       enabled: user.enabled,
+      githubPermission: WorkerGithubPermission.DEVELOP,
     });
     const saved = await this.workers.save(worker);
     this.logger.log(

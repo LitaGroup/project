@@ -16,7 +16,6 @@ import { Worker } from './worker.entity';
 import { WorkerDebugService } from './worker-debug.service';
 import type {
   WorkerDebugAttachment,
-  WorkerDebugMode,
   WorkerDebugModelCatalog,
   WorkerDebugModelSelection,
   WorkerDebugSnapshot,
@@ -335,22 +334,6 @@ export class PersonalAgentsService {
     );
   }
 
-  /** 我的 AGENT：切换主 Agent 模式（build / plan） */
-  async setMode(
-    user: User,
-    mode: WorkerDebugMode,
-    taskId?: number | null,
-    scope?: string | null,
-  ): Promise<WorkerDebugSnapshot> {
-    const { worker } = await this.requireChatAgent(user);
-    return this.debug.setMode(
-      user.id,
-      worker.id,
-      mode,
-      this.scopeOf(taskId, scope),
-    );
-  }
-
   async interrupt(
     user: User,
     taskId?: number | null,
@@ -524,26 +507,20 @@ export class PersonalAgentsService {
     workdir: string,
   ): Promise<void> {
     if (this.prepared.has(worker.id)) return;
-    const token = await this.workersService.ensureAgentToken(worker.id);
+    // 个人 AGENT 与主人真人机器人共用工作令牌，平台操作身份统一为真人
+    const token = await this.workersService.ensureWorkToken(worker.id);
     const client = new OpencodeClient(executor);
     const dir = `${workdir}/.opencode`;
-    const debugDir = `${workdir}/debug`;
-    // 调试会话目录保持独立，但把工位 .opencode 与 AGENTS.md 链接进去：
-    // 个人 AGENT 在 debug 目录对话时仍能读取角色定义、技能与令牌文件。
+    // 调试/聊天与任务执行共用工位根目录，AGENTS.md 与 .opencode 就是当前目录，
+    // 无需再为独立调试目录创建符号链接。
     await withTimeout(
       client.shell(
-        `mkdir -p ${shellQuote(dir)} ${shellQuote(debugDir)} && ` +
-          `rm -rf ${shellQuote(`${debugDir}/.opencode`)} ${shellQuote(
-            `${debugDir}/AGENTS.md`,
-          )} && ` +
-          `ln -s ${shellQuote('../.opencode')} ${shellQuote(
-            `${debugDir}/.opencode`,
-          )} && ` +
-          `ln -s ${shellQuote('../AGENTS.md')} ${shellQuote(
-            `${debugDir}/AGENTS.md`,
-          )} && ` +
+        `mkdir -p ${shellQuote(dir)} && ` +
           `${agentTokenShell(workdir, token)} && ` +
-          `${workerEnvShell(workdir, { LITA_PROJECT_TOKEN: token })}`,
+          `${workerEnvShell(workdir, {
+            LITA_WORK_TOKEN: token,
+            LITA_PROJECT_TOKEN: token,
+          })}`,
       ),
       PREPARE_TIMEOUT_MS,
       '准备个人 AGENT 工位超时',

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import { Skeleton } from '@appica/ui-react/skeleton'
@@ -14,21 +14,32 @@ import {
   type TaskHandoffDocument,
   type TaskPackage,
   type TaskPipelineStage,
+  type WorkbenchTask,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb, type Crumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import { TaskConversationView } from '../components/task-detail/TaskConversationView'
+import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel'
 import { TaskDocumentsPanel } from '../components/task-detail/TaskDocumentsPanel'
 import { TaskEventsPanel } from '../components/task-detail/TaskEventsPanel'
 import { TaskInfoPanel } from '../components/task-detail/TaskInfoPanel'
-import { TaskMarkdownDocumentView } from '../components/task-detail/TaskMarkdownDocumentView'
+import { TaskRequirementPanel } from '../components/task-detail/TaskRequirementPanel'
+import { TaskTreePanel } from '../components/task-detail/TaskTreePanel'
+import {
+  HandoffDocumentStatus,
+  TaskMarkdownDocumentView,
+} from '../components/task-detail/TaskMarkdownDocumentView'
+import type { MarkdownEditorHandle } from '../components/MarkdownEditor'
 import { formatDuration, taskDurationMs } from '../lib/duration'
+import { visibleEventSource } from '../lib/event-source'
 
 type ConnectionState = 'connecting' | 'live' | 'reconnecting'
 type TaskContentTab =
   | 'handoff'
+  | 'requirement'
+  | 'tasks'
   | 'info'
   | 'events'
   | 'documents'
@@ -37,6 +48,8 @@ type TaskContentTab =
 
 const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
   ['handoff', '交付'],
+  ['requirement', '需求'],
+  ['tasks', '任务'],
   ['info', '信息'],
   ['events', '事件'],
   ['documents', '文档'],
@@ -45,29 +58,52 @@ const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
 ]
 
 /**
- * 任务详情：正文按「交付 / 信息 / 事件 / 文档 / 会话 / 复盘」组织，
- * 右侧统一为「我的 AI」。会话只读实时展示多方交互，操作集中在信息 Tab。
+ * 任务详情：正文按「交付 / 需求 / 任务 / 信息 / 事件 / 文档 / 会话 / 复盘」组织，
+ * 右侧复用工作台的任务协作面板（需求方 / 执行方 / 我的 AI）。
+ * 正文「会话」只读实时展示多方交互，右侧按当前用户身份参与任务。
  */
 export function TaskPackageDetailPage() {
   const { id } = useParams<{ id: string }>()
   return <TaskDetailView taskId={Number(id)} />
 }
 
-/** 可复用的任务详情主体：工单详情页在同一任务对话外补充工单面包屑与状态徽标 */
+/**
+ * 可复用的任务详情主体：工单详情页补充工单面包屑与状态徽标；
+ * 工作台隐藏任务面包屑，并开放「交付」Tab 的 HANDOFF 创建/编辑。
+ */
 export function TaskDetailView({
   taskId,
   breadcrumb,
   title,
   extraBadges,
+  hideBreadcrumb = false,
+  handoffEditable = false,
+  onTaskChange,
+  onOpenTask,
 }: {
   taskId: number
   breadcrumb?: Crumb[]
   title?: string
   extraBadges?: ReactNode
+  /** 嵌入工作台时隐藏面包屑（工作台保留自己的左侧任务列表） */
+  hideBreadcrumb?: boolean
+  /** 工作台模式：需求方/执行方可在「交付」Tab 创建与编辑交付文档 */
+  handoffEditable?: boolean
+  /** 任务或文档刷新后通知外部，用于同步工作台左侧任务列表 */
+  onTaskChange?: () => void | Promise<void>
+  /** 打开关联任务：普通详情默认跳转任务中心，工作台可切换当前任务 */
+  onOpenTask?: (taskId: number) => void
 }) {
+  const navigate = useNavigate()
   const [task, setTask] = useState<TaskPackage | null>(null)
+  const [workbenchTask, setWorkbenchTask] = useState<WorkbenchTask | null>(null)
   const [pipeline, setPipeline] = useState<TaskPipelineStage[]>([])
   const [messages, setMessages] = useState<TaskChatMessage[]>([])
+  const [queuedMessages, setQueuedMessages] = useState<
+    TaskChatSnapshot['queuedMessages']
+  >([])
+  const [hasAcceptanceApplication, setHasAcceptanceApplication] =
+    useState(false)
   const [requesterName, setRequesterName] = useState<string | null>(null)
   const [agentOwnerName, setAgentOwnerName] = useState<string | null>(null)
   const [interventionCount, setInterventionCount] = useState(0)
@@ -85,6 +121,13 @@ export function TaskDetailView({
   const [docsError, setDocsError] = useState<string | null>(null)
   /** 文档写入（交付/复盘/普通文档）后由任务 SSE 递增，驱动只读预览刷新 */
   const [docsRevision, setDocsRevision] = useState(0)
+  const [handoffEditing, setHandoffEditing] = useState(false)
+  const [handoffSaving, setHandoffSaving] = useState(false)
+  const [handoffError, setHandoffError] = useState<string | null>(null)
+  const handoffEditorRef = useRef<MarkdownEditorHandle>(null)
+  /** 文档刷新时保留正在编辑的本地版本，避免远端版本变化重挂载编辑器 */
+  const handoffEditingRef = useRef(false)
+  const onTaskChangeRef = useRef(onTaskChange)
 
   const loadSeq = useRef(0)
   /** 首次快照请求是否已返回（用于与 SSE ready 对齐，避免重复加载） */
@@ -97,7 +140,12 @@ export function TaskDetailView({
       if (seq !== loadSeq.current) return
       setTask(data.task)
       setPipeline(data.pipeline)
-      setMessages(data.messages)
+      // 后端已按当前任务返回消息；这里再按 taskId 收敛一次，避免旧服务或异常数据串任务
+      setMessages(data.messages.filter((message) => message.taskId === taskId))
+      setQueuedMessages(
+        data.queuedMessages.filter((message) => message.taskId === taskId),
+      )
+      setHasAcceptanceApplication(data.hasAcceptanceApplication)
       setRequesterName(data.requesterName)
       setAgentOwnerName(data.agentOwnerName)
       setInterventionCount(data.interventionCount)
@@ -119,11 +167,53 @@ export function TaskDetailView({
   }, [load])
 
   useEffect(() => {
-    // 首次拉取任务对话；setState 均在 fetch 完成后的异步回调里触发，非同步级联
+    onTaskChangeRef.current = onTaskChange
+  }, [onTaskChange])
+
+  useEffect(() => {
+    handoffEditingRef.current = handoffEditing
+  }, [handoffEditing])
+
+  useEffect(() => {
+    // 切换任务时退出交付文档编辑，避免把上一个任务的正文带到新任务
+    // oxlint-disable-next-line react/set-state-in-effect
+    setHandoffEditing(false)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setHandoffSaving(false)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setHandoffError(null)
+  }, [taskId])
+
+  /** 当前用户在该任务中的工作台角色；加载失败时降级为仅「我的 AI」 */
+  const roleSeq = useRef(0)
+  const loadWorkbenchTask = useCallback(async () => {
+    const seq = ++roleSeq.current
+    try {
+      const data = await api.getWorkbenchTask(taskId)
+      if (seq === roleSeq.current) setWorkbenchTask(data)
+    } catch {
+      // 瞬态失败保留已加载角色；首次失败降级为仅「我的 AI」
+      if (seq === roleSeq.current) {
+        setWorkbenchTask((current) =>
+          current?.id === taskId ? current : null,
+        )
+      }
+    }
+  }, [taskId])
+
+  const loadWorkbenchTaskRef = useRef(loadWorkbenchTask)
+  useEffect(() => {
+    loadWorkbenchTaskRef.current = loadWorkbenchTask
+  }, [loadWorkbenchTask])
+
+  useEffect(() => {
+    // 首次拉取任务对话与当前用户角色；setState 均在 fetch 完成后的异步回调里触发
     initialSettledRef.current = false
     // oxlint-disable-next-line react/set-state-in-effect
     void load()
-  }, [load])
+    // oxlint-disable-next-line react/set-state-in-effect
+    void loadWorkbenchTask()
+  }, [load, loadWorkbenchTask])
 
   /** 任务文档数据：交付 / 复盘 / 文档清单；SSE 文档刷新时整体重读 */
   const docsSeq = useRef(0)
@@ -137,7 +227,9 @@ export function TaskDetailView({
         api.listTaskDocuments(taskId),
       ])
       if (seq !== docsSeq.current) return
-      setHandoffDoc(handoff)
+      setHandoffDoc((current) =>
+        handoffEditingRef.current && current ? current : handoff,
+      )
       setReviewDoc(review)
       setDocuments(documentList)
       setDocsError(null)
@@ -154,6 +246,56 @@ export function TaskDetailView({
     void loadTaskDocuments()
   }, [loadTaskDocuments, docsRevision])
 
+  /** 右侧任务协作操作后同步刷新任务、角色与文档，并通知工作台刷新任务列表 */
+  const refreshTaskPanel = useCallback(async () => {
+    await Promise.all([
+      loadRef.current(),
+      loadWorkbenchTaskRef.current(),
+      loadTaskDocuments(),
+    ])
+    await onTaskChangeRef.current?.()
+  }, [loadTaskDocuments])
+
+  /** 工作台维护交付文档：保存时以读取到的版本为基准，版本冲突由后端返回 409 */
+  const saveHandoff = useCallback(async () => {
+    if (
+      !handoffEditable ||
+      !handoffEditing ||
+      handoffSaving ||
+      !handoffDoc ||
+      task?.id !== taskId
+    ) {
+      return
+    }
+    setHandoffSaving(true)
+    setHandoffError(null)
+    try {
+      const content =
+        handoffEditorRef.current?.getMarkdown() ?? handoffDoc.content
+      const document = await api.updateWorkbenchHandoff(taskId, {
+        content,
+        baseVersion: handoffDoc.version,
+      })
+      setHandoffDoc(document)
+      setHandoffEditing(false)
+      await Promise.all([loadRef.current(), loadWorkbenchTaskRef.current()])
+      // 编辑态引用会在下一次渲染后更新，此处触发文档重读以同步文档 Tab 与状态
+      setDocsRevision((value) => value + 1)
+      await onTaskChangeRef.current?.()
+    } catch (error) {
+      setHandoffError((error as Error).message)
+    } finally {
+      setHandoffSaving(false)
+    }
+  }, [handoffEditable, handoffEditing, handoffSaving, handoffDoc, task, taskId])
+
+  const cancelHandoffEditing = useCallback(() => {
+    setHandoffEditing(false)
+    setHandoffError(null)
+    // 取消编辑后重读一次交付文档，丢弃编辑期间可能到达的远端更新
+    setDocsRevision((value) => value + 1)
+  }, [])
+
   // 持续时间展示：未结束任务定时刷新
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 15_000)
@@ -164,7 +306,7 @@ export function TaskDetailView({
   useEffect(() => {
     let closed = false
     let refreshTimer: number | undefined
-    const source = new EventSource(`/api/tasks/${taskId}/chat/stream`)
+    const source = visibleEventSource(`/api/tasks/${taskId}/chat/stream`)
 
     source.onopen = () => {
       if (!closed) setConnection('live')
@@ -184,11 +326,30 @@ export function TaskDetailView({
           // 请求仍在途则跳过（避免进入页面重复加载），活跃任务的事件会经 refresh 持续补偿
           if (initialSettledRef.current) {
             void loadRef.current()
+            void loadWorkbenchTaskRef.current()
             setDocsRevision((value) => value + 1)
           }
           break
         case 'message.upsert':
+          if (data.message.taskId !== taskId) break
           setMessages((current) => upsertMessage(current, data.message))
+          break
+        case 'queue.upsert':
+          if (data.message.taskId !== taskId) break
+          setQueuedMessages((current) => {
+            const index = current.findIndex(
+              (item) => item.id === data.message.id,
+            )
+            if (index < 0) return [...current, data.message]
+            const next = current.slice()
+            next[index] = data.message
+            return next
+          })
+          break
+        case 'queue.delete':
+          setQueuedMessages((current) =>
+            current.filter((item) => !data.ids.includes(item.id)),
+          )
           break
         case 'stage.upsert':
           setPipeline((current) => upsertStage(current, data.stage))
@@ -206,6 +367,7 @@ export function TaskDetailView({
           refreshTimer = window.setTimeout(() => {
             refreshTimer = undefined
             void loadRef.current()
+            void loadWorkbenchTaskRef.current()
             // 文档、交付、复盘与任务详情共用同一个刷新信号
             setDocsRevision((value) => value + 1)
           }, 120)
@@ -263,6 +425,38 @@ export function TaskDetailView({
   )
 
   const currentTask = task?.id === taskId ? task : null
+  /** 角色取工作台单任务接口，任务状态取实时聊天快照，避免操作后状态滞后 */
+  const interactiveTask: WorkbenchTask | null =
+    currentTask && workbenchTask?.id === currentTask.id
+      ? {
+          ...currentTask,
+          workbenchRoles: workbenchTask.workbenchRoles,
+          workbenchAction: workbenchTask.workbenchAction,
+        }
+      : null
+  const canEditHandoff = Boolean(
+    handoffEditable &&
+      interactiveTask &&
+      currentTask &&
+      currentTask.status !== '已结束' &&
+      currentTask.subStatus !== '待验收' &&
+      (interactiveTask.workbenchRoles.includes('requester') ||
+        interactiveTask.workbenchRoles.includes('agent')),
+  )
+  const interactiveChat: TaskChatSnapshot | null = currentTask
+    ? {
+        task: currentTask,
+        rootTask: currentTask,
+        pipeline,
+        messages,
+        queuedMessages,
+        requesterName,
+        agentOwnerName,
+        interventionCount,
+        hasAcceptanceApplication,
+        events,
+      }
+    : null
 
   // 初始加载失败（没有任何数据）：页面内错误 + 重试
   if (!currentTask && !loading && error) {
@@ -284,12 +478,13 @@ export function TaskDetailView({
   }
   // 首屏骨架：立即渲染页面结构（面包屑/标题/左右面板占位），快照返回后就地填充
   if (!currentTask) {
-    return <TaskDetailSkeleton />
+    return <TaskDetailSkeleton hideBreadcrumb={hideBreadcrumb} />
   }
 
   const durationMs = taskDurationMs(currentTask, now)
   const handoffPlaceholder =
-    !handoffDoc?.content.trim() ||
+    !handoffDoc?.exists ||
+    !handoffDoc.content.trim() ||
     handoffDoc.content.trim() === '> 正在处理中……'
   const agentName = pipeline.find(
     (stage) => stage.task.id === currentTask.id,
@@ -304,19 +499,12 @@ export function TaskDetailView({
         .map((question) => [question.id, question]),
     ).values(),
   )
+  const openRelatedTask =
+    onOpenTask ?? ((id: number) => navigate(`/tasks/${id}`))
 
-  return (
-    <DetailPageLayout
-      ai={
-        <DetailAgentPanel
-          taskId={currentTask.id}
-          emptyTitle={`${currentTask.code} 的独立 AI 会话`}
-          emptyHint="当前任务的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
-          placeholder={`让 AI 处理 ${currentTask.code}，或输入其它指令…`}
-        />
-      }
-    >
-      <div className="flex h-full min-h-0 flex-col gap-4">
+  const pageHeader = (
+    <>
+      {!hideBreadcrumb && (
         <PageBreadcrumb
           items={
             breadcrumb ?? [
@@ -325,109 +513,201 @@ export function TaskDetailView({
             ]
           }
         />
+      )}
 
-        <header className="shrink-0">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-semibold text-foreground-intense">
-                {title ?? `${currentTask.code} ${currentTask.title}`}
-              </h1>
-              {extraBadges}
-              <TaskStatusBadge
-                status={currentTask.status}
-                subStatus={currentTask.subStatus}
-                showMain
-              />
-              <Badge variant="soft" size="sm">
-                类型 · {currentTask.type}
-              </Badge>
-              <Badge variant="secondary" size="sm">
-                定义 · {currentTask.templateName ?? '未设置'}
-              </Badge>
-            </div>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
-              <span>
-                创建于 {new Date(currentTask.createdAt).toLocaleString()}
-              </span>
-              <span>·</span>
-              <span>
-                {currentTask.status === '已结束' ? '持续时间' : '已运行'}{' '}
-                {formatDuration(durationMs)}
-              </span>
-              <span>·</span>
-              <span>人工介入 {interventionCount} 次</span>
-            </p>
+      <header className="shrink-0">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-xl font-semibold text-foreground-intense">
+              {title ?? `${currentTask.code} ${currentTask.title}`}
+            </h1>
+            {extraBadges}
+            <TaskStatusBadge
+              status={currentTask.status}
+              subStatus={currentTask.subStatus}
+              showMain
+            />
+            <Badge variant="soft" size="sm">
+              类型 · {currentTask.type}
+            </Badge>
+            <Badge variant="secondary" size="sm">
+              定义 · {currentTask.templateName ?? '未设置'}
+            </Badge>
           </div>
-        </header>
-
-        {error && (
-          <p
-            role="alert"
-            className="shrink-0 rounded-[var(--radius-md)] bg-error-soft px-3 py-2 text-sm text-error-foreground"
-          >
-            {error}
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
+            <span>
+              创建于 {new Date(currentTask.createdAt).toLocaleString()}
+            </span>
+            <span>·</span>
+            <span>
+              {currentTask.status === '已结束' ? '持续时间' : '已运行'}{' '}
+              {formatDuration(durationMs)}
+            </span>
+            <span>·</span>
+            <span>人工介入 {interventionCount} 次</span>
           </p>
-        )}
+        </div>
+      </header>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div
-            role="tablist"
-            aria-label="任务详情正文"
-            className="flex w-fit max-w-full shrink-0 gap-1 overflow-x-auto rounded-[var(--radius-md)] bg-background-muted p-1"
-          >
-            {TASK_CONTENT_TABS.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={contentTab === key}
-                onClick={() => setContentTab(key)}
-                className={`shrink-0 rounded-[var(--radius-sm)] px-3 py-1 text-sm transition-colors ${
-                  contentTab === key
-                    ? 'bg-background font-medium text-foreground-intense shadow-sm'
-                    : 'text-foreground-muted hover:text-foreground-intense'
-                }`}
+      {error && (
+        <p
+          role="alert"
+          className="shrink-0 rounded-[var(--radius-md)] bg-error-soft px-3 py-2 text-sm text-error-foreground"
+        >
+          {error}
+        </p>
+      )}
+    </>
+  )
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      {pageHeader}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <DetailPageLayout
+          aiLabel="任务协作"
+          ai={
+            <TaskWorkbenchPanel
+              task={interactiveTask}
+              chat={interactiveChat}
+              handoffDoc={handoffDoc}
+              handoffEditing={handoffEditing}
+              onRefresh={refreshTaskPanel}
+              agent={
+                <DetailAgentPanel
+                  taskId={currentTask.id}
+                  embedded
+                  emptyTitle={`${currentTask.code} 的独立 AI 会话`}
+                  emptyHint="当前任务的对话与其它页面相互隔离；让 AI 查询、创建或推进任务"
+                  placeholder={`让 AI 处理 ${currentTask.code}，或输入其它指令…`}
+                  onRunFinished={() => {
+                    void refreshTaskPanel()
+                  }}
+                />
+              }
+            />
+          }
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+            <div className="shrink-0 overflow-x-auto px-3 py-2">
+              <div
+                role="tablist"
+                aria-label="任务详情正文"
+                className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-lg)] bg-background-muted p-1"
               >
-                {label}
-              </button>
-            ))}
-          </div>
+                {TASK_CONTENT_TABS.map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={contentTab === key}
+                    onClick={() => setContentTab(key)}
+                    className={`shrink-0 whitespace-nowrap rounded-[var(--radius-md)] px-3 py-1.5 text-sm transition-colors ${
+                      contentTab === key
+                        ? 'bg-background font-medium text-foreground-intense shadow-sm'
+                        : 'text-foreground-muted hover:bg-background/60 hover:text-foreground-intense'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          <div className="flex min-h-0 flex-1 flex-col pt-3">
+            <div className="flex min-h-0 flex-1 flex-col p-3">
             {contentTab === 'handoff' && (
               <TaskMarkdownDocumentView
                 title="交付文档"
-                subtitle={handoffDoc?.path}
-                meta={
-                  handoffDoc ? (
+                actions={
+                  handoffEditing ? (
                     <>
-                      <Badge variant="soft" size="sm">
-                        v{handoffDoc.version}
-                      </Badge>
-                      {handoffDoc.submittedVersion !== null && (
-                        <Badge variant="secondary" size="sm">
-                          已提交 v{handoffDoc.submittedVersion}
-                        </Badge>
-                      )}
-                      <span>
-                        {handoffDoc.updatedAt
-                          ? `更新于 ${new Date(
-                              handoffDoc.updatedAt,
-                            ).toLocaleString()}`
-                          : '尚未更新'}
-                      </span>
+                      <Button
+                        size="sm"
+                        onClick={() => void saveHandoff()}
+                        disabled={handoffSaving}
+                      >
+                        {handoffSaving ? '保存中…' : '保存'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={cancelHandoffEditing}
+                        disabled={handoffSaving}
+                      >
+                        取消
+                      </Button>
                     </>
+                  ) : canEditHandoff ? (
+                    handoffDoc ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setHandoffError(null)
+                          setHandoffEditing(true)
+                        }}
+                      >
+                        {handoffDoc.exists ? '编辑' : '创建'}
+                      </Button>
+                    ) : null
+                  ) : docsLoading && !handoffDoc ? (
+                    <span>更新中…</span>
                   ) : null
                 }
-                content={handoffPlaceholder ? undefined : handoffDoc?.content}
+                notice={
+                  handoffError ? (
+                    <p role="alert" className="text-error-foreground">
+                      保存交付文档失败：{handoffError}
+                    </p>
+                  ) : handoffEditing ? (
+                    <p className="text-foreground-muted">
+                      {handoffDoc?.exists
+                        ? '文档正文由执行方和需求方共同维护；内容变化后版本号自动递增，需求方修改会通知执行机器人读取最新版本。'
+                        : '保存后创建交付文档 v1；执行方应在开始处理后立即创建，并随任务进展持续更新。'}
+                    </p>
+                  ) : null
+                }
+                footer={
+                  <HandoffDocumentStatus
+                    path={handoffDoc?.path}
+                    version={handoffDoc?.version}
+                    updatedAt={handoffDoc?.updatedAt}
+                    exists={handoffDoc?.exists}
+                    loading={docsLoading && !handoffDoc}
+                  />
+                }
+                content={
+                  handoffEditing
+                    ? handoffDoc?.content
+                    : handoffPlaceholder
+                      ? undefined
+                      : handoffDoc?.content
+                }
                 loading={docsLoading && !handoffDoc}
                 error={!handoffDoc ? docsError : null}
                 emptyText={
-                  handoffDoc
+                  handoffDoc?.exists
                     ? '执行方尚未更新交付文档，更新后会自动展示'
-                    : '暂无交付文档'
+                    : handoffDoc
+                      ? '执行方尚未创建交付文档；接受任务并开始处理后应立即创建'
+                      : '暂无交付文档'
                 }
                 contentKey={handoffDoc?.version}
+                editing={handoffEditing}
+                editorRef={handoffEditorRef}
+              />
+            )}
+
+            {contentTab === 'requirement' && (
+              <TaskRequirementPanel key={taskId} task={currentTask} />
+            )}
+
+            {contentTab === 'tasks' && (
+              <TaskTreePanel
+                key={taskId}
+                pipeline={pipeline}
+                currentTaskId={currentTask.id}
+                onOpenTask={openRelatedTask}
               />
             )}
 
@@ -460,6 +740,7 @@ export function TaskDetailView({
 
             {contentTab === 'conversation' && (
               <TaskConversationView
+                taskId={taskId}
                 messages={messages}
                 connection={connection}
               />
@@ -488,8 +769,9 @@ export function TaskDetailView({
             )}
           </div>
         </div>
+        </DetailPageLayout>
       </div>
-    </DetailPageLayout>
+    </div>
   )
 }
 
@@ -526,55 +808,60 @@ function upsertStage(
 }
 
 /**
- * 首屏骨架：镜像真实页面布局（面包屑 + 标题区 + 六个正文 Tab + 右侧 AI），
+ * 首屏骨架：镜像真实页面布局（面包屑 + 标题区 + 正文 Tab + 右侧 AI），
  * 快照返回后就地填充，避免整页空白等待与明显布局跳动。
  */
-function TaskDetailSkeleton() {
+function TaskDetailSkeleton({
+  hideBreadcrumb = false,
+}: {
+  hideBreadcrumb?: boolean
+}) {
   return (
-    <DetailPageLayout
-      ai={
-        <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-          <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-            <Skeleton className="h-4 w-16" />
-            <Skeleton className="h-5 w-12 rounded-full" />
-          </div>
-          <div className="flex flex-1 flex-col justify-end gap-4 px-4 py-4">
-            <ChatBubbleSkeleton />
-            <ChatBubbleSkeleton align="right" />
-            <ChatBubbleSkeleton />
-          </div>
-        </section>
-      }
-    >
-      <div className="flex h-full min-h-0 flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      {!hideBreadcrumb && (
         <PageBreadcrumb
           items={[{ label: '任务', to: '/tasks/list' }, { label: '加载中' }]}
         />
-        <header className="shrink-0 space-y-2">
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-7 w-72 max-w-full" />
-            <Skeleton className="h-5 w-24 rounded-full" />
-            <Skeleton className="h-5 w-16 rounded-full" />
-            <Skeleton className="h-5 w-20 rounded-full" />
-          </div>
-          <Skeleton className="h-4 w-[28rem] max-w-full" />
-        </header>
+      )}
+      <header className="shrink-0 space-y-2">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-7 w-72 max-w-full" />
+          <Skeleton className="h-5 w-24 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-20 rounded-full" />
+        </div>
+        <Skeleton className="h-4 w-[28rem] max-w-full" />
+      </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex w-fit gap-1 rounded-[var(--radius-md)] bg-background-muted p-1">
-            {TASK_CONTENT_TABS.map(([key]) => (
-              <Skeleton
-                key={key}
-                className="h-8 w-14 rounded-[var(--radius-sm)]"
-              />
-            ))}
-          </div>
-          <section className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
-              <Skeleton className="h-4 w-20" />
-              <Skeleton className="h-5 w-24 rounded-full" />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <DetailPageLayout
+          aiLabel="任务协作"
+          ai={
+            <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+              <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-5 w-12 rounded-full" />
+              </div>
+              <div className="flex flex-1 flex-col justify-end gap-4 px-4 py-4">
+                <ChatBubbleSkeleton />
+                <ChatBubbleSkeleton align="right" />
+                <ChatBubbleSkeleton />
+              </div>
+            </section>
+          }
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
+            <div className="shrink-0 overflow-x-auto px-3 py-2">
+              <div className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-lg)] bg-background-muted p-1">
+                {TASK_CONTENT_TABS.map(([key]) => (
+                  <Skeleton
+                    key={key}
+                    className="h-7 w-14 shrink-0 rounded-[var(--radius-md)]"
+                  />
+                ))}
+              </div>
             </div>
-            <div className="flex flex-1 flex-col gap-3 px-4 py-4">
+            <div className="flex flex-1 flex-col gap-3 p-4">
               <Skeleton className="h-6 w-2/3" />
               <Skeleton className="h-3 w-full" />
               <Skeleton className="h-3 w-11/12" />
@@ -583,10 +870,10 @@ function TaskDetailSkeleton() {
               <Skeleton className="h-3 w-full" />
               <Skeleton className="h-3 w-10/12" />
             </div>
-          </section>
-        </div>
+          </div>
+        </DetailPageLayout>
       </div>
-    </DetailPageLayout>
+    </div>
   )
 }
 

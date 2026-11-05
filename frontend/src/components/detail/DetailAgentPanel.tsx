@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import { Wrench } from '@appica/icons-react'
@@ -8,11 +8,11 @@ import {
   type AgentPageContext,
   type WorkbenchAgentInfo,
   type WorkerDebugAttachment,
-  type WorkerDebugMode,
   type WorkerDebugModelCatalog,
   type WorkerDebugModelSelection,
   type WorkerDebugSnapshot,
 } from '../../lib/api'
+import { visibleEventSource } from '../../lib/event-source'
 import { DebugChat } from '../agent-chat/DebugChat'
 
 interface DetailAgentPanelProps {
@@ -23,11 +23,15 @@ interface DetailAgentPanelProps {
   emptyTitle?: string
   emptyHint?: string
   placeholder?: string
+  /** 一轮 AI 回复结束后触发（工作台用于刷新任务列表） */
+  onRunFinished?: () => void
+  /** 嵌入其他面板时去掉外层边框与圆角 */
+  embedded?: boolean
 }
 
 /**
  * 详情页右侧「我的 AI」。
- * 复用工作台个人 AGENT 的会话、模型、模式与提问能力；
+ * 复用工作台个人 AGENT 的会话、模型与提问能力；
  * 任务、文档、脚本等每个详情对象使用独立会话，切换页面不会串上下文。
  */
 export function DetailAgentPanel({
@@ -36,6 +40,8 @@ export function DetailAgentPanel({
   emptyTitle,
   emptyHint,
   placeholder,
+  onRunFinished,
+  embedded = false,
 }: DetailAgentPanelProps) {
   const [info, setInfo] = useState<WorkbenchAgentInfo | null>(null)
   const [infoError, setInfoError] = useState<string | null>(null)
@@ -43,9 +49,20 @@ export function DetailAgentPanel({
   const [catalog, setCatalog] = useState<WorkerDebugModelCatalog | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
-  const [modeBusy, setModeBusy] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
+  const wasRunning = useRef(false)
+  const onRunFinishedRef = useRef(onRunFinished)
+
+  useEffect(() => {
+    onRunFinishedRef.current = onRunFinished
+  }, [onRunFinished])
+
+  useEffect(() => {
+    const running = snapshot?.status === 'running'
+    if (wasRunning.current && !running) onRunFinishedRef.current?.()
+    wasRunning.current = running
+  }, [snapshot?.status])
 
   const contextKey = context
     ? `${context.type}:${context.id}`
@@ -76,7 +93,7 @@ export function DetailAgentPanel({
       .catch((e: Error) => {
         if (!closed) setError(e.message)
       })
-    const source = new EventSource(workbenchAgentStreamUrl(taskId, context))
+    const source = visibleEventSource(workbenchAgentStreamUrl(taskId, context))
     source.onopen = () => {
       if (!closed) setError(null)
     }
@@ -159,21 +176,6 @@ export function DetailAgentPanel({
     [context, taskId],
   )
 
-  const changeMode = useCallback(
-    async (mode: WorkerDebugMode) => {
-      setModeBusy(true)
-      setError(null)
-      try {
-        setSnapshot(await api.setWorkbenchAgentMode(mode, taskId, context))
-      } catch (e) {
-        setError((e as Error).message)
-      } finally {
-        setModeBusy(false)
-      }
-    },
-    [context, taskId],
-  )
-
   const replyQuestion = useCallback(
     async (questionId: string, answers: string[][] | null) => {
       setError(null)
@@ -215,32 +217,30 @@ export function DetailAgentPanel({
       : null
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-border bg-background">
-      {/* 右侧留出抽屉关闭按钮的位置，避免窄屏抽屉打开时与「重置」重叠 */}
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2 pr-12">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-sm font-medium text-foreground-intense">
-            我的 AI
-          </span>
-          {label && (
-            <Badge variant="soft" size="sm">
-              {label}
-            </Badge>
-          )}
-          {snapshot?.status === 'running' && (
-            <span className="text-[11px] text-info-foreground">回复中…</span>
-          )}
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={!snapshot || snapshot.status === 'running' || resetting}
-          onClick={() => void resetConversation()}
-        >
-          {resetting ? '重置中…' : '重置'}
-        </Button>
-      </header>
+    <section
+      className={`flex h-full min-h-0 flex-col overflow-hidden bg-background ${
+        embedded
+          ? ''
+          : 'rounded-[var(--radius-lg)] border border-border'
+      }`}
+    >
+      {!embedded && (
+        <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="text-sm font-medium text-foreground-intense">
+              我的助理
+            </span>
+            {label && (
+              <Badge variant="soft" size="sm">
+                {label}
+              </Badge>
+            )}
+            {snapshot?.status === 'running' && (
+              <span className="text-[11px] text-info-foreground">回复中…</span>
+            )}
+          </div>
+        </header>
+      )}
 
       {error && (
         <p
@@ -261,7 +261,7 @@ export function DetailAgentPanel({
             reason={
               infoError ??
               info?.reason ??
-              '个人 AI 暂不可用，请稍后重试。'
+              '个人助理暂不可用，请稍后重试。'
             }
             onRetry={loadInfo}
           />
@@ -282,23 +282,22 @@ export function DetailAgentPanel({
                 mime: uploaded.mime,
               }
             }}
+            onReset={resetConversation}
+            resetBusy={resetting}
             modelCatalog={catalog}
             modelSelection={snapshot.model}
             onModelChange={changeModel}
             modelBusy={modelBusy}
-            mode={snapshot.mode}
-            onModeChange={changeMode}
-            modeBusy={modeBusy}
-            emptyTitle={emptyTitle ?? '和你的 AI 开始对话'}
+            emptyTitle={emptyTitle ?? '和你的助理开始对话'}
             emptyHint={
               emptyHint ??
-              '当前页面使用独立会话；让 AI 读取当前内容、查资料或执行操作'
+              '当前页面使用独立会话；让助理读取当前内容、查资料或执行操作'
             }
             placeholder={
               snapshot.status === 'running'
-                ? 'AI 正在回复…'
+                ? '助理正在回复…'
                 : placeholder ??
-                  '输入指令，Enter 发送，Shift+Enter 换行，Tab 切换 Build/Plan…'
+                  '输入指令，Enter 发送，Shift+Enter 换行…'
             }
           />
         ) : error ? (
@@ -328,7 +327,7 @@ function AgentUnavailable({
       <span className="rounded-full bg-background-muted p-3">
         <Wrench className="size-5" />
       </span>
-      <p>我的 AI 暂不可用</p>
+      <p>我的助理暂不可用</p>
       <p className="max-w-md text-xs leading-relaxed text-foreground-subtle">
         {reason}
       </p>

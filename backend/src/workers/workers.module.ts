@@ -7,12 +7,16 @@ import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Worker } from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
+import { GithubPermissionCredential } from '../github-gateway/github-permission-credential.entity';
+import { GithubPermissionCredentialService } from './github-permission-credential.service';
 import { SystemWorkersService } from './system-workers.service';
 import { WorkerAiService } from './worker-ai.service';
 import { WorkerEnvironmentService } from './worker-environment.service';
 import { WorkerOptimizeService } from './worker-optimize.service';
 import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
 import { WorkerStandardCatalogService } from './worker-standard-catalog.service';
+import { WorkerChatController } from './worker-chat.controller';
+import { WorkerChatService } from './worker-chat.service';
 import { WorkerDebugController } from './worker-debug.controller';
 import { WorkerDebugService } from './worker-debug.service';
 import { PersonalAgentsService } from './personal-agents.service';
@@ -34,11 +38,13 @@ import { WorkersService } from './workers.service';
       User,
       Executor,
       WorkerDebugSession,
+      GithubPermissionCredential,
     ]),
     ExecutorsModule,
   ],
   controllers: [
     WorkerDebugController,
+    WorkerChatController,
     WorkersListMarkdownController,
     WorkersMarkdownController,
     WorkersController,
@@ -46,6 +52,7 @@ import { WorkersService } from './workers.service';
   providers: [
     WorkersService,
     WorkersMarkdownService,
+    GithubPermissionCredentialService,
     SystemWorkersService,
     WorkerAiService,
     WorkerOptimizeService,
@@ -53,8 +60,13 @@ import { WorkersService } from './workers.service';
     WorkerSkillCatalogService,
     WorkerStandardCatalogService,
     WorkerDebugService,
+    WorkerChatService,
     PersonalAgentsService,
   ],
-  exports: [WorkersService, PersonalAgentsService],
+  exports: [
+    WorkersService,
+    PersonalAgentsService,
+    GithubPermissionCredentialService,
+  ],
 })
 export class WorkersModule {}

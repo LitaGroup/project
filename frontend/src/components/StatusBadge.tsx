@@ -17,12 +17,13 @@ export function StatusBadge({ status }: { status: ProjectStatus }) {
   return <Badge variant={variantByStatus[status] ?? 'soft'}>{status}</Badge>
 }
 
-/** 提测记录状态 → Badge variant：待冒烟黄 / 已通过绿 / 未通过红（未知兜底 soft） */
+/** 提测记录状态 → Badge variant：待冒烟黄 / 进行中蓝 / 已通过绿 / 未通过红（未知兜底 soft） */
 const releaseVariantByStatus: Record<
   string,
-  'warning' | 'success' | 'error' | 'soft'
+  'info' | 'warning' | 'success' | 'error' | 'soft'
 > = {
   待冒烟: 'warning',
+  进行中: 'info',
   已通过: 'success',
   未通过: 'error',
 }
@@ -121,7 +122,7 @@ export function CodeBranchCategoryBadge({ category }: { category: string }) {
   )
 }
 
-/** 任务子状态 → Badge variant（分配/接受蓝，反馈/继续/验收黄，执行主色，完成绿，拒绝/失败红，取消淡） */
+/** 任务子状态 → Badge variant（分配/接受蓝，反馈/继续/待申请验收/验收黄，执行主色，完成绿，拒绝/失败红，取消淡） */
 const taskSubStatusVariant: Record<
   string,
   'info' | 'success' | 'warning' | 'error' | 'soft' | 'primary' | 'secondary'
@@ -130,6 +131,7 @@ const taskSubStatusVariant: Record<
   待接受: 'info',
   待反馈: 'warning',
   待继续: 'warning',
+  待申请验收: 'warning',
   待验收: 'warning',
   执行中: 'primary',
   完成: 'success',
@@ -168,6 +170,7 @@ const ticketVariantByStatus: Record<
   待接受: 'info',
   待反馈: 'warning',
   待继续: 'warning',
+  待申请验收: 'warning',
   待验收: 'warning',
   处理中: 'primary',
   已完成: 'success',

@@ -19,8 +19,10 @@ export function agentTokenShell(workdir: string, token: string): string {
 
 /**
  * 更新工位 .opencode/.env 的指定键（保留其他键，权限 600；文件不存在时创建）。
- * 工位 .env 固定注入两个令牌：
- * - LITA_PROJECT_TOKEN：机器人独立令牌，访问项目平台 .md 接口
+ * 工位 .env 固定注入三个令牌：
+ * - LITA_WORK_TOKEN：机器人工作令牌（新名，优先使用），访问项目平台 .md 接口；
+ *   个人 AGENT 使用其主人真人机器人的令牌
+ * - LITA_PROJECT_TOKEN：同一工作令牌的兼容旧名
  * - LITA_USER_TOKEN：Lita 用户令牌，供 lita-api 等技能使用
  */
 export function workerEnvShell(

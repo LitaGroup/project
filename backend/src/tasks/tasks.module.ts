@@ -26,6 +26,9 @@ import { TaskLoopService } from './task-loop.service';
 import { TaskNotifyService } from './task-notify.service';
 import { TaskQuestionAutoAnswerService } from './task-question-auto-answer.service';
 import { TaskRealtimeService } from './task-realtime.service';
+import { TaskReleaseNotificationService } from './task-release-notification.service';
+import { TaskRequesterReplyService } from './task-requester-reply.service';
+import { TaskRequesterVerifyService } from './task-requester-verify.service';
 import {
   TaskTemplatesController,
   TaskTemplatesListMarkdownController,
@@ -82,6 +85,9 @@ import { WorkbenchService } from './workbench.service';
     TaskLoopService,
     TaskNotifyService,
     TaskQuestionAutoAnswerService,
+    TaskRequesterReplyService,
+    TaskRequesterVerifyService,
+    TaskReleaseNotificationService,
     TaskWorkerInboxService,
     TaskCollaborationService,
     TaskRealtimeService,
@@ -92,11 +98,13 @@ import { WorkbenchService } from './workbench.service';
     TasksService,
     TaskChatService,
     TaskDispatchService,
+    TaskDocumentService,
     TaskHandoffService,
     TaskLoopService,
     TaskNotifyService,
     TaskRealtimeService,
     TaskTemplatesService,
+    TaskWorkerInboxService,
   ],
 })
 export class TasksModule {}

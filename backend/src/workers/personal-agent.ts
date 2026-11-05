@@ -33,10 +33,10 @@ export function buildPersonalAgentPrompt(
 ## 工位与鉴权
 
 - 项目平台 API 基础地址：${base}
-- 只有以 .md 结尾的接口接受机器人令牌；令牌在工位根目录 .opencode/.env 的 LITA_PROJECT_TOKEN（与 .opencode/agent-token 相同）。
-- 如果当前工作目录是工位下的 debug 子目录（工作台「我的 AI」会话），令牌文件在 ../.opencode/.env；任务执行会话的工作目录是工位根目录，令牌文件在 .opencode/.env。
-- 调用平台接口前先执行：\`set -a; . .opencode/.env; set +a\`（debug 目录改用 \`set -a; . ../.opencode/.env; set +a\`）
-- 请求头使用 \`X-Agent-Token: $LITA_PROJECT_TOKEN\` 或 \`X-Worker-Token: $LITA_PROJECT_TOKEN\`。
+- 当前会话工作目录就是工位根目录，角色定义在 AGENTS.md，令牌文件在 .opencode/.env（LITA_WORK_TOKEN 优先、LITA_PROJECT_TOKEN 兼容旧名，均与 .opencode/agent-token 相同）。
+- 你的工作令牌与主人对应的真人机器人令牌一致；通过平台接口执行操作时，统一以该真人机器人身份出现。
+- 调用平台接口前先执行：\`set -a; . .opencode/.env; set +a\`
+- 请求头使用 \`X-Agent-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}\` 或 \`X-Worker-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}\`。
 - 不得在任何回复、文档、代码或交付物中输出令牌；不要读取或展示 .opencode/.env 的内容。
 
 ## 我的任务
@@ -45,7 +45,7 @@ export function buildPersonalAgentPrompt(
 
 \`\`\`bash
 curl -sS "${base}/tasks.md?scope=mine" \\
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+  -H "X-Agent-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}"
 \`\`\`
 
 支持参数：q（编号/标题模糊搜索）、status（等待中/进行中/已结束）、subStatus、type、rootOnly=true。
@@ -54,7 +54,7 @@ curl -sS "${base}/tasks.md?scope=mine" \\
 
 \`\`\`bash
 curl -sS "${base}/tasks/{taskId}.md" \\
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN"
+  -H "X-Agent-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}"
 \`\`\`
 
 ## 创建任务
@@ -63,7 +63,7 @@ curl -sS "${base}/tasks/{taskId}.md" \\
 
 \`\`\`bash
 curl -sS -X POST "${base}/tasks/create.md" \\
-  -H "X-Agent-Token: $LITA_PROJECT_TOKEN" \\
+  -H "X-Agent-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}" \\
   -H 'Content-Type: application/json' \\
   -d '{
     "title": "一句话任务标题",
@@ -88,7 +88,7 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 - 任务文档目录：\`GET ${base}/tasks/{taskId}/documents.md\`
 - 写入任务文档：\`POST ${base}/tasks/{taskId}/documents.md\`（body 带 name 与 content，如 TECH_DESIGN.md）
 - 交付文档：\`GET ${base}/tasks/{taskId}/handoff.md\`
-- 更新交付文档：\`POST ${base}/tasks/{taskId}/handoff/update.md\`（body 带完整 content 与 baseVersion）
+- 创建/更新交付文档：\`POST ${base}/tasks/{taskId}/handoff/update.md\`（body 带完整 content 与 baseVersion；首次创建用 baseVersion=0，之后按当前版本更新）
 - 申请验收：\`POST ${base}/tasks/{taskId}/handoff/apply.md\`
 - 验收通过：\`POST ${base}/tasks/{taskId}/handoff/accept.md\`
 - 验收返工：\`POST ${base}/tasks/{taskId}/handoff/refuse.md\`
@@ -97,7 +97,7 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 - 工单上下文：\`GET ${base}/tasks/{taskId}/ticket.md\`
 - 工单转交：\`POST ${base}/tasks/{taskId}/ticket-route.md\`
 
-以上接口均带 \`X-Agent-Token: $LITA_PROJECT_TOKEN\`。执行前先重新读取任务详情，确认当前状态与自己的角色；只有需求方才能验收/返工/判失败，只有执行方才能接受/提问/申请验收。
+以上接口均带 \`X-Agent-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}\`。执行前先重新读取任务详情，确认当前状态与自己的角色；只有需求方才能验收/返工/判失败，只有执行方才能接受/提问/申请验收。
 
 ## 工作约定
 
@@ -108,6 +108,7 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 5. 不要替用户做验收决定，除非用户明确说「验收通过」「返工」「判失败」。
 6. 当前工作台选中的任务会随用户消息附带在上下文里；仍应以任务详情接口的最新状态为准。
 7. 任务相关文档默认放在 \`/task/{yyyyMMdd}/{任务编号}/\`（API.md / TECH_DESIGN.md / HANDOFF.md，REVIEW.md 验收后由平台生成）；需求明确指定文档地址时以需求为准。
+8. 执行任务时，接受任务后立即创建 HANDOFF（首次 baseVersion=0），并在重要阶段、关键产物、验证结果或阻塞变化后及时更新；申请验收前必须写入完整最终交付内容。
 `;
 }
 
@@ -124,9 +125,8 @@ export function buildPersonalAgentFirstPrompt(
         '',
         '# 工作台会话目录',
         '',
-        `- 当前会话工作目录：${workdir}/debug`,
-        `- 工位根目录：${workdir}`,
-        `- 令牌文件：${workdir}/.opencode/.env（相对当前目录为 ../.opencode/.env）`,
+        `- 当前会话工作目录：${workdir}（工位根目录）`,
+        `- 令牌文件：${workdir}/.opencode/.env`,
         `- 调用平台接口前执行：\`set -a; . '${workdir}/.opencode/.env'; set +a\``,
       ].join('\n')
     : '';

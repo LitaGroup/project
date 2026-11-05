@@ -1,7 +1,6 @@
 import { AlertCircle } from '@appica/icons-react'
 import type { TaskChatQuestion, TaskPackage } from '../../lib/api'
 import { formatDuration } from '../../lib/duration'
-import { ChatMarkdown } from '../ChatMarkdown'
 import { QuestionCard } from '../QuestionCard'
 
 interface TaskInfoPanelProps {
@@ -38,7 +37,7 @@ export function TaskInfoPanel({
   const finished = task.status === '已结束'
 
   return (
-    <section className="h-full min-h-0 overflow-y-auto rounded-[var(--radius-lg)] border border-border bg-background">
+    <section className="h-full min-h-0 overflow-y-auto rounded-none bg-background">
       <div className="flex flex-col gap-5 p-4">
         <section>
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -53,8 +52,8 @@ export function TaskInfoPanel({
             <InfoItem label="需求方" value={requesterName ?? '—'} />
             <InfoItem label="类型" value={task.type} />
             <InfoItem label="任务定义" value={task.templateName ?? '未设置'} />
-            <InfoItem label="处理机器人" value={agentName ?? '未分配'} />
-            <InfoItem label="执行方" value={agentOwnerName ?? '—'} />
+            <InfoItem label="执行机器人" value={agentName ?? '未分配'} />
+            <InfoItem label="机器人上级" value={agentOwnerName ?? '—'} />
             <InfoItem label="持续时间" value={formatDuration(durationMs)} />
             <InfoItem label="人工介入" value={`${interventionCount} 次`} />
             <InfoItem
@@ -77,14 +76,6 @@ export function TaskInfoPanel({
             )}
           </dl>
         </section>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <DetailField title="任务描述" value={task.description} />
-          <DetailField title="需求内容" value={task.content} />
-          <DetailField title="任务输入" value={task.input} />
-          <DetailField title="输出要求" value={task.outputSpec} />
-          <DetailField title="工作计划" value={task.workPlan} />
-        </div>
 
         {task.missingItems && task.missingItems.length > 0 && (
           <div className="rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-xs text-warning-foreground">
@@ -167,23 +158,3 @@ function InfoItem({ label, value }: { label: string; value: string }) {
   )
 }
 
-function DetailField({
-  title,
-  value,
-}: {
-  title: string
-  value: string | null | undefined
-}) {
-  return (
-    <section className="min-w-0">
-      <h3 className="mb-1 text-xs font-medium text-foreground-muted">{title}</h3>
-      <div className="min-h-16 rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm text-foreground-emphasis">
-        {value?.trim() ? (
-          <ChatMarkdown text={value} />
-        ) : (
-          <span className="text-xs text-foreground-subtle">未填写</span>
-        )}
-      </div>
-    </section>
-  )
-}

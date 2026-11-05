@@ -61,6 +61,7 @@ describe('TaskDocumentService 任务文档', () => {
   let tasksRepo: {
     findOne: jest.Mock;
     update: jest.Mock;
+    find: jest.Mock;
   };
   let templatesRepo: { findOne: jest.Mock };
   let knowledge: {
@@ -83,6 +84,7 @@ describe('TaskDocumentService 任务文档', () => {
         Object.assign(currentTask, patch);
         return Promise.resolve({ affected: 1 });
       }),
+      find: jest.fn().mockResolvedValue([]),
     };
     templatesRepo = {
       findOne: jest.fn().mockResolvedValue({
@@ -123,13 +125,29 @@ describe('TaskDocumentService 任务文档', () => {
     );
   });
 
-  it('任务创建时生成 HANDOFF，正文为处理中占位且带版本 Frontmatter', async () => {
-    const result = await service.ensureHandoff(currentTask);
+  it('读取未创建的 HANDOFF 只返回空状态，不自动生成', async () => {
+    const result = await service.readHandoff(currentTask);
 
+    expect(result.exists).toBe(false);
     expect(result.path).toBe('/task/20261028/TK-0001/HANDOFF');
     expect(result.url).toBe('/docs/detail/task/20261028/TK-0001/HANDOFF');
-    expect(result.version).toBe(1);
-    expect(result.content).toBe('> 正在处理中……');
+    expect(result.version).toBe(0);
+    expect(result.content).toBe('');
+    expect(knowledge.createArticleAtPath).not.toHaveBeenCalled();
+    expect(currentTask.handoffPath).toBeNull();
+    expect(currentTask.handoffVersion).toBe(0);
+  });
+
+  it('首次显式写入使用 baseVersion=0 创建 HANDOFF v1', async () => {
+    const result = await service.updateHandoff(1, {
+      baseVersion: 0,
+      content: '# 任务交付文档\n\n## 当前进展\n\n开始处理',
+      updatedBy: '执行机器人',
+    });
+
+    expect(result.document.exists).toBe(true);
+    expect(result.document.version).toBe(1);
+    expect(result.document.content).toContain('开始处理');
     expect(knowledge.createArticleAtPath).toHaveBeenCalledWith(
       expect.objectContaining({
         path: '/task/20261028/TK-0001/HANDOFF',
@@ -139,6 +157,17 @@ describe('TaskDocumentService 任务文档', () => {
     );
     expect(currentTask.handoffPath).toBe('/task/20261028/TK-0001/HANDOFF');
     expect(currentTask.handoffVersion).toBe(1);
+  });
+
+  it('未创建 HANDOFF 时使用非零 baseVersion 返回冲突', async () => {
+    await expect(
+      service.updateHandoff(1, {
+        baseVersion: 1,
+        content: '# 交付',
+        updatedBy: '执行机器人',
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(knowledge.createArticleAtPath).not.toHaveBeenCalled();
   });
 
   it('机器人提交完整正文时平台递增版本并覆盖 Frontmatter', async () => {
@@ -229,6 +258,14 @@ describe('TaskDocumentService 任务文档', () => {
     expect(knowledge.update).not.toHaveBeenCalled();
   });
 
+  it('交付文档尚未创建时不能申请验收', async () => {
+    await expect(service.prepareForAcceptance(currentTask)).rejects.toThrow(
+      '交付文档尚未创建',
+    );
+    expect(currentTask.handoffSubmittedVersion).toBeNull();
+    expect(knowledge.createArticleAtPath).not.toHaveBeenCalled();
+  });
+
   it('交付文档仍是处理中占位时不能申请验收', async () => {
     const path = '/task/20261028/TK-0001/HANDOFF';
     currentTask = task({ handoffPath: path, handoffVersion: 1 });
@@ -300,8 +337,9 @@ describe('TaskDocumentService 任务文档', () => {
       ),
     ]);
 
-    const result = await service.ensureHandoff(currentTask);
+    const result = await service.readHandoff(currentTask);
 
+    expect(result.exists).toBe(true);
     expect(result.path).toBe('/task/20261027/TK-0001/HANDOFF');
     expect(result.content).toBe('旧版平台拼接的交付内容');
     expect(result.version).toBe(1);
@@ -455,8 +493,9 @@ describe('TaskDocumentService 任务文档', () => {
       }),
     );
 
-    const document = await service.ensureHandoff(currentTask);
+    const document = await service.readHandoff(currentTask);
 
+    expect(document.exists).toBe(true);
     expect(document.path).toBe('/task/20261027/TK-0001/HANDOFF');
     expect(document.content).toBe('# 实际交付\n\n真实内容');
     expect(currentTask.handoffPath).toBe('/task/20261027/TK-0001/HANDOFF');
@@ -504,18 +543,111 @@ describe('TaskDocumentService 任务文档', () => {
         kind: 'image',
         url: '/images/uploads/20261028/a.png',
         sourceDocument: 'HANDOFF.md',
+        taskId: 1,
+        taskCode: 'TK-0001',
+        taskTitle: '活动页开发',
       },
       {
         name: '导出文件',
         kind: 'file',
         url: '/files/20261028/report.xlsx',
         sourceDocument: 'HANDOFF.md',
+        taskId: 1,
+        taskCode: 'TK-0001',
+        taskTitle: '活动页开发',
       },
       {
         name: 'H5 包',
         kind: 'file',
         url: '/files/20261028/h5.zip',
         sourceDocument: 'HANDOFF.md',
+        taskId: 1,
+        taskCode: 'TK-0001',
+        taskTitle: '活动页开发',
+      },
+    ]);
+  });
+
+  it('任务文档 Tab 聚合全部后代任务文档，不含父任务与兄弟任务', async () => {
+    const root = task({
+      id: 1,
+      code: 'TK-0001',
+      rootId: 1,
+      parentId: null,
+      title: '根任务',
+    });
+    const child = task({
+      id: 2,
+      code: 'TK-0002',
+      rootId: 1,
+      parentId: 1,
+      title: '子任务A',
+    });
+    const grandchild = task({
+      id: 3,
+      code: 'TK-0003',
+      rootId: 1,
+      parentId: 2,
+      title: '孙任务',
+    });
+    const sibling = task({
+      id: 4,
+      code: 'TK-0004',
+      rootId: 1,
+      parentId: 1,
+      title: '兄弟任务',
+    });
+    currentTask = child;
+    tasksRepo.find.mockResolvedValue([root, child, grandchild, sibling]);
+    knowledge.listArticlesByPrefix.mockImplementation((prefix: string) =>
+      Promise.resolve(
+        [
+          node('/task/20261028/TK-0001/API'),
+          node('/task/20261028/TK-0002/HANDOFF', '![图](/images/a.png)'),
+          node('/task/20261028/TK-0002/API'),
+          node('/task/20261028/TK-0002/sub/NESTED'),
+          node('/task/20261028/TK-0003/TECH_DESIGN', '[报告](/files/r.xlsx)'),
+          node('/task/20261028/TK-0004/REVIEW'),
+        ].filter((item) => item.path.startsWith(`${prefix}/`)),
+      ),
+    );
+
+    const view = await service.taskDocumentsView(child);
+
+    expect(view.taskId).toBe(2);
+    expect(view.directory).toBe('/task/20261028/TK-0002');
+    expect(
+      view.documents.map((document) => `${document.taskCode} ${document.name}`),
+    ).toEqual([
+      'TK-0002 HANDOFF.md',
+      'TK-0002 API.md',
+      'TK-0003 TECH_DESIGN.md',
+    ]);
+    expect(view.documents[2].taskId).toBe(3);
+    expect(view.documents[2].taskTitle).toBe('孙任务');
+    // 子目录里的文档不是直属文档，不进入清单
+    expect(
+      view.documents.some((document) => document.path.includes('/sub/')),
+    ).toBe(false);
+    // 产物包含子任务文档引用的文件，并携带来源任务
+    expect(view.artifacts).toEqual([
+      {
+        name: '图',
+        kind: 'image',
+        url: '/images/a.png',
+        sourceDocument: 'HANDOFF.md',
+        taskId: 2,
+        taskCode: 'TK-0002',
+        taskTitle: '子任务A',
+      },
+      {
+        name: '报告',
+        kind: 'file',
+        url: '/files/r.xlsx',
+        sourceDocument: 'TECH_DESIGN.md',
+        taskId: 3,
+        taskCode: 'TK-0003',
+        taskTitle: '孙任务',
       },
     ]);
   });

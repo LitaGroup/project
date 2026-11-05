@@ -7,14 +7,13 @@ import type { MessageEvent } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Observable } from 'rxjs';
-import { FindOptionsWhere, In, Repository } from 'typeorm';
+import { FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import type { User } from '../auth/user.entity';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
 import { WorkerRuntime } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
 import type {
   WorkerDebugAttachment,
-  WorkerDebugMode,
   WorkerDebugModelCatalog,
   WorkerDebugModelSelection,
   WorkerDebugSnapshot,
@@ -36,7 +35,7 @@ import type {
   TaskHandoffUpdateInput,
 } from './task-document.service';
 import { TaskDispatchService } from './task-dispatch.service';
-import type { TaskActor } from './task-requester';
+import { type TaskActor, workerRequesterActor } from './task-requester';
 import { TasksService } from './tasks.service';
 import { deriveWorkbenchRoles, type WorkbenchRole } from './workbench-roles';
 
@@ -44,7 +43,11 @@ export type { WorkbenchRole } from './workbench-roles';
 
 /** 操作台任务项：任务本体 + 当前用户可扮演的角色与下一步动作 */
 export interface WorkbenchTask extends Task {
-  /** agent=我的真人机器人执行；owner=我的 AGENT 执行；requester=我（或我的 AGENT）是需求方；responsible=我负责的机器人/已接管任务 */
+  /**
+   * agent=我的真人机器人执行；requester=我（含历史个人 AGENT 需求方）是需求方；
+   * responsible=我负责的机器人/已接管任务。responsible 仅用于任务可见与管理提示，
+   * 不参与任务沟通（沟通仅限需求方与当前真人执行机器人）。
+   */
   workbenchRoles: WorkbenchRole[];
   /** 当前需要当前用户处理的动作；空表示等待其他参与方 */
   workbenchAction: string | null;
@@ -166,6 +169,25 @@ export class WorkbenchService {
     private readonly tasksService: TasksService,
   ) {}
 
+  /** 单个任务在当前用户视角下的工作台角色与下一步动作 */
+  async taskDetail(user: User, taskId: number): Promise<WorkbenchTask> {
+    const worker = await this.workersService.mustHumanWorker(user.id);
+    const personalAgent = await this.personalAgents.findForUser(user.id);
+    const ownedWorkers = await this.workers.find({
+      where: { ownerUserId: user.id, personalAgentUserId: IsNull() },
+      select: { id: true },
+    });
+    const task = await this.tasks.findOne({ where: { id: taskId } });
+    if (!task) throw new BadRequestException('任务不存在');
+    return this.toWorkbenchTask(
+      task,
+      worker,
+      user,
+      personalAgent?.id ?? null,
+      ownedWorkers.map((item) => item.id),
+    );
+  }
+
   /** 当前用户的工作台任务清单：进行中 + 等待中 + 最近已完成 */
   async summary(user: User): Promise<WorkbenchSummary> {
     const worker = await this.workersService.mustHumanWorker(user.id);
@@ -178,7 +200,7 @@ export class WorkbenchService {
       }));
     const personalAgentId = agent.worker?.id ?? null;
     const ownedWorkers = await this.workers.find({
-      where: { ownerUserId: user.id },
+      where: { ownerUserId: user.id, personalAgentUserId: IsNull() },
       select: { id: true },
     });
     const ownedWorkerIds = ownedWorkers.map((item) => item.id);
@@ -200,14 +222,13 @@ export class WorkbenchService {
       },
     ];
     if (personalAgentId) {
-      where.push(
-        { agentId: personalAgentId, status: In(WORKBENCH_STATUSES) },
-        {
-          requesterType: 'worker' as const,
-          requesterId: personalAgentId,
-          status: In(WORKBENCH_STATUSES),
-        },
-      );
+      // 个人 AGENT 不再执行任务；仅保留历史任务（需求方=个人 AGENT）的兼容查询，
+      // 这些任务对外仍以真人身份参与。
+      where.push({
+        requesterType: 'worker' as const,
+        requesterId: personalAgentId,
+        status: In(WORKBENCH_STATUSES),
+      });
     }
     if (ownedWorkerIds.length > 0) {
       where.push({
@@ -282,13 +303,11 @@ export class WorkbenchService {
     const { worker, task } = await this.agentWorker(user, taskId);
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
-    if (
-      task.status !== TaskStatus.RUNNING ||
-      task.subStatus !== TaskSubStatus.EXECUTING
-    ) {
-      throw new BadRequestException('仅执行中的任务可以发送执行回复');
+    // 只有已结束任务不能再发消息；其余状态（含待验收）都可继续对话。
+    if (task.status === TaskStatus.FINISHED) {
+      throw new BadRequestException('任务已结束，不能发送消息');
     }
-    await this.taskChat.postAssistantMessage(taskId, text, {
+    const message = await this.taskChat.postAssistantMessage(taskId, text, {
       meta: {
         humanWorkerMessage: true,
         workerId: worker.id,
@@ -301,6 +320,12 @@ export class WorkbenchService {
       `真人机器人在操作台回复`,
       worker.name,
       { humanWorker: true },
+    );
+    // 子任务需求方是 AI 机器人时进入收件箱，由 LOOP 唤醒父机器人回复。
+    await this.dispatchService.notifyRequesterWorkerMessage(
+      task,
+      text,
+      message.id,
     );
     return this.tasks.findOneOrFail({ where: { id: taskId } });
   }
@@ -347,9 +372,7 @@ export class WorkbenchService {
         })
       : null;
     const isOwner =
-      task.agentId === personalAgent?.id ||
-      agent?.ownerUserId === user.id ||
-      task.ownerTakeoverUserId === user.id;
+      agent?.ownerUserId === user.id || task.ownerTakeoverUserId === user.id;
     if (!isRequester && !isAgent && !isOwner) {
       throw new ForbiddenException('无权访问该任务的交付文档');
     }
@@ -445,10 +468,12 @@ export class WorkbenchService {
   ): TaskActor {
     if (task.requesterType === 'worker') {
       if (task.requesterId === worker.id) {
-        return { type: 'worker', worker };
+        return workerRequesterActor(worker);
       }
+      // 历史任务需求方是个人 AGENT：后续由主人的真人机器人操作，
+      // 同时保留个人 AGENT Worker ID 作为需求方归属校验别名。
       if (personalAgent && task.requesterId === personalAgent.id) {
-        return { type: 'worker', worker: personalAgent };
+        return workerRequesterActor(worker, personalAgent);
       }
     }
     return { type: 'user', user };
@@ -563,7 +588,7 @@ export class WorkbenchService {
       const worker = await this.workersService.mustHumanWorker(user.id);
       const personalAgent = await this.personalAgents.findForUser(user.id);
       const ownedWorkers = await this.workers.find({
-        where: { ownerUserId: user.id },
+        where: { ownerUserId: user.id, personalAgentUserId: IsNull() },
         select: { id: true },
       });
       const roles = deriveWorkbenchRoles(task, user, {
@@ -620,21 +645,6 @@ export class WorkbenchService {
     return this.personalAgents.setModel(
       user,
       input,
-      taskId,
-      pageContext ? agentPageScope(pageContext) : null,
-    );
-  }
-
-  /** 我的 AGENT：切换 build / plan 模式 */
-  agentSetMode(
-    user: User,
-    mode: WorkerDebugMode,
-    taskId?: number | null,
-    pageContext?: AgentPageContext | null,
-  ): Promise<WorkerDebugSnapshot> {
-    return this.personalAgents.setMode(
-      user,
-      mode,
       taskId,
       pageContext ? agentPageScope(pageContext) : null,
     );

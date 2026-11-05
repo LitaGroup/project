@@ -7,9 +7,9 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-/** 需要父任务机器人处理的子任务事件类型。 */
+/** 需要父任务机器人处理的子任务事件类型；release 为提测机器人通知事件。 */
 export type TaskWorkerInboxKind =
-  'question' | 'handoff' | 'refused' | 'cancelled';
+  'question' | 'handoff' | 'message' | 'refused' | 'cancelled' | 'release';
 
 /** pending=待排队；queued=已写入待继续上下文；delivered=已发给父机器人；done/dead=结束 */
 export type TaskWorkerInboxStatus =
@@ -33,6 +33,10 @@ export class TaskWorkerInbox {
   @Column({ type: 'int' })
   workerId: number;
 
+  /**
+   * 关联任务；release 通知在机器人没有来源任务时用 0 占位
+   * （该事件由 LOOP 直接交给提测通知服务，不作为父子任务事件处理）。
+   */
   @Column({ type: 'int' })
   childTaskId: number;
 
@@ -48,6 +52,22 @@ export class TaskWorkerInbox {
 
   @Column({ type: 'varchar', length: 20, default: 'pending' })
   status: TaskWorkerInboxStatus;
+
+  /** 已尝试唤醒父机器人的次数；达到阈值后转人工，避免无限循环 */
+  @Column({ type: 'int', default: 0 })
+  attempts: number;
+
+  /** 最近一次尝试唤醒/恢复的时间 */
+  @Column({ type: 'timestamptz', nullable: true })
+  lastAttemptAt: Date | null;
+
+  /** 下次允许重试的时间（退避） */
+  @Column({ type: 'timestamptz', nullable: true })
+  nextRetryAt: Date | null;
+
+  /** 最近一次恢复失败原因 */
+  @Column({ type: 'text', nullable: true })
+  lastError: string | null;
 
   @Column({ type: 'timestamptz', nullable: true })
   deliveredAt: Date | null;

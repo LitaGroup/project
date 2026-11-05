@@ -345,6 +345,31 @@ describe('upsertDebugQuestion / settleDebugQuestion', () => {
     expect(list.filter((item) => item.id === 'question:q1')).toHaveLength(1);
   });
 
+  it('提问选项兼容字符串与 value 字段，规范化为 label', () => {
+    const list = messages();
+    upsertDebugQuestion(
+      list,
+      {
+        id: 'q3',
+        sessionID: 's1',
+        questions: [
+          {
+            question: '连接哪个环境？',
+            header: '环境',
+            options: ['测试', { value: '生产', description: '真实用户' }],
+          } as never,
+        ],
+      },
+      's1',
+      'T0',
+    );
+    const card = list.find((item) => item.id === 'question:q3');
+    expect(card?.question?.questions[0].options).toEqual([
+      { label: '测试' },
+      { label: '生产', description: '真实用户' },
+    ]);
+  });
+
   it('结算为已回答并记录答案；重复结算与不存在的提问返回 false', () => {
     const list = messages();
     upsertDebugQuestion(list, request, 's1', 'T0');

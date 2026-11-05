@@ -55,7 +55,6 @@ describe('TasksService 任务识别技能', () => {
       dispatchService as never,
       { deleteForTasks: jest.fn() } as never,
       { taskChanged: jest.fn() } as never,
-      { initializeHandoff: jest.fn().mockResolvedValue(null) } as never,
     );
   });
 

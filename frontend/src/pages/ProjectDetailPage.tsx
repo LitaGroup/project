@@ -112,6 +112,7 @@ import {
   RunTestButton,
 } from '../components/TestActionButtons'
 import { NewDefectDialog } from '../components/NewDefectDialog'
+import { MarkdownViewer } from '../components/MarkdownViewer'
 import {
   MarkdownEditor,
   type MarkdownEditorHandle,
@@ -1176,10 +1177,27 @@ function EditDescriptionDialog({
   return (
     <>
       <EditableValue
-        className="block w-full whitespace-pre-wrap"
+        className="block w-full text-sm"
         onClick={() => handleOpenChange(true)}
       >
-        {project.description ?? '暂无描述'}
+        {project.description?.trim() ? (
+          // 链接自行处理点击，避免同时打开项目描述编辑弹窗
+          <span
+            className="block"
+            onClick={(event) => {
+              if (
+                event.target instanceof Element &&
+                event.target.closest('a')
+              ) {
+                event.stopPropagation()
+              }
+            }}
+          >
+            <MarkdownViewer text={project.description} />
+          </span>
+        ) : (
+          '暂无描述'
+        )}
       </EditableValue>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent>
@@ -2391,6 +2409,7 @@ function DefectsPanel({
         <TableHeader>
           <TableRow>
             <TableHead>预期功能描述</TableHead>
+            <TableHead className="w-24 text-center">提测 ID</TableHead>
             <TableHead className="w-24 text-center">端</TableHead>
             <TableHead className="w-24 text-center">优先级</TableHead>
             <TableHead className="w-24 text-center">状态</TableHead>
@@ -2408,6 +2427,9 @@ function DefectsPanel({
                 >
                   {d.expected}
                 </Link>
+              </TableCell>
+              <TableCell className="text-center">
+                {d.releaseId ? `#${d.releaseId}` : '—'}
               </TableCell>
               <TableCell className="text-center">{d.platform ?? '—'}</TableCell>
               <TableCell className="text-center">
@@ -2434,7 +2456,7 @@ function DefectsPanel({
           ))}
           {defects.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6}>
+              <TableCell colSpan={7}>
                 {allDefects.length === 0
                   ? '暂无缺陷，点击「新建缺陷」创建'
                   : quickFilter === 'all'
@@ -2444,7 +2466,7 @@ function DefectsPanel({
             </TableRow>
           )}
           <CountRow
-            colSpan={6}
+            colSpan={7}
             total={filteredDefects.length}
             displayed={defects.length}
           />
@@ -4007,6 +4029,25 @@ function ReleasesSection({
                   <dt className="shrink-0 text-foreground-muted">提测人</dt>
                   <dd>{selected.operator ?? '—'}</dd>
                 </div>
+                {selected.workerId && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="shrink-0 text-foreground-muted">提测机器人</dt>
+                    <dd>#{selected.workerId}</dd>
+                  </div>
+                )}
+                {selected.sourceTaskId && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="shrink-0 text-foreground-muted">来源任务</dt>
+                    <dd>
+                      <Link
+                        to={`/tasks/${selected.sourceTaskId}`}
+                        className="underline"
+                      >
+                        #{selected.sourceTaskId}
+                      </Link>
+                    </dd>
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-4">
                   <dt className="shrink-0 text-foreground-muted">状态</dt>
                   <dd>
@@ -4055,7 +4096,13 @@ function ReleasesSection({
                 )}
                 <div className="flex flex-col gap-1">
                   <dt className="text-foreground-muted">提测内容</dt>
-                  <dd className="whitespace-pre-wrap">{selected.content || '—'}</dd>
+                  <dd className="min-w-0">
+                    {selected.content?.trim() ? (
+                      <MarkdownViewer text={selected.content} />
+                    ) : (
+                      '—'
+                    )}
+                  </dd>
                 </div>
               </dl>
             </DialogBody>
@@ -4073,7 +4120,7 @@ function ReleasesSection({
   )
 }
 
-/** 提测状态判定下拉：待冒烟（默认）/ 已通过 / 未通过，改回待冒烟清空判定人/判定时间 */
+/** 提测状态判定下拉：待冒烟（默认）/ 进行中 / 已通过 / 未通过，待冒烟/进行中不保留判定人/判定时间 */
 function ReleaseStatusSelect({
   release,
   onChanged,

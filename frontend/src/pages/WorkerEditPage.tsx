@@ -32,11 +32,14 @@ import {
 } from '@appica/ui-react/dialog'
 import {
   api,
+  WORKER_GITHUB_PERMISSIONS,
+  WORKER_GITHUB_PERMISSION_LABELS,
   type Executor,
   type PlatformUser,
   type Worker,
   type WorkerDebugModelCatalog,
   type WorkerDebugModelSelection,
+  type WorkerGithubPermission,
   type WorkerInitializeSnapshot,
   type WorkerInitializeStatus,
   type WorkerOptimizeSnapshot,
@@ -46,6 +49,7 @@ import {
   type WorkerStandard,
   type WorkerStandardCatalogItem,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { ModelSettingsPicker } from '../components/agent-chat/ModelSettingsPicker'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
@@ -111,6 +115,8 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const [standardPickerOpen, setStandardPickerOpen] = useState(false)
   const [ownerUserId, setOwnerUserId] = useState('')
   const [enabled, setEnabled] = useState(true)
+  const [githubPermission, setGithubPermission] =
+    useState<WorkerGithubPermission>('develop')
   const [error, setError] = useState<string | null>(null)
   /** 配置已落库但工作环境初始化失败时的提示（重试保存不会再重复创建） */
   const [initError, setInitError] = useState<string | null>(null)
@@ -142,20 +148,20 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const isScheduler = role === '调度器'
   /** 面包屑固定用初始标题；页面大标题跟随名称输入变化 */
   const initialTitle = personal
-    ? '我的代理'
+    ? '助理配置'
     : worker
       ? `编辑「${worker.name}」`
       : '新建机器人'
   const typedName = name.trim()
   const pageTitle = personal
-    ? '我的代理'
+    ? '助理配置'
     : worker
       ? typedName
         ? `编辑「${typedName}」`
         : initialTitle
       : typedName || initialTitle
   const breadcrumbItems = personal
-    ? [{ label: '个人中心', to: '/profile' }, { label: '我的代理' }]
+    ? [{ label: '个人中心', to: '/profile' }, { label: '助理配置' }]
     : [{ label: '机器人', to: listPath }, { label: initialTitle }]
 
   useEffect(() => {
@@ -248,6 +254,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
         )
         setOwnerUserId(w.ownerUserId ? String(w.ownerUserId) : '')
         setEnabled(w.enabled)
+        setGithubPermission(w.githubPermission ?? 'develop')
       })
       .catch((e: Error) => setLoadError(e.message))
       .finally(() => {
@@ -290,7 +297,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   // 初始化进度 SSE：snapshot 校准全量状态，line 增量推送；终态后由服务端完成流
   useEffect(() => {
     if (trackedWorkerId === null) return
-    const source = new EventSource(
+    const source = visibleEventSource(
       `/api/workers/${trackedWorkerId}/initialize/stream`,
     )
     source.onmessage = (event: MessageEvent<string>) => {
@@ -419,6 +426,8 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       standards,
       ownerUserId: ownerUserId ? Number(ownerUserId) : null,
       enabled,
+      // 真人机器人与个人 AGENT 不提交该字段；后端固定为 none
+      ...(personal || worker?.runtime === 'human' ? {} : { githubPermission }),
     }
     let stage: 'save' | 'init' = 'save'
     setSaving(true)
@@ -521,7 +530,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   // 优化进度 SSE：snapshot 校准全量状态，line 增量推送；终态后由服务端完成流
   useEffect(() => {
     if (!optimizeRunId) return
-    const source = new EventSource(
+    const source = visibleEventSource(
       `/api/workers/optimize-prompt/${encodeURIComponent(optimizeRunId)}/stream`,
     )
     source.onmessage = (event: MessageEvent<string>) => {
@@ -622,7 +631,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
             {personal
-              ? '这是你在工作台「我的 AI」中实际对话的 AGENT；任务的实际执行仍由真人机器人负责'
+              ? '这是你在工作台「我的助理」中实际对话的 AGENT；任务的实际执行仍由真人机器人负责'
               : isScheduler
                 ? '系统调度机器人：保留历史调度能力，新任务由平台自动匹配分配'
                 : '机器人的上级对机器人的产出结果负责'}
@@ -651,13 +660,13 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       )}
       {worker?.personalAgentUserId && (
         <p className="rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm text-foreground-muted">
-          这是用户 #{worker.personalAgentUserId} 的个人 AI AGENT：工作台「我的 AI」直接与它对话，每个任务使用独立会话；保存后会重新初始化 AGENTS.md、技能与规范。
+          这是用户 #{worker.personalAgentUserId} 的个人 AI AGENT：工作台「我的助理」直接与它对话，每个任务使用独立会话；保存后会重新初始化 AGENTS.md、技能与规范。
         </p>
       )}
 
       {/* 左右两栏：左侧机器人定义 AGENTS.md（撑满剩余高度），右侧基础信息（独立滚动） */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <Card className="min-h-64 min-w-0 flex-1">
+        <Card className="min-h-64 min-w-0 flex-1 rounded-none">
           <CardHeader className="flex-none">
             <CardTitle>机器人定义 AGENTS.md</CardTitle>
             <CardDescription>
@@ -742,10 +751,10 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
 
         <Card className="w-full shrink-0 lg:min-h-0 lg:w-[26rem]">
           <CardHeader className="flex-none">
-            <CardTitle>{personal ? '我的代理配置' : '基础信息'}</CardTitle>
+            <CardTitle>{personal ? '助理配置' : '基础信息'}</CardTitle>
             <CardDescription>
               {personal
-                ? '技能、规范、AGENTS.md 与执行器决定「我的 AI」的对话能力'
+                ? '技能、规范、AGENTS.md 与执行器决定「我的助理」的对话能力'
                 : '名称、简介与任务定义用于平台匹配任务与分配机器人，执行器、默认模型与思考等级决定运行方式'}
             </CardDescription>
           </CardHeader>
@@ -767,7 +776,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
                     {worker?.name ?? name}
                   </p>
                   <p className="text-xs text-foreground-muted">
-                    机器人 #{worker?.id ?? '—'} · 工作台「我的 AI」专用
+                    机器人 #{worker?.id ?? '—'} · 工作台「我的助理」专用
                   </p>
                 </div>
               </div>
@@ -841,6 +850,31 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
                       ))}
                     </SelectContent>
                   </Select>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  GitHub 权限
+                  <Select
+                    value={githubPermission}
+                    onValueChange={(v) =>
+                      setGithubPermission(v as WorkerGithubPermission)
+                    }
+                    items={WORKER_GITHUB_PERMISSION_LABELS}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WORKER_GITHUB_PERMISSIONS.map((permission) => (
+                        <SelectItem key={permission} value={permission}>
+                          {WORKER_GITHUB_PERMISSION_LABELS[permission]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-foreground-muted">
+                    开发权限可拉代码、push 普通分支和提 PR；发布权限额外允许写
+                    main/stable、审批与合并 PR。保存后会重新初始化工位说明。
+                  </span>
                 </label>
               </>
             )}

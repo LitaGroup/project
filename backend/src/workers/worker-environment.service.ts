@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
 import type { MessageEvent } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,7 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
-import { WorkerRuntime } from '../common/enums';
+import { WorkerRuntime, WorkerGithubPermission } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeEventHub } from '../executors/opencode-event-hub.service';
 import type { OpencodeEvent } from '../executors/opencode-event-hub.service';
@@ -18,6 +19,8 @@ import { isFreshOutcome, OpencodeClient } from '../executors/opencode-client';
 import { Worker } from './worker.entity';
 import { agentTokenShell, workerEnvShell } from './worker-env';
 import { WorkersService } from './workers.service';
+import { GithubPermissionCredentialService } from './github-permission-credential.service';
+import { GithubCredentialStatus } from '../github-gateway/github-permission-credential.entity';
 import {
   ManagedStandardFiles,
   WorkerStandardCatalogService,
@@ -41,14 +44,16 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 
 1. 一个任务有且只有一个负责机器人和一个需求方；需求方可以是人类用户，也可以是父任务机器人。
 2. 任务来源包括人类创建和机器人通过 task-create 创建。同一时间只执行一个「进行中」任务；等待中的任务不占用你，可以接受其他任务。
-3. 机器人身份令牌位于 .opencode/agent-token，同时写入 .opencode/.env 的 LITA_PROJECT_TOKEN。调用平台所有 .md 接口时先执行 \`set -a; . .opencode/.env; set +a\`，再使用 \`X-Agent-Token: $LITA_PROJECT_TOKEN\`（或 \`TOKEN=$(cat .opencode/agent-token)\` + \`X-Worker-Token: $TOKEN\`）；不得把令牌写入聊天、交付物或文档。
+3. 机器人身份令牌位于 .opencode/agent-token，同时写入 .opencode/.env 的 LITA_WORK_TOKEN（新名，优先）与 LITA_PROJECT_TOKEN（兼容旧名），两者同值。调用平台所有 .md 接口时先执行 \`set -a; . .opencode/.env; set +a\`，再使用 \`X-Agent-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}\`（或 \`TOKEN=$(cat .opencode/agent-token)\` + \`X-Worker-Token: $TOKEN\`）；不得把令牌写入聊天、交付物或文档。
 
 ### 工位环境变量（.opencode/.env）
 
 - .opencode/.env 由平台注入并维护（权限 600，不得读取展示、改写或删除）：
-  - \`LITA_PROJECT_TOKEN\`：访问项目平台 .md 接口的令牌，与 .opencode/agent-token 是同一个机器人身份令牌，放在 \`X-Agent-Token\` 或 \`X-Worker-Token\` 均可。
+  - \`LITA_WORK_TOKEN\`：访问项目平台 .md 接口的机器人独立令牌（新名，优先使用），与 .opencode/agent-token 同值，放在 \`X-Agent-Token\` 或 \`X-Worker-Token\` 均可。
+  - \`LITA_PROJECT_TOKEN\`：同一机器人令牌的兼容旧名，仅在旧脚本只认旧名时使用；新调用优先 \`LITA_WORK_TOKEN\`。
   - \`LITA_USER_TOKEN\`：访问 Lita 平台的用户令牌，供 lita-api 等技能使用；执行器宿主 ~/.env 也有同名配置。
-- 调用平台接口或使用上述技能前，先执行：\`set -a; . .opencode/.env; set +a\`（或 \`set -a; . ~/.env; set +a\`）。
+- **环境变量优先级（硬性）**：调用 lita-project（lita-work）等技能前，工位 \`.opencode/.env\` 中的环境变量优先级最高，高于当前进程环境变量和执行器宿主 \`~/.env\`；同名变量必须以 \`.opencode/.env\` 为准，不得用 \`~/.env\` 或进程环境中的同名值覆盖。
+- 每次调用相关技能前，必须在同一个 shell 中先执行：\`set -a; . .opencode/.env; set +a\`，再执行技能或接口调用。
 - 不得把令牌写入聊天、交付物、文档或代码仓库。
 
 ### 任务状态与动作
@@ -58,10 +63,11 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 - 待接受 → 已拒绝：任务不匹配自己的职责时，只能在待接受阶段调用 task-refuse，必须填写拒绝理由 reason，并尽量给出发送建议 suggestion（推荐任务定义、任务类型或机器人）。不得接受后再拒绝，也不得把不匹配任务转交他人代替拒绝接口。
 - 执行中 → 待反馈：需要需求方澄清时调用 task-question-ask，由 project 创建和展示提问；不要使用 opencode 原生 question。调用后停止本轮，等待平台恢复。
 - 待反馈 → 待继续 → 执行中：需求方答复后，平台在机器人空闲时恢复原任务会话。
-- 执行中维护交付文档：任务创建时就生成 HANDOFF，执行过程中持续调用 task-handoff-update 写入当前进展和最终交付内容，便于需求方实时查看。
+- 执行中维护交付文档：接受任务并开始处理后，立即调用 task-handoff-update 创建 HANDOFF（首次使用 baseVersion=0）；每完成一个重要阶段、取得关键产物、完成验证或出现阻塞时及时更新，申请验收前补齐最终交付内容。
 - 任务文档目录：任务相关文档默认放在 /task/{yyyyMMdd}/{任务编号}/，常用 API.md（接口）、TECH_DESIGN.md（技术方案）、HANDOFF.md（交付）、REVIEW.md（复盘，验收后平台生成）；需求明确指定文档地址时按指定地址写入，不要另起目录。
 - 任务目录下的普通文档用 task-documents-list / task-documents-update 读写；HANDOFF 仍用 task-handoff-update，REVIEW 不要自行创建。
-- 执行中 → 待验收：完成、自检并准备好交付物后调用 task-handoff-apply；申请验收只锁定当前交付文档版本，会话结束不等于完成，未申请验收会一直保持执行中。
+- 执行中 → 待申请验收：本轮答复结束且当前任务没有排队消息时，平台会释放机器人，任务转为「等待中-待申请验收」，你可以先承接其它任务；平台会重新唤醒你申请验收。
+- 待申请验收 → 待验收：完成、自检并准备好交付物后调用 task-handoff-apply；申请前必须确认 HANDOFF 已创建且为最终内容，申请验收只锁定当前交付文档版本，未创建或正文为空会被拒绝。会话结束不等于完成，不调用申请接口任务不会自动进入待验收。
 - 待验收 → 完成/待继续或执行中/失败：只能由任务需求方分别调用 task-handoff-accept、task-handoff-refuse 或 task-fail。机器人不得代替需求方验收或判失败。
 
 ### 创建与处理子任务
@@ -172,6 +178,8 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
     private readonly standardCatalog: WorkerStandardCatalogService,
     private readonly eventHub: OpencodeEventHub,
     private readonly config: ConfigService,
+    @Optional()
+    private readonly githubCredentials?: GithubPermissionCredentialService,
   ) {}
 
   /**
@@ -320,8 +328,26 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       await this.writeAgentToken(client, worker.id, workdir);
       this.pushLine(job, '· 注入 Lita 用户令牌…');
       await this.writeLitaUserToken(client, workdir);
+      const githubCredentialStatus = (await this.githubCredentials?.statusOf(
+        worker.githubPermission,
+      )) ?? {
+        configured: false,
+        enabled: false,
+        githubAccount: null,
+        rotatedAt: null,
+      };
+      this.pushLine(
+        job,
+        `· GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}；凭证：${
+          githubCredentialStatus.configured
+            ? githubCredentialStatus.enabled
+              ? '已配置'
+              : '已停用'
+            : '未配置'
+        }`,
+      );
       this.pushLine(job, '· 生成初始化指令（AGENTS.md + 技能 + 规范）…');
-      const prompt = await this.buildPrompt(worker);
+      const prompt = await this.buildPrompt(worker, githubCredentialStatus);
       this.pushLine(
         job,
         `· 创建执行器会话（${worker.providerId}/${worker.modelId}）…`,
@@ -387,8 +413,9 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
   }
 
   /**
-   * 把机器人独立令牌写入工位 .opencode/agent-token，并同步到 .opencode/.env 的
-   * LITA_PROJECT_TOKEN（技能统一从 .env 读取访问项目平台的令牌）。
+   * 把机器人工作令牌写入工位 .opencode/agent-token，并同步到 .opencode/.env 的
+   * LITA_WORK_TOKEN（新名，优先）与 LITA_PROJECT_TOKEN（兼容旧名）。
+   * 个人 AGENT 使用其主人真人机器人的令牌。
    * 令牌只经服务端落盘，不进入初始化 Prompt、SSE 进度或日志。
    */
   private async writeAgentToken(
@@ -396,10 +423,13 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
     workerId: number,
     workdir: string,
   ): Promise<void> {
-    const token = await this.workersService.ensureAgentToken(workerId);
+    const token = await this.workersService.ensureWorkToken(workerId);
     await client.shell(
       `${agentTokenShell(workdir, token)} && ` +
-        workerEnvShell(workdir, { LITA_PROJECT_TOKEN: token }),
+        workerEnvShell(workdir, {
+          LITA_WORK_TOKEN: token,
+          LITA_PROJECT_TOKEN: token,
+        }),
     );
   }
 
@@ -522,7 +552,15 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
   }
 
   /** 初始化任务指令：AGENTS.md 原文 + 技能库链接 + 规范目录同步要求 + 工位结构约定 */
-  private async buildPrompt(worker: Worker): Promise<string> {
+  private async buildPrompt(
+    worker: Worker,
+    githubCredentialStatus: GithubCredentialStatus = {
+      configured: false,
+      enabled: false,
+      githubAccount: null,
+      rotatedAt: null,
+    },
+  ): Promise<string> {
     const agents = worker.prompt ?? '';
     const skills = worker.skills ?? [];
     const standards = await this.resolveStandardFiles(worker.standards);
@@ -609,6 +647,11 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
         ].join('\n')
       : '## 规范与规则\n\n本次未选择规范。';
 
+    const githubSection = this.buildGithubAgentsSection(
+      worker,
+      githubCredentialStatus,
+    );
+
     return `接下来，更新当前的工作环境：
 
 ## 根据以下信息更新AGENTS.md 以下为AGENTS.md 内容
@@ -621,6 +664,14 @@ ${agents}
 ### 平台固定协同协议
 \`\`\`\`markdown
 ${TASK_COLLABORATION_AGENTS}
+\`\`\`\`
+
+### GitHub 操作权限（必须写入 AGENTS.md）
+
+把以下内容原样写入 AGENTS.md 的「## GitHub 操作权限」小节，权限、允许/禁止事项与凭证状态不得删减或改写：
+
+\`\`\`\`markdown
+${githubSection}
 \`\`\`\`
 
 ### 规范与规则（必须写入 AGENTS.md）
@@ -636,7 +687,7 @@ ${rulesSection}
 - AGENTS.md    机器人的工作基本原则
 - .opencode/   opencode自身的目录
 - .opencode/agent-token   平台注入的机器人身份令牌（权限 600，不得读取展示、改写或删除）
-- .opencode/.env   平台注入的工位环境变量（权限 600，不得读取展示、改写或删除）：LITA_PROJECT_TOKEN 访问项目平台 .md 接口（与 agent-token 同值）、LITA_USER_TOKEN 访问 Lita 平台技能
+- .opencode/.env   平台注入的工位环境变量（权限 600，不得读取展示、改写或删除）：LITA_WORK_TOKEN 访问项目平台 .md 接口（新名，优先，与 agent-token 同值）、LITA_PROJECT_TOKEN 兼容旧名（同值）、LITA_USER_TOKEN 访问 Lita 平台技能
 - .opencode/skills/   当前机器人的技能
 - .opencode/rules/   平台同步的规范与规则文档（保持规范库原始目录结构；.standards-manifest.json 是受管清单）
 - .opencode/rules/.standards-manifest.json   本次同步的规范文件清单（JSON：{"version":1,"files":[...]}）
@@ -645,18 +696,19 @@ ${rulesSection}
 ### 更新要求
 
 1. 把「工作职责定义」和「平台固定协同协议」中的 Markdown 原文完整写入当前工作目录的 AGENTS.md；不要改写、缩写或额外发挥。协同协议放在工作职责定义之后。
-2. 把「规范与规则（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 规范与规则」小节；规范名称、说明、工位目录与文档清单不得删减。
-3. 确保 AGENTS.md 中包含上面的目录结构说明。
-4. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
-5. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
-6. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
-7. .opencode/rules/ 中的规范文档以本次规范清单为准：
+2. 把「GitHub 操作权限（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## GitHub 操作权限」小节；权限、允许/禁止事项与凭证状态不得删减。
+3. 把「规范与规则（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 规范与规则」小节；规范名称、说明、工位目录与文档清单不得删减。
+4. 确保 AGENTS.md 中包含上面的目录结构说明。
+5. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
+6. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
+7. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
+8. .opencode/rules/ 中的规范文档以本次规范清单为准：
    - 如果 .opencode/rules/.standards-manifest.json 存在，先读取其中 files 数组作为旧受管文件清单；不存在或内容非法时旧受管清单视为空。
    - 如果旧的 .opencode/docs/.standards-manifest.json 存在：先按其 files 清单删除 .opencode/docs/ 下对应的旧受管文件，再删除该旧清单；这是目录从 docs 迁移到 rules 的一次性清理，其他 docs 文档不要动。
    - 按下方「需存在的规范文件」下载并写入 .opencode/rules/ 下同名相对路径；保持文件内容与链接内容一致，不要改写或摘要。
    - 只删除「旧受管文件清单中存在、但本次需存在清单中没有」的文件；不要删除 .opencode/docs/ 或其他流程产生的文档。
    - 同步完成后把本次需存在的全部相对路径写入 .opencode/rules/.standards-manifest.json，格式为 {"version":1,"files":[...]}，路径按字典序排序；manifest 自身不要写入 files。
-8. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
+9. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
 
 ## 从以下链接中，安装或更新技能
 
@@ -680,8 +732,82 @@ ${requiredFileLines}
 `;
   }
 
-  /** 解析本次需同步的规范目录与文件清单；规范库不可访问时初始化直接失败 */
-  private async resolveStandardFiles(
+  /**
+   * 生成写入工位 AGENTS.md 的 GitHub 权限说明。
+   * 只描述权限、允许/禁止事项与凭证可用性；不得出现 PAT、密文或 SecretRef。
+   */
+  private buildGithubAgentsSection(
+    worker: Worker,
+    status: GithubCredentialStatus,
+  ): string {
+    const permission = worker.githubPermission;
+    const credentialText = !status.configured
+      ? '未配置'
+      : status.enabled
+        ? `已配置${status.githubAccount ? `（GitHub 账号：${status.githubAccount}）` : ''}`
+        : `已停用${status.githubAccount ? `（GitHub 账号：${status.githubAccount}）` : ''}`;
+
+    if (permission === WorkerGithubPermission.NONE) {
+      return `## GitHub 操作权限
+
+当前权限：无权限。
+凭证状态：${credentialText}。
+
+禁止事项：
+- 不要调用 OP Gateway 获取 GitHub 凭证。
+- 不要 clone、fetch、pull 平台私有仓库，也不要 push 或创建 PR。
+- 不要尝试审批或合并 PR。
+
+如果当前任务确实需要 GitHub 操作，应向需求方说明：机器人尚未配置 GitHub 权限，需管理员在机器人配置页调整权限。`;
+    }
+
+    if (permission === WorkerGithubPermission.RELEASE) {
+      return `## GitHub 操作权限
+
+当前权限：发布权限。
+凭证状态：${credentialText}。
+
+允许事项：
+- 通过 OP Gateway clone、fetch、pull 仓库。
+- 创建任务分支、开发并提交代码。
+- push 普通分支。
+- 创建目标为 main、stable 的 PR。
+- 在确认符合当前任务要求后，直接 push main、stable。
+- 在确认符合当前任务要求后，审批 PR、合并 PR。
+
+禁止事项：
+- 修改仓库权限、Secret、Ruleset 或删除仓库。
+- 试图读取、展示、导出或绕过 OP Gateway 获取 GitHub PAT。
+- 执行与当前任务无关的写操作。`;
+    }
+
+    return `## GitHub 操作权限
+
+当前权限：开发权限。
+凭证状态：${credentialText}。
+
+允许事项：
+- 通过 OP Gateway clone、fetch、pull 仓库。
+- 创建任务分支、开发并提交代码。
+- push 普通分支。
+- 创建目标为 main、stable 的 PR。
+
+禁止事项：
+- 直接 push main、stable。
+- 审批或合并 PR。
+- 修改仓库权限、Secret、Ruleset 或删除仓库。
+- 试图读取、展示、导出或绕过 OP Gateway 获取 GitHub PAT。`;
+  }
+
+  private githubPermissionLabel(
+    permission: Worker['githubPermission'],
+  ): string {
+    if (permission === WorkerGithubPermission.RELEASE) return '发布权限';
+    if (permission === WorkerGithubPermission.NONE) return '无权限';
+    return '开发权限';
+  }
+
+  /** 解析本次需同步的规范目录与文件清单；规范库不可访问时初始化直接失败 */ private async resolveStandardFiles(
     standards: Worker['standards'],
   ): Promise<ManagedStandardFiles> {
     try {

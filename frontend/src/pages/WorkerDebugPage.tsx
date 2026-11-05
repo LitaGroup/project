@@ -22,6 +22,7 @@ import {
   type WorkerDebugSnapshot,
   type WorkerDebugTodo,
 } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { RobotAvatar } from '../components/task-detail/WorkerAvatar'
 import { DebugChat } from '../components/agent-chat/DebugChat'
 
@@ -63,7 +64,7 @@ export function WorkerDebugPage() {
   // 调试会话 SSE：文本/思考/待办/终态实时推送（断线自动重连并重收快照），无定时轮询
   useEffect(() => {
     if (!valid) return
-    const source = new EventSource(`/api/workers/${id}/debug/stream`)
+    const source = visibleEventSource(`/api/workers/${id}/debug/stream`)
     source.onopen = () => setError(null)
     source.onmessage = (event: MessageEvent<string>) => {
       let payload: { type?: string; snapshot?: WorkerDebugSnapshot }

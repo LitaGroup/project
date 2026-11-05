@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import { api, type ExportRun, type ProjectExport } from '../lib/api'
+import { visibleEventSource } from '../lib/event-source'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import {
   RunDetailView,
@@ -94,7 +95,7 @@ export function ExportRunPage() {
   useEffect(() => {
     if (selectedRunId === null) return
     let finished = false
-    const es = new EventSource(`/api/exports/runs/${selectedRunId}/stream`)
+    const es = visibleEventSource(`/api/exports/runs/${selectedRunId}/stream`)
     es.onmessage = (e: MessageEvent<string>) => {
       const r = JSON.parse(e.data) as ExportRun
       setRunData(r)

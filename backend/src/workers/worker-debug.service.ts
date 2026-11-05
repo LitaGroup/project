@@ -17,6 +17,7 @@ import { basename, join } from 'path';
 import { In, LessThan, MoreThanOrEqual, Repository } from 'typeorm';
 import { Observable } from 'rxjs';
 import { WorkerRuntime } from '../common/enums';
+import { normalizeQuestionOptions } from '../common/question-option';
 import { fileWebroot } from '../common/paths';
 import { variantLabel } from '../common/variants';
 import { Executor } from '../executors/executor.entity';
@@ -274,7 +275,7 @@ export function upsertDebugQuestion(
       sessionId: request.sessionID || fallbackSessionId,
       questions: (request.questions ?? []).map((question) => ({
         ...question,
-        options: question.options?.map((option) => ({ ...option })),
+        options: normalizeQuestionOptions(question.options),
       })),
       state: 'pending',
       askedAt: createdAt,
@@ -410,7 +411,7 @@ interface DebugSession {
 /** 机器人调试页默认会话范围（我的 AI 使用 agent:global / agent:task:{id}） */
 export const DEBUG_SCOPE = 'debug';
 
-/** 主 Agent 模式规范化：仅接受 build / plan，缺省 build */
+/** 历史主 Agent 模式：仅用于识别旧会话远端实际生效的模式，个人 AI 统一使用 build */
 export function normalizeDebugMode(value: unknown): WorkerDebugMode {
   return value === 'plan' ? 'plan' : 'build';
 }
@@ -565,8 +566,10 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
                   variant: row.activeVariant ?? null,
                 }
               : this.defaultModelOf(rowContext);
-          session.activeAgent = normalizeDebugMode(row.activeAgent);
-          session.appliedAgent = session.activeAgent;
+          session.activeAgent = 'build';
+          session.appliedAgent = row.sessionId
+            ? normalizeDebugMode(row.activeAgent)
+            : null;
           session.initialized = true;
           // 不做中断恢复：活跃会话里的 pending 提问仍要保留并可回答
           session.messages = messages;
@@ -767,52 +770,6 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       }
     }
     session.activeModel = { providerId, modelId, variant };
-    session.updatedAt = new Date();
-    await this.persist(session);
-    this.emitUpdate(session);
-    return this.toSnapshot(session);
-  }
-
-  /** 切换主 Agent 模式（build / plan；下一条消息生效） */
-  async setMode(
-    userId: number,
-    workerId: number,
-    mode: WorkerDebugMode,
-    scope: string = DEBUG_SCOPE,
-  ): Promise<WorkerDebugSnapshot> {
-    if (mode !== 'build' && mode !== 'plan') {
-      throw new BadRequestException('仅支持 build / plan 模式');
-    }
-    const context = await this.resolveContext(workerId);
-    const key = this.keyOf(userId, workerId, scope);
-    let session = await this.findSession(userId, workerId, context, scope);
-    if (session?.running) {
-      throw new ConflictException('机器人正在回复，请等待完成后再切换模式');
-    }
-    if (!session) {
-      session = this.newSession(userId, workerId, context, scope);
-      this.sessions.set(key, session);
-    }
-    if (session.sessionId && session.appliedAgent !== mode) {
-      try {
-        await session.client.switchAgent(session.sessionId, mode);
-        session.appliedAgent = mode;
-      } catch (error) {
-        if (isSessionMissing(error)) {
-          // 远端会话已不存在：只更新选择，下一条消息会按新模式重建会话
-          session.sessionId = null;
-          session.bound = null;
-          session.initialized = false;
-          session.appliedModelKey = null;
-          session.appliedAgent = null;
-        } else {
-          throw new ServiceUnavailableException(
-            `切换模式失败：${(error as Error).message}`,
-          );
-        }
-      }
-    }
-    session.activeAgent = mode;
     session.updatedAt = new Date();
     await this.persist(session);
     this.emitUpdate(session);
@@ -1175,7 +1132,22 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       // 会话绑定可能指向已重启/清理的执行器会话，先校验；丢失则新建
       if (session.sessionId) {
         try {
-          await session.client.session(session.sessionId);
+          const info = await session.client.session(session.sessionId);
+          // 工位目录调整（如早期调试目录由 {workdir}/debug 改回工位根目录）后
+          // 旧会话不再复用，避免继续在缺少 AGENTS.md 的目录里对话。
+          const directory = info.location?.directory?.replace(/\/+$/, '');
+          if (
+            directory &&
+            directory !== session.context.workdir.replace(/\/+$/, '')
+          ) {
+            this.logger.log(
+              `调试会话 ${session.sessionId} 工作目录已变更（${directory} → ${session.context.workdir}），重建会话`,
+            );
+            session.sessionId = null;
+            session.bound = null;
+            session.initialized = false;
+            session.appliedModelKey = null;
+          }
         } catch (error) {
           if (!isSessionMissing(error)) throw error;
           session.sessionId = null;
@@ -1235,7 +1207,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       }
       const prompt = session.initialized
         ? text
-        : this.buildFirstPrompt(text, firstPrompt);
+        : this.buildFirstPrompt(text, firstPrompt, session.context.worker);
       const staged = await this.stageAttachments(session, files);
       const promptText = staged.failed.length
         ? `${prompt}\n\n# 附件（未能写入工作区，请通过链接下载）\n${staged.failed
@@ -1562,20 +1534,35 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** 首条提示：调试说明 + 用户消息（角色定义与技能由工位文件提供） */
-  private buildFirstPrompt(text: string, firstPrompt?: string): string {
-    if (firstPrompt?.trim()) {
-      return [firstPrompt.trim(), '# 用户消息', text].join('\n\n');
-    }
-    return [
-      '# 调试对话',
+  /** 首条提示：机器人身份 + 调试说明（或角色说明）+ 用户消息 */
+  private buildFirstPrompt(
+    text: string,
+    firstPrompt: string | undefined,
+    worker: Worker,
+  ): string {
+    const identity = [
+      '# 你的身份',
       '',
-      '这是机器人的调试对话。机器人的 AGENTS.md 与技能已由工作目录提供；请结合前文直接回答用户，不要复述角色设定。',
+      `- 名称：${worker.name}`,
+      `- ID：${worker.id}`,
+      `- 工位：${this.workersService.workdirOf(worker.id) ?? '未配置'}`,
       '',
-      '# 用户消息',
-      '',
-      text,
+      '请始终以该机器人身份回答。如果工作目录中没有你的 AGENTS.md，说明工位尚未初始化，请提示用户先到机器人页面保存并完成初始化，不要猜测或冒用其他身份。',
     ].join('\n');
+    const body = firstPrompt?.trim()
+      ? [identity, firstPrompt.trim(), '# 用户消息', text].join('\n\n')
+      : [
+          identity,
+          '',
+          '# 调试对话',
+          '',
+          '这是机器人的调试对话。机器人的 AGENTS.md 与技能已由工作目录提供；请结合前文直接回答用户，不要复述角色设定。',
+          '',
+          '# 用户消息',
+          '',
+          text,
+        ].join('\n');
+    return body;
   }
 
   private async resolveContext(workerId: number): Promise<DebugContext> {
@@ -1610,8 +1597,9 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       worker,
       executor,
       option: this.toOption(worker, executor),
-      // 调试与正式任务分目录，避免调试工具调用污染任务工作区。
-      workdir: `${workdir}/debug`,
+      // 调试/聊天与正式任务共用工位根目录：AGENTS.md、技能与 .opencode/.env
+      // 都在当前目录，避免调试目录缺少身份定义和令牌。
+      workdir,
     };
   }
 
@@ -1721,8 +1709,10 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     const session = this.newSession(userId, workerId, context, scope);
     session.rowId = row.id;
     session.sessionId = row.sessionId;
-    session.activeAgent = normalizeDebugMode(row.activeAgent);
-    session.appliedAgent = row.sessionId ? session.activeAgent : null;
+    session.activeAgent = 'build';
+    session.appliedAgent = row.sessionId
+      ? normalizeDebugMode(row.activeAgent)
+      : null;
     session.bound =
       row.executorId && row.providerId && row.modelId
         ? {
@@ -1855,7 +1845,6 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
         modelId: worker.modelId,
         variant: worker.variant,
       },
-      mode: 'build',
       sessionId: null,
       status: 'idle',
       messages: [],
@@ -1869,7 +1858,6 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     return {
       worker: session.context.option,
       model: { ...session.activeModel },
-      mode: session.activeAgent,
       sessionId: session.sessionId,
       status: session.running ? 'running' : 'idle',
       messages: session.messages.map((message) => ({ ...message })),

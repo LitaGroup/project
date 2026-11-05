@@ -18,11 +18,20 @@ export interface TaskNotifyResult {
   ownerName?: string;
 }
 
+export interface TaskRequesterNotifyOptions {
+  /**
+   * 普通 AI 机器人需求方没有绑定用户时，是否回退通知其负责人。
+   * 仅用于自动处理失败、人工介入等升级场景；正常待验收/待反馈不打扰负责人。
+   */
+  fallbackToRequesterOwner?: boolean;
+}
+
 /**
  * 任务通知：
  * - 待反馈优先通知历史调度机器人负责人，其次处理机器人负责人；
- * - 待验收优先通知任务需求方（任务创建人，子任务回退根任务创建人），
- *   无有效需求方时回退机器人负责人。
+ * - 待验收通知真实需求方（人、真人机器人绑定用户或个人 AGENT 主人）；
+ *   普通 AI 机器人需求方由收件箱/自动验收驱动，正常通知不打扰其负责人；
+ * - 未找到有效需求方时回退执行机器人负责人，避免异常提醒完全丢失。
  */
 @Injectable()
 export class TaskNotifyService {
@@ -63,13 +72,15 @@ export class TaskNotifyService {
 
   /**
    * 需求方通知：优先任务创建用户，子任务回退根任务创建用户。
-   * 未找到有效用户时回退机器人负责人，避免待验收提醒完全丢失。
+   * 真人机器人需求方通知其绑定用户；普通 AI 机器人需求方由收件箱与自动验收驱动，
+   * 正常通知不打扰负责人，只有显式的人工兜底场景才回退通知其负责人。
    */
   async notifyTaskRequester(
     task: Task,
     kind: TaskNotifyKind,
     title: string,
     description: string,
+    options?: TaskRequesterNotifyOptions,
   ): Promise<TaskNotifyResult> {
     // 真人机器人需求方仍由其绑定用户在操作台处理；AI 机器人需求方由收件箱和 LOOP 唤醒。
     if (task.requesterType === 'worker' && task.requesterId) {
@@ -81,13 +92,35 @@ export class TaskNotifyService {
           humanUserId: true,
           personalAgentUserId: true,
           runtime: true,
+          ownerUserId: true,
+          ownerName: true,
         },
       });
       const boundUserId =
         requesterWorker?.runtime === WorkerRuntime.HUMAN
           ? requesterWorker.humanUserId
           : (requesterWorker?.personalAgentUserId ?? null);
-      if (!boundUserId) return { sent: false };
+      if (!boundUserId) {
+        // 普通 AI 机器人需求方没有绑定用户，默认不发飞书；
+        // 仅自动验收/自动回复失败等升级场景回退通知负责人，且不能标成需求方。
+        if (options?.fallbackToRequesterOwner && requesterWorker) {
+          const openId = await this.workersService.ownerOpenId(requesterWorker);
+          if (openId) {
+            return this.sendCard(
+              task,
+              {
+                openId,
+                ownerName: requesterWorker.ownerName ?? requesterWorker.name,
+              },
+              kind,
+              title,
+              description,
+              '负责人',
+            );
+          }
+        }
+        return { sent: false };
+      }
       const user = await this.users.findOne({
         where: { id: boundUserId },
         select: { id: true, name: true, feishuOpenId: true },
@@ -122,6 +155,40 @@ export class TaskNotifyService {
       }
     }
     return this.notifyTaskOwner(task, kind, title, description);
+  }
+
+  /**
+   * 新任务首次分配到真人执行机器人时，通知绑定的真实用户前往工作台处理。
+   * 非真人机器人、未绑定用户或缺少飞书 openId 时静默跳过。
+   */
+  async notifyTaskHumanAssignee(
+    task: Task,
+    kind: TaskNotifyKind,
+    title: string,
+    description: string,
+  ): Promise<TaskNotifyResult> {
+    if (!task.agentId) return { sent: false };
+    const worker = await this.workers.findOne({
+      where: { id: task.agentId },
+      select: { id: true, name: true, humanUserId: true, runtime: true },
+    });
+    if (worker?.runtime !== WorkerRuntime.HUMAN || !worker.humanUserId) {
+      return { sent: false };
+    }
+    const user = await this.users.findOne({
+      where: { id: worker.humanUserId },
+      select: { id: true, name: true, feishuOpenId: true },
+    });
+    if (!user?.feishuOpenId) return { sent: false };
+    return this.sendCard(
+      task,
+      { openId: user.feishuOpenId, ownerName: user.name },
+      kind,
+      title,
+      description,
+      '执行人',
+      { workbench: true, actionLabel: '打开工作台' },
+    );
   }
 
   /**
@@ -169,11 +236,19 @@ export class TaskNotifyService {
     kind: TaskNotifyKind,
     title: string,
     description: string,
-    receiverLabel: '负责人' | '需求方',
+    receiverLabel: '负责人' | '需求方' | '执行人',
+    options?: { workbench?: boolean; actionLabel?: string },
   ): Promise<TaskNotifyResult> {
     const template = kind === 'accept' ? 'green' : 'orange';
+    const taskUrl =
+      options?.workbench || kind === 'accept'
+        ? `${this.appUrl}/workbench/tasks/${task.id}`
+        : `${this.appUrl}/tasks/${task.id}`;
 
-    const statusLabel = `${task.status}-${task.subStatus}`;
+    // 部分调用方只查了任务的部分字段（如对账兜底只取 id/code/title），
+    // 缺状态时不要拼出 "undefined-undefined"。
+    const statusLabel =
+      [task.status, task.subStatus].filter(Boolean).join('-') || '未知';
     try {
       await this.feishuService.sendUserCard(receiver.openId, {
         config: { wide_screen_mode: true },
@@ -200,9 +275,12 @@ export class TaskNotifyService {
             actions: [
               {
                 tag: 'button',
-                text: { tag: 'plain_text', content: '打开任务详情' },
+                text: {
+                  tag: 'plain_text',
+                  content: options?.actionLabel ?? '打开任务详情',
+                },
                 type: 'primary',
-                url: `${this.appUrl}/tasks/${task.id}`,
+                url: taskUrl,
               },
             ],
           },

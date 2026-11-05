@@ -13,6 +13,7 @@ import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
 import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
+import { TaskChatService } from './task-chat.service';
 import type { TaskChatPerspective } from './task-chat.types';
 import type { TaskDeliveryReportInput } from './task-delivery-report';
 import { TaskDispatchService } from './task-dispatch.service';
@@ -64,6 +65,7 @@ export class TaskDeliveryService {
     private readonly workers: Repository<Worker>,
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
+    private readonly taskChat: TaskChatService,
     private readonly taskDocuments: TaskDocumentService,
     private readonly taskHandoff: TaskHandoffService,
     private readonly taskNotify: TaskNotifyService,
@@ -206,6 +208,11 @@ export class TaskDeliveryService {
     perspective: TaskChatPerspective = 'requester',
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
+    if (task.status === TaskStatus.FINISHED) {
+      throw new BadRequestException(
+        `任务 ${task.code} 已结束，不能继续发送消息`,
+      );
+    }
     const humanWorker = await this.workers.findOne({
       where: { humanUserId: actor.id },
       select: { id: true, name: true, runtime: true },
@@ -223,8 +230,56 @@ export class TaskDeliveryService {
         : personalAgent &&
             task.requesterType === 'worker' &&
             task.requesterId === personalAgent.id
-          ? personalAgent
+          ? // 历史任务需求方是个人 AGENT：有真人机器人时按真人身份操作
+            (humanWorker ?? personalAgent)
           : null;
+    const text = content.trim();
+    if (!text) throw new BadRequestException('消息内容不能为空');
+
+    // 任务沟通仅限需求方与当前真人执行机器人，机器人负责人/接管人及无关用户不参与。
+    const isRequester =
+      (task.requesterType === 'worker' &&
+        (task.requesterId === humanWorker?.id ||
+          task.requesterId === personalAgent?.id)) ||
+      (task.requesterType === 'user' && task.requesterId === actor.id) ||
+      (!task.requesterType && task.createdById === actor.id);
+    const isExecutor =
+      humanWorker?.runtime === WorkerRuntime.HUMAN &&
+      task.agentId === humanWorker.id;
+    if (perspective === 'responsible' && !isExecutor) {
+      throw new ForbiddenException(
+        '仅任务的真人执行机器人可以以执行方身份发送消息',
+      );
+    }
+    if (perspective !== 'responsible' && !isRequester) {
+      throw new ForbiddenException('仅任务需求方可以以需求方身份发送消息');
+    }
+
+    // 执行方是当前用户的真人机器人：任何未结束状态（含待验收）都按操作台对话落库，
+    // 不触发机器人会话，也不改变任务状态。
+    if (perspective === 'responsible' && isExecutor && humanWorker) {
+      const message = await this.taskChat.postAssistantMessage(taskId, text, {
+        meta: {
+          humanWorkerMessage: true,
+          workerId: humanWorker.id,
+          perspective: 'responsible',
+        },
+      });
+      await this.dispatchService.addEvent(
+        taskId,
+        '操作',
+        '真人机器人在操作台回复',
+        humanWorker.name,
+        { humanWorker: true },
+      );
+      // 子任务需求方是 AI 机器人时进入收件箱，由 LOOP 唤醒父机器人回复。
+      await this.dispatchService.notifyRequesterWorkerMessage(
+        task,
+        text,
+        message.id,
+      );
+      return this.mustFind(taskId);
+    }
     if (
       task.status === TaskStatus.WAITING &&
       task.subStatus === TaskSubStatus.PENDING_ACCEPT
@@ -234,10 +289,10 @@ export class TaskDeliveryService {
         requesterWorker
           ? { type: 'worker', worker: requesterWorker }
           : { type: 'user', user: actor },
-        content,
+        text,
       );
     }
-    return this.tasksService.sendMessage(taskId, content, actor.name ?? null, {
+    return this.tasksService.sendMessage(taskId, text, actor.name ?? null, {
       actorWorkerId:
         perspective === 'requester' ? (requesterWorker?.id ?? null) : null,
       perspective,
@@ -269,9 +324,13 @@ export class TaskDeliveryService {
         `任务 ${task.code} 的执行机器人不是「${worker.name}」`,
       );
     }
+    const pendingApply =
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_APPLY;
     if (
-      task.status !== TaskStatus.RUNNING ||
-      task.subStatus !== TaskSubStatus.EXECUTING
+      !pendingApply &&
+      (task.status !== TaskStatus.RUNNING ||
+        task.subStatus !== TaskSubStatus.EXECUTING)
     ) {
       throw new BadRequestException(
         `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可更新交付文档`,
@@ -349,7 +408,7 @@ export class TaskDeliveryService {
   /**
    * 人工修改交付文档后告知执行机器人：
    * - 执行中：进入当前会话的发送队列，本轮结束后读取最新版本
-   * - 待反馈/待继续：并入下一次恢复提示
+   * - 待反馈/待继续/待申请验收：并入下一次恢复提示（待申请验收同时转入待继续）
    */
   private async notifyAgentOfHandoffUpdate(
     task: Task,
@@ -388,13 +447,18 @@ export class TaskDeliveryService {
     }
     if (
       task.status === TaskStatus.WAITING &&
-      [TaskSubStatus.PENDING_FEEDBACK, TaskSubStatus.PENDING_RESUME].includes(
-        task.subStatus,
-      )
+      [
+        TaskSubStatus.PENDING_FEEDBACK,
+        TaskSubStatus.PENDING_RESUME,
+        TaskSubStatus.PENDING_APPLY,
+      ].includes(task.subStatus)
     ) {
       await this.tasks.update(
         { id: task.id, status: task.status, subStatus: task.subStatus },
         {
+          ...(task.subStatus === TaskSubStatus.PENDING_APPLY
+            ? { subStatus: TaskSubStatus.PENDING_RESUME }
+            : {}),
           resumePrompt: [task.resumePrompt?.trim(), prompt]
             .filter(Boolean)
             .join('\n\n'),
@@ -607,6 +671,7 @@ export class TaskDeliveryService {
         'feedback',
         notifyTitle,
         notifyDescription,
+        { fallbackToRequesterOwner: true },
       );
     }
     return saved;
