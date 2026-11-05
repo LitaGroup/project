@@ -208,7 +208,7 @@ function outgoingOutcomes(node: WorkflowNodeDefinition): WorkflowOutcome[] {
 /**
  * 结构校验与归一化。
  * strict=false 用于保存草稿，允许尚未选择任务定义/机器人；
- * strict=true 用于发布，要求四类节点完整、引用可执行且所有路径最终经过验收后结束。
+ * strict=true 用于发布，要求四类节点完整、引用可执行且所有路径最终可以结束。
  */
 export function normalizeWorkflowDefinition(
   value: unknown,
@@ -273,10 +273,14 @@ export function normalizeWorkflowDefinition(
     if (edge.to === WORKFLOW_END_NODE) {
       const canEnd =
         (source.kind === 'acceptance' && edge.outcome === 'approved') ||
+        (source.kind === 'approval' &&
+          (edge.outcome === 'approved' || edge.outcome === 'rejected')) ||
         (source.kind === 'operation' &&
           (edge.outcome === 'succeeded' || edge.outcome === 'failed'));
       if (!canEnd) {
-        bad('只有验收通过或操作节点的成功/失败结果可以流转到流程结束');
+        bad(
+          '只有验收通过、审批通过/驳回或操作节点的成功/失败结果可以流转到流程结束',
+        );
       }
     }
     const edgeKey = `${edge.from}\u0000${edge.outcome ?? '__unconditional__'}`;

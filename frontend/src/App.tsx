@@ -242,6 +242,8 @@ function App() {
           <Route path="/admin/executors" element={<ExecutorsPage />} />
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
           <Route path="/tickets" element={<TicketHomePage />} />
+          <Route path="/tickets/mine" element={<TicketsPage scope="mine" />} />
+          <Route path="/tickets/all" element={<TicketsPage scope="all" />} />
           <Route
             path="/tickets/wf/:definitionId"
             element={<TicketsPageWithDefinition />}

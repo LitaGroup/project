@@ -928,7 +928,7 @@ export function TicketDefinitionEditPage() {
               <div>
                 <CardTitle>流转规则</CardTitle>
                 <CardDescription>
-                  起始节点只能无条件流出；审批/操作/验收按结果流转
+                  起始节点只能无条件流出；审批/操作/验收按结果流转，审批通过/驳回、操作成功/失败可直接结束流程
                 </CardDescription>
               </div>
               <Button variant="outline" size="sm" onClick={addEdge}>

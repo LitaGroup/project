@@ -1,6 +1,10 @@
 import { TaskStatus, TaskSubStatus } from '../common/enums';
 import { Task } from '../tasks/task.entity';
 import { Worker } from '../workers/worker.entity';
+import {
+  WORKFLOW_END_NODE,
+  type WorkflowDefinitionJson,
+} from '../workflows/workflow.types';
 import { TicketWorkflowRuntimeService } from './ticket-workflow-runtime.service';
 import { TicketWorkflowRun } from './ticket-workflow-run.entity';
 import { Ticket } from './ticket.entity';
@@ -83,6 +87,50 @@ describe('TicketWorkflowRuntimeService', () => {
 
     expect(complete).toHaveBeenCalledWith(run, task, outcome);
   });
+
+  it.each([
+    ['approval', 'approved', '已完成'],
+    ['approval', 'rejected', '已失败'],
+    ['operation', 'succeeded', '已完成'],
+    ['operation', 'failed', '已失败'],
+  ])(
+    '%s 节点以 %s 直接结束流程时，工单状态为 %s',
+    async (_kind, outcome, workflowStatus) => {
+      const workflow: WorkflowDefinitionJson = {
+        startNode: 'start',
+        nodes: [],
+        edges: [
+          {
+            from: 'node-1',
+            to: WORKFLOW_END_NODE,
+            outcome: outcome as 'succeeded',
+            label: null,
+          },
+        ],
+      };
+      const advance = (
+        service as unknown as {
+          advance: (
+            ticketId: number,
+            workflow: WorkflowDefinitionJson,
+            fromKey: string,
+            outcome: string,
+          ) => Promise<void>;
+        }
+      ).advance.bind(service);
+
+      await advance(5, workflow, 'node-1', outcome);
+
+      expect(tickets.update).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({
+          workflowStatus,
+          currentNodeKey: null,
+          currentNodeName: null,
+        }),
+      );
+    },
+  );
 
   it('调用节点拒绝接口时把节点任务置为失败并按拒绝结果推进', async () => {
     const worker = { id: 1001, name: '审批机器人' } as Worker;

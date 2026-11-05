@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   Navigation,
@@ -73,6 +73,12 @@ interface NavItem {
   end?: boolean
 }
 
+/** 左侧导航分组：组标题 + 组内导航项 */
+interface NavGroup {
+  label?: string
+  items: NavItem[]
+}
+
 /** 顶级导航分区：顶部 Tab 切换，各分区有独立的左侧导航 */
 interface NavSection {
   key: string
@@ -82,6 +88,8 @@ interface NavSection {
   /** 路径归属判定（决定顶部 Tab / 左侧导航高亮） */
   match: (pathname: string) => boolean
   items: NavItem[]
+  /** 需要分组展示时使用；存在时优先于 items */
+  groups?: NavGroup[]
 }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -128,6 +136,20 @@ const NAV_SECTIONS: NavSection[] = [
     to: '/tickets',
     match: (p) => p.startsWith('/tickets'),
     items: [],
+    groups: [
+      {
+        label: '我的',
+        items: [
+          { to: '/tickets/mine', label: '我的工单', icon: ClipboardList, ready: true },
+        ],
+      },
+      {
+        label: '全部',
+        items: [
+          { to: '/tickets/all', label: '工单列表', icon: ListCheck, ready: true },
+        ],
+      },
+    ],
   },
   {
     key: 'knowledge',
@@ -247,6 +269,38 @@ function UserArea() {
   )
 }
 
+/** 左侧导航链接列表（普通分区与分组分区共用） */
+function SidebarNavList({ items }: { items: NavItem[] }) {
+  return (
+    <NavigationList className="gap-1">
+      {items.map((item) => (
+        <NavigationItem key={item.to}>
+          <NavigationLink
+            value={item.to}
+            disabled={!item.ready}
+            render={
+              <NavLink
+                to={item.to}
+                end={item.end ?? item.to === '/'}
+              />
+            }
+          >
+            <span className="flex w-full items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2.5">
+                <item.icon size={18} className="shrink-0" />
+                <span className="truncate">{item.label}</span>
+              </span>
+              {!item.ready && (
+                <Badge variant="soft">{item.badge ?? '待补充'}</Badge>
+              )}
+            </span>
+          </NavigationLink>
+        </NavigationItem>
+      ))}
+    </NavigationList>
+  )
+}
+
 export function Layout() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -259,37 +313,9 @@ export function Layout() {
   const isWorkbench = pathname.startsWith('/workbench')
   const isRobotChat = pathname.startsWith('/robots')
   const isProfile = pathname.startsWith('/profile')
-  // 只有启用且已发布的工单配置进入左侧导航；顶部默认进入第一个可用配置
+  // 只有启用且已发布的工单配置进入顶部「+」新建入口
   const availableTicketWorkflows = ticketWorkflows.filter(
     (item) => item.enabled && item.latestPublishedVersion > 0,
-  )
-  const sections = useMemo<NavSection[]>(
-    () =>
-      NAV_SECTIONS.map((section) =>
-        section.key === 'tickets'
-          ? {
-              ...section,
-              items:
-                availableTicketWorkflows.length > 0
-                  ? availableTicketWorkflows.map((workflow) => ({
-                      to: `/tickets/wf/${workflow.id}`,
-                      label: workflow.name,
-                      icon: ClipboardList,
-                      ready: true,
-                    }))
-                  : [
-                      {
-                        to: '/admin/ticket-config',
-                        label: '暂无可用工单配置',
-                        icon: ClipboardList,
-                        ready: false,
-                        badge: '去配置',
-                      },
-                    ],
-            }
-          : section,
-      ),
-    [availableTicketWorkflows],
   )
 
   useEffect(() => {
@@ -311,7 +337,7 @@ export function Layout() {
     ? undefined
     : isProfile
       ? PROFILE_SECTION
-      : (sections.find((s) => s.match(pathname)) ?? sections[0])
+      : (NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0])
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -344,7 +370,7 @@ export function Layout() {
         <div className="flex h-full min-w-0 items-center pl-3">
           <LayoutGroup id="top-navigation">
             <nav className="flex items-center gap-1">
-              {sections.map((section) => {
+              {NAV_SECTIONS.map((section) => {
                 const active = section.key === activeSection?.key
                 return (
                   <Link
@@ -489,32 +515,22 @@ export function Layout() {
           <>
             <aside className="w-[20%] shrink-0 overflow-y-auto bg-background p-3">
               <Navigation orientation="vertical" activeLink={pathname}>
-                <NavigationList className="gap-1">
-                  {activeSection.items.map((item) => (
-                    <NavigationItem key={item.to}>
-                      <NavigationLink
-                        value={item.to}
-                        disabled={!item.ready}
-                        render={
-                          <NavLink
-                            to={item.to}
-                            end={item.end ?? item.to === '/'}
-                          />
-                        }
-                      >
-                        <span className="flex w-full items-center justify-between gap-2">
-                          <span className="flex min-w-0 items-center gap-2.5">
-                            <item.icon size={18} className="shrink-0" />
-                            <span className="truncate">{item.label}</span>
-                          </span>
-                          {!item.ready && (
-                            <Badge variant="soft">{item.badge ?? '待补充'}</Badge>
-                          )}
-                        </span>
-                      </NavigationLink>
-                    </NavigationItem>
-                  ))}
-                </NavigationList>
+                {activeSection.groups ? (
+                  <div className="flex flex-col gap-4">
+                    {activeSection.groups.map((group, index) => (
+                      <div key={group.label ?? index}>
+                        {group.label && (
+                          <p className="px-3 pb-1 text-xs font-medium text-foreground-muted">
+                            {group.label}
+                          </p>
+                        )}
+                        <SidebarNavList items={group.items} />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <SidebarNavList items={activeSection.items} />
+                )}
               </Navigation>
             </aside>
 

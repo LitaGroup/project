@@ -2889,12 +2889,13 @@ export const api = {
       method: 'POST',
     }),
 
-  /** 工单列表（category/status/q 可选） */
+  /** 工单列表（category/status/q/workflowDefinitionId/scope 可选；scope=mine 仅当前用户提出） */
   listTickets: (params?: {
     category?: string
     status?: string
     q?: string
     workflowDefinitionId?: number
+    scope?: 'mine'
   }) => {
     const qs = new URLSearchParams()
     if (params?.category) qs.set('category', params.category)
@@ -2902,6 +2903,7 @@ export const api = {
       qs.set('workflowDefinitionId', String(params.workflowDefinitionId))
     if (params?.status) qs.set('status', params.status)
     if (params?.q) qs.set('q', params.q)
+    if (params?.scope) qs.set('scope', params.scope)
     const q = qs.toString()
     return request<Ticket[]>(`/tickets${q ? `?${q}` : ''}`)
   },

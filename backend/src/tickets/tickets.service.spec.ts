@@ -330,4 +330,21 @@ describe('TicketsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(dispatchService.assign).not.toHaveBeenCalled();
   });
+
+  it('查询我的工单时按 createdById 过滤', async () => {
+    const query = {
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+    tickets.createQueryBuilder.mockReturnValue(query);
+
+    await service.findAll({ createdById: 7 });
+
+    expect(query.andWhere).toHaveBeenCalledWith(
+      't.createdById = :createdById',
+      { createdById: 7 },
+    );
+  });
 });

@@ -46,8 +46,15 @@ const STATUS_ITEMS = {
   ...Object.fromEntries(TICKET_STATUSES.map((status) => [status, status])),
 }
 
-/** 工单列表：按工单配置（工作流）过滤；历史类型工单走旧链接兼容页 */
-export function TicketsPage({ definitionId }: { definitionId: number }) {
+interface TicketsPageProps {
+  /** 指定工单配置时展示该配置下的工单（保留按配置进入的链接） */
+  definitionId?: number
+  /** 全部工单 / 当前用户提出的工单 */
+  scope?: 'all' | 'mine'
+}
+
+/** 工单列表：支持指定配置、全部工单与我的工单 */
+export function TicketsPage({ definitionId, scope = 'all' }: TicketsPageProps) {
   const [definition, setDefinition] =
     useState<TicketWorkflowDefinitionDetail | null>(null)
   const [tickets, setTickets] = useState<Ticket[] | null>(null)
@@ -55,50 +62,88 @@ export function TicketsPage({ definitionId }: { definitionId: number }) {
   const [status, setStatus] = useState('all')
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (!definitionId) return
+    let alive = true
+    api
+      .getTicketWorkflowDefinition(definitionId)
+      .then((workflow) => {
+        if (alive) setDefinition(workflow)
+      })
+      .catch((e: Error) => {
+        if (alive) setError(e.message)
+      })
+    return () => {
+      alive = false
+    }
+  }, [definitionId])
+
   const reload = useCallback(() => {
-    if (!Number.isInteger(definitionId) || definitionId <= 0) return
-    Promise.all([
-      api.getTicketWorkflowDefinition(definitionId),
-      api.listTickets({ workflowDefinitionId: definitionId }),
-    ])
-      .then(([workflow, rows]) => {
-        setDefinition(workflow)
+    const statusFilter = status === 'all' ? undefined : status
+    const query = keyword.trim() || undefined
+    const request = definitionId
+      ? api.listTickets({
+          workflowDefinitionId: definitionId,
+          status: statusFilter,
+          q: query,
+        })
+      : api.listTickets({
+          scope: scope === 'mine' ? 'mine' : undefined,
+          status: statusFilter,
+          q: query,
+        })
+    request
+      .then((rows) => {
         setTickets(rows)
         setError(null)
       })
       .catch((e: Error) => setError(e.message))
-  }, [definitionId])
+  }, [definitionId, keyword, scope, status])
 
   useEffect(() => {
     const timer = window.setTimeout(reload, 250)
     return () => window.clearTimeout(timer)
-  }, [reload, status, keyword])
+  }, [reload])
 
-  const basePath = `/tickets/wf/${definitionId}`
+  const basePath = definitionId ? `/tickets/wf/${definitionId}` : null
   const available = Boolean(definition?.enabled && definition.latestPublishedVersion)
+  const title = definitionId
+    ? (definition?.name ?? '工单配置')
+    : scope === 'mine'
+      ? '我的工单'
+      : '工单列表'
+  const description = definitionId
+    ? (definition?.description || '按已发布工作流受理和推进的工单')
+    : scope === 'mine'
+      ? '我提出的全部工单'
+      : '全部工单'
+  const emptyText = definitionId
+    ? available
+      ? '暂无工单，点右上角「新建工单」创建'
+      : '该工单配置还没有发布版本'
+    : scope === 'mine'
+      ? '你还没有提出过工单，可从右上角「+」新建工单'
+      : '暂无工单'
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <PageBreadcrumb items={[{ label: '工单' }, { label: definition?.name ?? '工单配置' }]} />
-          <h1 className="mt-2 text-2xl font-semibold">
-            {definition?.name ?? '工单配置'}
-          </h1>
-          <p className="mt-1 text-sm text-foreground-muted">
-            {definition?.description || '按已发布工作流受理和推进的工单'}
-          </p>
+          <PageBreadcrumb items={[{ label: '工单' }, { label: title }]} />
+          <h1 className="mt-2 text-2xl font-semibold">{title}</h1>
+          <p className="mt-1 text-sm text-foreground-muted">{description}</p>
         </div>
-        {available ? (
-          <Link
-            to={`${basePath}/new`}
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            新建工单
-          </Link>
-        ) : (
-          <Badge variant="soft">配置未发布，暂不能新建</Badge>
-        )}
+        {definitionId &&
+          (available ? (
+            <Link
+              to={`${basePath}/new`}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              新建工单
+            </Link>
+          ) : (
+            <Badge variant="soft">配置未发布，暂不能新建</Badge>
+          ))}
       </div>
 
       {error && <p className="text-sm text-error-foreground">加载失败：{error}</p>}
@@ -180,9 +225,7 @@ export function TicketsPage({ definitionId }: { definitionId: number }) {
           {tickets !== null && tickets.length === 0 && (
             <TableRow>
               <TableCell colSpan={6} className="text-foreground-muted">
-                {available
-                  ? '暂无工单，点右上角「新建工单」创建'
-                  : '该工单配置还没有发布版本'}
+                {emptyText}
               </TableCell>
             </TableRow>
           )}

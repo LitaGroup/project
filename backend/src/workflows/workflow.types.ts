@@ -18,7 +18,7 @@ export const WORKFLOW_OUTCOMES = [
 
 export type WorkflowOutcome = (typeof WORKFLOW_OUTCOMES)[number];
 
-/** 流程结束虚拟节点，不会创建任务；验收通过或操作节点的成功/失败流转可以指向它 */
+/** 流程结束虚拟节点，不会创建任务；验收通过、审批通过/驳回或操作节点的成功/失败流转可以指向它 */
 export const WORKFLOW_END_NODE = '$end';
 
 /** 起始节点支持的输入字段类型 */

@@ -705,8 +705,8 @@ export class TicketWorkflowRuntimeService {
     }
     const edge = candidates[0];
     if (edge.to === WORKFLOW_END_NODE) {
-      // 操作失败可以直接结束流程；其余终局流转都视为工单完成
-      const failed = edge.outcome === 'failed';
+      // 审批驳回或操作失败直接结束流程；其余终局流转都视为工单完成
+      const failed = edge.outcome === 'failed' || edge.outcome === 'rejected';
       await this.updateTicket(ticketId, {
         workflowStatus: failed ? TICKET_STATUS_FAILED : TICKET_STATUS_COMPLETED,
         currentNodeKey: null,

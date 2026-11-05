@@ -171,8 +171,15 @@ export class TicketsService implements OnModuleInit {
     status?: string;
     q?: string;
     workflowDefinitionId?: number;
+    /** 需求方用户 ID：仅返回该用户创建的工单（「我的工单」） */
+    createdById?: number;
   }): Promise<TicketView[]> {
     const qb = this.tickets.createQueryBuilder('t');
+    if (params.createdById !== undefined) {
+      qb.andWhere('t.createdById = :createdById', {
+        createdById: params.createdById,
+      });
+    }
     if (params.workflowDefinitionId) {
       qb.andWhere('t.workflowDefinitionId = :workflowDefinitionId', {
         workflowDefinitionId: params.workflowDefinitionId,

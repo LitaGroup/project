@@ -45,12 +45,18 @@ export class TicketsController {
 
   @Get()
   findAll(
+    @Req() req: AuthedRequest,
     @Query('category') category?: string,
     @Query('status') status?: string,
     @Query('q') q?: string,
     @Query('workflowDefinitionId') workflowDefinitionId?: string,
+    @Query('scope') scope?: string,
   ) {
     const definitionId = Number(workflowDefinitionId);
+    const mine = scope?.trim() === 'mine';
+    if (mine && !req.user) {
+      throw new ForbiddenException('查看我的工单需要用户身份');
+    }
     return this.tickets.findAll({
       category,
       status,
@@ -59,6 +65,7 @@ export class TicketsController {
         Number.isInteger(definitionId) && definitionId > 0
           ? definitionId
           : undefined,
+      createdById: mine ? req.user?.id : undefined,
     });
   }
 

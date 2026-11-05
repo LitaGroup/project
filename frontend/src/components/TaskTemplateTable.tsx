@@ -50,154 +50,160 @@ export function TaskTemplateTable({
   const workerMap = new Map(workers.map((worker) => [worker.id, worker]))
 
   return (
-    <Table hoverableRows>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-52">名称</TableHead>
-          <TableHead className="w-28">任务类型</TableHead>
-          <TableHead className="w-64">处理机器人</TableHead>
-          <TableHead>任务定义描述</TableHead>
-          <TableHead className="w-28">创建人</TableHead>
-          <TableHead className="w-40">更新时间</TableHead>
-          <TableHead className="w-32 text-center">操作</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {(templates ?? []).map((template) => {
-          const system = SYSTEM_TASK_TEMPLATE_IDS.has(template.id)
-          const mine =
-            currentUserId != null && template.createdById === currentUserId
-          return (
-            <TableRow key={template.id}>
-              <TableCell className="max-w-52">
-                <p className="flex items-center gap-1.5 truncate font-medium">
-                  {mode === 'readonly' ? (
-                    <Link
-                      to={`/tasks/definitions/${template.id}`}
-                      className="truncate underline-offset-2 hover:underline"
-                    >
-                      {template.name}
-                    </Link>
-                  ) : (
-                    <span className="truncate">{template.name}</span>
-                  )}
-                  {system && (
-                    <Badge variant="soft" size="sm">
-                      系统
-                    </Badge>
-                  )}
-                  {mine && (
-                    <Badge variant="secondary" size="sm">
-                      我创建的
-                    </Badge>
-                  )}
-                  {template.followedByMe && (
-                    <Badge variant="secondary" size="sm">
-                      已关注
-                    </Badge>
-                  )}
-                </p>
-              </TableCell>
-              <TableCell>{template.type || '其它'}</TableCell>
-              <TableCell className="max-w-64">
-                {(template.agentIds ?? []).length > 0 ? (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                    {template.agentIds.map((agentId) => {
-                      const worker = workerMap.get(agentId)
-                      const name = worker?.name ?? `#${agentId}`
-                      return (
-                        <span
-                          key={agentId}
-                          className="flex min-w-0 max-w-full items-center gap-1.5"
-                          title={name}
-                        >
-                          <RobotAvatar
-                            name={name}
-                            avatarUrl={worker?.avatarUrl}
-                            size={22}
-                          />
-                          <span className="truncate text-xs">{name}</span>
-                        </span>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  '—'
-                )}
-              </TableCell>
-              <TableCell
-                className="max-w-md truncate text-xs text-foreground-muted"
-                title={template.description ?? ''}
-              >
-                {template.description ?? '—'}
-              </TableCell>
-              <TableCell className="truncate text-xs">
-                {template.createdByName ?? '系统'}
-              </TableCell>
-              <TableCell>
-                {new Date(template.updatedAt).toLocaleString()}
-              </TableCell>
-              <TableCell className="text-center">
-                <div className="flex justify-center gap-2">
-                  {mode === 'manage' ? (
-                    <>
+    <div className="w-full overflow-x-auto">
+      <Table hoverableRows className="table-fixed">
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-44">名称</TableHead>
+            <TableHead className="w-24">任务类型</TableHead>
+            <TableHead className="w-44">处理机器人</TableHead>
+            <TableHead>任务定义描述</TableHead>
+            <TableHead className="w-24">创建人</TableHead>
+            <TableHead className="w-36">更新时间</TableHead>
+            <TableHead
+              className={mode === 'plain' ? 'w-48 text-center' : 'w-40 text-center'}
+            >
+              操作
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {(templates ?? []).map((template) => {
+            const system = SYSTEM_TASK_TEMPLATE_IDS.has(template.id)
+            const mine =
+              currentUserId != null && template.createdById === currentUserId
+            return (
+              <TableRow key={template.id}>
+                <TableCell>
+                  <p className="flex min-w-0 items-center gap-1.5 truncate font-medium">
+                    {mode === 'readonly' ? (
                       <Link
-                        to={`/admin/task-templates/${template.id}`}
-                        className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                        to={`/tasks/definitions/${template.id}`}
+                        className="min-w-0 truncate underline-offset-2 hover:underline"
                       >
-                        编辑
+                        {template.name}
                       </Link>
-                      {!system && (
-                        <DeleteTemplateButton
-                          template={template}
-                          onDeleted={onChanged ?? (() => undefined)}
-                          onError={onError ?? (() => undefined)}
-                        />
-                      )}
-                    </>
-                  ) : mode === 'readonly' ? (
-                    <Link
-                      to={`/tasks/definitions/${template.id}`}
-                      className={buttonVariants({ variant: 'outline', size: 'sm' })}
-                    >
-                      查看
-                    </Link>
+                    ) : (
+                      <span className="min-w-0 truncate">{template.name}</span>
+                    )}
+                    {system && (
+                      <Badge variant="soft" size="sm">
+                        系统
+                      </Badge>
+                    )}
+                    {mine && (
+                      <Badge variant="secondary" size="sm">
+                        我创建的
+                      </Badge>
+                    )}
+                    {template.followedByMe && (
+                      <Badge variant="secondary" size="sm">
+                        已关注
+                      </Badge>
+                    )}
+                  </p>
+                </TableCell>
+                <TableCell className="truncate">{template.type || '其它'}</TableCell>
+                <TableCell>
+                  {(template.agentIds ?? []).length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      {template.agentIds.map((agentId) => {
+                        const worker = workerMap.get(agentId)
+                        const name = worker?.name ?? `#${agentId}`
+                        return (
+                          <span
+                            key={agentId}
+                            className="flex min-w-0 max-w-full items-center gap-1.5"
+                            title={name}
+                          >
+                            <RobotAvatar
+                              name={name}
+                              avatarUrl={worker?.avatarUrl}
+                              size={22}
+                            />
+                            <span className="min-w-0 truncate text-xs">{name}</span>
+                          </span>
+                        )
+                      })}
+                    </div>
                   ) : (
-                    <>
-                      <Button
-                        variant={template.followedByMe ? 'ghost' : 'outline'}
-                        size="sm"
-                        onClick={() => {
-                          const action = template.followedByMe
-                            ? api.unfollowTaskTemplate(template.id)
-                            : api.followTaskTemplate(template.id)
-                          action.then(onChanged).catch((e: Error) => onError?.(e.message))
-                        }}
-                      >
-                        {template.followedByMe ? '取消关注' : '关注'}
-                      </Button>
+                    '—'
+                  )}
+                </TableCell>
+                <TableCell
+                  className="truncate text-xs text-foreground-muted"
+                  title={template.description ?? ''}
+                >
+                  {template.description ?? '—'}
+                </TableCell>
+                <TableCell className="truncate text-xs">
+                  {template.createdByName ?? '系统'}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-xs">
+                  {new Date(template.updatedAt).toLocaleString()}
+                </TableCell>
+                <TableCell className="text-center">
+                  <div className="flex justify-center gap-2 whitespace-nowrap">
+                    {mode === 'manage' ? (
+                      <>
+                        <Link
+                          to={`/admin/task-templates/${template.id}`}
+                          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                        >
+                          编辑
+                        </Link>
+                        {!system && (
+                          <DeleteTemplateButton
+                            template={template}
+                            onDeleted={onChanged ?? (() => undefined)}
+                            onError={onError ?? (() => undefined)}
+                          />
+                        )}
+                      </>
+                    ) : mode === 'readonly' ? (
                       <Link
-                        to={`/admin/task-templates/${template.id}`}
+                        to={`/tasks/definitions/${template.id}`}
                         className={buttonVariants({ variant: 'outline', size: 'sm' })}
                       >
                         查看
                       </Link>
-                    </>
-                  )}
-                </div>
+                    ) : (
+                      <>
+                        <Button
+                          variant={template.followedByMe ? 'ghost' : 'outline'}
+                          size="sm"
+                          onClick={() => {
+                            const action = template.followedByMe
+                              ? api.unfollowTaskTemplate(template.id)
+                              : api.followTaskTemplate(template.id)
+                            action.then(onChanged).catch((e: Error) => onError?.(e.message))
+                          }}
+                        >
+                          {template.followedByMe ? '取消关注' : '关注'}
+                        </Button>
+                        <Link
+                          to={`/admin/task-templates/${template.id}`}
+                          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                        >
+                          查看
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            )
+          })}
+          {templates !== null && templates.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={7}>
+                {emptyText ?? '暂无任务定义，点右上角「新建任务定义」创建'}
               </TableCell>
             </TableRow>
-          )
-        })}
-        {templates !== null && templates.length === 0 && (
-          <TableRow>
-            <TableCell colSpan={7}>
-              {emptyText ?? '暂无任务定义，点右上角「新建任务定义」创建'}
-            </TableCell>
-          </TableRow>
-        )}
-      </TableBody>
-    </Table>
+          )}
+        </TableBody>
+      </Table>
+    </div>
   )
 }
 

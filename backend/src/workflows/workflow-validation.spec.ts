@@ -116,7 +116,7 @@ describe('normalizeWorkflowDefinition', () => {
     ).toHaveLength(2);
   });
 
-  it('只有验收通过或操作结果可以到达流程结束', () => {
+  it('验收驳回不能直接流转到流程结束', () => {
     const definition = validDefinition();
     definition.edges = definition.edges.map((edge) =>
       edge.from === 'acceptance' && edge.to === '$end'
@@ -124,9 +124,46 @@ describe('normalizeWorkflowDefinition', () => {
         : edge,
     );
     expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
-      '只有验收通过或操作节点',
+      '只有验收通过、审批通过/驳回或操作节点',
     );
   });
+
+  it.each(['approved', 'rejected'] as const)(
+    '允许审批节点结果 %s 后直接结束流程',
+    (outcome) => {
+      const otherOutcome = outcome === 'approved' ? 'rejected' : 'approved';
+      const definition: WorkflowDefinitionJson = {
+        startNode: 'start',
+        nodes: [
+          node('start', 'start'),
+          node('approval', 'approval'),
+          node('acceptance', 'acceptance'),
+        ],
+        edges: [
+          { from: 'start', to: 'approval', outcome: null, label: null },
+          {
+            from: 'approval',
+            to: '$end',
+            outcome,
+            label: null,
+          },
+          {
+            from: 'approval',
+            to: 'acceptance',
+            outcome: otherOutcome,
+            label: null,
+          },
+          { from: 'acceptance', to: '$end', outcome: 'approved', label: null },
+        ],
+      };
+      const normalized = normalizeWorkflowDefinition(definition, true);
+      expect(
+        normalized.edges.filter(
+          (edge) => edge.from === 'approval' && edge.to === '$end',
+        ),
+      ).toHaveLength(1);
+    },
+  );
 
   it('允许操作节点成功或失败后直接结束流程', () => {
     const definition: WorkflowDefinitionJson = {
