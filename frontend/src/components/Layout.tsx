@@ -90,6 +90,8 @@ interface NavSection {
   items: NavItem[]
   /** 需要分组展示时使用；存在时优先于 items */
   groups?: NavGroup[]
+  /** 仅管理员可见（管理区） */
+  adminOnly?: boolean
 }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -145,9 +147,7 @@ const NAV_SECTIONS: NavSection[] = [
       },
       {
         label: '全部',
-        items: [
-          { to: '/tickets/all', label: '工单列表', icon: ListCheck, ready: true },
-        ],
+        items: [],
       },
     ],
   },
@@ -165,6 +165,7 @@ const NAV_SECTIONS: NavSection[] = [
     key: 'admin',
     label: '管理',
     to: '/admin/users',
+    adminOnly: true,
     match: (p) => p.startsWith('/admin'),
     items: [
       { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
@@ -313,6 +314,11 @@ export function Layout() {
   const isWorkbench = pathname.startsWith('/workbench')
   const isRobotChat = pathname.startsWith('/robots')
   const isProfile = pathname.startsWith('/profile')
+  const isAdmin = user?.role === '管理员'
+  // 管理区仅管理员可见：非管理员过滤掉管理 Tab（路由层另有 RequireAdmin 兜底）
+  const visibleSections = isAdmin
+    ? NAV_SECTIONS
+    : NAV_SECTIONS.filter((section) => !section.adminOnly)
   // 只有启用且已发布的工单配置进入顶部「+」新建入口
   const availableTicketWorkflows = ticketWorkflows.filter(
     (item) => item.enabled && item.latestPublishedVersion > 0,
@@ -337,7 +343,29 @@ export function Layout() {
     ? undefined
     : isProfile
       ? PROFILE_SECTION
-      : (NAV_SECTIONS.find((s) => s.match(pathname)) ?? NAV_SECTIONS[0])
+      : (visibleSections.find((s) => s.match(pathname)) ?? visibleSections[0])
+  // 工单分区「全部」分组下追加所有启用且已发布的工单定义，点击进入对应工单列表
+  const sidebarSection: NavSection | undefined =
+    activeSection?.key === 'tickets' && activeSection.groups
+      ? {
+          ...activeSection,
+          groups: activeSection.groups
+            .map((group) =>
+              group.label === '全部'
+                ? {
+                    ...group,
+                    items: availableTicketWorkflows.map((workflow) => ({
+                      to: `/tickets/wf/${workflow.id}`,
+                      label: workflow.name,
+                      icon: ClipboardList,
+                      ready: true,
+                    })),
+                  }
+                : group,
+            )
+            .filter((group) => group.items.length > 0),
+        }
+      : activeSection
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -370,7 +398,7 @@ export function Layout() {
         <div className="flex h-full min-w-0 items-center pl-3">
           <LayoutGroup id="top-navigation">
             <nav className="flex items-center gap-1">
-              {NAV_SECTIONS.map((section) => {
+              {visibleSections.map((section) => {
                 const active = section.key === activeSection?.key
                 return (
                   <Link
@@ -469,14 +497,14 @@ export function Layout() {
                     新建{workflow.name}
                   </DropdownMenuItem>
                 ))
-              ) : (
+              ) : isAdmin ? (
                 <DropdownMenuItem
                   onClick={() => navigate('/admin/ticket-config')}
                 >
                   <ClipboardList size={16} />
                   暂无工单配置，去配置
                 </DropdownMenuItem>
-              )}
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
           <Link
@@ -511,13 +539,13 @@ export function Layout() {
 
       <div className="flex h-[calc(100vh-3.5rem)]">
         {/* 普通页面：左侧 20% 导航，右侧 80% 浅色圆角内容画布 */}
-        {!isWorkbench && !isRobotChat && activeSection && (
+        {!isWorkbench && !isRobotChat && sidebarSection && (
           <>
             <aside className="w-[20%] shrink-0 overflow-y-auto bg-background p-3">
               <Navigation orientation="vertical" activeLink={pathname}>
-                {activeSection.groups ? (
+                {sidebarSection.groups ? (
                   <div className="flex flex-col gap-4">
-                    {activeSection.groups.map((group, index) => (
+                    {sidebarSection.groups.map((group, index) => (
                       <div key={group.label ?? index}>
                         {group.label && (
                           <p className="px-3 pb-1 text-xs font-medium text-foreground-muted">
@@ -529,7 +557,7 @@ export function Layout() {
                     ))}
                   </div>
                 ) : (
-                  <SidebarNavList items={activeSection.items} />
+                  <SidebarNavList items={sidebarSection.items} />
                 )}
               </Navigation>
             </aside>

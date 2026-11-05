@@ -63,6 +63,14 @@ function RequireAuth() {
   return <Outlet />
 }
 
+/** 管理区守卫：仅管理员可访问，其他人直接访问 /admin/* 时跳回项目概览 */
+function RequireAdmin() {
+  const { user, loading } = useAuth()
+  if (loading) return null
+  if (user?.role !== '管理员') return <Navigate to="/" replace />
+  return <Outlet />
+}
+
 /** 工单列表按 URL 中的工单配置 ID 加载 */
 function TicketsPageWithDefinition() {
   const { definitionId } = useParams<{ definitionId: string }>()
@@ -222,24 +230,42 @@ function App() {
             path="/tasks/executors"
             element={<Navigate to="/admin/executors" replace />}
           />
-          <Route path="/admin/task-types" element={<TaskTypesPage />} />
-          <Route path="/admin/task-templates" element={<TaskTemplatesPage />} />
-          <Route
-            path="/admin/task-templates/new"
-            element={<TaskTemplateEditPage />}
-          />
-          <Route
-            path="/admin/task-templates/:templateId"
-            element={<TaskTemplateEditPage />}
-          />
-          <Route path="/admin/workers" element={<WorkersPage />} />
-          <Route path="/admin/workers/new" element={<WorkerEditPage />} />
-          <Route path="/admin/workers/:workerId" element={<WorkerEditPage />} />
-          <Route
-            path="/admin/workers/:workerId/debug"
-            element={<WorkerDebugPage />}
-          />
-          <Route path="/admin/executors" element={<ExecutorsPage />} />
+          <Route element={<RequireAdmin />}>
+            <Route path="/admin/task-types" element={<TaskTypesPage />} />
+            <Route path="/admin/task-templates" element={<TaskTemplatesPage />} />
+            <Route
+              path="/admin/task-templates/new"
+              element={<TaskTemplateEditPage />}
+            />
+            <Route
+              path="/admin/task-templates/:templateId"
+              element={<TaskTemplateEditPage />}
+            />
+            <Route path="/admin/workers" element={<WorkersPage />} />
+            <Route path="/admin/workers/new" element={<WorkerEditPage />} />
+            <Route path="/admin/workers/:workerId" element={<WorkerEditPage />} />
+            <Route
+              path="/admin/workers/:workerId/debug"
+              element={<WorkerDebugPage />}
+            />
+            <Route path="/admin/executors" element={<ExecutorsPage />} />
+            <Route path="/admin/users" element={<UserListPage />} />
+            <Route path="/admin/ticket-config" element={<TicketDefinitionsPage />} />
+            <Route
+              path="/admin/ticket-config/:definitionId"
+              element={<TicketDefinitionEditPage />}
+            />
+            <Route
+              path="/admin/ticket-definitions"
+              element={<Navigate to="/admin/ticket-config" replace />}
+            />
+            <Route
+              path="/admin/ticket-definitions/:definitionId"
+              element={<Navigate to="/admin/ticket-config" replace />}
+            />
+            <Route path="/admin/repos" element={<ReposPage />} />
+            <Route path="/admin/github-access" element={<GithubAccessPage />} />
+          </Route>
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
           <Route path="/tickets" element={<TicketHomePage />} />
           <Route path="/tickets/mine" element={<TicketsPage scope="mine" />} />
@@ -273,22 +299,6 @@ function App() {
             path="/profile/task-definitions"
             element={<ProfileTaskDefinitionsPage />}
           />
-          <Route path="/admin/users" element={<UserListPage />} />
-          <Route path="/admin/ticket-config" element={<TicketDefinitionsPage />} />
-          <Route
-            path="/admin/ticket-config/:definitionId"
-            element={<TicketDefinitionEditPage />}
-          />
-          <Route
-            path="/admin/ticket-definitions"
-            element={<Navigate to="/admin/ticket-config" replace />}
-          />
-          <Route
-            path="/admin/ticket-definitions/:definitionId"
-            element={<Navigate to="/admin/ticket-config" replace />}
-          />
-          <Route path="/admin/repos" element={<ReposPage />} />
-          <Route path="/admin/github-access" element={<GithubAccessPage />} />
           </Route>
         </Route>
       </Routes>

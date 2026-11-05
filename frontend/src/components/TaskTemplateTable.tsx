@@ -182,7 +182,7 @@ export function TaskTemplateTable({
                           {template.followedByMe ? '取消关注' : '关注'}
                         </Button>
                         <Link
-                          to={`/admin/task-templates/${template.id}`}
+                          to={`/tasks/definitions/${template.id}`}
                           className={buttonVariants({ variant: 'outline', size: 'sm' })}
                         >
                           查看

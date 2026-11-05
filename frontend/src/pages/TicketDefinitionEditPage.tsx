@@ -765,7 +765,9 @@ export function TicketDefinitionEditPage() {
                         <div className="flex flex-col gap-3">
                           {(node.inputFields ?? []).map((field, fieldIndex) => (
                             <div
-                              key={`${field.key}-${fieldIndex}`}
+                              // 用下标做 key：标识可直接编辑，不能把可编辑值当 key，
+                              // 否则每次按键都会重挂载输入框导致失焦
+                              key={fieldIndex}
                               className="rounded-[var(--radius-md)] border border-border-strong bg-background p-3"
                             >
                               <div className="grid gap-2 md:grid-cols-4">

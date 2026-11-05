@@ -117,12 +117,14 @@ export function ProfileTaskDefinitionsPage() {
             查看我创建或关注的任务定义，也可浏览平台全部任务定义
           </p>
         </div>
-        <Link
-          to="/admin/task-templates/new"
-          className={buttonVariants({ variant: 'outline', size: 'sm' })}
-        >
-          新建任务定义
-        </Link>
+        {user?.role === '管理员' && (
+          <Link
+            to="/admin/task-templates/new"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            新建任务定义
+          </Link>
+        )}
       </div>
       {error && <p className="text-sm">操作失败:{error}</p>}
 
