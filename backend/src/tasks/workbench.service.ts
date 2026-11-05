@@ -596,20 +596,21 @@ export class WorkbenchService {
         personalAgentId: personalAgent?.id ?? null,
         ownedWorkerIds: ownedWorkers.map((item) => item.id),
       });
-      if (roles.length === 0) {
-        throw new ForbiddenException('仅工作台内的任务可以作为 AGENT 上下文');
-      }
+      // 任务详情网页对登录用户可见，个人 AGENT 也按同一可见范围提供上下文；
+      // 无参与角色时只作为查看者，写操作仍由任务中心现有权限校验拦截。
       taskContext = [
-        '# 当前工作台任务',
+        '# 当前任务',
         '',
         `- 任务 ID：${task.id}`,
         `- 编号：${task.code}`,
         `- 标题：${task.title}`,
         `- 状态：${task.status}-${task.subStatus}`,
-        `- 你在该任务中的角色：${roles.join(' / ')}`,
+        `- 你在该任务中的角色：${roles.length > 0 ? roles.join(' / ') : '查看者（只读）'}`,
         `- 详情接口：GET /api/tasks/${task.id}.md`,
         '',
-        '如需操作该任务，先读取详情确认最新状态，再按个人 AGENT 角色定义中的接口执行。',
+        roles.length > 0
+          ? '如需操作该任务，先读取详情确认最新状态，再按个人 AGENT 角色定义中的接口执行。'
+          : '你当前不是该任务的需求方、执行方或负责方，只能查看和解释任务信息，不要调用会修改任务状态或文档的接口。',
       ].join('\n');
     } else if (pageContext) {
       taskContext = buildAgentPagePrompt(pageContext);

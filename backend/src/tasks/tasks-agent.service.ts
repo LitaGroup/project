@@ -23,6 +23,11 @@ export interface AgentTaskScope {
   workerIds: number[];
   /** 我负责的机器人（workers.ownerUserId），任务清单中标记为「负责方」 */
   responsibleWorkerIds: number[];
+  /**
+   * 是否可读取「我的任务」范围之外的可见任务。
+   * 仅用户本人及其真人机器人/个人 AGENT 为 true；普通执行机器人仍按参与身份收敛。
+   */
+  canReadVisibleTasks: boolean;
   /** 身份描述（用于 Markdown 头部） */
   label: string;
 }
@@ -78,12 +83,14 @@ export class TasksAgentService {
     const userIds = new Set<number>();
     const workerIds = new Set<number>();
     const labels: string[] = [];
+    let canReadVisibleTasks = false;
 
     if (req.worker) {
       workerIds.add(req.worker.id);
       labels.push(req.worker.name);
       if (req.worker.humanUserId) {
         userIds.add(req.worker.humanUserId);
+        canReadVisibleTasks = true;
         const personal = await this.personalAgents.findForUser(
           req.worker.humanUserId,
         );
@@ -91,6 +98,7 @@ export class TasksAgentService {
       }
       if (req.worker.personalAgentUserId) {
         userIds.add(req.worker.personalAgentUserId);
+        canReadVisibleTasks = true;
         const human = await this.workersService.findByHumanUserId(
           req.worker.personalAgentUserId,
         );
@@ -100,6 +108,7 @@ export class TasksAgentService {
     if (req.user) {
       userIds.add(req.user.id);
       labels.push(req.user.name);
+      canReadVisibleTasks = true;
       const human = await this.workersService.findByHumanUserId(req.user.id);
       if (human) workerIds.add(human.id);
       const personal = await this.personalAgents.findForUser(req.user.id);
@@ -129,6 +138,7 @@ export class TasksAgentService {
       userIds: [...userIds],
       workerIds: [...workerIds],
       responsibleWorkerIds: [...responsibleWorkerIds],
+      canReadVisibleTasks,
       label: labels.filter(Boolean).join(' / ') || '当前 Agent',
     };
   }
@@ -218,7 +228,8 @@ export class TasksAgentService {
   /** GET /api/tasks/:id.md：任务详情 */
   async detailMarkdown(scope: AgentTaskScope, taskId: number): Promise<string> {
     const task = await this.tasksService.findOneDetail(taskId);
-    if (!this.includes(scope, task)) {
+    const canOperate = this.includes(scope, task);
+    if (!canOperate && !scope.canReadVisibleTasks) {
       throw new ForbiddenException(
         '仅任务需求方、执行方或负责方可以读取该任务',
       );
@@ -243,7 +254,7 @@ export class TasksAgentService {
       `- 任务定义：${task.templateName ?? '未设置'}`,
       `- 需求方：${this.requesterName(names, task)}`,
       `- 执行机器人：${this.agentName(names, task)}`,
-      `- 我的角色：${this.roleOf(scope, task)}`,
+      `- 我的角色：${canOperate ? this.roleOf(scope, task) : '查看者（只读）'}`,
       `- 创建时间：${beijingTime(task.createdAt)}`,
       `- 更新时间：${beijingTime(task.updatedAt)}`,
       task.assignedAt ? `- 分配时间：${beijingTime(task.assignedAt)}` : '',
@@ -324,28 +335,41 @@ export class TasksAgentService {
       }
     }
     lines.push('## 交付结果', '', body(task.result), '');
-    lines.push(
-      '## 可用操作',
-      '',
-      '- 接受邀约：`POST /api/tasks/{id}/accept-task.md`',
-      '- 拒绝邀约：`POST /api/tasks/{id}/refuse.md`',
-      '- 提问：`POST /api/tasks/{id}/questions/ask.md`',
-      '- 答复：`POST /api/tasks/{id}/questions/{questionId}/answer.md`',
-      '- 交付文档：`GET /api/tasks/{id}/handoff.md`',
-      '- 创建/更新交付文档：`POST /api/tasks/{id}/handoff/update.md`（body 带 `content` 与 `baseVersion`；首次创建用 0，之后按当前版本更新）',
-      '- 任务文档目录：`GET /api/tasks/{id}/documents.md`',
-      '- 写入任务文档：`POST /api/tasks/{id}/documents.md`（body 带 `name` 与 `content`，如 `TECH_DESIGN.md`）',
-      '- 工单文档：`GET /api/tasks/{id}/ticket-documents.md`（任务属于工单时查看清单与调用示例）',
-      '- 交付/更新/删除工单文档：`POST /api/tasks/{id}/ticket-documents.md` / `.../{documentId}/update.md` / `.../{documentId}/delete.md`',
-      '- 申请验收：`POST /api/tasks/{id}/handoff/apply.md`',
-      '- 验收通过：`POST /api/tasks/{id}/handoff/accept.md`',
-      '- 验收返工：`POST /api/tasks/{id}/handoff/refuse.md`',
-      '- 判定失败：`POST /api/tasks/{id}/fail.md`',
-      '- 创建子任务：`POST /api/tasks/{id}/subtasks/create.md`',
-      '',
-      '> 先确认当前状态与自己的角色：只有需求方可验收/返工/判失败，只有执行方可接受/提问/申请验收。',
-      '',
-    );
+    if (canOperate) {
+      lines.push(
+        '## 可用操作',
+        '',
+        '- 接受邀约：`POST /api/tasks/{id}/accept-task.md`',
+        '- 拒绝邀约：`POST /api/tasks/{id}/refuse.md`',
+        '- 提问：`POST /api/tasks/{id}/questions/ask.md`',
+        '- 答复：`POST /api/tasks/{id}/questions/{questionId}/answer.md`',
+        '- 交付文档：`GET /api/tasks/{id}/handoff.md`',
+        '- 创建/更新交付文档：`POST /api/tasks/{id}/handoff/update.md`（body 带 `content` 与 `baseVersion`；首次创建用 0，之后按当前版本更新）',
+        '- 任务文档目录：`GET /api/tasks/{id}/documents.md`',
+        '- 写入任务文档：`POST /api/tasks/{id}/documents.md`（body 带 `name` 与 `content`，如 `TECH_DESIGN.md`）',
+        '- 工单文档：`GET /api/tasks/{id}/ticket-documents.md`（任务属于工单时查看清单与调用示例）',
+        '- 交付/更新/删除工单文档：`POST /api/tasks/{id}/ticket-documents.md` / `.../{documentId}/update.md` / `.../{documentId}/delete.md`',
+        '- 申请验收：`POST /api/tasks/{id}/handoff/apply.md`',
+        '- 验收通过：`POST /api/tasks/{id}/handoff/accept.md`',
+        '- 验收返工：`POST /api/tasks/{id}/handoff/refuse.md`',
+        '- 判定失败：`POST /api/tasks/{id}/fail.md`',
+        '- 创建子任务：`POST /api/tasks/{id}/subtasks/create.md`',
+        '',
+        '> 先确认当前状态与自己的角色：只有需求方可验收/返工/判失败，只有执行方可接受/提问/申请验收。',
+        '',
+      );
+    } else {
+      lines.push(
+        '## 只读访问',
+        '',
+        '- 交付文档：`GET /api/tasks/{id}/handoff.md`',
+        '- 任务文档目录：`GET /api/tasks/{id}/documents.md`',
+        '- 工单文档：`GET /api/tasks/{id}/ticket-documents.md`（任务属于工单时查看清单）',
+        '',
+        '> 当前身份不是任务需求方、执行方或负责方，仅可查看，不能接受、提问、交付、验收、返工、判失败或写入任务文档。',
+        '',
+      );
+    }
     return lines.join('\n');
   }
 
