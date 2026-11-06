@@ -51,6 +51,7 @@ import {
   type Worker,
 } from '../../lib/api'
 import { matchesPinyinSearch } from '../../lib/pinyin-search'
+import { useImeEnterGuard } from '../../lib/ime-enter'
 import { TaskStatusBadge } from '../StatusBadge'
 import {
   TaskChatMessageItem,
@@ -118,6 +119,7 @@ export function TaskWorkbenchPanel({
   const [subtaskTitle, setSubtaskTitle] = useState('')
   const [subtaskInput, setSubtaskInput] = useState('')
   const [subtaskOutputSpec, setSubtaskOutputSpec] = useState('')
+  const imeEnter = useImeEnterGuard()
 
   const assignWorkers = useMemo(
     () => workers.filter((worker) => worker.id !== task?.agentId),
@@ -611,11 +613,13 @@ export function TaskWorkbenchPanel({
                     (currentRightTab === 'responsible' && awaitingReview)
                   }
                   onChange={(event) => setDraft(event.target.value)}
+                  onCompositionStart={imeEnter.onCompositionStart}
+                  onCompositionEnd={imeEnter.onCompositionEnd}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault()
-                      void sendMessage()
-                    }
+                    if (event.key !== 'Enter' || event.shiftKey) return
+                    if (imeEnter.isImeEnter(event)) return
+                    event.preventDefault()
+                    void sendMessage()
                   }}
                   placeholder={
                     !task

@@ -48,6 +48,7 @@ import {
   toChatToolPart,
 } from './ChatParts'
 import { ModelSettingsPicker } from './ModelSettingsPicker'
+import { useImeEnterGuard } from '../../lib/ime-enter'
 
 interface DebugChatProps {
   snapshot: WorkerDebugSnapshot
@@ -111,6 +112,7 @@ export function DebugChat({
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachmentsRef = useRef<WorkerDebugAttachment[]>([])
+  const imeEnter = useImeEnterGuard()
 
   const updateAttachments = useCallback(
     (next: WorkerDebugAttachment[]) => {
@@ -207,7 +209,7 @@ export function DebugChat({
             </ThreadPrimitive.Messages>
           </ThreadPrimitive.Viewport>
           <ChatComposerDock>
-            {/* assistant-ui 的 Enter 发送依赖最近的 form，缺少 Root 时只能点击发送 */}
+            {/* Enter 发送由下方输入框自行接管，统一走输入法防护后提交最近的 form */}
             <ComposerPrimitive.Root>
               <ChatComposerFrame
                 singleLine
@@ -285,7 +287,16 @@ export function DebugChat({
               >
                 <ComposerPrimitive.Input
                   rows={2}
-                  submitMode="enter"
+                  submitMode="none"
+                  onCompositionStart={imeEnter.onCompositionStart}
+                  onCompositionEnd={imeEnter.onCompositionEnd}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' || event.shiftKey) return
+                    if (imeEnter.isImeEnter(event)) return
+                    if (running) return
+                    event.preventDefault()
+                    event.currentTarget.form?.requestSubmit()
+                  }}
                   placeholder={
                     placeholder ??
                     (running

@@ -7,6 +7,7 @@ import {
   MessageCircleQuestion,
 } from '@appica/icons-react'
 import type { TaskChatQuestion } from '../lib/api'
+import { useImeEnterGuard } from '../lib/ime-enter'
 
 interface QuestionCardProps {
   question: TaskChatQuestion
@@ -33,6 +34,7 @@ export function QuestionCard({
   const [index, setIndex] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const imeEnter = useImeEnterGuard()
   const pending = question.state === 'pending'
   const interactive = pending && !disabled && !busy
   const total = question.questions.length
@@ -223,13 +225,11 @@ export function QuestionCard({
                         [currentIndex]: event.target.value,
                       }))
                     }
+                    onCompositionStart={imeEnter.onCompositionStart}
+                    onCompositionEnd={imeEnter.onCompositionEnd}
                     onKeyDown={(event) => {
-                      if (
-                        event.key !== 'Enter' ||
-                        event.nativeEvent.isComposing
-                      ) {
-                        return
-                      }
+                      if (event.key !== 'Enter') return
+                      if (imeEnter.isImeEnter(event)) return
                       event.preventDefault()
                       if (submitting || answersOf(currentIndex).length === 0) {
                         return
