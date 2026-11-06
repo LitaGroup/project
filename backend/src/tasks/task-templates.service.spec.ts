@@ -198,15 +198,24 @@ describe('TaskTemplatesService', () => {
 
     it('详情包含任务定义描述与系统限制', async () => {
       templates.findOne.mockResolvedValue({
-        ...template(10),
+        ...template(6),
+        name: '未知任务',
         description: '任务范围\n交付要求',
       });
 
-      const markdown = await service.findOneMarkdown(10);
+      const markdown = await service.findOneMarkdown(6);
 
       expect(markdown).toContain('系统（不可改名、不可修改类型、不可删除）');
       expect(markdown).toContain('任务范围');
       expect(markdown).toContain('交付要求');
+    });
+
+    it('退役的工单调度定义 ID 视为自定义定义', async () => {
+      templates.findOne.mockResolvedValue(template(10));
+
+      const markdown = await service.findOneMarkdown(10);
+
+      expect(markdown).toContain('- 来源：自定义');
     });
 
     it('机器人 Token 创建时记录机器人名称但不伪造用户 ID', async () => {

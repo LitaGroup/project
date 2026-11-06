@@ -1388,52 +1388,6 @@ export interface TaskPackage {
   liveLines?: string[]
 }
 
-/** 工单类型：当前开放技术工单与数据工单，其余类型保留配置与内置调度定义；已开放的类型排在前面 */
-export const TICKET_CATEGORY_DEFINITIONS = [
-  {
-    category: '技术工单',
-    defaultTemplateId: 11,
-    defaultTemplateName: '工单-技术工单-调度',
-    enabled: true,
-    description: '业务同学向技术同学申请完成某个任务，由调度机器人澄清后转交技术任务定义',
-  },
-  {
-    category: '数据工单',
-    defaultTemplateId: 12,
-    defaultTemplateName: '工单-数据工单-调度',
-    enabled: true,
-    description: '数据查询、数据导出、报表设计等申请，由调度机器人澄清口径后转交数据任务定义',
-  },
-  {
-    category: '方案工单',
-    defaultTemplateId: 10,
-    defaultTemplateName: '工单-方案工单-调度',
-    enabled: false,
-    description: '针对方案设计的工单（已关闭创建，历史工单保留查看）',
-  },
-  {
-    category: '运维工单',
-    defaultTemplateId: 13,
-    defaultTemplateName: '工单-运维工单-调度',
-    enabled: false,
-    description: '线上数据库、NACOS 等操作申请（暂未开放）',
-  },
-  {
-    category: '需求工单',
-    defaultTemplateId: 14,
-    defaultTemplateName: '工单-需求工单-调度',
-    enabled: false,
-    description: '业务同学向产品同学提出需求申请（暂未开放）',
-  },
-  {
-    category: 'BUG反馈',
-    defaultTemplateId: 15,
-    defaultTemplateName: '工单-BUG工单-调度',
-    enabled: false,
-    description: '线上故障反馈工单（暂未开放）',
-  },
-] as const
-
 export type TicketCategory = string
 export type TicketAssigneeType = 'user' | 'worker'
 
@@ -1522,29 +1476,6 @@ export interface Ticket {
   workflow?: TicketWorkflowView | null
   createdAt: string
   updatedAt: string
-}
-
-export interface TicketAllowedTemplate {
-  id: number
-  name: string
-  type: string
-  description: string | null
-  agentIds: number[]
-}
-
-export interface TicketDetail extends Ticket {
-  config: TicketConfig | null
-  allowedTemplates: TicketAllowedTemplate[]
-}
-
-export interface TicketConfig {
-  category: TicketCategory
-  defaultTemplateId: number
-  defaultTemplateName: string
-  allowedTemplateIds: number[]
-  allowedTemplates: Array<{ id: number; name: string; type: string }>
-  enabled: boolean
-  description: string
 }
 
 /** 工单工作流节点类型：起始 / 审批 / 操作 / 验收 */
@@ -2907,14 +2838,12 @@ export const api = {
     const q = qs.toString()
     return request<Ticket[]>(`/tickets${q ? `?${q}` : ''}`)
   },
-  /** 工单详情：工单 + 关联任务 + 可转派定义 */
-  getTicket: (id: number) => request<TicketDetail>(`/tickets/${id}`),
-  /** 创建工单：工作流工单按配置起始字段提交；历史类型工单保留 category/description */
+  /** 工单详情：工单 + 关联任务 + 工作流运行视图 */
+  getTicket: (id: number) => request<Ticket>(`/tickets/${id}`),
+  /** 创建工单：工作流工单按配置起始字段提交 */
   createTicket: (input: {
-    category?: string
     workflowDefinitionId?: number
     title?: string
-    description?: string
     inputValues?: Record<string, unknown>
   }) =>
     request<Ticket>('/tickets', {
@@ -2930,16 +2859,6 @@ export const api = {
   /** 审批节点直接通过（仅当前审批节点的真人处理人） */
   approveTicketWorkflow: (id: number) =>
     request<Ticket>(`/tickets/${id}/workflow/approve`, { method: 'POST' }),
-  /** 工单类型配置（旧模型兼容，仅供历史工单详情展示） */
-  listTicketConfigs: () => request<TicketConfig[]>('/ticket-configs'),
-  updateTicketConfig: (category: string, allowedTemplateIds: number[]) =>
-    request<TicketConfig>(
-      `/ticket-configs/${encodeURIComponent(category)}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({ allowedTemplateIds }),
-      },
-    ),
 
   /** 管理端工单配置（工单工作流） */
   listTicketWorkflowDefinitions: () =>

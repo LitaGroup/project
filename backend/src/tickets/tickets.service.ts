@@ -4,11 +4,9 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomBytes } from 'crypto';
 import { In, Repository } from 'typeorm';
 import type { User } from '../auth/user.entity';
 import type { AuthedRequest } from '../auth/auth.guard';
@@ -18,16 +16,11 @@ import { unescapeMarkdown } from '../common/markdown-escape';
 import { TaskDispatchService } from '../tasks/task-dispatch.service';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Task } from '../tasks/task.entity';
-import { deriveTaskTitle } from '../tasks/task-title';
-import {
-  isSystemTaskTemplateId,
-  TICKET_TASK_TYPE,
-} from '../tasks/system-task-templates';
 import { TasksService } from '../tasks/tasks.service';
 import { TaskDocumentService } from '../tasks/task-document.service';
 import { TaskMessage } from '../tasks/task-message.entity';
 import { Worker } from '../workers/worker.entity';
-import { findTicketCategory, TICKET_CATEGORIES } from './ticket-categories';
+import { findTicketCategory } from './ticket-categories';
 import { TicketConfig } from './ticket-config.entity';
 import { TicketDocumentsService } from './ticket-documents.service';
 import { Ticket } from './ticket.entity';
@@ -37,10 +30,8 @@ import {
 } from './ticket-workflow-runtime.service';
 
 export interface CreateTicketInput {
-  category?: string;
   title?: string;
-  description?: string;
-  /** 新工作流工单：指定工单配置并按起始节点字段提交 */
+  /** 工单配置：按起始节点字段创建工作流工单 */
   workflowDefinitionId?: number;
   inputValues?: Record<string, unknown>;
 }
@@ -53,26 +44,12 @@ export interface RouteTicketInput {
   workPlan: string;
 }
 
-export interface UpdateTicketConfigInput {
-  allowedTemplateIds?: number[];
-}
-
 export interface TicketView extends Ticket {
   /** 推导状态：待分配/待接受/待反馈/待继续/待申请验收/待验收/处理中/已完成/已失败/已取消 */
   status: string;
   task: Task | null;
   /** 工作流工单的运行视图；历史工单为空 */
   workflow?: Awaited<ReturnType<TicketWorkflowRuntimeService['workflowView']>>;
-}
-
-export interface TicketConfigView {
-  category: string;
-  defaultTemplateId: number;
-  defaultTemplateName: string;
-  allowedTemplateIds: number[];
-  allowedTemplates: Array<{ id: number; name: string; type: string }>;
-  enabled: boolean;
-  description: string;
 }
 
 function markdownText(value: string | null | undefined): string {
@@ -112,11 +89,11 @@ export function deriveTicketStatus(task: Task | null): string {
 }
 
 /**
- * 工单：创建时按工单类型固定默认任务定义派发，支持调度机器人澄清后转交配置内的后续定义。
- * 工单与任务一对一；对话、验收、失败、取消全部复用任务中心。
+ * 工单：通过工单配置（工作流）创建，节点任务按任务定义派发；
+ * 历史调度工单保留只读与转交通道，对话、验收、失败、取消全部复用任务中心。
  */
 @Injectable()
-export class TicketsService implements OnModuleInit {
+export class TicketsService {
   private readonly logger = new Logger(TicketsService.name);
   private readonly apiUrl: string;
 
@@ -145,29 +122,6 @@ export class TicketsService implements OnModuleInit {
     ).replace(/\/+$/, '');
   }
 
-  /** 开发环境 synchronize 建表后补齐六类工单配置；已有配置不覆盖 */
-  async onModuleInit(): Promise<void> {
-    for (const item of TICKET_CATEGORIES) {
-      await this.configs
-        .createQueryBuilder()
-        .insert()
-        .into(TicketConfig)
-        .values({
-          category: item.category,
-          defaultTemplateId: item.defaultTemplateId,
-          allowedTemplateIds: [],
-          enabled: item.enabled,
-        })
-        .orIgnore()
-        .execute();
-      // 存量配置按当前开放清单对齐（当前无管理端关闭入口，启停由代码常量控制）
-      await this.configs.update(
-        { category: item.category },
-        { enabled: item.enabled },
-      );
-    }
-  }
-
   async findAll(params: {
     category?: string;
     status?: string;
@@ -189,7 +143,7 @@ export class TicketsService implements OnModuleInit {
     } else if (params.category) {
       const category = findTicketCategory(params.category);
       if (!category) return [];
-      qb.andWhere('t.category = :category', { category: category.category });
+      qb.andWhere('t.category = :category', { category });
     }
     const q = params.q?.trim().toLowerCase();
     if (q) {
@@ -254,18 +208,7 @@ export class TicketsService implements OnModuleInit {
     return views.filter((ticket) => !status || ticket.status === status);
   }
 
-  async findOne(id: number): Promise<
-    TicketView & {
-      config: TicketConfigView | null;
-      allowedTemplates: Array<{
-        id: number;
-        name: string;
-        type: string;
-        description: string | null;
-        agentIds: number[];
-      }>;
-    }
-  > {
+  async findOne(id: number): Promise<TicketView> {
     const ticket = await this.mustFind(id);
     const workflow = ticket.workflowDefinitionId
       ? await this.workflowRuntime.workflowView(ticket)
@@ -273,10 +216,6 @@ export class TicketsService implements OnModuleInit {
     const task = ticket.taskId
       ? await this.tasks.findOne({ where: { id: ticket.taskId } })
       : null;
-    // 工作流工单不再绑定旧的类型调度配置；历史工单保留兼容视图
-    const config = ticket.workflowDefinitionId
-      ? null
-      : await this.configView(ticket.category);
     // 历史工单的处理机器人若是个人 AGENT，对外统一显示其主人姓名
     const assignee = await this.workers.findOne({
       where: { id: ticket.assigneeId },
@@ -286,178 +225,37 @@ export class TicketsService implements OnModuleInit {
       assignee?.personalAgentUserId && assignee.ownerName
         ? assignee.ownerName
         : ticket.assigneeName;
-    const allowedTemplates = config
-      ? await this.templates.find({
-          where: { id: In(config.allowedTemplateIds) },
-        })
-      : [];
     return {
       ...ticket,
       assigneeName,
       task,
       status: workflow?.status ?? deriveTicketStatus(task),
       workflow,
-      config,
-      allowedTemplates: (config?.allowedTemplateIds ?? [])
-        .map((templateId) =>
-          allowedTemplates.find((template) => template.id === templateId),
-        )
-        .filter((template): template is TaskTemplate => Boolean(template))
-        .map((template) => ({
-          id: template.id,
-          name: template.name,
-          type: template.type,
-          description: template.description,
-          agentIds: template.agentIds ?? [],
-        })),
     };
   }
 
   async create(input: CreateTicketInput, user: User): Promise<TicketView> {
-    if (input.workflowDefinitionId) {
-      const ticket = await this.workflowRuntime.create(
-        {
-          workflowDefinitionId: input.workflowDefinitionId,
-          title: input.title,
-          inputValues: input.inputValues ?? {},
-        },
-        user,
-      );
-      const workflow = await this.workflowRuntime.workflowView(ticket);
-      return {
-        ...ticket,
-        task: null,
-        status: ticket.workflowStatus ?? '处理中',
-        workflow,
-      };
-    }
-    const category = findTicketCategory(input.category);
-    if (!category) throw new BadRequestException('工单类型不存在');
-    const config = await this.configs.findOne({
-      where: { category: category.category },
-    });
-    if (!config?.enabled || !category.enabled) {
-      throw new BadRequestException(`「${category.category}」暂未开放创建`);
-    }
-    const description = input.description?.trim();
-    if (!description) throw new BadRequestException('工单描述不能为空');
-
-    const template = await this.templates.findOne({
-      where: { id: config.defaultTemplateId },
-    });
-    if (!template) {
+    if (!input.workflowDefinitionId) {
+      // 旧调度模型（category + 默认调度任务定义）已随 ID 10-15 定义一并退役
       throw new BadRequestException(
-        `工单默认任务定义 #${config.defaultTemplateId} 不存在，请检查系统配置`,
+        '旧版工单类别创建已下线，请通过工单配置（工作流）创建工单',
       );
     }
-    const agent = await this.pickEnabledAgent(template.agentIds ?? []);
-    if (!agent) {
-      throw new BadRequestException(
-        `默认任务定义「${template.name}」没有启用的处理机器人，请先在任务定义中配置`,
-      );
-    }
-
-    const requesterWorker = await this.workers.findOne({
-      where: { humanUserId: user.id },
-      select: { id: true },
-    });
-    const title =
-      (input.title?.trim() ? unescapeMarkdown(input.title.trim()) : '') ||
-      deriveTaskTitle(description) ||
-      '新工单';
-    const task = await this.tasksService.create({
-      title,
-      description,
-      type: TICKET_TASK_TYPE,
-      templateId: template.id,
-      agentId: agent.id,
-      createdById: user.id,
-      requesterType: requesterWorker ? 'worker' : 'user',
-      requesterId: requesterWorker?.id ?? user.id,
-      operatorName: user.name,
-    });
-    // 工单严格绑定默认定义：直接进入待接受，不再经过通用分配器的同类型/未知任务兜底
-    const advanced = await this.tasks.update(
+    const ticket = await this.workflowRuntime.create(
       {
-        id: task.id,
-        status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
+        workflowDefinitionId: input.workflowDefinitionId,
+        title: input.title,
+        inputValues: input.inputValues ?? {},
       },
-      {
-        subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
-        offerAttemptAt: null,
-      },
+      user,
     );
-    if (advanced.affected) {
-      task.subStatus = TaskSubStatus.PENDING_ACCEPTANCE;
-      await this.tasksService.addEvent(
-        task.id,
-        '状态变更',
-        `状态变更：等待中-待分配 → 等待中-待接受（任务定义「${template.name}」，机器人：${agent.name}）`,
-        null,
-        {
-          source: 'definition',
-          templateId: template.id,
-          templateName: template.name,
-          agentId: agent.id,
-          agentName: agent.name,
-        },
-      );
-    } else {
-      const latest = await this.tasks.findOne({ where: { id: task.id } });
-      if (latest) {
-        task.status = latest.status;
-        task.subStatus = latest.subStatus;
-      }
-    }
-
-    let saved: Ticket;
-    try {
-      const ticket = await this.tickets.save(
-        this.tickets.create({
-          code: `TMP-${randomBytes(8).toString('hex')}`,
-          category: category.category,
-          title,
-          description,
-          createdById: user.id,
-          createdByName: user.name,
-          // 责任方由工单绑定的默认调度机器人自动担任，创建时无需用户选择
-          assigneeType: 'worker',
-          assigneeId: agent.id,
-          assigneeName: agent.name,
-          taskId: task.id,
-        }),
-      );
-      ticket.code = `WO-${String(ticket.id).padStart(4, '0')}`;
-      saved = await this.tickets.save(ticket);
-    } catch (error) {
-      await this.tasksService
-        .remove(task.id, user.name)
-        .catch((e: Error) =>
-          this.logger.warn(
-            `工单创建失败后清理任务 #${task.id} 失败：${e.message}`,
-          ),
-        );
-      throw error;
-    }
-    await this.tasksService
-      .addEvent(
-        task.id,
-        '操作',
-        `创建${category.category} ${saved.code}，处理机器人：${agent.name}`,
-        user.name,
-        {
-          ticketId: saved.id,
-          ticketCode: saved.code,
-          category: saved.category,
-          assigneeType: saved.assigneeType,
-          assigneeId: saved.assigneeId,
-        },
-      )
-      .catch((e: Error) =>
-        this.logger.warn(`工单 ${saved.code} 创建事件写入失败：${e.message}`),
-      );
-    return { ...saved, task, status: deriveTicketStatus(task) };
+    const workflow = await this.workflowRuntime.workflowView(ticket);
+    return {
+      ...ticket,
+      task: null,
+      status: ticket.workflowStatus ?? '处理中',
+      workflow,
+    };
   }
 
   /** 工作流工单验收（通过/驳回）；历史工单由运行时拒绝 */
@@ -495,87 +293,6 @@ export class TicketsService implements OnModuleInit {
       status: ticket.workflowStatus ?? '处理中',
       workflow,
     };
-  }
-
-  async listConfigs(): Promise<TicketConfigView[]> {
-    const rows = await this.configs.find();
-    return Promise.all(
-      TICKET_CATEGORIES.map((item) =>
-        this.configView(
-          item.category,
-          rows.find((row) => row.category === item.category),
-        ),
-      ),
-    );
-  }
-
-  async updateConfig(
-    categoryName: string,
-    input: UpdateTicketConfigInput,
-  ): Promise<TicketConfigView> {
-    const category = findTicketCategory(categoryName);
-    if (!category) throw new NotFoundException('工单类型不存在');
-    const config = await this.mustFindConfig(category.category);
-    if (input.allowedTemplateIds !== undefined) {
-      config.allowedTemplateIds = await this.normalizeAllowedTemplates(
-        input.allowedTemplateIds,
-      );
-    }
-    await this.configs.save(config);
-    return this.configView(category.category);
-  }
-
-  private async configView(
-    categoryName: string,
-    provided?: TicketConfig,
-  ): Promise<TicketConfigView> {
-    const category = findTicketCategory(categoryName);
-    if (!category) throw new NotFoundException('工单类型不存在');
-    const config = provided ?? (await this.mustFindConfig(category.category));
-    const ids = [
-      config.defaultTemplateId,
-      ...(config.allowedTemplateIds ?? []),
-    ];
-    const templates = ids.length
-      ? await this.templates.find({ where: { id: In(ids) } })
-      : [];
-    const templateById = new Map(templates.map((item) => [item.id, item]));
-    const existingAllowedIds = (config.allowedTemplateIds ?? []).filter((id) =>
-      templateById.has(id),
-    );
-    return {
-      category: category.category,
-      defaultTemplateId: config.defaultTemplateId,
-      defaultTemplateName:
-        templateById.get(config.defaultTemplateId)?.name ??
-        category.defaultTemplateName,
-      allowedTemplateIds: existingAllowedIds,
-      allowedTemplates: existingAllowedIds
-        .map((id) => templateById.get(id))
-        .filter((item): item is TaskTemplate => Boolean(item))
-        .map((item) => ({ id: item.id, name: item.name, type: item.type })),
-      enabled: config.enabled,
-      description: category.description,
-    };
-  }
-
-  private async normalizeAllowedTemplates(ids: number[]): Promise<number[]> {
-    if (!Array.isArray(ids))
-      throw new BadRequestException('任务定义清单格式错误');
-    const unique = [...new Set(ids.map((id) => Number(id)))];
-    for (const id of unique) {
-      if (!Number.isInteger(id) || id < 1) {
-        throw new BadRequestException('任务定义 ID 必须为正整数');
-      }
-      if (isSystemTaskTemplateId(id)) {
-        throw new BadRequestException('系统调度任务定义不能配置为后续转派定义');
-      }
-      const template = await this.templates.findOne({ where: { id } });
-      if (!template) {
-        throw new BadRequestException(`任务定义 #${id} 不存在`);
-      }
-    }
-    return unique;
   }
 
   private async pickEnabledAgent(ids: number[]): Promise<Worker | null> {

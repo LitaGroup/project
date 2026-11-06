@@ -24,8 +24,8 @@ describe('TicketsService', () => {
       code: 'TK-0101',
       title: '方案工单',
       type: '工单',
-      templateId: 10,
-      templateName: '工单-方案工单-调度',
+      templateId: 1001,
+      templateName: '方案设计',
       status: TaskStatus.RUNNING,
       subStatus: TaskSubStatus.EXECUTING,
       agentId: 1001,
@@ -38,12 +38,11 @@ describe('TicketsService', () => {
     findOne: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
-  let configs: { findOne: jest.Mock; find: jest.Mock; save: jest.Mock };
+  let configs: { findOne: jest.Mock };
   let tasks: {
     findOne: jest.Mock;
     find: jest.Mock;
     save: jest.Mock;
-    update: jest.Mock;
   };
   let templates: { findOne: jest.Mock; find: jest.Mock };
   let workers: { find: jest.Mock; findOne: jest.Mock };
@@ -83,14 +82,11 @@ describe('TicketsService', () => {
     };
     configs = {
       findOne: jest.fn().mockResolvedValue(config),
-      find: jest.fn().mockResolvedValue([]),
-      save: jest.fn((value: TicketConfig) => Promise.resolve(value)),
     };
     tasks = {
       findOne: jest.fn().mockResolvedValue(null),
       find: jest.fn().mockResolvedValue([]),
       save: jest.fn((value: Task) => Promise.resolve(value)),
-      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     templates = {
       findOne: jest.fn(),
@@ -140,144 +136,46 @@ describe('TicketsService', () => {
     );
   });
 
-  it('创建技术工单固定使用 ID=11 定义的首个启用机器人', async () => {
-    configs.findOne.mockResolvedValue({
-      category: '技术工单',
-      defaultTemplateId: 11,
-      allowedTemplateIds: [],
-      enabled: true,
-    });
-    templates.findOne.mockResolvedValue({
-      id: 11,
-      name: '工单-技术工单-调度',
-      type: '工单',
-      agentIds: [1000, 1001],
-    });
-    workers.find.mockResolvedValue([
-      worker(1000, { enabled: false }),
-      worker(1001),
-    ]);
-
-    const saved = await service.create(
-      {
-        category: '技术工单',
-        description: '# 需要技术支持\n\n线上问题排查',
-      },
-      user as never,
-    );
-
-    expect(tasksService.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: '工单',
-        templateId: 11,
-        agentId: 1001,
-        requesterType: 'user',
-        requesterId: 7,
-      }),
-    );
-    expect(tickets.save).toHaveBeenCalled();
-    expect(saved).toMatchObject({
-      code: 'WO-0001',
-      category: '技术工单',
-      assigneeType: 'worker',
-      assigneeId: 1001,
-      assigneeName: '机器人1001',
-      taskId: 101,
-    });
-  });
-
-  it('已关闭的方案工单拒绝创建', async () => {
+  it('旧版类别工单拒绝创建，必须通过工单配置（工作流）创建', async () => {
     await expect(
-      service.create(
-        {
-          category: '方案工单',
-          description: '需要设计方案',
-        },
-        user as never,
-      ),
-    ).rejects.toThrow('暂未开放创建');
-  });
-
-  it('创建数据工单固定使用 ID=12 定义的首个启用机器人', async () => {
-    configs.findOne.mockResolvedValue({
-      category: '数据工单',
-      defaultTemplateId: 12,
-      allowedTemplateIds: [],
-      enabled: true,
-    });
-    templates.findOne.mockResolvedValue({
-      id: 12,
-      name: '工单-数据工单-调度',
-      type: '工单',
-      agentIds: [1002],
-    });
-    workers.find.mockResolvedValue([worker(1002)]);
-
-    const saved = await service.create(
-      {
-        category: '数据工单',
-        description: '# 数据导出\n\n导出近 7 天数据',
-      },
-      user as never,
-    );
-
-    expect(tasksService.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: '工单',
-        templateId: 12,
-        agentId: 1002,
-      }),
-    );
-    expect(saved).toMatchObject({
-      category: '数据工单',
-      assigneeId: 1002,
-      assigneeName: '机器人1002',
-    });
-  });
-
-  it('未开放工单类型拒绝创建', async () => {
-    configs.findOne.mockResolvedValue({
-      category: '运维工单',
-      defaultTemplateId: 13,
-      allowedTemplateIds: [],
-      enabled: true,
-    });
-    await expect(
-      service.create(
-        {
-          category: '运维工单',
-          description: '需要运维支持',
-        },
-        user as never,
-      ),
-    ).rejects.toThrow('暂未开放创建');
-  });
-
-  it('默认任务定义没有启用机器人时拒绝创建', async () => {
-    configs.findOne.mockResolvedValue({
-      category: '技术工单',
-      defaultTemplateId: 11,
-      allowedTemplateIds: [],
-      enabled: true,
-    });
-    templates.findOne.mockResolvedValue({
-      id: 11,
-      name: '工单-技术工单-调度',
-      type: '工单',
-      agentIds: [1001],
-    });
-    workers.find.mockResolvedValue([]);
-
-    await expect(
-      service.create(
-        {
-          category: '技术工单',
-          description: '需要技术支持',
-        },
-        user as never,
-      ),
-    ).rejects.toThrow('没有启用的处理机器人');
+      service.create({ category: '技术工单' } as never, user as never),
+    ).rejects.toThrow('旧版工单类别创建已下线');
+    expect(workflowRuntime.create).not.toHaveBeenCalled();
     expect(tasksService.create).not.toHaveBeenCalled();
+  });
+
+  it('工作流工单委托运行时创建并返回运行视图', async () => {
+    const created = {
+      id: 3,
+      code: 'WO-0003',
+      workflowStatus: '处理中',
+    } as Ticket;
+    const view = { nodes: [], runs: [] };
+    workflowRuntime.create.mockResolvedValue(created);
+    workflowRuntime.workflowView.mockResolvedValue(view);
+
+    const saved = await service.create(
+      {
+        workflowDefinitionId: 5,
+        title: '发布 v1.2.0',
+        inputValues: { title: '发布 v1.2.0' },
+      },
+      user as never,
+    );
+
+    expect(workflowRuntime.create).toHaveBeenCalledWith(
+      {
+        workflowDefinitionId: 5,
+        title: '发布 v1.2.0',
+        inputValues: { title: '发布 v1.2.0' },
+      },
+      user,
+    );
+    expect(saved).toMatchObject({
+      code: 'WO-0003',
+      status: '处理中',
+      workflow: view,
+    });
   });
 
   it('转交工单更新任务定义并强制目标机器人重新接受', async () => {
@@ -357,5 +255,20 @@ describe('TicketsService', () => {
       't.createdById = :createdById',
       { createdById: 7 },
     );
+  });
+
+  it('未知工单类别筛选直接返回空列表', async () => {
+    const query = {
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+    tickets.createQueryBuilder.mockReturnValue(query);
+
+    const rows = await service.findAll({ category: '不存在的工单' });
+
+    expect(rows).toEqual([]);
+    expect(query.andWhere).not.toHaveBeenCalled();
   });
 });

@@ -20,7 +20,7 @@ import {
   type TaskDocumentsView,
   type TaskHandoffDocument,
   type TaskPipelineStage,
-  type TicketDetail,
+  type Ticket,
   type TicketWorkflowRun,
   type TicketWorkflowView,
   type WorkbenchTask,
@@ -81,7 +81,7 @@ export function TicketDetailPage() {
   const navigate = useNavigate()
   const { user: currentUser } = useAuth()
   const id = Number(ticketId)
-  const [ticket, setTicket] = useState<TicketDetail | null>(null)
+  const [ticket, setTicket] = useState<Ticket | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [acting, setActing] = useState<'accept' | 'reject' | 'approve' | null>(

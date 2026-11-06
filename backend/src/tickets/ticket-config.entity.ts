@@ -7,24 +7,24 @@ import {
 } from 'typeorm';
 
 /**
- * 工单类型配置：固定默认调度任务定义 + 调度机器人可转交的后续任务定义清单。
- * 默认定义由平台按工单类型锁定，配置页只允许维护可转派清单。
+ * 历史工单配置（旧调度模型遗留）：保存当时按类别绑定的默认调度任务定义与可转交清单。
+ * 工单已改为工作流模型，不再按类别创建；该表仅为存量工单的 ticket-route 转交通道保留。
  */
 @Entity('ticket_configs')
 export class TicketConfig {
-  /** 工单类型（与固定默认调度任务定义一一对应） */
+  /** 工单类别（历史调度工单的类别） */
   @PrimaryColumn({ type: 'varchar', length: 64 })
   category: string;
 
-  /** 默认调度任务定义（固定系统定义 ID，不在此处换绑） */
+  /** 当时的默认调度任务定义 ID（定义已退役，仅保留历史数据） */
   @Column({ type: 'int' })
   defaultTemplateId: number;
 
-  /** 可转交的后续任务定义 ID 列表（排除系统调度定义） */
+  /** 可转交的后续任务定义 ID 列表（历史转交通道仍在使用） */
   @Column({ type: 'simple-json', default: '[]' })
   allowedTemplateIds: number[];
 
-  /** 是否开放创建；启停由代码常量 ENABLED_TICKET_CATEGORIES 对齐（当前技术工单、数据工单为 true） */
+  /** 是否开放创建（旧模型字段；新工单一律走工作流，此字段不再生效） */
   @Column({ default: false })
   enabled: boolean;
 

@@ -7,7 +7,6 @@ import {
   HttpCode,
   Param,
   ParseIntPipe,
-  Patch,
   Post,
   Query,
   Req,
@@ -21,13 +20,10 @@ import {
   CreateTicketInput,
   RouteTicketInput,
   TicketsService,
-  UpdateTicketConfigInput,
 } from './tickets.service';
 
 class CreateTicketDto implements CreateTicketInput {
-  category?: string;
   title?: string;
-  description?: string;
   workflowDefinitionId?: number;
   inputValues?: Record<string, unknown>;
 }
@@ -38,10 +34,6 @@ class RouteTicketDto implements RouteTicketInput {
   content: string;
   outputSpec: string;
   workPlan: string;
-}
-
-class UpdateTicketConfigDto implements UpdateTicketConfigInput {
-  allowedTemplateIds?: number[];
 }
 
 class TicketDocumentDto implements TicketDocumentInput {
@@ -139,24 +131,6 @@ export class TicketsController {
     @Req() req: AuthedRequest,
   ) {
     return this.tickets.acceptWorkflow(id, 'rejected', req, dto?.remark);
-  }
-}
-
-@Controller('ticket-configs')
-export class TicketConfigsController {
-  constructor(private readonly tickets: TicketsService) {}
-
-  @Get()
-  findAll() {
-    return this.tickets.listConfigs();
-  }
-
-  @Patch(':category')
-  update(
-    @Param('category') category: string,
-    @Body() dto: UpdateTicketConfigDto,
-  ) {
-    return this.tickets.updateConfig(category, dto);
   }
 }
 

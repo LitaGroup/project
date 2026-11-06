@@ -45,7 +45,7 @@ export const DEFAULT_TASK_TYPES: Array<{ name: string; description: string }> =
     {
       name: TASK_TYPE_TICKET,
       description:
-        '工单创建的调度任务类型，按工单类型绑定的系统任务定义分发，不允许改名与删除',
+        '工单任务使用的系统类型（历史工单与工单工作流节点任务），不允许改名与删除',
     },
   ];
 

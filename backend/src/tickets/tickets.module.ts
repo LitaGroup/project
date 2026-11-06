@@ -14,11 +14,7 @@ import { TicketDocumentsService } from './ticket-documents.service';
 import { Ticket } from './ticket.entity';
 import { TicketWorkflowRun } from './ticket-workflow-run.entity';
 import { TicketWorkflowRuntimeService } from './ticket-workflow-runtime.service';
-import {
-  TicketConfigsController,
-  TicketsController,
-  TicketTaskController,
-} from './tickets.controller';
+import { TicketsController, TicketTaskController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
 
 @Module({
@@ -38,11 +34,7 @@ import { TicketsService } from './tickets.service';
     TasksModule,
     WorkersModule,
   ],
-  controllers: [
-    TicketsController,
-    TicketConfigsController,
-    TicketTaskController,
-  ],
+  controllers: [TicketsController, TicketTaskController],
   providers: [
     TicketsService,
     TicketDocumentsService,
