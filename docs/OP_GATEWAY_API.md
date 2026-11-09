@@ -75,6 +75,7 @@ POST /api/internal/gateway/v1/credentials/acquire
 
 - `workers.githubPermission` 是唯一权限来源；
 - AI 机器人可配置档位仅 `develop` / `release` 两档；`none` 为真人机器人与个人 AGENT 的内部兜底；
+- 该接口只向机器人发放凭证；有效真人个人令牌会返回 401 `WORKER_UNAUTHORIZED`，并写入 `identityType=user` 的拒绝审计，不会被授予 GitHub PAT；
 - 有权限但没有启用中的 PAT 时返回 `CREDENTIAL_NOT_CONFIGURED`；
 - `git.write` 不区分目标分支；`main/stable` 是否可直推由 GitHub Ruleset 根据机器账号最终强制。
 
@@ -259,26 +260,56 @@ curl -X POST 'https://platform.internal/api/internal/gateway/v1/credentials/acqu
 POST /api/internal/gateway/v1/resource-permissions/verify
 ```
 
-用途：验证 AI Gateway 服务身份与机器人 Token，返回机器人当前的资源网关权限。**该接口不返回任何凭证**，只用于资源列表与数据库/缓存访问前的资源级授权。
+用途：验证 AI Gateway 服务身份与调用方 Token，返回机器人或真人的资源网关权限。**该接口不返回任何凭证**，只用于资源列表与数据库/缓存访问前的资源级授权。
+
+身份判定顺序：
+
+1. `workers.agentToken` 命中且机器人启用 → 机器人身份；
+2. 否则 `users.agentToken` 命中且用户启用 → 真人身份；
+3. 否则返回 401 `WORKER_UNAUTHORIZED`。
+
+机器人路径优先，保证既有机器人行为不变。公共 Agent 令牌（`PUBLIC_AGENT_TOKEN`）不参与本接口的真人反查。
 
 ### 9.1 请求头
 
 | Header | 必填 | 说明 |
 |:---|:---:|:---|
 | `X-Gateway-Token` | 是 | 平台与 Gateway 共享的服务 Token，对应 `OP_GATEWAY_SHARED_TOKEN` |
-| `X-Worker-Token` | 是 | 机器人独立令牌，即工位 `LITA_WORK_TOKEN` |
+| `X-Worker-Token` | 是 | 机器人独立令牌（`LITA_WORK_TOKEN`）或个人中心「我的令牌」（`users.agentToken`） |
 | `X-Request-Id` | 否 | Gateway 生成的请求 ID |
 
-请求体为空。接口不缓存结果，机器人停用或权限变更后立即生效。
+请求体为空。接口不缓存结果，令牌重置、机器人停用、用户停用或角色变更后立即生效。
 
 ### 9.2 成功响应
+
+机器人：
 
 ```json
 {
   "workerId": 1001,
-  "permission": "read"
+  "permission": "read",
+  "identityType": "worker",
+  "userId": null
 }
 ```
+
+真人（管理员示例）：
+
+```json
+{
+  "workerId": 1006,
+  "permission": "write",
+  "identityType": "user",
+  "userId": 7
+}
+```
+
+| 字段 | 说明 |
+|:---|:---|
+| `workerId` | 机器人 ID；真人时为其真人机器人 ID（`workers.humanUserId`） |
+| `permission` | 资源权限 |
+| `identityType` | `worker`（机器人）/ `user`（真人） |
+| `userId` | 真人对应的 `users.id`；机器人为 `null` |
 
 | permission | 含义 |
 |:---|:---|
@@ -286,17 +317,19 @@ POST /api/internal/gateway/v1/resource-permissions/verify
 | `read` | 仅可访问 `readOnly=true` 的资源 |
 | `none` | 无资源权限；由调用方拒绝业务操作 |
 
-`permission` 与 `workers.githubPermission` 相互独立，默认 `none`，由机器人配置页的「资源权限」维护。
+`permission` 与 `workers.githubPermission` 相互独立。机器人取 `workers.resourcePermission`；真人按 `users.role` 实时映射：管理员 `write`，成员 `read`。
 
 ### 9.3 错误响应
 
 | HTTP | code | 场景 |
 |---:|:---|:---|
-| 401 | `WORKER_UNAUTHORIZED` | 机器人 Token 缺失、无效或机器人已停用 |
+| 401 | `WORKER_UNAUTHORIZED` | Token 缺失；机器人令牌无效/机器人停用；真人令牌无效/用户停用；真人缺少真人机器人绑定 |
 | 401 | `GATEWAY_UNAUTHORIZED` | Gateway Token 缺失/无效，或平台未配置共享 Token |
 | 5xx | — | 平台内部错误；Gateway 按验权不可用处理，不降级放行 |
 
 所有响应带 `Cache-Control: no-store`。4xx 不重试；网络错误或 5xx 最多重试一次。
+
+响应中的 `identityType` / `userId` 是向后兼容的新增字段。lita-proxy 现有数据面只读取 `workerId` 与 `permission`，可忽略新增字段；后续若要记录 MCP 调用日志，可直接使用这两个字段区分机器人与真人，无需再次修改控制面契约。
 
 ### 9.4 调用示例
 

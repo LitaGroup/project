@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
+import { AuthService } from '../auth/auth.service';
 import { WorkerGithubPermission } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
@@ -37,6 +38,7 @@ export class GatewayCredentialService {
     @InjectRepository(GatewayCredentialAudit)
     private readonly audits: Repository<GatewayCredentialAudit>,
     private readonly workersService: WorkersService,
+    private readonly authService: AuthService,
     private readonly githubCredentials: GithubPermissionCredentialService,
     config: ConfigService,
   ) {
@@ -81,6 +83,8 @@ export class GatewayCredentialService {
   ): Promise<GatewayCredentialLease> {
     const type = input.credentialType?.trim() || '';
     const action = input.action?.trim() || '';
+    let identityType: 'worker' | 'user' = 'worker';
+    let userId: number | null = null;
     let workerId = 0;
     let credentialId: number | null = null;
     let allowed = false;
@@ -106,6 +110,20 @@ export class GatewayCredentialService {
       }
       const worker = await this.workersService.findByAgentToken(workerToken);
       if (!worker) {
+        // 真人个人令牌可以访问资源网关，但不能获取 GitHub PAT；
+        // 这里识别真人身份并落审计，保持 WORKER_UNAUTHORIZED 错误码不变。
+        const user =
+          await this.authService.getUserByPersonalAgentToken(workerToken);
+        if (user) {
+          identityType = 'user';
+          userId = user.id;
+          const human = await this.workersService.findByHumanUserId(user.id);
+          workerId = human?.id ?? 0;
+          throw new GatewayCredentialError(
+            'WORKER_UNAUTHORIZED',
+            '真人令牌不能获取 Gateway 凭证，请使用机器人令牌',
+          );
+        }
         throw new GatewayCredentialError(
           'WORKER_UNAUTHORIZED',
           '机器人令牌无效或机器人已停用',
@@ -177,6 +195,8 @@ export class GatewayCredentialService {
     } finally {
       await this.writeAudit({
         leaseId,
+        identityType,
+        userId,
         workerId,
         credentialId,
         credentialType: type || 'unknown',
@@ -191,6 +211,8 @@ export class GatewayCredentialService {
 
   private async writeAudit(input: {
     leaseId: string | null;
+    identityType: 'worker' | 'user';
+    userId: number | null;
     workerId: number;
     credentialId: number | null;
     credentialType: string;
@@ -204,6 +226,8 @@ export class GatewayCredentialService {
       await this.audits.save(
         this.audits.create({
           leaseId: input.leaseId,
+          identityType: input.identityType,
+          userId: input.userId,
           workerId: input.workerId,
           credentialId: input.credentialId,
           credentialType: input.credentialType.slice(0, 60),

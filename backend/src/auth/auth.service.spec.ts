@@ -24,7 +24,9 @@ function createRepo() {
           (u) =>
             (where.id !== undefined && u.id === where.id) ||
             (where.feishuOpenId !== undefined &&
-              u.feishuOpenId === where.feishuOpenId),
+              u.feishuOpenId === where.feishuOpenId) ||
+            (where.agentToken !== undefined &&
+              u.agentToken === where.agentToken),
         ) ?? null,
     ),
     count: jest.fn(
@@ -355,6 +357,40 @@ describe('AuthService（飞书登录 + 会话）', () => {
       await expect(service.getUserByAgentToken(TOKEN)).resolves.toBeNull();
       expect(repo.findOne).toHaveBeenCalled();
       expect(service.hasPublicAgentToken()).toBe(false);
+    });
+  });
+
+  describe('个人 agent 令牌反查（资源网关等真人场景）', () => {
+    it('只接受真实用户个人令牌，enabled=false 视为无效', async () => {
+      const { service } = createService();
+      const user = await service.upsertFeishuUser(FEISHU_INFO);
+      user.agentToken = 'personal-token-123';
+
+      await expect(
+        service.getUserByPersonalAgentToken('personal-token-123'),
+      ).resolves.toMatchObject({ id: user.id, name: '张三' });
+
+      user.enabled = false;
+      await expect(
+        service.getUserByPersonalAgentToken('personal-token-123'),
+      ).resolves.toBeNull();
+
+      await expect(
+        service.getUserByPersonalAgentToken('missing-token'),
+      ).resolves.toBeNull();
+      await expect(service.getUserByPersonalAgentToken('')).resolves.toBeNull();
+    });
+
+    it('公共 Agent 令牌不参与个人令牌反查', async () => {
+      const TOKEN = 'pmpub_test_token_1234567890';
+      const { service } = createService({ PUBLIC_AGENT_TOKEN: TOKEN });
+      await expect(
+        service.getUserByPersonalAgentToken(TOKEN),
+      ).resolves.toBeNull();
+      // 通用 getUserByAgentToken 仍保留公共 Agent 虚拟管理员行为
+      await expect(service.getUserByAgentToken(TOKEN)).resolves.toMatchObject({
+        id: PUBLIC_AGENT_USER_ID,
+      });
     });
   });
 

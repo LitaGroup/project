@@ -11,6 +11,7 @@ import {
  */
 @Entity('gateway_credential_audits')
 @Index('IDX_gateway_credential_audits_workerId', ['workerId'])
+@Index('IDX_gateway_credential_audits_userId', ['userId'])
 @Index('IDX_gateway_credential_audits_leaseId', ['leaseId'])
 export class GatewayCredentialAudit {
   @PrimaryGeneratedColumn()
@@ -19,6 +20,14 @@ export class GatewayCredentialAudit {
   /** 本次授权租用 ID（成功时生成；失败为空） */
   @Column({ type: 'varchar', length: 80, nullable: true })
   leaseId: string | null;
+
+  /** 调用方身份：worker（机器人）/ user（真人） */
+  @Column({ type: 'varchar', length: 20, default: 'worker' })
+  identityType: 'worker' | 'user';
+
+  /** 真人身份对应的 users.id；机器人为空 */
+  @Column({ type: 'int', nullable: true })
+  userId: number | null;
 
   @Column({ type: 'int' })
   workerId: number;

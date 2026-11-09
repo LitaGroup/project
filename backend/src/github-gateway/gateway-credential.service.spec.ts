@@ -1,9 +1,10 @@
 import { ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { WorkerGithubPermission } from '../common/enums';
+import { WorkerGithubPermission, UserRole } from '../common/enums';
 import { GatewayCredentialService } from './gateway-credential.service';
 import { GatewayCredentialError } from './gateway-credential-protocol';
 import type { Worker } from '../workers/worker.entity';
+import type { User } from '../auth/user.entity';
 
 describe('GatewayCredentialService', () => {
   const buildService = (
@@ -13,6 +14,8 @@ describe('GatewayCredentialService', () => {
       githubAccount: string;
       pat: string;
     }>,
+    user: Partial<User> | null = null,
+    humanWorkerId: number | null = 1006,
   ) => {
     const audits = {
       save: jest.fn().mockResolvedValue(undefined),
@@ -26,6 +29,16 @@ describe('GatewayCredentialService', () => {
           .mockResolvedValue(
             worker ? ({ id: 1001, ...worker } as Worker) : null,
           ),
+        findByHumanUserId: jest
+          .fn()
+          .mockResolvedValue(
+            humanWorkerId ? ({ id: humanWorkerId } as Worker) : null,
+          ),
+      } as never,
+      {
+        getUserByPersonalAgentToken: jest
+          .fn()
+          .mockResolvedValue(user ? ({ id: 7, ...user } as User) : null),
       } as never,
       {
         decryptEnabledPat: jest.fn(decrypt),
@@ -142,6 +155,9 @@ describe('GatewayCredentialService', () => {
     ).rejects.toMatchObject({ code: 'PERMISSION_NONE' });
     expect(none.audits.save).toHaveBeenCalledWith(
       expect.objectContaining({
+        identityType: 'worker',
+        userId: null,
+        workerId: 1001,
         allowed: false,
         denyReason: 'PERMISSION_NONE',
       }),
@@ -185,5 +201,68 @@ describe('GatewayCredentialService', () => {
       }),
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(decrypt).not.toHaveBeenCalled();
+  });
+
+  it('真人令牌不能获取凭证，审计记录真人身份', async () => {
+    const { service, audits } = buildService(
+      null,
+      () =>
+        Promise.resolve({
+          credentialId: 1,
+          githubAccount: 'ai-developer',
+          pat: 'pat',
+        }),
+      { role: UserRole.MEMBER },
+      1006,
+    );
+
+    await expect(
+      service.acquire('user-token', {
+        credentialType: 'github.pat',
+        resource: 'LitaGroup/repo-a',
+        action: 'git.read',
+      }),
+    ).rejects.toMatchObject({ code: 'WORKER_UNAUTHORIZED' });
+
+    expect(audits.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identityType: 'user',
+        userId: 7,
+        workerId: 1006,
+        allowed: false,
+        denyReason: 'WORKER_UNAUTHORIZED',
+      }),
+    );
+  });
+
+  it('真人缺少真人机器人时仍拒绝凭证并落 workerId=0 审计', async () => {
+    const { service, audits } = buildService(
+      null,
+      () =>
+        Promise.resolve({
+          credentialId: 1,
+          githubAccount: 'ai-developer',
+          pat: 'pat',
+        }),
+      { role: UserRole.MEMBER },
+      null,
+    );
+
+    await expect(
+      service.acquire('user-token', {
+        credentialType: 'github.pat',
+        resource: 'LitaGroup/repo-a',
+        action: 'git.read',
+      }),
+    ).rejects.toMatchObject({ code: 'WORKER_UNAUTHORIZED' });
+
+    expect(audits.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identityType: 'user',
+        userId: 7,
+        workerId: 0,
+        denyReason: 'WORKER_UNAUTHORIZED',
+      }),
+    );
   });
 });

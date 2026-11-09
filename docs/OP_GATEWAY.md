@@ -99,10 +99,12 @@ github_permission_credentials
 
 ```text
 gateway_credential_audits
-- leaseId / workerId / credentialId
+- leaseId / identityType / userId / workerId / credentialId
 - credentialType / resource / action
 - allowed / denyReason / requestId
 ```
+
+`identityType` 为 `worker`（机器人）或 `user`（真人）；`userId` 仅真人身份记录，机器人为空。凭证获取仍只向机器人发放，真人尝试会落一条 `identityType=user` 的拒绝审计，便于和机器人区分。
 
 审计不记录 `X-Gateway-Token`、`X-Worker-Token`、PAT。
 
@@ -150,12 +152,14 @@ X-Worker-Token: <LITA_WORK_TOKEN>
 ```http
 POST /api/internal/gateway/v1/resource-permissions/verify
 X-Gateway-Token: <OP_GATEWAY_SHARED_TOKEN>
-X-Worker-Token: <LITA_WORK_TOKEN>
+X-Worker-Token: <LITA_WORK_TOKEN 或 个人中心令牌>
 ```
 
-- 只返回 `{ workerId, permission }`，不返回任何凭证。
-- `permission` 为 `write/read/none`，与 `githubPermission` 独立；默认 `none`。
-- 每次请求实时读取，机器人停用或权限变更后立即生效。
+- 先按 `workers.agentToken` 反查机器人；未命中再按 `users.agentToken` 反查真人（`users.enabled=false` 视为无效）。
+- 响应包含 `{ workerId, permission, identityType, userId }`，不返回任何凭证。
+- `permission` 为 `write/read/none`，与 `githubPermission` 独立。机器人取 `workers.resourcePermission`；真人按角色映射：管理员 `write`，成员 `read`。
+- 真人响应的 `workerId` 是其真人机器人 ID（`workers.humanUserId`），`userId` 才是 `users.id`；机器人 `identityType=worker`、`userId=null`。
+- 每次请求实时读取，令牌重置、用户停用、角色或机器人权限变更后立即生效。
 - 供 `admin-api` 的 Agent 资源列表与 MySQL SQL 执行前验权使用；接口细节见 [OP_GATEWAY_API.md](./OP_GATEWAY_API.md) 第九节。
 
 ### 5.3 管理接口

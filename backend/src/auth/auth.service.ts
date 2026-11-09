@@ -403,6 +403,15 @@ export class AuthService {
   async getUserByAgentToken(token: string): Promise<User | null> {
     if (!token) return null;
     if (this.isPublicAgentToken(token)) return this.buildPublicAgentUser();
+    return this.getUserByPersonalAgentToken(token);
+  }
+
+  /**
+   * 按个人 agent 访问令牌查真实用户（不包含公共 Agent 虚拟身份）。
+   * 资源网关等需要区分“真人 vs 机器人”的场景只接受个人令牌。
+   */
+  async getUserByPersonalAgentToken(token: string): Promise<User | null> {
+    if (!token) return null;
     const user = await this.usersRepo.findOne({
       where: { agentToken: token },
     });

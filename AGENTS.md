@@ -226,7 +226,7 @@
 - 项目分支按 `(projectId, repo, branch)` 唯一；代码事件按 `(repo, branch, sha)` 唯一且 append-only，与项目无外键。
 - 新提交先入库再发 `CODE_EVENT_BUS`；首次基线事件可被后续动作跳过。单目标失败不阻断其他目标。
 - OP Gateway 凭证申请必须同时校验共享网关令牌和机器人令牌，按权限档位发放短租期凭证。响应与错误均 `no-store`，敏感响应不透传给 AI，审计不保存 Token/PAT。
-- 资源网关权限存 `workers.resourcePermission`，与 `githubPermission` 独立：`write` 可访问全部资源、`read` 仅可访问 `readOnly` 资源、`none` 无权限且默认。内部验权接口只返回权限，不发放凭证；实时校验，不缓存结果。
+- 资源网关权限存 `workers.resourcePermission`，与 `githubPermission` 独立：`write` 可访问全部资源、`read` 仅可访问 `readOnly` 资源、`none` 无权限且默认。内部验权接口同时支持机器人令牌与真人个人令牌：先查机器人，再查 `users.agentToken`（用户停用即失效）；机器人取自身权限，真人按角色映射（管理员 `write`、成员 `read`），响应带 `identityType`/`userId` 供审计区分。接口只返回权限，不发放凭证；实时校验，不缓存结果。
 
 ### 飞书与 Appium
 
