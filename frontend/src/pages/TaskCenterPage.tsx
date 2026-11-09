@@ -27,8 +27,6 @@ import {
   type TaskPackage,
   type TaskOverview,
   type TaskSubStatus,
-  type TaskType,
-  type TaskTypeDef,
   type Worker,
 } from '../lib/api'
 import { TaskStatusBadge } from '../components/StatusBadge'
@@ -64,10 +62,8 @@ export function TaskCenterPage() {
   const [overview, setOverview] = useState<TaskOverview | null>(null)
   const [tasks, setTasks] = useState<TaskPackage[] | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
-  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([])
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [typeFilter, setTypeFilter] = useState<string>('all')
   const [error, setError] = useState<string | null>(null)
 
   const reload = useCallback(() => {
@@ -82,11 +78,10 @@ export function TaskCenterPage() {
           statusFilter === 'all'
             ? undefined
             : (statusFilter as TaskSubStatus),
-        type: typeFilter === 'all' ? undefined : (typeFilter as TaskType),
       })
       .then(setTasks)
       .catch((e: Error) => setError(e.message))
-  }, [keyword, statusFilter, typeFilter])
+  }, [keyword, statusFilter])
 
   useEffect(() => {
     const t = setTimeout(reload, 250)
@@ -97,10 +92,6 @@ export function TaskCenterPage() {
     api
       .listWorkers({ role: '工作者' })
       .then(setWorkers)
-      .catch(() => undefined)
-    api
-      .listTaskTypes()
-      .then(setTaskTypes)
       .catch(() => undefined)
   }, [])
 
@@ -185,26 +176,6 @@ export function TaskCenterPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select
-          value={typeFilter}
-          onValueChange={(v) => setTypeFilter(v as string)}
-          items={{
-            all: '全部类型',
-            ...Object.fromEntries(taskTypes.map((t) => [t.name, t.name])),
-          }}
-        >
-          <SelectTrigger className="w-36">
-            <SelectValue placeholder="类型" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部类型</SelectItem>
-            {taskTypes.map((t) => (
-              <SelectItem key={t.id} value={t.name}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </Toolbar>
 
       {error && <p className="text-sm">操作失败:{error}</p>}
@@ -214,7 +185,6 @@ export function TaskCenterPage() {
           <TableRow>
             <TableHead className="w-28">编号</TableHead>
             <TableHead>标题</TableHead>
-            <TableHead className="w-24">类型</TableHead>
             <TableHead className="w-24">状态</TableHead>
             <TableHead className="w-36">机器人</TableHead>
             <TableHead className="w-40">更新时间</TableHead>
@@ -226,7 +196,7 @@ export function TaskCenterPage() {
           ))}
           {tasks !== null && tasks.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6}>
+              <TableCell colSpan={5}>
                 暂无任务，点右上角「新建任务」创建
               </TableCell>
             </TableRow>
@@ -254,7 +224,6 @@ function TaskRows({
             {task.title}
           </Link>
         </TableCell>
-        <TableCell>{task.type}</TableCell>
         <TableCell>
           <TaskStatusBadge status={task.status} subStatus={task.subStatus} />
         </TableCell>
@@ -274,7 +243,6 @@ function TaskRows({
               {child.title}
             </Link>
           </TableCell>
-          <TableCell>{child.type}</TableCell>
           <TableCell>
             <TaskStatusBadge status={child.status} subStatus={child.subStatus} />
           </TableCell>

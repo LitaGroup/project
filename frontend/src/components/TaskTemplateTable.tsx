@@ -55,7 +55,6 @@ export function TaskTemplateTable({
         <TableHeader>
           <TableRow>
             <TableHead className="w-44">名称</TableHead>
-            <TableHead className="w-24">任务类型</TableHead>
             <TableHead className="w-44">处理机器人</TableHead>
             <TableHead>任务定义描述</TableHead>
             <TableHead className="w-24">创建人</TableHead>
@@ -103,7 +102,6 @@ export function TaskTemplateTable({
                     )}
                   </p>
                 </TableCell>
-                <TableCell className="truncate">{template.type || '其它'}</TableCell>
                 <TableCell>
                   {(template.agentIds ?? []).length > 0 ? (
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -196,7 +194,7 @@ export function TaskTemplateTable({
           })}
           {templates !== null && templates.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7}>
+              <TableCell colSpan={6}>
                 {emptyText ?? '暂无任务定义，点右上角「新建任务定义」创建'}
               </TableCell>
             </TableRow>

@@ -7,7 +7,6 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
-import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 
 /** 创建阶段缺失清单条目（调度机器人材料审查产出，补齐后清除） */
 export interface TaskMissingItem {
@@ -22,7 +21,7 @@ export interface TaskPlanRef {
 }
 
 /**
- * 任务：具体需要执行的任务内容（明确输入/输出/类型），可挂子任务形成工作流。
+ * 任务：具体需要执行的任务内容（明确输入/输出/定义），可挂子任务形成工作流。
  * 无物理外键（测试库无 REFERENCES 权限）：agent/scheduler/executor 仅记 id；
  * 删除根任务时应用层级联删子任务、事件与方案。
  */
@@ -32,6 +31,7 @@ export interface TaskPlanRef {
 @Index(['status'])
 @Index(['subStatus'])
 @Index(['status', 'subStatus'])
+@Index('IDX_tasks_projectId', ['projectId'])
 export class Task {
   @PrimaryGeneratedColumn()
   id: number;
@@ -43,10 +43,6 @@ export class Task {
   @Column({ length: 200 })
   title: string;
 
-  /** 任务类型（task_types.name，动态字典；无物理外键，改名由 TaskTypesService 同步） */
-  @Column({ type: 'varchar', length: 64, default: TASK_TYPE_DEFAULT })
-  type: string;
-
   /** 任务定义（task_templates.id，可空；无物理外键，历史任务保留快照） */
   @Column({ type: 'int', nullable: true })
   templateId: number | null;
@@ -54,6 +50,10 @@ export class Task {
   /** 任务定义名称快照（定义改名/删除后仍能展示历史名称） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   templateName: string | null;
+
+  /** 关联项目（projects.id，可空；项目交付任务用于稳定关联项目） */
+  @Column({ type: 'int', nullable: true })
+  projectId: number | null;
 
   /** 父任务 id（顶层为 null） */
   @Column({ type: 'int', nullable: true })

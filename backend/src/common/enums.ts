@@ -222,6 +222,16 @@ export enum WorkerGithubPermission {
   RELEASE = 'release',
 }
 
+/**
+ * 机器人资源网关权限：与 GitHub 权限相互独立。
+ * write 可访问全部资源；read 仅可访问 readOnly 资源；none 无权限（默认）。
+ */
+export enum WorkerResourcePermission {
+  NONE = 'none',
+  READ = 'read',
+  WRITE = 'write',
+}
+
 /** 机器人实时状态（不落库，由名下任务实时推导，见 workers.service） */
 export enum WorkerLiveStatus {
   IDLE = '空闲中',

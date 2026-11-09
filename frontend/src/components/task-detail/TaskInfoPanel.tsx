@@ -50,7 +50,6 @@ export function TaskInfoPanel({
           </div>
           <dl className="grid gap-x-5 gap-y-3 text-xs sm:grid-cols-2 xl:grid-cols-3">
             <InfoItem label="需求方" value={requesterName ?? '—'} />
-            <InfoItem label="类型" value={task.type} />
             <InfoItem label="任务定义" value={task.templateName ?? '未设置'} />
             <InfoItem label="执行机器人" value={agentName ?? '未分配'} />
             <InfoItem label="机器人上级" value={agentOwnerName ?? '—'} />

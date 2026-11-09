@@ -15,7 +15,7 @@ import {
   ToolbarGroup,
   ToolbarInput,
 } from '@appica/ui-react/toolbar'
-import { api, type TaskTemplate, type TaskTypeDef, type Worker } from '../lib/api'
+import { api, type TaskTemplate, type Worker } from '../lib/api'
 import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -23,16 +23,14 @@ import {
   TaskTemplateTable,
 } from '../components/TaskTemplateTable'
 
-/** 任务定义列表：任务类型 + 可复用描述 + 多个默认处理机器人 */
+/** 任务定义列表：可复用描述 + 多个默认处理机器人 */
 export function TaskTemplatesPage() {
   const { user } = useAuth()
   const [templates, setTemplates] = useState<TaskTemplate[] | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
-  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const [keyword, setKeyword] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
   const [workerFilter, setWorkerFilter] = useState('all')
   const [scopeFilter, setScopeFilter] = useState('all')
 
@@ -49,16 +47,8 @@ export function TaskTemplatesPage() {
       .listWorkers({ role: '工作者' })
       .then(setWorkers)
       .catch(() => undefined)
-    api.listTaskTypes().then(setTaskTypes).catch(() => undefined)
   }, [reload])
 
-  const typeItems = useMemo<Record<string, string>>(
-    () => ({
-      all: '不限类型',
-      ...Object.fromEntries(taskTypes.map((type) => [type.name, type.name])),
-    }),
-    [taskTypes],
-  )
   const workerItems = useMemo<Record<string, string>>(
     () => ({
       all: '不限机器人',
@@ -75,7 +65,6 @@ export function TaskTemplatesPage() {
       ) {
         return false
       }
-      if (typeFilter !== 'all' && template.type !== typeFilter) return false
       if (workerFilter === 'none') {
         if ((template.agentIds ?? []).length > 0) return false
       } else if (workerFilter !== 'all') {
@@ -92,17 +81,15 @@ export function TaskTemplatesPage() {
       }
       return true
     })
-  }, [templates, keyword, typeFilter, workerFilter, scopeFilter, user?.id])
+  }, [templates, keyword, workerFilter, scopeFilter, user?.id])
 
   const hasFilter =
     keyword.trim() !== '' ||
-    typeFilter !== 'all' ||
     workerFilter !== 'all' ||
     scopeFilter !== 'all'
 
   const clearFilters = () => {
     setKeyword('')
-    setTypeFilter('all')
     setWorkerFilter('all')
     setScopeFilter('all')
   }
@@ -113,7 +100,7 @@ export function TaskTemplatesPage() {
         <div>
           <h1 className="text-2xl font-semibold">任务定义</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            沉淀一类任务的可复用定义：任务类型、统一描述、所需输入、交付方式与多个默认处理机器人
+            沉淀一类任务的可复用定义：统一描述、所需输入、交付方式与多个默认处理机器人
           </p>
         </div>
         <Link
@@ -140,27 +127,6 @@ export function TaskTemplatesPage() {
           }
         />
         <ToolbarGroup aria-label="筛选">
-          <Select
-            value={typeFilter}
-            onValueChange={(value) => setTypeFilter(value as string)}
-            items={typeItems}
-          >
-            <ToolbarButton
-              className="w-36"
-              render={
-                <SelectTrigger aria-label="按任务类型筛选">
-                  <SelectValue placeholder="类型" />
-                </SelectTrigger>
-              }
-            />
-            <SelectContent>
-              {Object.entries(typeItems).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Select
             value={workerFilter}
             onValueChange={(value) => setWorkerFilter(value as string)}

@@ -11,7 +11,6 @@ import { AppVersionsModule } from './app-versions/app-versions.module';
 import { AgentModule } from './agent/agent.module';
 import { AgentAppsModule } from './agent/agent-apps.module';
 import { ExecutorsModule } from './executors/executors.module';
-import { TaskTypesModule } from './task-types/task-types.module';
 import { TasksModule } from './tasks/tasks.module';
 import { WorkersModule } from './workers/workers.module';
 import { AuthModule } from './auth/auth.module';
@@ -85,7 +84,6 @@ import { FeishuBotModule } from './feishu-bot/feishu-bot.module';
     AgentAppsModule,
     ExecutorsModule,
     WorkersModule,
-    TaskTypesModule,
     TasksModule,
     TicketsModule,
     WorkflowsModule,

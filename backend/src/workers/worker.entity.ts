@@ -8,11 +8,12 @@ import {
 } from 'typeorm';
 import {
   WorkerGithubPermission,
+  WorkerResourcePermission,
   WorkerRole,
   WorkerRuntime,
 } from '../common/enums';
 
-/** 智能体的任务定义：接什么类型的任务、要什么输入、产出什么、怎么完成 */
+/** 智能体的任务定义：接什么任务、要什么输入、产出什么、怎么完成 */
 export interface WorkerTaskDefInput {
   name: string;
   desc?: string;
@@ -25,8 +26,6 @@ export interface WorkerTaskDefOutput {
 }
 
 export interface WorkerTaskDef {
-  /** 任务类型（task_types.name 或历史自定义值） */
-  type: string;
   inputs: WorkerTaskDefInput[];
   outputs: WorkerTaskDefOutput[];
   /** 完成方式说明 */
@@ -176,6 +175,17 @@ export class Worker {
     default: WorkerGithubPermission.DEVELOP,
   })
   githubPermission: WorkerGithubPermission;
+
+  /**
+   * 资源网关权限：write（全部资源）/ read（仅只读资源）/ none（无权限）。
+   * 与 GitHub 权限相互独立，默认无权限；由机器人配置页维护。
+   */
+  @Column({
+    type: 'enum',
+    enum: WorkerResourcePermission,
+    default: WorkerResourcePermission.NONE,
+  })
+  resourcePermission: WorkerResourcePermission;
 
   @Column({ default: true })
   enabled: boolean;

@@ -24,14 +24,12 @@ import {
 
 class CreateTaskTemplateDto implements CreateTaskTemplateInput {
   name: string;
-  type?: string | null;
   description?: string | null;
   agentIds?: number[] | null;
 }
 
 class UpdateTaskTemplateDto implements UpdateTaskTemplateInput {
   name?: string;
-  type?: string | null;
   description?: string | null;
   agentIds?: number[] | null;
 }

@@ -83,7 +83,6 @@ export function renderTaskDocument(input: TaskDocumentRenderInput): string {
     '| --- | --- |',
     `| 任务编号 | ${escapeCell(task.code)} |`,
     `| 任务标题 | ${escapeCell(task.title)} |`,
-    `| 任务类型 | ${escapeCell(task.type)} |`,
     `| 任务定义 | ${escapeCell(input.definitionName)} |`,
     `| 需求方 | ${escapeCell(input.requesterName)} |`,
     `| 执行机器人 | ${escapeCell(workerLabel)} |`,

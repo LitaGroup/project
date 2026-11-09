@@ -11,7 +11,6 @@ describe('TaskDocumentService 任务文档', () => {
       id: 1,
       code: 'TK-0001',
       title: '活动页开发',
-      type: '前端开发',
       templateId: 11,
       templateName: '前端任务定义',
       status: TaskStatus.RUNNING,

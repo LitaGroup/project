@@ -13,7 +13,6 @@ describe('TaskLoopService 多机器人协同', () => {
       id: 1,
       code: 'TK-0001',
       title: '协同任务',
-      type: '其它',
       status: TaskStatus.WAITING,
       subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
       description: '帮我做一个活动页',
@@ -165,12 +164,11 @@ describe('TaskLoopService 多机器人协同', () => {
     const task = baseTask();
     returnForStatus(TaskSubStatus.PENDING_ASSIGNMENT, task);
     assignmentService.assign.mockResolvedValue({
-      type: '前端开发',
       agentId: 3,
       agentName: '前端工程师',
       templateId: 11,
       templateName: '前端任务定义',
-      source: 'type-definition',
+      source: 'definition',
     });
 
     await service.tick();
@@ -182,7 +180,6 @@ describe('TaskLoopService 多机器人协同', () => {
       }),
       expect.objectContaining({
         subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
-        type: '前端开发',
         templateId: 11,
         agentId: 3,
       }),
@@ -194,7 +191,6 @@ describe('TaskLoopService 多机器人协同', () => {
     const task = baseTask();
     returnForStatus(TaskSubStatus.PENDING_ASSIGNMENT, task);
     assignmentService.assign.mockResolvedValue({
-      type: '前端开发',
       agentId: 3,
       agentName: '前端工程师',
       templateId: 11,
@@ -276,7 +272,6 @@ describe('TaskLoopService 多机器人协同', () => {
     const task = baseTask();
     returnForStatus(TaskSubStatus.PENDING_ASSIGNMENT, task);
     assignmentService.assign.mockResolvedValue({
-      type: '未知任务',
       agentId: null,
       agentName: null,
       templateId: 6,

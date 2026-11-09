@@ -14,6 +14,7 @@ import {
   TaskSubStatus,
   WorkerGithubPermission,
   WorkerLiveStatus,
+  WorkerResourcePermission,
   WorkerRole,
   WorkerRuntime,
 } from '../common/enums';
@@ -52,6 +53,7 @@ export interface CreateWorkerInput {
   ownerUserId?: number | null;
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
+  resourcePermission?: WorkerResourcePermission;
 }
 
 export type UpdateWorkerInput = Partial<CreateWorkerInput>;
@@ -85,6 +87,26 @@ function normalizeGithubPermission(value: unknown): WorkerGithubPermission {
   }
   throw new BadRequestException(
     'GitHub 权限仅支持 none（无权限）/ develop（开发权限）/ release（发布权限）',
+  );
+}
+
+/**
+ * 资源网关权限归一：write / read / none。
+ * 未传时缺省为 none，安全优先；已有机器人需管理员显式授权。
+ */
+function normalizeResourcePermission(value: unknown): WorkerResourcePermission {
+  if (value === undefined || value === null || value === '') {
+    return WorkerResourcePermission.NONE;
+  }
+  if (
+    value === WorkerResourcePermission.NONE ||
+    value === WorkerResourcePermission.READ ||
+    value === WorkerResourcePermission.WRITE
+  ) {
+    return value;
+  }
+  throw new BadRequestException(
+    '资源权限仅支持 none（无权限）/ read（仅只读资源）/ write（全部资源）',
   );
 }
 
@@ -367,6 +389,7 @@ export class WorkersService implements OnApplicationBootstrap {
       taskDefs: input.taskDefs?.length ? input.taskDefs : null,
       enabled: input.enabled ?? true,
       githubPermission: normalizeGithubPermission(input.githubPermission),
+      resourcePermission: normalizeResourcePermission(input.resourcePermission),
     });
     await this.assertConfig(worker);
     await this.resolveOwner(worker, input.ownerUserId ?? null);
@@ -450,6 +473,11 @@ export class WorkersService implements OnApplicationBootstrap {
     if (input.githubPermission !== undefined) {
       worker.githubPermission = normalizeGithubPermission(
         input.githubPermission,
+      );
+    }
+    if (input.resourcePermission !== undefined) {
+      worker.resourcePermission = normalizeResourcePermission(
+        input.resourcePermission,
       );
     }
     await this.assertConfig(worker);
@@ -626,6 +654,7 @@ export class WorkersService implements OnApplicationBootstrap {
       humanUserName: user.name,
       enabled: user.enabled,
       githubPermission: WorkerGithubPermission.DEVELOP,
+      resourcePermission: WorkerResourcePermission.NONE,
     });
     const saved = await this.workers.save(worker);
     this.logger.log(

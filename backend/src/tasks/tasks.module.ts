@@ -5,7 +5,6 @@ import { ExecutorsModule } from '../executors/executors.module';
 import { Executor } from '../executors/executor.entity';
 import { FeishuModule } from '../feishu/feishu.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
-import { TaskTypesModule } from '../task-types/task-types.module';
 import { WorkersModule } from '../workers/workers.module';
 import { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
@@ -61,7 +60,6 @@ import { WorkbenchService } from './workbench.service';
     WorkersModule,
     ExecutorsModule,
     FeishuModule,
-    TaskTypesModule,
     KnowledgeModule,
   ],
   controllers: [

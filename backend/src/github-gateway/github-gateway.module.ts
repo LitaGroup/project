@@ -7,6 +7,8 @@ import {
   GatewayCredentialsController,
   GithubAccessController,
 } from './github-gateway.controller';
+import { GatewayResourcePermissionController } from './resource-permission.controller';
+import { GatewayResourcePermissionService } from './resource-permission.service';
 import { WorkersModule } from '../workers/workers.module';
 
 /**
@@ -21,7 +23,11 @@ import { WorkersModule } from '../workers/workers.module';
     ]),
     WorkersModule,
   ],
-  controllers: [GatewayCredentialsController, GithubAccessController],
-  providers: [GatewayCredentialService],
+  controllers: [
+    GatewayCredentialsController,
+    GatewayResourcePermissionController,
+    GithubAccessController,
+  ],
+  providers: [GatewayCredentialService, GatewayResourcePermissionService],
 })
 export class GithubGatewayModule {}

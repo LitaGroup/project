@@ -2227,7 +2227,7 @@ export class TaskDispatchService
     ].join('\n');
   }
 
-  /** prompt 组装：任务编号/标题/类型/任务定义/输入/需求内容/输出要求；角色与技能由工位文件提供 */
+  /** prompt 组装：任务编号/标题/任务定义/输入/需求内容/输出要求；角色与技能由工位文件提供 */
   private async buildPrompt(task: Task): Promise<string> {
     const template = task.templateId
       ? await this.taskTemplates.findOne({ where: { id: task.templateId } })
@@ -2250,7 +2250,6 @@ export class TaskDispatchService
         '',
         `- 编号：${task.code}`,
         `- 标题：${task.title}`,
-        `- 类型：${task.type}`,
         template
           ? `\n# 任务定义\n\n${template.name}${
               template.description?.trim()

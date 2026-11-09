@@ -89,7 +89,6 @@ export class TaskCollaborationService {
       lines.push(
         `## ${template.name}（ID=${template.id}）`,
         '',
-        `- 类型：${template.type}`,
         `- 处理机器人：${agents.map((worker) => `${worker.name}#${worker.id}`).join('、')}`,
         '',
         template.description?.trim() || '（暂无任务定义描述）',

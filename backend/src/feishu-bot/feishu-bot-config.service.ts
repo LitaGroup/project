@@ -68,6 +68,15 @@ export class FeishuBotConfigService {
     );
   }
 
+  /** 机器人已启用且绑定的飞书应用配置（项目沟通群拉机器人用） */
+  async findEnabledWorkerConfig(
+    workerId: number,
+  ): Promise<FeishuBotConfig | null> {
+    return this.configs.findOne({
+      where: { workerId, kind: 'worker', enabled: true },
+    });
+  }
+
   /** 配置/更新平台官方机器人（全平台唯一） */
   async saveOfficial(
     input: SaveFeishuBotConfigInput,

@@ -710,7 +710,6 @@ export class TicketWorkflowRuntimeService {
       title: `${ticket.code} ${node.name}`,
       description,
       outputSpec,
-      type: template.type,
       templateId: template.id,
       agentId: agent.id,
       createdById: ticket.createdById,

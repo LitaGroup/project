@@ -36,13 +36,11 @@ export interface AgentTaskQuery {
   q?: string;
   status?: string;
   subStatus?: string;
-  type?: string;
   rootOnly?: boolean;
 }
 
 export interface AgentCreateTaskInput {
   title?: string;
-  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -166,9 +164,6 @@ export class TasksAgentService {
     if (params.subStatus) {
       rows = rows.filter((task) => task.subStatus === params.subStatus);
     }
-    if (params.type) {
-      rows = rows.filter((task) => task.type === params.type);
-    }
     if (params.rootOnly) {
       rows = rows.filter((task) => task.parentId === null);
     }
@@ -193,14 +188,14 @@ export class TasksAgentService {
         rows.length
       } 条，最多返回 ${TASK_LIST_LIMIT} 条）`,
       '',
-      '| ID | 编号 | 标题 | 类型 | 状态 | 我的角色 | 执行机器人 | 需求方 | 更新时间 |',
-      '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| ID | 编号 | 标题 | 状态 | 我的角色 | 执行机器人 | 需求方 | 更新时间 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ];
     for (const task of rows) {
       lines.push(
         `| ${task.id} | ${cell(task.code)} | ${cell(task.title)} | ${cell(
-          task.type,
-        )} | ${cell(`${task.status}-${task.subStatus}`)} | ${cell(
+          `${task.status}-${task.subStatus}`,
+        )} | ${cell(
           this.roleOf(scope, task),
         )} | ${cell(this.agentName(names, task))} | ${cell(
           this.requesterName(names, task),
@@ -208,7 +203,7 @@ export class TasksAgentService {
       );
     }
     if (rows.length === 0) {
-      lines.push('| — | — | 暂无任务 | — | — | — | — | — | — |');
+      lines.push('| — | — | 暂无任务 | — | — | — | — | — |');
     }
     lines.push(
       '',
@@ -217,7 +212,7 @@ export class TasksAgentService {
       '- 任务详情：`GET /api/tasks/{id}.md`',
       '- 创建任务：`POST /api/tasks/create.md`',
       '- 接受 / 拒绝 / 提问 / 答复 / 验收 / 返工 / 失败等：见 `GET /api/tasks/defines.md` 与 `lita-work` 技能',
-      '- 参数：`q`（编号/标题模糊搜索）、`status`、`subStatus`、`type`、`rootOnly=true`',
+      '- 参数：`q`（编号/标题模糊搜索）、`status`、`subStatus`、`rootOnly=true`',
       '',
       '> 只返回当前身份作为需求方、执行方或负责方的任务；需要其它项目上下文时使用项目 / 文档 / 知识相关技能。',
       '',
@@ -250,7 +245,6 @@ export class TasksAgentService {
       `# ${task.code} ${task.title}`,
       '',
       `- 状态：${task.status}-${task.subStatus}`,
-      `- 类型：${task.type}`,
       `- 任务定义：${task.templateName ?? '未设置'}`,
       `- 需求方：${this.requesterName(names, task)}`,
       `- 执行机器人：${this.agentName(names, task)}`,
@@ -384,7 +378,6 @@ export class TasksAgentService {
     const identity = await this.createIdentity(req);
     const created = await this.tasksService.create({
       title: input.title?.trim() || undefined,
-      type: input.type?.trim() || undefined,
       description: input.description?.trim() || null,
       input: input.input?.trim() || null,
       outputSpec: input.outputSpec?.trim() || null,
@@ -410,7 +403,6 @@ export class TasksAgentService {
       `- ID：${created.id}`,
       `- 编号：${created.code}`,
       `- 标题：${created.title}`,
-      `- 类型：${created.type}`,
       `- 状态：${created.status}-${created.subStatus}`,
       `- 需求方：${requesterLabel}`,
       '',

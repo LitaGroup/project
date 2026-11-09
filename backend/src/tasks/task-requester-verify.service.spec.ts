@@ -16,7 +16,6 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
       id: 53,
       code: 'TK-0053',
       title: '验证任务',
-      type: '其它',
       status: TaskStatus.WAITING,
       subStatus: TaskSubStatus.PENDING_ACCEPT,
       parentId: null,

@@ -14,7 +14,6 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
       id: 1,
       code: 'TK-0001',
       title: '协同任务',
-      type: '其它',
       status: TaskStatus.WAITING,
       subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
       description: '任务描述',

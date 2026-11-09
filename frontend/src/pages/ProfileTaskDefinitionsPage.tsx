@@ -3,13 +3,6 @@ import { Link } from 'react-router-dom'
 import { Button, buttonVariants } from '@appica/ui-react/button'
 import { Input } from '@appica/ui-react/input'
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@appica/ui-react/select'
-import {
   Tabs,
   TabsList,
   TabsTrigger,
@@ -17,32 +10,24 @@ import {
 } from '@appica/ui-react/tabs'
 import {
   Toolbar,
-  ToolbarButton,
   ToolbarGroup,
   ToolbarInput,
 } from '@appica/ui-react/toolbar'
-import { api, type TaskTemplate, type TaskTypeDef, type Worker } from '../lib/api'
+import { api, type TaskTemplate, type Worker } from '../lib/api'
 import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { useAuth } from '../context/AuthContext'
 import { TaskTemplateTable } from '../components/TaskTemplateTable'
 
 type TabKey = 'mine' | 'all'
 
-/** 关键词（名称/描述）+ 任务类型筛选 */
+/** 关键词（名称/描述）筛选 */
 function filterTemplates(
   list: TaskTemplate[],
   keyword: string,
-  typeFilter: string,
 ): TaskTemplate[] {
-  return list.filter((template) => {
-    if (
-      !matchesPinyinSearch(keyword, [template.name, template.description])
-    ) {
-      return false
-    }
-    if (typeFilter !== 'all' && template.type !== typeFilter) return false
-    return true
-  })
+  return list.filter((template) =>
+    matchesPinyinSearch(keyword, [template.name, template.description]),
+  )
 }
 
 /**
@@ -54,10 +39,8 @@ export function ProfileTaskDefinitionsPage() {
   const [tab, setTab] = useState<TabKey>('mine')
   const [templates, setTemplates] = useState<TaskTemplate[] | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
-  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([])
   const [error, setError] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
 
   const reload = useCallback(() => {
     api
@@ -72,16 +55,7 @@ export function ProfileTaskDefinitionsPage() {
       .listWorkers({ role: '工作者' })
       .then(setWorkers)
       .catch(() => undefined)
-    api.listTaskTypes().then(setTaskTypes).catch(() => undefined)
   }, [reload])
-
-  const typeItems = useMemo<Record<string, string>>(
-    () => ({
-      all: '不限类型',
-      ...Object.fromEntries(taskTypes.map((type) => [type.name, type.name])),
-    }),
-    [taskTypes],
-  )
 
   const mine = useMemo(
     () =>
@@ -94,18 +68,17 @@ export function ProfileTaskDefinitionsPage() {
   )
 
   const filteredMine = useMemo(
-    () => filterTemplates(mine, keyword, typeFilter),
-    [mine, keyword, typeFilter],
+    () => filterTemplates(mine, keyword),
+    [mine, keyword],
   )
   const filteredAll = useMemo(
-    () => filterTemplates(templates ?? [], keyword, typeFilter),
-    [templates, keyword, typeFilter],
+    () => filterTemplates(templates ?? [], keyword),
+    [templates, keyword],
   )
 
-  const hasFilter = keyword.trim() !== '' || typeFilter !== 'all'
+  const hasFilter = keyword.trim() !== ''
   const clearFilters = () => {
     setKeyword('')
-    setTypeFilter('all')
   }
 
   return (
@@ -157,11 +130,8 @@ export function ProfileTaskDefinitionsPage() {
           <div className="flex flex-col gap-4">
             <FilterToolbar
               keyword={keyword}
-              typeFilter={typeFilter}
-              typeItems={typeItems}
               hasFilter={hasFilter}
               onKeyword={setKeyword}
-              onType={setTypeFilter}
               onClear={clearFilters}
             />
             <TaskTemplateTable
@@ -184,11 +154,8 @@ export function ProfileTaskDefinitionsPage() {
           <div className="flex flex-col gap-4">
             <FilterToolbar
               keyword={keyword}
-              typeFilter={typeFilter}
-              typeItems={typeItems}
               hasFilter={hasFilter}
               onKeyword={setKeyword}
-              onType={setTypeFilter}
               onClear={clearFilters}
             />
             <TaskTemplateTable
@@ -211,19 +178,13 @@ export function ProfileTaskDefinitionsPage() {
 
 function FilterToolbar({
   keyword,
-  typeFilter,
-  typeItems,
   hasFilter,
   onKeyword,
-  onType,
   onClear,
 }: {
   keyword: string
-  typeFilter: string
-  typeItems: Record<string, string>
   hasFilter: boolean
   onKeyword: (value: string) => void
-  onType: (value: string) => void
   onClear: () => void
 }) {
   return (
@@ -242,27 +203,6 @@ function FilterToolbar({
         }
       />
       <ToolbarGroup aria-label="筛选">
-        <Select
-          value={typeFilter}
-          onValueChange={(value) => onType(value as string)}
-          items={typeItems}
-        >
-          <ToolbarButton
-            className="w-36"
-            render={
-              <SelectTrigger aria-label="按任务类型筛选">
-                <SelectValue placeholder="类型" />
-              </SelectTrigger>
-            }
-          />
-          <SelectContent>
-            {Object.entries(typeItems).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         {hasFilter && (
           <Button variant="ghost" size="sm" onClick={onClear}>
             清空筛选

@@ -64,7 +64,7 @@ const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
  */
 export function TaskPackageDetailPage() {
   const { id } = useParams<{ id: string }>()
-  return <TaskDetailView taskId={Number(id)} />
+  return <TaskDetailView taskId={Number(id)} collapsibleCollaboration />
 }
 
 /**
@@ -78,6 +78,7 @@ export function TaskDetailView({
   extraBadges,
   hideBreadcrumb = false,
   handoffEditable = false,
+  collapsibleCollaboration = false,
   onTaskChange,
   onOpenTask,
 }: {
@@ -89,6 +90,8 @@ export function TaskDetailView({
   hideBreadcrumb?: boolean
   /** 工作台模式：需求方/执行方可在「交付」Tab 创建与编辑交付文档 */
   handoffEditable?: boolean
+  /** 普通详情页：右侧任务协作面板外置并默认收起；工作台保持常驻 */
+  collapsibleCollaboration?: boolean
   /** 任务或文档刷新后通知外部，用于同步工作台左侧任务列表 */
   onTaskChange?: () => void | Promise<void>
   /** 打开关联任务：普通详情默认跳转任务中心，工作台可切换当前任务 */
@@ -121,6 +124,8 @@ export function TaskDetailView({
   const [docsError, setDocsError] = useState<string | null>(null)
   /** 文档写入（交付/复盘/普通文档）后由任务 SSE 递增，驱动只读预览刷新 */
   const [docsRevision, setDocsRevision] = useState(0)
+  const [collaborationOpen, setCollaborationOpen] = useState(false)
+  const [collaborationUnread, setCollaborationUnread] = useState(0)
   const [handoffEditing, setHandoffEditing] = useState(false)
   const [handoffSaving, setHandoffSaving] = useState(false)
   const [handoffError, setHandoffError] = useState<string | null>(null)
@@ -528,9 +533,6 @@ export function TaskDetailView({
               showMain
             />
             <Badge variant="soft" size="sm">
-              类型 · {currentTask.type}
-            </Badge>
-            <Badge variant="secondary" size="sm">
               定义 · {currentTask.templateName ?? '未设置'}
             </Badge>
           </div>
@@ -566,12 +568,20 @@ export function TaskDetailView({
       <div className="flex min-h-0 flex-1 flex-col">
         <DetailPageLayout
           aiLabel="任务协作"
+          aiCollapsible={collapsibleCollaboration}
+          aiOutsideContent={collapsibleCollaboration}
+          aiOpen={collaborationOpen}
+          onAiOpenChange={setCollaborationOpen}
+          aiUnreadCount={collaborationUnread}
+          aiCollapseClassName="top-0 h-12"
           ai={
             <TaskWorkbenchPanel
               task={interactiveTask}
               chat={interactiveChat}
               handoffDoc={handoffDoc}
               handoffEditing={handoffEditing}
+              visible={collapsibleCollaboration ? collaborationOpen : true}
+              onUnreadChange={setCollaborationUnread}
               onRefresh={refreshTaskPanel}
               agent={
                 <DetailAgentPanel

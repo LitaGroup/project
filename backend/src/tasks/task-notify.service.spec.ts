@@ -8,7 +8,6 @@ describe('TaskNotifyService 飞书任务通知', () => {
       id: 42,
       code: 'TK-0042',
       title: '活动页开发',
-      type: '其它',
       status: TaskStatus.WAITING,
       subStatus: TaskSubStatus.PENDING_ACCEPT,
       requesterType: 'user',

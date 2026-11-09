@@ -23,7 +23,6 @@ describe('TicketsService', () => {
       id: 101,
       code: 'TK-0101',
       title: '方案工单',
-      type: '工单',
       templateId: 1001,
       templateName: '方案设计',
       status: TaskStatus.RUNNING,
@@ -189,7 +188,6 @@ describe('TicketsService', () => {
     templates.findOne.mockResolvedValue({
       id: 1001,
       name: '方案设计',
-      type: '技术设计',
       agentIds: [1002],
     });
     workers.find.mockResolvedValue([worker(1002)]);
@@ -206,7 +204,6 @@ describe('TicketsService', () => {
       expect.objectContaining({
         templateId: 1001,
         templateName: '方案设计',
-        type: '技术设计',
         content: '明确后的需求',
       }),
     );

@@ -199,7 +199,6 @@ function TaskTreeRow({
               subStatus={task.subStatus}
               showMain
             />
-            <span>类型 · {task.type}</span>
             <span>处理机器人 · {agentName ?? '未分配'}</span>
             {hasChildren && (
               <span>

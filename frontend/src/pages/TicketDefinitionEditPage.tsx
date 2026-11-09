@@ -190,7 +190,7 @@ export function TicketDefinitionEditPage() {
       ...Object.fromEntries(
         templates.map((template) => [
           String(template.id),
-          `${template.name} · ${template.type}`,
+          template.name,
         ]),
       ),
     }),
@@ -697,7 +697,7 @@ export function TicketDefinitionEditPage() {
                                   key={template.id}
                                   value={String(template.id)}
                                 >
-                                  {template.name} · {template.type}
+                                  {template.name}
                                 </SelectItem>
                               ))}
                             </SelectContent>

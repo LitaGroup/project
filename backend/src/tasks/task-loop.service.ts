@@ -139,7 +139,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
       } catch (e) {
         await this.toFeedback(task.id, [
           {
-            item: '任务分配失败，请检查任务定义或任务类型',
+            item: '任务分配失败，请检查任务定义',
             reason: (e as Error).message,
           },
         ]);
@@ -164,7 +164,6 @@ export class TaskLoopService implements OnApplicationBootstrap {
         },
         {
           subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
-          type: result.type,
           templateId: result.templateId,
           templateName: result.templateName,
           agentId: result.agentId,
@@ -180,8 +179,6 @@ export class TaskLoopService implements OnApplicationBootstrap {
       const sourceLabel = {
         manual: '人工预分配',
         definition: '任务定义',
-        'type-definition': '同类型任务定义',
-        'type-worker': '机器人任务定义',
         unknown: '系统未知任务定义（ID=6）',
       }[result.source];
       await this.tasksService.addEvent(

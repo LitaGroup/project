@@ -76,15 +76,18 @@ export function ChatComposerFrame({
 export function ChatComposerDock({
   children,
   className,
+  bordered = true,
 }: {
   children: ReactNode
   className?: string
+  /** 是否展示顶部分隔线 */
+  bordered?: boolean
 }) {
   return (
     <div
-      className={`shrink-0 border-t border-border bg-background p-3 ${
-        className ?? ''
-      }`}
+      className={`shrink-0 ${
+        bordered ? 'border-t border-border' : ''
+      } bg-background p-3 ${className ?? ''}`}
     >
       {children}
     </div>

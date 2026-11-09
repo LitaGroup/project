@@ -6,6 +6,7 @@ import { User } from '../auth/user.entity';
 import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { Task } from '../tasks/task.entity';
 import { TaskDeliveryService } from '../tasks/task-delivery.service';
+import { SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID } from '../tasks/system-task-templates';
 import { Worker } from '../workers/worker.entity';
 import { FeishuBotClientService } from './feishu-bot-client.service';
 import type {
@@ -115,6 +116,18 @@ export class FeishuBotTaskChatService {
         }
         continue;
       }
+      if (task.templateId === SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID) {
+        // 存量项目交付任务的双人群迁移到项目沟通群，避免同一任务出现两个群。
+        if (row.chatId && secrets && row.state !== 'destroyed') {
+          await this.dissolve(row, secrets);
+        } else if (!row.chatId && row.state !== 'destroyed') {
+          await this.chats.update(row.id, {
+            state: 'destroyed',
+            lastError: '项目交付任务已改用项目沟通群',
+          });
+        }
+        continue;
+      }
       if (task.status === TaskStatus.FINISHED) {
         if (!row.finishedAt) {
           const finishedAt = task.acceptedAt ?? task.updatedAt;
@@ -157,6 +170,9 @@ export class FeishuBotTaskChatService {
     for (const task of candidates) {
       if (bound.has(task.id)) continue;
       if (task.parentId !== null) continue;
+      // 项目交付任务使用 ProjectChat 多人沟通群，不再创建双人任务群。
+      if (task.templateId === SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID)
+        continue;
       const existing = rows.find((row) => row.taskId === task.id);
       if (
         existing &&

@@ -69,7 +69,7 @@ const WORKBENCH_STATUSES = [
 const WORKBENCH_TASK_LIMIT = 300;
 
 /** 详情页「我的 AI」可用的页面类型 */
-export type AgentPageContextType = 'document' | 'script';
+export type AgentPageContextType = 'document' | 'script' | 'project';
 
 /** 详情页上下文入参（query/body 原始值） */
 export interface AgentPageContextInput {
@@ -89,10 +89,15 @@ export interface AgentPageContext {
   readUrl?: string;
 }
 
-const AGENT_PAGE_TYPES = new Set<AgentPageContextType>(['document', 'script']);
+const AGENT_PAGE_TYPES = new Set<AgentPageContextType>([
+  'document',
+  'script',
+  'project',
+]);
 const AGENT_PAGE_LABELS: Record<AgentPageContextType, string> = {
   document: '文档',
   script: '脚本',
+  project: '项目',
 };
 
 /**

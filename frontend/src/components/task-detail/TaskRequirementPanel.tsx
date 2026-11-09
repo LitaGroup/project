@@ -91,7 +91,6 @@ export function TaskRequirementPanel({ task }: { task: TaskPackage }) {
         <div className="flex flex-col gap-4 p-4">
           <dl className="grid gap-x-5 gap-y-3 rounded-[var(--radius-md)] bg-background-muted px-3 py-3 text-xs sm:grid-cols-2 xl:grid-cols-4">
             <RequirementMeta label="任务编号" value={task.code} mono />
-            <RequirementMeta label="任务类型" value={task.type} />
             <RequirementMeta
               label="任务定义"
               value={task.templateName ?? '未设置'}

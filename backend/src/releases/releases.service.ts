@@ -475,14 +475,20 @@ export class ReleasesService {
     }
   }
 
-  /** 项目人员（resources 前端/后端/测试/客户端）+ 测试人员 去重后逐个私聊卡片 */
+  /** 项目人员（resources 前端/后端/测试/产品/客户端）+ 测试人员 去重后逐个私聊卡片 */
   private async notifyMembers(
     release: ProjectRelease,
     project: Project,
     card: Record<string, unknown>,
   ): Promise<void> {
     const names = new Set(release.testers);
-    for (const key of ['frontend', 'backend', 'qa', 'client'] as const) {
+    for (const key of [
+      'frontend',
+      'backend',
+      'qa',
+      'product',
+      'client',
+    ] as const) {
       for (const name of splitMemberNames(project.resources?.[key])) {
         names.add(name);
       }

@@ -56,7 +56,6 @@ import { PersonalAgentsService } from '../workers/personal-agents.service';
 
 class CreateTaskDto implements CreateTaskInput {
   title?: string;
-  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -69,7 +68,6 @@ class CreateTaskDto implements CreateTaskInput {
 
 class UpdateTaskDto implements UpdateTaskInput {
   title?: string;
-  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -220,20 +218,18 @@ export class TasksController {
     return this.tasksService.overview();
   }
 
-  /** 任务列表（默认根任务树；q=编号/标题，status/subStatus/type 筛选，rootOnly=false 展开全部） */
+  /** 任务列表（默认根任务树；q=编号/标题，status/subStatus 筛选，rootOnly=false 展开全部） */
   @Get()
   findAll(
     @Query('q') q?: string,
     @Query('status') status?: TaskStatus,
     @Query('subStatus') subStatus?: TaskSubStatus,
-    @Query('type') type?: string,
     @Query('rootOnly') rootOnly?: string,
   ) {
     return this.tasksService.findAll({
       q,
       status: status || undefined,
       subStatus: subStatus || undefined,
-      type: type || undefined,
       rootOnly: rootOnly === 'false' ? false : undefined,
     });
   }

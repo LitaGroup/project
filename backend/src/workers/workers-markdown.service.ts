@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   WorkerGithubPermission,
+  WorkerResourcePermission,
   WorkerRole,
   WorkerRuntime,
 } from '../common/enums';
@@ -43,17 +44,17 @@ export class WorkersMarkdownService {
       '',
       `共 ${workers.length} 个机器人${filter?.role ? `（角色：${filter.role}）` : ''}。`,
       '',
-      '| ID | 名称 | 归属 | 角色 | 运行时 | GitHub 权限 | 实时状态 | 启用 | 执行器 | 模型 | 负责人 | 当前任务 |',
-      '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| ID | 名称 | 归属 | 角色 | 运行时 | GitHub 权限 | 资源权限 | 实时状态 | 启用 | 执行器 | 模型 | 负责人 | 当前任务 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ];
     for (const worker of workers) {
       lines.push(
-        `| [${worker.id}](/api/workers/${worker.id}.md) | ${markdownCell(worker.name)} | ${this.workerKind(worker)} | ${worker.role} | ${worker.runtime} | ${this.githubPermissionLabel(worker.githubPermission)} | ${worker.liveStatus} | ${worker.enabled ? '是' : '否'} | ${worker.executorId ?? '-'} | ${markdownCell(worker.modelId)} | ${markdownCell(worker.ownerName)} | ${markdownCell(this.activeTaskLabel(worker))} |`,
+        `| [${worker.id}](/api/workers/${worker.id}.md) | ${markdownCell(worker.name)} | ${this.workerKind(worker)} | ${worker.role} | ${worker.runtime} | ${this.githubPermissionLabel(worker.githubPermission)} | ${this.resourcePermissionLabel(worker.resourcePermission)} | ${worker.liveStatus} | ${worker.enabled ? '是' : '否'} | ${worker.executorId ?? '-'} | ${markdownCell(worker.modelId)} | ${markdownCell(worker.ownerName)} | ${markdownCell(this.activeTaskLabel(worker))} |`,
       );
     }
     if (workers.length === 0) {
       lines.push(
-        '| - | （暂无机器人） | - | - | - | - | - | - | - | - | - | - |',
+        '| - | （暂无机器人） | - | - | - | - | - | - | - | - | - | - | - |',
       );
     }
     lines.push(
@@ -84,6 +85,7 @@ export class WorkersMarkdownService {
       `- 角色：${worker.role}`,
       `- 运行时：${worker.runtime}`,
       `- GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}`,
+      `- 资源权限：${this.resourcePermissionLabel(worker.resourcePermission)}`,
       `- 启用：${worker.enabled ? '是' : '否'}`,
       `- 实时状态：${worker.liveStatus}`,
       `- 当前任务：${this.activeTaskLabel(worker)}`,
@@ -230,6 +232,7 @@ export class WorkersMarkdownService {
       `- 角色：${worker.role}`,
       `- 运行时：${worker.runtime}`,
       `- GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}`,
+      `- 资源权限：${this.resourcePermissionLabel(worker.resourcePermission)}`,
       `- 启用：${worker.enabled ? '是' : '否'}`,
       `- 执行器：${worker.executorId ?? '—'}`,
       `- 供应商：${worker.providerId ?? '—'}`,
@@ -267,6 +270,14 @@ export class WorkersMarkdownService {
     if (permission === WorkerGithubPermission.RELEASE) return '发布权限';
     if (permission === WorkerGithubPermission.NONE) return '无权限';
     return '开发权限';
+  }
+
+  private resourcePermissionLabel(
+    permission: WorkerView['resourcePermission'],
+  ): string {
+    if (permission === WorkerResourcePermission.WRITE) return '全部资源';
+    if (permission === WorkerResourcePermission.READ) return '只读资源';
+    return '无权限';
   }
 
   private activeTaskLabel(worker: WorkerView): string {

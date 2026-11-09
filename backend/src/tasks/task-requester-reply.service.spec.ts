@@ -17,7 +17,6 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
       id: 54,
       code: 'TK-0054',
       title: '咱们APP的主要业务是什么',
-      type: '其它',
       status: TaskStatus.WAITING,
       subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
       parentId: null,

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../auth/user.entity';
+import { Project } from '../projects/project.entity';
 import { Task } from '../tasks/task.entity';
 import { TasksModule } from '../tasks/tasks.module';
 import { Worker } from '../workers/worker.entity';
@@ -19,6 +20,8 @@ import { FeishuBotEvent } from './feishu-bot-event.entity';
 import { FeishuBotLongConnectionService } from './feishu-bot-long-connection.service';
 import { FeishuBotMessageService } from './feishu-bot-message.service';
 import { FeishuBotP2PService } from './feishu-bot-p2p.service';
+import { FeishuBotProjectChat } from './feishu-bot-project-chat.entity';
+import { FeishuBotProjectChatService } from './feishu-bot-project-chat.service';
 import { FeishuBotTaskChat } from './feishu-bot-task-chat.entity';
 import { FeishuBotTaskChatService } from './feishu-bot-task-chat.service';
 import { FeishuBotController } from './feishu-bot.controller';
@@ -39,7 +42,9 @@ import { FeishuBotController } from './feishu-bot.controller';
       FeishuBotCard,
       FeishuBotEvent,
       FeishuBotTaskChat,
+      FeishuBotProjectChat,
       Worker,
+      Project,
       Task,
       User,
     ]),
@@ -58,9 +63,10 @@ import { FeishuBotController } from './feishu-bot.controller';
     FeishuBotMessageService,
     FeishuBotP2PService,
     FeishuBotTaskChatService,
+    FeishuBotProjectChatService,
     FeishuBotEventService,
     FeishuBotLongConnectionService,
   ],
-  exports: [FeishuBotConfigService],
+  exports: [FeishuBotConfigService, FeishuBotProjectChatService],
 })
 export class FeishuBotModule {}

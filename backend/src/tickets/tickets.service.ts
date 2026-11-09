@@ -371,7 +371,6 @@ export class TicketsService {
     task.workPlan = workPlan;
     task.templateId = template.id;
     task.templateName = template.name;
-    task.type = template.type;
     await this.tasks.save(task);
 
     const routed = await this.dispatchService.assign(
@@ -486,11 +485,10 @@ export class TicketsService {
       );
     } else {
       lines.push(
-        '| ID | 名称 | 类型 |',
-        '| --- | --- | --- |',
+        '| ID | 名称 |',
+        '| --- | --- |',
         ...orderedTemplates.map(
-          (template) =>
-            `| ${template.id} | ${escapeCell(template.name)} | ${escapeCell(template.type)} |`,
+          (template) => `| ${template.id} | ${escapeCell(template.name)} |`,
         ),
         '',
       );

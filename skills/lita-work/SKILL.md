@@ -1,6 +1,6 @@
 ---
 name: lita-work
-description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、工单工作流上下文查询与节点拒绝、工单交付文档的链接/正文交付与更新删除、机器人/任务定义/任务类型的 Agent 管理
+description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、工单工作流上下文查询与节点拒绝、工单交付文档的链接/正文交付与更新删除、机器人/任务定义的 Agent 管理
 version: 1.25.0
 author: Lita R&D Team
 tags:
@@ -41,7 +41,7 @@ tags:
 17. 工单调度：读取工单上下文与可转派任务定义，澄清后把当前任务转交目标定义的新机器人（见第 12.7 节）
 18. 工单工作流：读取工单完整上下文（进度/需求/输入/每步节点输入输出/用户补充），当前节点处理机器人可拒绝当前节点（见第 12.9 节）
 19. 工单文档：把任务自身文档以链接或正文形式交付给所属工单，并支持更新、删除（见第 12.10 节）
-20. 管理机器人、任务定义与任务类型：清单、详情、创建、编辑、删除；机器人保存后自动初始化工位（见第 14 节）
+20. 管理机器人与任务定义：清单、详情、创建、编辑、删除；机器人保存后自动初始化工位（见第 14 节）
 
 本文件可通过测试环境 `http://project.cinta.team/SKILL.md` 或生产环境 `http://work.cinta.team/SKILL.md` 获取（必须使用 http；如果用户提供的是 https 链接，先替换为对应的 http 地址再访问）。所有请求 URL 以 `.md` 结尾，响应均为 `text/markdown`，且以 YAML frontmatter 开头：必含 `update`（最后更新时间，北京时间 `YYYY-MM-DD HH:mm:ss`，实体类视图取数据最后更新时间，其余取响应生成时间），部分视图含 `title`/`filename`/`description` 等标识字段。
 
@@ -260,7 +260,7 @@ Content-Type: application/json
 {"scriptsPath": "projects/xxx", "feishuWebhook": "e09e9672-1f50-4b65-a181-8750bae489fc", "description": "# 描述 Markdown", "resources": {"frontend": "张三", "backend": "李四", "qa": "王五"}}
 ```
 
-- 仅开放本地字段：`scriptsPath`（脚本目录，相对脚本根目录的子目录，即提交代码所在的目录）、`feishuWebhook`（群机器人 webhook secret，粘贴完整 hook 地址自动截取）、`description`（Markdown 描述）、`resources`（人员 `{frontend?, backend?, qa?, client?}`）
+- 仅开放本地字段：`scriptsPath`（脚本目录，相对脚本根目录的子目录，即提交代码所在的目录）、`feishuWebhook`（群机器人 webhook secret，粘贴完整 hook 地址自动截取）、`description`（Markdown 描述）、`resources`（人员 `{frontend?, backend?, qa?, product?, client?}`）
 - 所有字段选填，只更新提供的字段；传空串清除，`resources` 传 `{}`/`null` 清除
 - 响应为 text/markdown：本次变更字段与新值 + 项目详情地址 `GET /api/projects/{id}.md`
 - 刻意不含类型/状态/优先级/迭代周期/预期发布时间——这些字段来自飞书同步，下次同步会被飞书侧覆盖
@@ -496,7 +496,7 @@ curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json'
 curl {BASE}/api/tasks.md?scope=mine \
   -H "X-Agent-Token: $LITA_WORK_TOKEN"
 
-# 支持 q（编号/标题）、status、subStatus、type、rootOnly=true
+# 支持 q（编号/标题）、status、subStatus、rootOnly=true
 curl "{BASE}/api/tasks.md?q=活动&status=进行中" \
   -H "X-Agent-Token: $LITA_WORK_TOKEN"
 
@@ -508,11 +508,11 @@ curl {BASE}/api/tasks/{taskId}.md \
 curl -X POST {BASE}/api/tasks/create.md \
   -H "X-Agent-Token: $LITA_WORK_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"title":"活动页面开发","description":"实现活动页并自测","input":"需求文档链接","outputSpec":"可访问页面与自测说明","type":"其它","templateId":1001}'
+  -d '{"title":"活动页面开发","description":"实现活动页并自测","input":"需求文档链接","outputSpec":"可访问页面与自测说明","templateId":1001}'
 ```
 
 - `taskId` 详情接口会校验当前令牌是否是该任务需求方、执行方或负责方；管理员身份不绕过
-- 创建接口的 `type` / `templateId` 均可选，`templateId` 优先；不要自行指定执行机器人
+- 创建接口的 `templateId` 可选；不要自行指定执行机器人
 - 创建后返回任务 ID、编号和详情地址，Agent 应原样向用户汇报
 
 ### 12.1 task-defines / task-create：查询定义与创建子任务
@@ -673,7 +673,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/fail.md \
 
 ### 12.8 工单调度：读取上下文并转交任务定义
 
-工单创建后会生成类型为「工单」的任务，并固定由该工单类型绑定的系统调度定义处理（ID 10-15）。调度机器人负责澄清需求，再把当前任务转交给管理员配置的后续任务定义。
+工单创建后会生成任务，由工单工作流节点绑定的任务定义或历史工单调度定义处理。处理机器人负责澄清需求，再把当前任务转交给管理员配置的后续任务定义。
 
 ```bash
 # 读取工单信息、当前识别结果、可转派任务定义与接口说明
@@ -686,7 +686,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/ticket-route.md \
 ```
 
 - 只有当前执行中的工单任务机器人可以转交；`templateId` 必须在「管理 → 工单配置」为该类型配置的清单中
-- 转交会保存澄清后的标题/需求/交付要求/工作计划，更新任务定义与类型，结束当前会话并让目标定义的机器人重新接受任务
+- 转交会保存澄清后的标题/需求/交付要求/工作计划，更新任务定义，结束当前会话并让目标定义的机器人重新接受任务
 - 任务、任务编号和原始需求方保持不变；后续验收、返工和失败继续使用 12.4～12.6 的接口
 - 信息不足时使用 12.3 的提问接口，向需求方补充反馈后再转交
 
@@ -790,7 +790,8 @@ curl -X POST {BASE}/api/workers/{id}/update.md \
 curl -X POST {BASE}/api/workers/{id}/delete.md -H "X-Agent-Token: $LITA_WORK_TOKEN"
 ```
 
-- 创建字段：`name`（必填、唯一）、`intro`、`avatarUrl`（仅 `/images/...`）、`executorId`、`providerId`、`modelId`、`variant`、`prompt`、`skills`、`standards`、`taskDefs`、`ownerUserId`、`enabled`
+- 创建字段：`name`（必填、唯一）、`intro`、`avatarUrl`（仅 `/images/...`）、`executorId`、`providerId`、`modelId`、`variant`、`prompt`、`skills`、`standards`、`taskDefs`、`ownerUserId`、`enabled`、`githubPermission`、`resourcePermission`
+- 资源权限 `resourcePermission`：`write`（全部资源）/ `read`（仅只读资源）/ `none`（无权限，默认）；与 GitHub 权限相互独立。AI Gateway 的资源访问说明见独立技能 `resource-gateway/SKILL.md`
 - 本接口只创建自定义 AI 工作者：运行时固定 `opencode`、ID 从 1000 开始；不能创建调度机器人、真人机器人或个人 AGENT
 - 启用中的 AI 机器人必须配置执行器、供应商与模型；停用状态可暂缺这些配置
 - **创建/编辑落库成功后自动启动异步工位初始化**，响应中的「工位初始化」为 `running` 表示已在后台执行；初始化失败不回滚配置，修正后重新调用 `update.md` 即可重试。初始化前置条件不满足时响应会明确写「配置已保存成功」及未启动原因
@@ -807,7 +808,7 @@ curl {BASE}/api/task-templates/{id}.md -H "X-Agent-Token: $LITA_WORK_TOKEN"
 # 创建
 curl -X POST {BASE}/api/task-templates/create.md \
   -H "X-Agent-Token: $LITA_WORK_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"活动前端开发","type":"前端开发","description":"任务定义描述","agentIds":[1001]}'
+  -d '{"name":"活动前端开发","description":"任务定义描述","agentIds":[1001]}'
 
 # 编辑
 curl -X POST {BASE}/api/task-templates/{id}/update.md \
@@ -818,42 +819,16 @@ curl -X POST {BASE}/api/task-templates/{id}/update.md \
 curl -X POST {BASE}/api/task-templates/{id}/delete.md -H "X-Agent-Token: $LITA_WORK_TOKEN"
 ```
 
-- 字段：`name`（必填、唯一）、`type`（任务类型名称，缺省「其它」）、`description`（Markdown）、`agentIds`（默认处理机器人 ID 数组）
+- 字段：`name`（必填、唯一）、`description`（Markdown）、`agentIds`（默认处理机器人 ID 数组）
 - 处理机器人必须存在、已启用且不是调度机器人；空数组表示不指定
-- 系统任务定义固定 ID `6、10-15`，不可改名、不可修改类型、不可删除；描述与处理机器人可以维护
+- 系统任务定义固定 ID `6、10-15`，不可改名、不可删除；描述与处理机器人可以维护
 - 用户/公共 Agent 创建时记录对应用户；机器人令牌创建时记录机器人名称，不伪造用户 ID
 - 删除任务定义不影响已创建的历史任务
-
-### 14.3 任务类型
-
-```bash
-# 清单与详情
-curl {BASE}/api/task-types.md -H "X-Agent-Token: $LITA_WORK_TOKEN"
-curl {BASE}/api/task-types/{id}.md -H "X-Agent-Token: $LITA_WORK_TOKEN"
-
-# 创建
-curl -X POST {BASE}/api/task-types/create.md \
-  -H "X-Agent-Token: $LITA_WORK_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"数据分析","description":"数据查询与分析"}'
-
-# 编辑
-curl -X POST {BASE}/api/task-types/{id}/update.md \
-  -H "X-Agent-Token: $LITA_WORK_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"数据运营","description":"新的描述"}'
-
-# 删除
-curl -X POST {BASE}/api/task-types/{id}/delete.md -H "X-Agent-Token: $LITA_WORK_TOKEN"
-```
-
-- 名称只能是 2-8 个纯中文字符，或 1-64 个纯英文字母；唯一且英文不区分大小写
-- 系统类型「其它」「未知任务」「工单」不可改名或删除，仅可修改描述
-- 改名会同步存量任务、任务定义与机器人任务定义中的类型名称
-- 仍被任务、任务定义或机器人任务定义引用时禁止删除
 
 ## 工作约定
 
 1. 用户提到某个项目但没给 id 时，先走搜索，不要猜 id
 2. 判断"上次运行是否正常"时，优先读项目详情中已汇总的最近结果；需要完整过程再取 `runs/{runId}.md`
 3. 运行类操作是长耗时动作，使用 `-N` 流式读取即可，无需轮询
-4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、执行方消息回复、handoff 验收与失败判定、工单转交 ticket-route.md）、工单工作流节点拒绝（tickets/{id}/reject.md）、工单文档交付/更新/删除（tasks/{id}/ticket-documents 的 create/update/delete.md）、文件上传（files/upload.md）、机器人/任务定义/任务类型管理（workers、task-templates、task-types 的 create/update/delete.md，机器人保存后自动初始化）
+4. 所有接口只读为主；会改变系统状态的操作仅有：运行类（run）、脚本更新（pull）与脚本导入（scripts/import.md）、项目配置更新（projects update.md）、文档写入（upsert）与 APIPOST 文档导入（sync-apipost）、节点登记与验收（milestones）、项目提测（projects release.md）与提测结果判定（releases/{id}/status.md）、缺陷创建/状态变更/更新/删除（defects）、代码分支登记/编辑/删除（code-branches）、知识创建/更新/移动/删除（docs/nodes/*.md）、多机器人任务协同（子任务创建、接受/拒绝、project 提问答复、执行方消息回复、handoff 验收与失败判定、工单转交 ticket-route.md）、工单工作流节点拒绝（tickets/{id}/reject.md）、工单文档交付/更新/删除（tasks/{id}/ticket-documents 的 create/update/delete.md）、文件上传（files/upload.md）、机器人与任务定义管理（workers、task-templates 的 create/update/delete.md，机器人保存后自动初始化）
 5. 向 scripts 仓库提交代码后，按 5.1 的流程把新脚本导入到项目；导入的 检查/用例 描述默认留空，可在项目详情确认后由人工补充

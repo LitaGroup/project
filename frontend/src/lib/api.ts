@@ -659,7 +659,7 @@ export interface Project {
   iterationCycle: string | null
   priority: string | null
   /** 以下字段仅详情接口（GET /projects/:id）返回，列表接口（GET /projects）不包含 */
-  resources?: { frontend?: string; backend?: string; qa?: string; client?: string } | null
+  resources?: { frontend?: string; backend?: string; qa?: string; product?: string; client?: string } | null
   /** 飞书同步的项目有 record_id，可据此判断来源 */
   feishuRecordId?: string | null
   description?: string | null
@@ -681,6 +681,10 @@ export interface Project {
   projectBranches?: ProjectBranch[]
   /** 提测记录（倒序） */
   projectReleases?: ProjectRelease[]
+  /** 项目开发交付任务及进展（详情接口附带） */
+  projectDeliveryTask?: ProjectDeliveryTaskView | null
+  /** 项目任务板块：任务/子任务与关联工单（详情接口附带） */
+  projectWorkItems?: ProjectWorkItem[]
   createdAt: string
   updatedAt: string
 }
@@ -974,16 +978,18 @@ export const WORKER_GITHUB_PERMISSION_LABELS: Record<WorkerGithubPermission, str
   release: '发布权限',
 }
 
-/** 任务类型名称（动态字典，来源 /api/task-types） */
-export type TaskType = string
+/** 机器人资源网关权限：none（无权限，默认）/ read（仅只读资源）/ write（全部资源） */
+export const WORKER_RESOURCE_PERMISSIONS = ['none', 'read', 'write'] as const
+export type WorkerResourcePermission =
+  (typeof WORKER_RESOURCE_PERMISSIONS)[number]
 
-/** 任务类型定义（task_types 表，平台内维护） */
-export interface TaskTypeDef {
-  id: number
-  name: string
-  description: string
-  createdAt: string
-  updatedAt: string
+export const WORKER_RESOURCE_PERMISSION_LABELS: Record<
+  WorkerResourcePermission,
+  string
+> = {
+  none: '无权限',
+  read: '只读资源',
+  write: '全部资源',
 }
 
 /** 任务主状态：等待中 / 进行中 / 已结束 */
@@ -1087,7 +1093,6 @@ export interface WorkerStandard {
   sourceUrl?: string | null
 }
 export interface WorkerTaskDef {
-  type: string
   inputs: { name: string; desc?: string; required?: boolean }[]
   outputs: { name: string; desc?: string }[]
   how?: string
@@ -1122,6 +1127,8 @@ export interface Worker {
   personalAgentUserId: number | null
   /** GitHub 权限：none（内部兜底）/ develop（开发权限）/ release（发布权限） */
   githubPermission: WorkerGithubPermission
+  /** 资源网关权限：none（无权限）/ read（仅只读资源）/ write（全部资源） */
+  resourcePermission: WorkerResourcePermission
   enabled: boolean
   /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
@@ -1330,16 +1337,17 @@ export interface DispatchPlan {
   createdAt: string
 }
 
-/** 任务：明确输入/输出/类型，可挂子任务形成工作流 */
+/** 任务：明确输入/输出/任务定义，可挂子任务形成工作流 */
 export interface TaskPackage {
   id: number
   code: string
   title: string
-  type: TaskType
   /** 任务定义（task_templates.id，可空） */
   templateId: number | null
   /** 任务定义名称快照 */
   templateName: string | null
+  /** 关联项目（项目交付任务使用） */
+  projectId: number | null
   parentId: number | null
   rootId: number
   sortOrder: number
@@ -1414,6 +1422,40 @@ export interface TaskPackage {
   /** 详情接口附带的事件时间线与实时输出行 */
   events?: TaskEvent[]
   liveLines?: string[]
+}
+
+/** 项目详情附带的项目交付任务快照 */
+export interface ProjectDeliveryTaskView {
+  task: TaskPackage
+  /** 当前执行机器人名称 */
+  agentName: string | null
+  /** 最近一条流转/操作事件 */
+  latestEvent: TaskEvent | null
+  /** 最近实时输出行（最多 5 条） */
+  liveLines: string[]
+  /** 已拆出的子任务数量 */
+  childCount: number
+}
+
+export type ProjectWorkItemKind = 'task' | 'ticket'
+
+/** 项目详情任务板块的统一展示项 */
+export interface ProjectWorkItem {
+  kind: ProjectWorkItemKind
+  id: number
+  code: string
+  title: string
+  status: string
+  /** 任务子状态；工单为空 */
+  subStatus: string | null
+  /** 执行机器人或工单处理人 */
+  agentName: string | null
+  /** 任务实时进度或工单当前节点 */
+  progress: string
+  currentNodeName: string | null
+  /** 子任务指向父任务 */
+  parentTaskId: number | null
+  updatedAt: string
 }
 
 export type TicketCategory = string
@@ -1754,7 +1796,7 @@ export interface WorkbenchAgentInfo {
 }
 
 /** 详情页「我的 AI」页面类型（每个类型 + ID 使用独立会话） */
-export type AgentPageContextType = 'document' | 'script'
+export type AgentPageContextType = 'document' | 'script' | 'project'
 
 /** 详情页「我的 AI」上下文：会话按 type + id 隔离，内容读取接口供 AI 取当前页面 */
 export interface AgentPageContext {
@@ -1856,12 +1898,10 @@ export interface TaskOverview {
   subStatuses: Record<string, number>
 }
 
-/** 任务定义：一类任务的可复用定义（任务类型 + 描述 + 默认处理机器人） */
+/** 任务定义：一类任务的可复用定义（描述 + 默认处理机器人） */
 export interface TaskTemplate {
   id: number
   name: string
-  /** 任务类型名称（task_types.name） */
-  type: string
   /** Markdown 描述：包含任务范围、所需输入与交付方式 */
   description: string | null
   /** 默认处理机器人 workers.id 列表 */
@@ -2602,6 +2642,11 @@ export const api = {
     const qs = search.toString()
     return request<CodeEvent[]>(`/code-events${qs ? `?${qs}` : ''}`)
   },
+  /** 幂等创建项目开发交付任务；已有任务时直接返回现有任务快照 */
+  ensureProjectDeliveryTask: (projectId: number) =>
+    request<ProjectDeliveryTaskView>(`/projects/${projectId}/delivery-task`, {
+      method: 'POST',
+    }),
   /** 项目提测：创建提测记录 + 状态流转「测试中」+ 通知提测群与项目人员（testers 至少 1 人且须为用户系统内用户） */
   submitRelease: (
     projectId: number,
@@ -2762,6 +2807,7 @@ export const api = {
     ownerUserId?: number | null
     enabled?: boolean
     githubPermission?: WorkerGithubPermission
+    resourcePermission?: WorkerResourcePermission
   }) =>
     request<Worker>('/workers', {
       method: 'POST',
@@ -2786,6 +2832,7 @@ export const api = {
       ownerUserId: number | null
       enabled: boolean
       githubPermission: WorkerGithubPermission
+      resourcePermission: WorkerResourcePermission
     }>,
   ) =>
     request<Worker>(`/workers/${id}`, {
@@ -3008,7 +3055,6 @@ export const api = {
     request<TaskPackage[]>(`/task-templates/${id}/tasks`),
   createTaskTemplate: (input: {
     name: string
-    type?: string | null
     description?: string | null
     agentIds?: number[] | null
   }) =>
@@ -3020,7 +3066,6 @@ export const api = {
     id: number,
     input: Partial<{
       name: string
-      type: string | null
       description: string | null
       agentIds: number[] | null
     }>,
@@ -3040,24 +3085,6 @@ export const api = {
       method: 'DELETE',
     }),
 
-  /** 任务类型字典（识别与筛选用，平台内维护） */
-  listTaskTypes: () => request<TaskTypeDef[]>('/task-types'),
-  createTaskType: (input: { name: string; description?: string | null }) =>
-    request<TaskTypeDef>('/task-types', {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }),
-  updateTaskType: (
-    id: number,
-    input: { name?: string; description?: string | null },
-  ) =>
-    request<TaskTypeDef>(`/task-types/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    }),
-  deleteTaskType: (id: number) =>
-    request<void>(`/task-types/${id}`, { method: 'DELETE' }),
-
   /** 任务概览统计 */
   taskOverview: () => request<TaskOverview>('/tasks/overview'),
   /** 任务列表（默认根任务树；q=编号/标题） */
@@ -3065,14 +3092,12 @@ export const api = {
     q?: string
     status?: TaskStatus
     subStatus?: TaskSubStatus
-    type?: TaskType
     rootOnly?: boolean
   }) => {
     const qs = new URLSearchParams()
     if (params?.q) qs.set('q', params.q)
     if (params?.status) qs.set('status', params.status)
     if (params?.subStatus) qs.set('subStatus', params.subStatus)
-    if (params?.type) qs.set('type', params.type)
     if (params?.rootOnly === false) qs.set('rootOnly', 'false')
     const q = qs.toString()
     return request<TaskPackage[]>(`/tasks${q ? `?${q}` : ''}`)
@@ -3286,7 +3311,6 @@ export const api = {
   createTaskPackage: (input: {
     /** 可空：按任务描述首行生成标题 */
     title?: string
-    type?: TaskType
     description?: string | null
     input?: string | null
     outputSpec?: string | null
@@ -3303,7 +3327,6 @@ export const api = {
     id: number,
     input: Partial<{
       title: string
-      type: TaskType
       description: string | null
       input: string | null
       outputSpec: string | null

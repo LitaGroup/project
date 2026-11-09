@@ -42,9 +42,26 @@ describe('normalizeAgentPageContext', () => {
     });
   });
 
+  it('规范化项目上下文并保留站内读取接口', () => {
+    expect(
+      normalizeAgentPageContext({
+        type: 'project',
+        id: 'project:3708',
+        title: ' 项目详情  ',
+        readUrl: '/api/projects/3708.md',
+      }),
+    ).toEqual({
+      type: 'project',
+      id: 'project:3708',
+      title: '项目详情',
+      summary: undefined,
+      readUrl: '/api/projects/3708.md',
+    });
+  });
+
   it('拒绝不支持的类型或缺少 ID', () => {
     expect(() =>
-      normalizeAgentPageContext({ type: 'project', id: '1' }),
+      normalizeAgentPageContext({ type: 'ticket', id: '1' }),
     ).toThrow('不支持的 AI 页面上下文类型');
     expect(() => normalizeAgentPageContext({ type: 'document' })).toThrow(
       '缺少 AI 页面上下文 ID',

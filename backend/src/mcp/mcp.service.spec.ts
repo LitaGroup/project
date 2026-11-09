@@ -179,6 +179,7 @@ describe('McpService', () => {
       3,
       7,
       'x',
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       expect.objectContaining({ scope: expect.stringMatching(/^mcp:s/) }),
     );
   });

@@ -21,8 +21,6 @@ import {
   unescapeMarkdown,
   unescapeMarkdownUrlColons,
 } from '../common/markdown-escape';
-import { TaskTypesService } from '../task-types/task-types.service';
-import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
 import { WorkerView, WorkersService } from '../workers/workers.service';
 import { User } from '../auth/user.entity';
 import { Worker } from '../workers/worker.entity';
@@ -39,12 +37,14 @@ import {
   TaskRealtimeEvent,
   TaskRealtimeService,
 } from './task-realtime.service';
+import {
+  SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
+  SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_NAME,
+} from './system-task-templates';
 
 export interface CreateTaskInput {
   /** 标题（可空：按任务描述首行推导） */
   title?: string;
-  /** 任务类型（task_types.name；须为已配置类型，缺省为「其它」） */
-  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -59,14 +59,14 @@ export interface CreateTaskInput {
   operatorName?: string;
   /** 任务定义（task_templates.id，可空） */
   templateId?: number | null;
+  /** 关联项目（projects.id，可空；项目交付任务使用） */
+  projectId?: number | null;
   /** 兼容旧客户端字段：新流程创建后始终进入「等待中-待分配」 */
   submitForScheduling?: boolean;
 }
 
 export interface UpdateTaskInput {
   title?: string;
-  /** 任务类型（task_types.name；须为已配置类型，不可为空） */
-  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -100,6 +100,15 @@ export interface TaskOverview {
   subStatuses: Record<string, number>;
 }
 
+/** 项目详情展示的项目交付任务快照 */
+export interface ProjectDeliveryTaskView {
+  task: Task;
+  agentName: string | null;
+  latestEvent: TaskEvent | null;
+  liveLines: string[];
+  childCount: number;
+}
+
 /** Markdown 正文段：空值用占位符，避免 AI 误读为缺失字段 */
 function markdownText(value: string | null | undefined): string {
   return value?.trim() || '（暂无）';
@@ -128,21 +137,19 @@ export class TasksService {
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
     private readonly workersService: WorkersService,
-    private readonly taskTypes: TaskTypesService,
     private readonly dispatchService: TaskDispatchService,
     private readonly workerInbox: TaskWorkerInboxService,
     private readonly taskRealtime: TaskRealtimeService,
   ) {}
 
   /**
-   * 任务列表（默认只返回根任务；q 匹配编号/标题，status/subStatus/type 精确筛选；
+   * 任务列表（默认只返回根任务；q 匹配编号/标题，status/subStatus 精确筛选；
    * rootOnly=false 时返回全部）。每个根任务附 children 树。
    */
   async findAll(params: {
     q?: string;
     status?: TaskStatus;
     subStatus?: TaskSubStatus;
-    type?: string;
     rootOnly?: boolean;
   }): Promise<
     Array<Task & { children?: Task[]; requesterName: string | null }>
@@ -157,7 +164,6 @@ export class TasksService {
       qb.andWhere('t.subStatus = :subStatus', {
         subStatus: params.subStatus,
       });
-    if (params.type) qb.andWhere('t.type = :type', { type: params.type });
     const q = params.q?.trim().toLowerCase();
     if (q) {
       qb.andWhere(
@@ -288,6 +294,14 @@ export class TasksService {
   private recentLiveLines(id: number): string[] {
     const lines = this.dispatchService.liveLines(id);
     return lines.length > 60 ? lines.slice(-60) : lines;
+  }
+
+  /** 项目工作项进度：取任务最近一条非空实时输出 */
+  latestProjectProgressLine(id: number): string | null {
+    const line = [...this.recentLiveLines(id)]
+      .reverse()
+      .find((item) => item.trim());
+    return line?.replace(/\s+/g, ' ').trim() || null;
   }
 
   /**
@@ -466,11 +480,6 @@ export class TasksService {
     if (input.templateId && !template) {
       throw new BadRequestException('任务定义不存在');
     }
-    const typeName = input.type
-      ? await this.taskTypes.assertExists(input.type)
-      : template
-        ? await this.taskTypes.assertExists(template.type)
-        : null;
     // 父任务先校验，避免插入后才因父任务不存在留下孤儿记录
     const parent = input.parentId ? await this.mustFind(input.parentId) : null;
     const requesterType =
@@ -493,9 +502,9 @@ export class TasksService {
         code: `TMP-${randomBytes(8).toString('hex')}`,
         rootId: parent ? parent.rootId : 0,
         title,
-        type: typeName ?? TASK_TYPE_DEFAULT,
         templateId: template?.id ?? null,
         templateName: template?.name ?? null,
+        projectId: input.projectId ?? null,
         description,
         input: input.input?.trim()
           ? unescapeMarkdownUrlColons(input.input.trim())
@@ -550,11 +559,6 @@ export class TasksService {
       const title = unescapeMarkdown(input.title.trim());
       if (!title) throw new BadRequestException('标题不能为空');
       task.title = title;
-    }
-    if (input.type !== undefined) {
-      const typeName = await this.taskTypes.assertExists(input.type);
-      if (!typeName) throw new BadRequestException('任务类型不能为空');
-      task.type = typeName;
     }
     if (input.description !== undefined) {
       task.description = input.description?.trim()
@@ -628,7 +632,6 @@ export class TasksService {
       '',
       `- ID：${task.id}`,
       `- 编号：${task.code}`,
-      `- 类型：${task.type}`,
       `- 状态：${task.status}-${task.subStatus}`,
       `- 执行机器人：${agentLabel}`,
       `- 创建时间：${beijingTime(task.createdAt)}`,
@@ -1242,6 +1245,89 @@ export class TasksService {
     meta?: Record<string, unknown>,
   ): Promise<void> {
     return this.dispatchService.addEvent(taskId, type, content, operator, meta);
+  }
+
+  /** 项目详情使用的交付任务快照：绑定项目 + 系统定义的最新根任务 */
+  async findProjectDeliveryTask(
+    projectId: number,
+  ): Promise<ProjectDeliveryTaskView | null> {
+    let task = await this.tasks.findOne({
+      where: {
+        projectId,
+        templateId: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
+        parentId: IsNull(),
+      },
+      order: { id: 'DESC' },
+    });
+    if (!task) {
+      // 兼容 projectId 上线前按固定描述创建的项目任务，读取时自动回填关联
+      task = await this.tasks.findOne({
+        where: {
+          templateId: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
+          parentId: IsNull(),
+          description: `项目ID：${projectId} 的实施交付`,
+        },
+        order: { id: 'DESC' },
+      });
+      if (task) {
+        task.projectId = projectId;
+        await this.tasks.save(task);
+      }
+    }
+    if (!task) return null;
+    const [agent, latestEvent, childCount] = await Promise.all([
+      task.agentId
+        ? this.workers.findOne({
+            where: { id: task.agentId },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve(null),
+      this.events.findOne({
+        where: { taskId: task.id },
+        order: { id: 'DESC' },
+      }),
+      this.tasks.count({ where: { parentId: task.id } }),
+    ]);
+    return {
+      task,
+      agentName: agent?.name ?? null,
+      latestEvent,
+      liveLines: this.recentLiveLines(task.id).slice(-5),
+      childCount,
+    };
+  }
+
+  /**
+   * 幂等创建项目开发交付任务；已有未取消的项目任务时直接返回现有任务。
+   * 已取消的任务保留历史，但允许重新创建一条交付任务。
+   */
+  async ensureProjectDeliveryTask(
+    projectId: number,
+    creator?: { userId: number; userName?: string | null },
+  ): Promise<ProjectDeliveryTaskView> {
+    const existing = await this.findProjectDeliveryTask(projectId);
+    const canceled =
+      existing?.task.status === TaskStatus.FINISHED &&
+      existing.task.subStatus === TaskSubStatus.CANCELED;
+    if (existing && !canceled) return existing;
+    const humanWorker = creator
+      ? await this.workersService.findByHumanUserId(creator.userId)
+      : null;
+    await this.create({
+      projectId,
+      templateId: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
+      title: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_NAME,
+      description: `项目ID：${projectId} 的实施交付`,
+      createdById: creator?.userId ?? null,
+      operatorName: creator?.userName ?? undefined,
+      requesterType: creator ? (humanWorker ? 'worker' : 'user') : null,
+      requesterId: creator ? (humanWorker?.id ?? creator.userId) : null,
+    });
+    const created = await this.findProjectDeliveryTask(projectId);
+    if (!created) {
+      throw new NotFoundException('项目交付任务创建后未能读取');
+    }
+    return created;
   }
 
   async mustFind(id: number): Promise<Task> {

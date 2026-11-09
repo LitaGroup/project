@@ -8,12 +8,6 @@ import {
   TaskTemplatesMarkdownController,
 } from '../tasks/task-templates.controller';
 import { TaskTemplatesService } from '../tasks/task-templates.service';
-import {
-  TaskTypesController,
-  TaskTypesListMarkdownController,
-  TaskTypesMarkdownController,
-} from '../task-types/task-types.controller';
-import { TaskTypesService } from '../task-types/task-types.service';
 import { WorkersController } from '../workers/workers.controller';
 import {
   WorkersListMarkdownController,
@@ -50,13 +44,6 @@ describe('Agent 管理接口路由', () => {
     updateMarkdown: jest.fn(),
     removeMarkdown: jest.fn(),
   };
-  const taskTypes = {
-    listMarkdown: jest.fn(),
-    findOneMarkdown: jest.fn(),
-    createMarkdown: jest.fn(),
-    updateMarkdown: jest.fn(),
-    removeMarkdown: jest.fn(),
-  };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -67,9 +54,6 @@ describe('Agent 管理接口路由', () => {
         TaskTemplatesListMarkdownController,
         TaskTemplatesMarkdownController,
         TaskTemplatesController,
-        TaskTypesListMarkdownController,
-        TaskTypesMarkdownController,
-        TaskTypesController,
       ],
       providers: [
         { provide: WorkersMarkdownService, useValue: workersMarkdown },
@@ -79,7 +63,6 @@ describe('Agent 管理接口路由', () => {
         { provide: WorkerSkillCatalogService, useValue: {} },
         { provide: WorkerStandardCatalogService, useValue: {} },
         { provide: TaskTemplatesService, useValue: templates },
-        { provide: TaskTypesService, useValue: taskTypes },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -107,11 +90,6 @@ describe('Agent 管理接口路由', () => {
     templates.createMarkdown.mockResolvedValue('# 任务定义已创建');
     templates.updateMarkdown.mockResolvedValue('# 任务定义已更新');
     templates.removeMarkdown.mockResolvedValue('# 任务定义已删除');
-    taskTypes.listMarkdown.mockResolvedValue('# 任务类型');
-    taskTypes.findOneMarkdown.mockResolvedValue('# 任务类型详情');
-    taskTypes.createMarkdown.mockResolvedValue('# 任务类型已创建');
-    taskTypes.updateMarkdown.mockResolvedValue('# 任务类型已更新');
-    taskTypes.removeMarkdown.mockResolvedValue('# 任务类型已删除');
   });
 
   it('机器人清单与详情命中 Markdown 控制器', async () => {
@@ -150,7 +128,7 @@ describe('Agent 管理接口路由', () => {
     expect(removed.text).toBe('# 机器人已删除');
   });
 
-  it('任务定义与任务类型的 Markdown 路由优先于 JSON :id', async () => {
+  it('任务定义的 Markdown 路由优先于 JSON :id', async () => {
     const server = app.getHttpServer() as Server;
 
     const templateList = await request(server)
@@ -161,18 +139,9 @@ describe('Agent 管理接口路由', () => {
       .get('/api/task-templates/10.md')
       .expect(200);
     expect(templateDetail.text).toBe('# 任务定义详情');
-
-    const typeList = await request(server)
-      .get('/api/task-types.md')
-      .expect(200);
-    expect(typeList.text).toBe('# 任务类型');
-    const typeDetail = await request(server)
-      .get('/api/task-types/1.md')
-      .expect(200);
-    expect(typeDetail.text).toBe('# 任务类型详情');
   });
 
-  it('任务定义与任务类型写接口返回 HTTP 200 Markdown', async () => {
+  it('任务定义写接口返回 HTTP 200 Markdown', async () => {
     const server = app.getHttpServer() as Server;
 
     await request(server)
@@ -188,14 +157,5 @@ describe('Agent 管理接口路由', () => {
     expect(templates.updateMarkdown).toHaveBeenCalledWith(1000, {
       description: '新描述',
     });
-
-    await request(server)
-      .post('/api/task-types/create.md')
-      .send({ name: '数据分析' })
-      .expect(200);
-    expect(taskTypes.createMarkdown).toHaveBeenCalled();
-
-    await request(server).post('/api/task-types/1/delete.md').expect(200);
-    expect(taskTypes.removeMarkdown).toHaveBeenCalledWith(1);
   });
 });

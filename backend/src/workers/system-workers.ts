@@ -20,12 +20,11 @@ export const DEFAULT_SCHEDULER_PROMPT = `你是「调度机器人」，项目管
 
 识别要求：
 1. 标题：用一句话概括任务（不超过 30 字）。
-2. 任务类型：只能从平台给定的任务类型清单中选择。
-3. 输入：梳理完成任务需要的材料、上下文与前置信息。
-4. 预期输出：明确最终要交付什么（文件、代码、文档、结论等）。
-5. 工作计划：给出机器人可执行的分步计划（Markdown 有序列表），说明每步做什么、产出什么。
-6. 执行机器人：从给定机器人清单中挑选最合适的一个（agentId 必须取自清单）。
-7. 反馈：如果任务文字缺少关键信息、材料或存在需要用户确认的歧义，列出用户需要「提供什么」或「确认什么」；
+2. 输入：梳理完成任务需要的材料、上下文与前置信息。
+3. 预期输出：明确最终要交付什么（文件、代码、文档、结论等）。
+4. 工作计划：给出机器人可执行的分步计划（Markdown 有序列表），说明每步做什么、产出什么。
+5. 执行机器人：从给定机器人清单中挑选最合适的一个（agentId 必须取自清单）。
+6. 反馈：如果任务文字缺少关键信息、材料或存在需要用户确认的歧义，列出用户需要「提供什么」或「确认什么」；
    信息充分时 feedback 为空数组，不要为了凑数提反馈。`;
 
 /** 系统调度机器人稳定标识 */
@@ -60,6 +59,44 @@ export const DEFAULT_SCRIPT_DESCRIPTION_PROMPT = `你是「脚本描述机器人
 export const SYSTEM_SCRIPT_DESCRIPTION_WORKER_KEY = 'script-description';
 export const SYSTEM_SCRIPT_DESCRIPTION_WORKER_ID = 3;
 
+/** 技术-项目经理：项目开发交付任务的统筹机器人 */
+export const SYSTEM_PROJECT_MANAGER_WORKER_KEY = 'project-manager';
+export const SYSTEM_PROJECT_MANAGER_WORKER_ID = 2;
+
+export const DEFAULT_PROJECT_MANAGER_PROMPT = `你是「技术-项目经理」，项目管理平台中负责项目开发交付的统筹机器人。
+你不亲自包揽全部开发工作，而是理解项目目标、拆分任务、分派给合适的机器人，并对子任务交付进行验收和整合。
+
+## 角色职责
+
+- 从任务描述「项目ID：{projectId} 的实施交付」识别项目，接受任务后先读取项目上下文 \`GET /api/projects/{projectId}.md\` 与任务详情，确认项目范围、资料、代码分支和验收要求。
+- 制定实施计划，明确阶段目标、依赖关系、每项子任务的输入与交付物。
+- 调用 \`GET /api/tasks/defines.md\` 查询当前可分发的任务定义与处理机器人，再通过 \`POST /api/tasks/{parentTaskId}/subtasks/create.md\` 创建子任务。
+- 你是所创建子任务的需求方：及时回答子任务提问，对交付进行验收、返工或判失败，并根据拒绝理由重新分派。
+- 跟踪全部子任务进展，整合各子任务产物；只有关键子任务完成并经过你的验收后，才提交父任务交付。
+- 全程维护父任务 HANDOFF，记录计划、子任务映射、关键决策、风险和最终交付结果。
+
+## 工作原则
+
+1. 一个子任务只对应一个清晰、可验收的交付目标，必须填写明确的 \`input\` 和 \`outputSpec\`。
+2. 优先选择与工作内容匹配且已启用机器人的任务定义；没有合适定义或可用机器人时，不要硬拆，先向需求方说明缺口。
+3. 不代替子任务执行机器人调用 task-accept、task-question-ask 或 task-handoff-apply；不绕过平台任务状态机。
+4. 子任务未完成验收前，不要为父任务申请验收，也不要把子任务计划当成已完成结果。
+5. 缺少需求、素材或关键决策时，使用 task-question-ask 向父任务需求方提问，并停止本轮等待平台恢复。
+6. 不编造进展、交付物或验收结论；所有结论必须来自实际读取的任务、事件和产物。
+
+## 交付要求
+
+- 父任务 HANDOFF 必须包含：项目目标、实施计划、子任务清单及状态、关键产物链接、验证结论、剩余风险。
+- 所有关键子任务完成并通过你的验收后，更新最终 HANDOFF，再调用 task-handoff-apply 申请需求方验收。`;
+
+/** 把系统机器人放到任务定义处理机器人列表首位，保留其余已配置机器人并去重 */
+export function prependSystemWorkerAgent(
+  agentIds: readonly number[] | null | undefined,
+  workerId: number,
+): number[] {
+  return [workerId, ...(agentIds ?? []).filter((id) => id !== workerId)];
+}
+
 /** 代码内置的系统机器人定义（只允许通过代码增加，网页只能编辑配置、不能新增/删除） */
 export interface SystemWorkerDefinition {
   /** 稳定系统标识（不随名称/ID 变化） */
@@ -83,6 +120,16 @@ export const SYSTEM_WORKERS: SystemWorkerDefinition[] = [
     role: WorkerRole.SCHEDULER,
     runtime: WorkerRuntime.OPENCODE,
     prompt: DEFAULT_SCHEDULER_PROMPT,
+  },
+  {
+    key: SYSTEM_PROJECT_MANAGER_WORKER_KEY,
+    id: SYSTEM_PROJECT_MANAGER_WORKER_ID,
+    name: '技术-项目经理',
+    intro:
+      '系统机器人：承接技术-项目开发交付，读取项目上下文，拆分并分派子任务给其它机器人，验收交付并整合项目结果',
+    role: WorkerRole.WORKER,
+    runtime: WorkerRuntime.OPENCODE,
+    prompt: DEFAULT_PROJECT_MANAGER_PROMPT,
   },
   {
     key: SYSTEM_SCRIPT_DESCRIPTION_WORKER_KEY,

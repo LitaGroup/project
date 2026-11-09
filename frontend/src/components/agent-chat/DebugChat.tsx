@@ -208,7 +208,7 @@ export function DebugChat({
               }}
             </ThreadPrimitive.Messages>
           </ThreadPrimitive.Viewport>
-          <ChatComposerDock>
+          <ChatComposerDock bordered={false}>
             {/* Enter 发送由下方输入框自行接管，统一走输入法防护后提交最近的 form */}
             <ComposerPrimitive.Root>
               <ChatComposerFrame
@@ -286,7 +286,8 @@ export function DebugChat({
                 }
               >
                 <ComposerPrimitive.Input
-                  rows={2}
+                  // 关闭 TextareaAutosize：输入长文本时固定两行并内部滚动，避免面板高度跳动
+                  render={<textarea rows={2} />}
                   submitMode="none"
                   onCompositionStart={imeEnter.onCompositionStart}
                   onCompositionEnd={imeEnter.onCompositionEnd}
@@ -303,7 +304,7 @@ export function DebugChat({
                       ? 'AGENT 正在回复…'
                       : '输入消息，Enter 发送，Shift+Enter 换行…')
                   }
-                  className="max-h-40 min-h-10 w-full flex-1 resize-none bg-transparent px-3 py-2 text-sm outline-none placeholder:text-foreground-muted"
+                  className="min-h-10 w-full flex-1 resize-none overflow-y-auto bg-transparent px-3 py-2 text-sm outline-none placeholder:text-foreground-muted"
                 />
               </ChatComposerFrame>
               {uploadError && (

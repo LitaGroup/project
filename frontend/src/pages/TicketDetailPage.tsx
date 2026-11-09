@@ -88,6 +88,8 @@ export function TicketDetailPage() {
     null,
   )
   const [contentTab, setContentTab] = useState<TicketContentTab>('current')
+  const [collaborationOpen, setCollaborationOpen] = useState(false)
+  const [collaborationUnread, setCollaborationUnread] = useState(0)
 
   /** 关联节点任务（最近一次创建的节点任务）的实时数据 */
   const [taskChat, setTaskChat] = useState<TaskChatSnapshot | null>(null)
@@ -482,10 +484,18 @@ export function TicketDetailPage() {
         <div className="flex min-h-0 flex-1 flex-col">
           <DetailPageLayout
             aiLabel="任务协作"
+            aiCollapsible
+            aiOutsideContent
+            aiOpen={collaborationOpen}
+            onAiOpenChange={setCollaborationOpen}
+            aiUnreadCount={collaborationUnread}
+            aiCollapseClassName="top-0 h-12"
             ai={
               <TaskWorkbenchPanel
                 task={isTaskNode ? currentNodeTask : null}
                 chat={isTaskNode ? currentNodeChat : null}
+                visible={collaborationOpen}
+                onUnreadChange={setCollaborationUnread}
                 handoffDoc={
                   currentNodeTaskId && currentNodeTaskId === activeTaskId
                     ? handoffDoc
@@ -801,6 +811,7 @@ export function TicketDetailPage() {
         { label: ticket.code },
       ]}
       title={`${ticket.code} ${ticket.title}`}
+      collapsibleCollaboration
       extraBadges={
         <>
           <Badge variant="soft" size="sm">

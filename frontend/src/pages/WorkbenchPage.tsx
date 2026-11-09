@@ -216,12 +216,6 @@ export function WorkbenchPage() {
                                 >
                                   {item.title}
                                 </p>
-                                <p
-                                  className="mt-1 truncate text-[11px] text-foreground-muted"
-                                  title={item.type}
-                                >
-                                  {item.type}
-                                </p>
                               </button>
                             </li>
                           )

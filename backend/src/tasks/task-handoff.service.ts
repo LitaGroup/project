@@ -484,7 +484,6 @@ export class TaskHandoffService {
       '',
       `- 编号：${task.code}`,
       `- 标题：${task.title}`,
-      `- 类型：${task.type}`,
       `- 任务定义：${task.templateName ?? '未指定'}`,
       `- 机器人：${endpoint.worker?.name ?? '未记录（使用任务执行器）'}`,
       `- 创建时间：${beijingTime(task.createdAt)}`,

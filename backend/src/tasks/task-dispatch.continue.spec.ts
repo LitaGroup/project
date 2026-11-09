@@ -10,7 +10,6 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       id: 1,
       code: 'TK-0001',
       title: '任务标题',
-      type: '其它',
       status: TaskStatus.WAITING,
       subStatus: TaskSubStatus.PENDING_ACCEPT,
       description: '原始需求',

@@ -30,7 +30,7 @@ describe('McpController.authenticate（经 handlePost 验证）', () => {
   const user = { id: 3, name: '张三' };
 
   function mockAuthValid(auth: { getUserByAgentToken: jest.Mock }): void {
-    auth.getUserByAgentToken.mockImplementation(async (token: string) =>
+    auth.getUserByAgentToken.mockImplementation((token: string) =>
       token === 'valid-token' ? user : null,
     );
   }

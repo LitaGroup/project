@@ -345,23 +345,31 @@ export class FeishuBotClientService {
 
   // ---- 群管理（任务群） ----
 
-  /** 创建群（操作者为机器人本身，默认群主）；userIds 为 open_id 列表 */
+  /**
+   * 创建群（操作者为机器人本身，默认群主）；userIds 为 open_id 列表。
+   * botIds 使用应用的 App ID；idempotencyKey 由飞书 uuid 参数保证重试幂等。
+   */
   async createChat(
     configId: number,
     secrets: FeishuBotSecrets,
     name: string,
     description: string | null,
     userIds: string[],
+    options: { botIds?: string[]; idempotencyKey?: string } = {},
   ): Promise<string> {
+    const query = new URLSearchParams({ user_id_type: 'open_id' });
+    if (options.idempotencyKey) query.set('uuid', options.idempotencyKey);
+    const botIds = (options.botIds ?? []).slice(0, 5);
     const data = await this.request(
       configId,
       secrets,
       'POST',
-      '/im/v1/chats?user_id_type=open_id',
+      `/im/v1/chats?${query.toString()}`,
       {
         name,
         ...(description ? { description } : {}),
         ...(userIds.length ? { user_id_list: userIds } : {}),
+        ...(botIds.length ? { bot_id_list: botIds } : {}),
       },
     );
     const chatId = readString(data, 'chat_id');
@@ -369,6 +377,23 @@ export class FeishuBotClientService {
       throw new ServiceUnavailableException('飞书建群成功但未返回 chat_id');
     }
     return chatId;
+  }
+
+  /** 将机器人拉入群（appIds 为应用 App ID；不可用机器人由飞书忽略） */
+  async addChatMembers(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    chatId: string,
+    appIds: string[],
+  ): Promise<void> {
+    if (appIds.length === 0) return;
+    await this.request(
+      configId,
+      secrets,
+      'POST',
+      `/im/v1/chats/${encodeURIComponent(chatId)}/members?member_id_type=app_id&succeed_type=1`,
+      { id_list: appIds.slice(0, 5) },
+    );
   }
 
   /** 解散群（机器人须为群主） */

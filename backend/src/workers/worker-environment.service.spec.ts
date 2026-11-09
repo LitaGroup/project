@@ -132,6 +132,14 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
     expect(prompt).toContain('不得把令牌写入聊天、交付物或文档');
   });
 
+  it('AGENTS.md 注入资源权限且默认无权限', async () => {
+    const prompt = await buildService()['buildPrompt'](worker);
+    expect(prompt).toContain('## 资源访问权限');
+    expect(prompt).toContain('当前权限：无权限');
+    expect(prompt).toContain('不要调用 AI Gateway 的资源列表或 SQL 执行接口');
+    expect(prompt).toContain('需管理员在机器人配置页授权');
+  });
+
   it('AGENTS.md 说明 Lita 用户令牌的位置、加载方式与最高优先级', async () => {
     const prompt = await buildService()['buildPrompt'](worker);
     expect(prompt).toContain('.opencode/.env');

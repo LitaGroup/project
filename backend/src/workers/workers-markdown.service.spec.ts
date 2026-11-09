@@ -1,6 +1,7 @@
 import {
   WorkerGithubPermission,
   WorkerLiveStatus,
+  WorkerResourcePermission,
   WorkerRole,
   WorkerRuntime,
 } from '../common/enums';
@@ -32,6 +33,7 @@ function workerView(over: Partial<WorkerView> = {}): WorkerView {
     ownerName: null,
     agentToken: 'must-not-leak',
     githubPermission: WorkerGithubPermission.DEVELOP,
+    resourcePermission: WorkerResourcePermission.READ,
     enabled: true,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-02T00:00:00Z'),
@@ -73,6 +75,8 @@ describe('WorkersMarkdownService', () => {
     expect(markdown).toContain('活动开发机器人');
     expect(markdown).not.toContain('must-not-leak');
     expect(markdown).not.toContain('agentToken');
+    expect(markdown).toContain('资源权限');
+    expect(markdown).toContain('只读资源');
     expect(markdown).toContain('POST /api/workers/create.md');
   });
 

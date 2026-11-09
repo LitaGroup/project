@@ -1,17 +1,20 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as path from 'path';
-import { FindOptionsWhere, ILike, Not, Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, In, IsNull, Not, Repository } from 'typeorm';
 import {
   MilestoneAchieved,
   ProjectStatus,
   ProjectType,
   ResourceType,
   ResourceStatus,
+  TaskStatus,
+  TaskSubStatus,
 } from '../common/enums';
 import { ChecksService } from '../checks/checks.service';
 import { Check } from '../checks/check.entity';
@@ -43,6 +46,17 @@ import { mdFrontmatter, beijingTime } from '../common/frontmatter';
 import { splitMemberNames } from '../common/names';
 import { ReleasesService } from '../releases/releases.service';
 import { ProjectRelease } from '../releases/project-release.entity';
+import { FeishuBotProjectChatService } from '../feishu-bot/feishu-bot-project-chat.service';
+import {
+  TasksService,
+  type ProjectDeliveryTaskView,
+} from '../tasks/tasks.service';
+import { Task } from '../tasks/task.entity';
+import { TaskEvent } from '../tasks/task-event.entity';
+import { SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID } from '../tasks/system-task-templates';
+import { Ticket } from '../tickets/ticket.entity';
+import { TicketWorkflowRun } from '../tickets/ticket-workflow-run.entity';
+import { Worker } from '../workers/worker.entity';
 import { Project } from './project.entity';
 
 export interface CreateProjectInput {
@@ -69,6 +83,7 @@ const MEMBER_LABELS: Record<string, string> = {
   frontend: '前端',
   backend: '后端',
   qa: '测试',
+  product: '产品',
   client: '客户端',
 };
 
@@ -78,6 +93,68 @@ export interface ProjectPage {
   total: number;
   iterations: string[];
   priorities: string[];
+}
+
+/** 项目详情任务板块：任务/子任务与关联工单的统一展示项 */
+export type ProjectWorkItemKind = 'task' | 'ticket';
+
+export interface ProjectWorkItem {
+  kind: ProjectWorkItemKind;
+  id: number;
+  code: string;
+  title: string;
+  status: string;
+  /** 任务子状态；工单为空 */
+  subStatus: string | null;
+  /** 执行机器人或工单处理人，个人 AGENT 展示其主人 */
+  agentName: string | null;
+  /** 当前进度：任务取实时输出/最近事件，工单优先取当前节点 */
+  progress: string;
+  /** 工单当前节点 */
+  currentNodeName: string | null;
+  /** 子任务指向父任务；根任务与工单为空 */
+  parentTaskId: number | null;
+  updatedAt: Date;
+}
+
+const PROJECT_TASK_SELECT = {
+  id: true,
+  code: true,
+  title: true,
+  status: true,
+  subStatus: true,
+  parentId: true,
+  rootId: true,
+  agentId: true,
+  updatedAt: true,
+} as const;
+
+const PROJECT_TICKET_SELECT = {
+  id: true,
+  code: true,
+  title: true,
+  taskId: true,
+  assigneeId: true,
+  assigneeName: true,
+  workflowStatus: true,
+  currentNodeName: true,
+  updatedAt: true,
+} as const;
+
+/** 历史工单状态按关联任务推导；工作流工单直接使用工单状态 */
+function deriveProjectTicketStatus(
+  ticket: Ticket,
+  task: Task | undefined,
+): string {
+  if (ticket.workflowStatus?.trim()) return ticket.workflowStatus;
+  if (!task) return '已取消';
+  if (task.status === TaskStatus.FINISHED) {
+    if (task.subStatus === TaskSubStatus.COMPLETED) return '已完成';
+    if (task.subStatus === TaskSubStatus.CANCELED) return '已取消';
+    return '已失败';
+  }
+  if (task.status === TaskStatus.RUNNING) return '处理中';
+  return task.subStatus;
 }
 
 /** 编号的自然排序（数字段按数值比较，如 check-2 < check-10） */
@@ -101,6 +178,8 @@ const PROJECT_LIST_SELECT = {
 
 @Injectable()
 export class ProjectsService {
+  private readonly logger = new Logger(ProjectsService.name);
+
   constructor(
     @InjectRepository(Project)
     private readonly projects: Repository<Project>,
@@ -115,6 +194,8 @@ export class ProjectsService {
     private readonly milestonesService: MilestonesService,
     private readonly appVersionsService: AppVersionsService,
     private readonly codeBranchesService: CodeBranchesService,
+    private readonly tasksService: TasksService,
+    private readonly projectChats: FeishuBotProjectChatService,
   ) {}
 
   findAll(): Promise<Project[]> {
@@ -186,6 +267,8 @@ export class ProjectsService {
       milestones,
       projectBranches,
       projectReleases,
+      projectDeliveryTask,
+      projectWorkItems,
     ] = await Promise.all([
       // 文档列表不取 longtext 正文（列表展示只需元信息）
       manager.find(Document, {
@@ -220,6 +303,8 @@ export class ProjectsService {
         where: { projectId: id },
         order: { createdAt: 'DESC', id: 'DESC' },
       }),
+      this.tasksService.findProjectDeliveryTask(id),
+      this.findProjectWorkItems(id),
     ]);
     project.documents = documents;
     project.checks = checks;
@@ -231,6 +316,7 @@ export class ProjectsService {
     project.milestones = milestones;
     project.projectBranches = projectBranches;
     project.projectReleases = projectReleases;
+    Object.assign(project, { projectDeliveryTask, projectWorkItems });
     // 检查/测试/导出按编号自然排序
     project.checks.sort((a, b) => codeCollator.compare(a.code, b.code));
     project.tests.sort((a, b) => codeCollator.compare(a.code, b.code));
@@ -238,8 +324,230 @@ export class ProjectsService {
     return project;
   }
 
+  /**
+   * 项目任务板块：项目交付任务主/子任务、缺陷处理任务及由这些任务关联的工单。
+   * 不新增物理外键，按现有 projectId/rootId/followupTaskId/taskId 关系归集。
+   */
+  async findProjectWorkItems(projectId: number): Promise<ProjectWorkItem[]> {
+    const { manager } = this.projects;
+    const legacyDescription = `项目ID：${projectId} 的实施交付`;
+    const [directRoots, defectRows] = await Promise.all([
+      manager.find(Task, {
+        where: [
+          { projectId, parentId: IsNull() },
+          {
+            templateId: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
+            parentId: IsNull(),
+            description: legacyDescription,
+          },
+        ],
+        select: PROJECT_TASK_SELECT,
+        order: { updatedAt: 'DESC' },
+      }),
+      manager.find(Defect, {
+        where: { projectId },
+        select: { id: true, followupTaskId: true },
+      }),
+    ]);
+
+    const rootsById = new Map<number, Task>(
+      directRoots.map((task) => [task.id, task]),
+    );
+    const followupIds = [
+      ...new Set(
+        defectRows
+          .map((defect) => defect.followupTaskId)
+          .filter((id): id is number => Boolean(id)),
+      ),
+    ].filter((id) => !rootsById.has(id));
+    if (followupIds.length > 0) {
+      const followupTasks = await manager.find(Task, {
+        where: { id: In(followupIds) },
+        select: PROJECT_TASK_SELECT,
+      });
+      for (const task of followupTasks) rootsById.set(task.id, task);
+    }
+    const roots = [...rootsById.values()];
+    const treeRootIds = [
+      ...new Set(roots.map((task) => task.rootId || task.id)),
+    ];
+    const children =
+      treeRootIds.length > 0
+        ? await manager.find(Task, {
+            where: {
+              rootId: In(treeRootIds),
+              parentId: Not(IsNull()),
+            },
+            select: PROJECT_TASK_SELECT,
+          })
+        : [];
+    const tasksById = new Map<number, Task>();
+    for (const task of [...roots, ...children]) tasksById.set(task.id, task);
+    // rootId 缺失的历史数据再按主任务 id 补一次
+    const knownIds = new Set(tasksById.keys());
+    const missingRootIds = treeRootIds.filter((id) => !knownIds.has(id));
+    if (missingRootIds.length > 0) {
+      const missingRoots = await manager.find(Task, {
+        where: { id: In(missingRootIds) },
+        select: PROJECT_TASK_SELECT,
+      });
+      for (const task of missingRoots) tasksById.set(task.id, task);
+    }
+    const finalTasks = [...tasksById.values()];
+    const taskIds = finalTasks.map((task) => task.id);
+
+    const [latestEvents, workflowRuns] = await Promise.all([
+      taskIds.length > 0
+        ? manager.find(TaskEvent, {
+            where: { taskId: In(taskIds) },
+            select: {
+              id: true,
+              taskId: true,
+              content: true,
+              createdAt: true,
+            },
+            order: { id: 'DESC' },
+          })
+        : Promise.resolve([]),
+      taskIds.length > 0
+        ? manager.find(TicketWorkflowRun, {
+            where: { taskId: In(taskIds) },
+            select: { id: true, ticketId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const latestEventByTask = new Map<number, TaskEvent>();
+    for (const event of latestEvents) {
+      if (!latestEventByTask.has(event.taskId)) {
+        latestEventByTask.set(event.taskId, event);
+      }
+    }
+
+    const ticketIds = [...new Set(workflowRuns.map((run) => run.ticketId))];
+    const ticketWhere: FindOptionsWhere<Ticket>[] = [];
+    if (taskIds.length > 0) ticketWhere.push({ taskId: In(taskIds) });
+    if (ticketIds.length > 0) ticketWhere.push({ id: In(ticketIds) });
+    const tickets =
+      ticketWhere.length > 0
+        ? await manager.find(Ticket, {
+            where: ticketWhere,
+            select: PROJECT_TICKET_SELECT,
+            order: { updatedAt: 'DESC' },
+          })
+        : [];
+
+    const workerIds = [
+      ...new Set([
+        ...finalTasks
+          .map((task) => task.agentId)
+          .filter((id): id is number => Boolean(id)),
+        ...tickets.map((ticket) => ticket.assigneeId),
+      ]),
+    ];
+    const workers =
+      workerIds.length > 0
+        ? await manager.find(Worker, {
+            where: { id: In(workerIds) },
+            select: {
+              id: true,
+              name: true,
+              ownerName: true,
+              personalAgentUserId: true,
+            },
+          })
+        : [];
+    const workerById = new Map(workers.map((worker) => [worker.id, worker]));
+    const agentName = (id: number | null): string | null => {
+      if (!id) return null;
+      const worker = workerById.get(id);
+      if (!worker) return null;
+      return worker.personalAgentUserId && worker.ownerName
+        ? worker.ownerName
+        : worker.name;
+    };
+
+    const progressText = (value: string | null | undefined): string | null =>
+      value?.replace(/\s+/g, ' ').trim() || null;
+
+    const items: ProjectWorkItem[] = finalTasks.map((task) => {
+      const latestEvent = latestEventByTask.get(task.id);
+      return {
+        kind: 'task',
+        id: task.id,
+        code: task.code,
+        title: task.title,
+        status: task.status,
+        subStatus: task.subStatus,
+        agentName: agentName(task.agentId),
+        progress:
+          this.tasksService.latestProjectProgressLine(task.id) ??
+          progressText(latestEvent?.content) ??
+          '等待任务开始',
+        currentNodeName: null,
+        parentTaskId: task.parentId,
+        updatedAt: task.updatedAt,
+      };
+    });
+
+    for (const ticket of tickets) {
+      const task = ticket.taskId ? tasksById.get(ticket.taskId) : undefined;
+      const latestEvent = ticket.taskId
+        ? latestEventByTask.get(ticket.taskId)
+        : undefined;
+      const currentNodeName = ticket.currentNodeName?.trim() || null;
+      items.push({
+        kind: 'ticket',
+        id: ticket.id,
+        code: ticket.code,
+        title: ticket.title,
+        status: deriveProjectTicketStatus(ticket, task),
+        subStatus: null,
+        agentName: agentName(ticket.assigneeId) ?? ticket.assigneeName,
+        progress:
+          (currentNodeName ? `当前节点：${currentNodeName}` : null) ??
+          progressText(latestEvent?.content) ??
+          '等待处理',
+        currentNodeName,
+        parentTaskId: null,
+        updatedAt: ticket.updatedAt,
+      });
+    }
+
+    return items.sort(
+      (a, b) =>
+        b.updatedAt.getTime() - a.updatedAt.getTime() ||
+        (a.kind === b.kind ? b.id - a.id : a.kind.localeCompare(b.kind)),
+    );
+  }
+
   create(input: CreateProjectInput): Promise<Project> {
     return this.projects.save(this.projects.create(input));
+  }
+
+  /** 幂等创建项目开发交付任务；重复调用返回当前已有任务 */
+  async ensureProjectDeliveryTask(
+    projectId: number,
+    creator?: { userId: number; userName?: string | null },
+  ): Promise<ProjectDeliveryTaskView> {
+    const exists = await this.projects.findOne({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!exists) throw new NotFoundException(`Project ${projectId} not found`);
+    const result = await this.tasksService.ensureProjectDeliveryTask(
+      projectId,
+      creator,
+    );
+    // 建群失败不能影响任务创建；绑定与重试由沟通群服务持久化处理。
+    try {
+      await this.projectChats.ensureForProjectTask(projectId, result.task.id);
+    } catch (error) {
+      this.logger.warn(
+        `项目沟通群创建失败（project=${projectId}, task=${result.task.id}）: ${(error as Error).message}`,
+      );
+    }
+    return result;
   }
 
   /**
@@ -320,10 +628,10 @@ export class ProjectsService {
       meta.push(`- 迭代周期：${project.iterationCycle}`);
     }
     if (project.resources) {
-      const { frontend, backend, qa, client } = project.resources;
-      if (frontend || backend || qa || client) {
+      const { frontend, backend, qa, product, client } = project.resources;
+      if (frontend || backend || qa || product || client) {
         meta.push(
-          `- 人员：前端 ${frontend ?? '-'} / 后端 ${backend ?? '-'} / 测试 ${qa ?? '-'} / 客户端 ${client ?? '-'}`,
+          `- 人员：前端 ${frontend ?? '-'} / 后端 ${backend ?? '-'} / 测试 ${qa ?? '-'} / 产品 ${product ?? '-'} / 客户端 ${client ?? '-'}`,
         );
       }
     }
@@ -552,7 +860,7 @@ export class ProjectsService {
       '修改项目配置（仅本地字段：脚本目录 / 飞书通知群 / 描述 / 人员，空串清除；脚本目录即上方导入扫描的子目录，相对脚本根目录）：',
       '',
       '```bash',
-      `curl -X POST /api/projects/${project.id}/update.md -H 'Content-Type: application/json' -d '{"scriptsPath": "projects/xxx", "resources": {"frontend": "张三", "backend": "李四", "qa": "王五", "client": "赵六"}}'`,
+      `curl -X POST /api/projects/${project.id}/update.md -H 'Content-Type: application/json' -d '{"scriptsPath": "projects/xxx", "resources": {"frontend": "张三", "backend": "李四", "qa": "王五", "product": "钱七", "client": "赵六"}}'`,
       '```',
       '',
       '写入/更新项目文档（按 projectId + fileName 判重 upsert：fileName 是稳定唯一标识，重复调用更新同一文档；title/type/description 选填，type 可选 需求/功能/测试/技术/接口/配置，缺省"技术"）：',
@@ -626,7 +934,13 @@ export class ProjectsService {
       scriptsPath?: string;
       feishuWebhook?: string;
       description?: string;
-      resources?: { frontend?: string; backend?: string; qa?: string } | null;
+      resources?: {
+        frontend?: string;
+        backend?: string;
+        qa?: string;
+        product?: string;
+        client?: string;
+      } | null;
     },
   ): Promise<Project> {
     const project = await this.findOne(id);
@@ -672,7 +986,13 @@ export class ProjectsService {
       const members = this.normalizeMembers(input.resources);
       // 项目中不允许配置用户系统之外的用户（users 表 = 飞书登录落库）
       const names = new Set<string>();
-      for (const key of ['frontend', 'backend', 'qa', 'client'] as const) {
+      for (const key of [
+        'frontend',
+        'backend',
+        'qa',
+        'product',
+        'client',
+      ] as const) {
         for (const name of splitMemberNames(members?.[key])) names.add(name);
       }
       if (names.size > 0) {
@@ -700,6 +1020,7 @@ export class ProjectsService {
         frontend?: string;
         backend?: string;
         qa?: string;
+        product?: string;
         client?: string;
       } | null;
     },
@@ -790,18 +1111,20 @@ export class ProjectsService {
     return normalized;
   }
 
-  /** 人员（resources 列）：{frontend?, backend?, qa?, client?}，各值 trim、空值移除键；null/空对象清除 */
+  /** 人员（resources 列）：{frontend?, backend?, qa?, product?, client?}，各值 trim、空值移除键；null/空对象清除 */
   private normalizeMembers(
     resources: {
       frontend?: string;
       backend?: string;
       qa?: string;
+      product?: string;
       client?: string;
     } | null,
   ): {
     frontend?: string;
     backend?: string;
     qa?: string;
+    product?: string;
     client?: string;
   } | null {
     if (!resources || typeof resources !== 'object') return null;
@@ -809,9 +1132,16 @@ export class ProjectsService {
       frontend?: string;
       backend?: string;
       qa?: string;
+      product?: string;
       client?: string;
     } = {};
-    for (const key of ['frontend', 'backend', 'qa', 'client'] as const) {
+    for (const key of [
+      'frontend',
+      'backend',
+      'qa',
+      'product',
+      'client',
+    ] as const) {
       const value = resources[key];
       if (typeof value === 'string' && value.trim()) {
         normalized[key] = value.trim();

@@ -7,7 +7,6 @@ function buildTask(overrides: Record<string, unknown> = {}) {
     id: 42,
     code: 'TK-0042',
     title: '查询任务信息',
-    type: '其它',
     templateName: null,
     status: TaskStatus.RUNNING,
     subStatus: TaskSubStatus.EXECUTING,

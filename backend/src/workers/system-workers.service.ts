@@ -4,12 +4,16 @@ import { LessThan, Repository } from 'typeorm';
 import { WorkerRole, WorkerRuntime } from '../common/enums';
 import { Task } from '../tasks/task.entity';
 import { TaskTemplate } from '../tasks/task-template.entity';
+import { SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID } from '../tasks/system-task-templates';
 import { Worker } from './worker.entity';
 import {
+  SYSTEM_PROJECT_MANAGER_WORKER_ID,
+  SYSTEM_PROJECT_MANAGER_WORKER_KEY,
   SYSTEM_WORKERS,
   SYSTEM_WORKER_ID_LIMIT,
   SystemWorkerDefinition,
   isSystemWorkerId,
+  prependSystemWorkerAgent,
 } from './system-workers';
 
 /**
@@ -54,6 +58,7 @@ export class SystemWorkersService implements OnApplicationBootstrap {
       await this.normalizeCustomWorkerIds();
       await this.normalizeSchedulerIds();
       await this.ensureSystemWorkers();
+      await this.bindProjectManager();
       await ensureWorkerSequenceFloor(this.workers);
     } catch (e) {
       this.logger.error(`系统机器人初始化失败: ${(e as Error).message}`);
@@ -246,6 +251,37 @@ export class SystemWorkersService implements OnApplicationBootstrap {
         `已内置系统机器人「${name}」#${insertedId}（默认停用，请在机器人页配置执行器/模型后启用）`,
       );
     }
+  }
+
+  /**
+   * 把「技术-项目经理」放到项目开发交付任务定义的首位处理机器人。
+   * 保留管理员已配置的其它机器人作为兜底，重复启动幂等。
+   */
+  private async bindProjectManager(): Promise<void> {
+    const manager = await this.workers.findOne({
+      where: { systemKey: SYSTEM_PROJECT_MANAGER_WORKER_KEY },
+    });
+    if (!manager) return;
+    const template = await this.workers.manager.findOne(TaskTemplate, {
+      where: { id: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID },
+    });
+    if (!template) return;
+    // 首选 ID 被历史系统机器人占用时，移除模板里预置但未实际指向项目经理的 ID
+    const current = (template.agentIds ?? []).filter(
+      (id) => id !== SYSTEM_PROJECT_MANAGER_WORKER_ID || manager.id === id,
+    );
+    const next = prependSystemWorkerAgent(current, manager.id);
+    if (
+      next.length === current.length &&
+      next.every((id, index) => id === current[index])
+    ) {
+      return;
+    }
+    template.agentIds = next;
+    await this.workers.manager.save(template);
+    this.logger.log(
+      `已把系统机器人「${manager.name}」#${manager.id} 绑定为任务定义 #${template.id}「${template.name}」的首位处理机器人`,
+    );
   }
 
   private async correctSystemWorker(

@@ -41,7 +41,6 @@ import {
   Folder,
   GitCommit,
   GitFork,
-  Label,
   LayoutDashboard,
   ListCheck,
   Book,
@@ -59,6 +58,10 @@ import { LayoutGroup, m } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
 import { api, type TicketWorkflowDefinitionSummary } from '../lib/api'
 import { PageTransition } from './PageTransition'
+import {
+  DetailAISlotHost,
+  DetailAISlotProvider,
+} from './detail/DetailAISlotContext'
 import { KnowledgeSearchDialog } from './KnowledgeSearchDialog'
 import { navIndicatorTransition } from '../lib/motion'
 
@@ -174,7 +177,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
       { to: '/admin/github-access', label: 'GitHub 权限', icon: Settings, ready: true },
       { to: '/admin/feishu-config', label: '飞书配置', icon: PlugConnected, ready: true },
-      { to: '/admin/task-types', label: '任务类型', icon: Label, ready: true },
       { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },
       { to: '/admin/workers', label: '机器人', icon: Robot, ready: true },
       { to: '/admin/executors', label: '执行器', icon: Cpu, ready: true },
@@ -388,7 +390,7 @@ export function Layout() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      {/* 顶部导航：与普通页面保持一致，统一按 20% 起始（工作台正文左侧同为 20%） */}
+      {/* 顶部导航：保持 20% 起始，与工作台正文左侧对齐 */}
       <header className="grid h-14 shrink-0 grid-cols-[20%_minmax(0,1fr)_auto] items-center bg-background">
         <div className="flex h-full items-center px-6">
           <Link
@@ -541,10 +543,10 @@ export function Layout() {
       />
 
       <div className="flex h-[calc(100vh-3.5rem)]">
-        {/* 普通页面：左侧 20% 导航，右侧 80% 浅色圆角内容画布 */}
+        {/* 普通页面：左侧导航缩短至原 20% 的 1/2（10%），右侧内容画布自适应 */}
         {!isWorkbench && !isRobotChat && sidebarSection && (
           <>
-            <aside className="w-[20%] shrink-0 overflow-y-auto bg-background p-3">
+            <aside className="w-[10%] shrink-0 overflow-y-auto bg-background p-3">
               <Navigation orientation="vertical" activeLink={pathname}>
                 {sidebarSection.groups ? (
                   <div className="flex flex-col gap-4">
@@ -565,17 +567,22 @@ export function Layout() {
               </Navigation>
             </aside>
 
-            <main className="h-full w-[80%] min-w-0 p-3">
-              <div className="h-full min-h-0 overflow-auto rounded-[var(--radius-lg)] bg-background-muted p-4 text-foreground-intense">
-                <PageTransition pageKey={pathname}>
-                  <Outlet />
-                </PageTransition>
-              </div>
+            <main className="h-full min-w-0 flex-1 p-3">
+              <DetailAISlotProvider>
+                <div className="flex h-full min-h-0 gap-3">
+                  <div className="h-full min-w-0 flex-1 overflow-auto rounded-[var(--radius-lg)] bg-background-muted p-4 text-foreground-intense">
+                    <PageTransition pageKey={pathname}>
+                      <Outlet />
+                    </PageTransition>
+                  </div>
+                  <DetailAISlotHost />
+                </div>
+              </DetailAISlotProvider>
             </main>
           </>
         )}
 
-        {/* 工作台：页面自身渲染 20% 宽度任务列表（与普通页左侧导航同宽）+ 自适应内容画布 */}
+        {/* 工作台：页面自身渲染 20% 宽度任务列表 + 自适应内容画布 */}
         {isWorkbench && (
           <main className="h-full w-full min-w-0 text-foreground-intense">
             <Outlet />

@@ -9,7 +9,6 @@ describe('TasksService 任务详情与对话', () => {
       id: 1,
       code: 'TK-0001',
       title: '任务标题',
-      type: '其它',
       templateId: null,
       templateName: null,
       status: TaskStatus.WAITING,
@@ -86,7 +85,6 @@ describe('TasksService 任务详情与对话', () => {
       usersRepo as never,
       { findOne: jest.fn() } as never,
       { findAll: jest.fn().mockResolvedValue([]) } as never,
-      { assertExists: jest.fn().mockResolvedValue('其它') } as never,
       dispatchService as never,
       {
         deleteForTasks: jest.fn(),
@@ -222,7 +220,6 @@ describe('TasksService 任务详情与对话', () => {
     taskTemplatesRepo.findOne.mockResolvedValue({
       id: 3,
       name: '前端任务定义',
-      type: '前端开发',
     });
     tasksRepo.save.mockImplementation((task: Task) => {
       if (!task.id) task.id = 5;
@@ -231,7 +228,6 @@ describe('TasksService 任务详情与对话', () => {
 
     const created = await service.create({
       description: '开发活动页',
-      type: '前端开发',
       templateId: 3,
       createdById: 8,
     });

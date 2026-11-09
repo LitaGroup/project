@@ -11,8 +11,6 @@ import { TaskMissingItem } from './task.entity';
 /** 方案建议的子任务（管理员确认后物化为 Task） */
 export interface PlanSubtask {
   title: string;
-  /** 任务类型（task_types.name） */
-  type: string;
   input?: string;
   outputSpec?: string;
   /** 建议的机器人（workers.id） */
@@ -25,7 +23,6 @@ export interface PlanSubtask {
 export interface DispatchPlanContent {
   /** 任务识别结果 */
   identification: {
-    type?: string;
     input?: string;
     output?: string;
     summary?: string;

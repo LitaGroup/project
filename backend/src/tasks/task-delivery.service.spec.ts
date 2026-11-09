@@ -12,7 +12,6 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       id: 1,
       code: 'TK-0001',
       title: '活动页开发',
-      type: '其它',
       status: TaskStatus.WAITING,
       subStatus: TaskSubStatus.PENDING_ACCEPT,
       description: '开发活动页',

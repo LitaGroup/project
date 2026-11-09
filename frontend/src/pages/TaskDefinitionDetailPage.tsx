@@ -120,13 +120,9 @@ export function TaskDefinitionDetailPage() {
         <Card className="shrink-0">
           <CardHeader className="flex-none">
             <CardTitle>基础信息</CardTitle>
-            <CardDescription>任务类型、创建人与默认处理机器人</CardDescription>
+            <CardDescription>创建人与默认处理机器人</CardDescription>
           </CardHeader>
           <div className="grid grid-cols-2 gap-x-8 gap-y-3 px-4 pb-4 text-sm sm:grid-cols-3">
-            <div>
-              <p className="text-xs text-foreground-muted">任务类型</p>
-              <p className="mt-0.5">{template.type || '其它'}</p>
-            </div>
             <div>
               <p className="text-xs text-foreground-muted">创建人</p>
               <p className="mt-0.5">{template.createdByName ?? '系统'}</p>

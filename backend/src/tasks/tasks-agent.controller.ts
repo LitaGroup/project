@@ -16,7 +16,6 @@ import {
 
 class CreateTaskMarkdownDto implements AgentCreateTaskInput {
   title?: string;
-  type?: string;
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
@@ -35,7 +34,6 @@ export class TasksListMarkdownController {
     @Query('q') q?: string,
     @Query('status') status?: string,
     @Query('subStatus') subStatus?: string,
-    @Query('type') type?: string,
     @Query('rootOnly') rootOnly?: string,
   ): Promise<string> {
     const scope = await this.agent.resolveScope(req);
@@ -43,7 +41,6 @@ export class TasksListMarkdownController {
       q,
       status,
       subStatus,
-      type,
       rootOnly: rootOnly === 'true',
     };
     return this.agent.listMarkdown(scope, params);

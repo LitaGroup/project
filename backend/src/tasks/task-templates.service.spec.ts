@@ -4,7 +4,6 @@ import { Task } from './task.entity';
 import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import { TaskTemplatesService } from './task-templates.service';
-import { TaskTypesService } from '../task-types/task-types.service';
 import { Worker } from '../workers/worker.entity';
 
 /** 任务定义服务：创建人归属与关注关系 */
@@ -15,6 +14,7 @@ describe('TaskTemplatesService', () => {
     save: jest.fn(),
     create: jest.fn((input: Partial<TaskTemplate>) => input),
     remove: jest.fn(),
+    query: jest.fn(),
   };
   const tasks = {
     find: jest.fn(),
@@ -23,9 +23,6 @@ describe('TaskTemplatesService', () => {
     find: jest.fn(),
     createQueryBuilder: jest.fn(),
     delete: jest.fn(),
-  };
-  const taskTypes = {
-    assertExists: jest.fn(),
   };
   const workers = {
     find: jest.fn(),
@@ -36,7 +33,6 @@ describe('TaskTemplatesService', () => {
   const template = (id: number): TaskTemplate => ({
     id,
     name: `定义 ${id}`,
-    type: '其它',
     description: null,
     agentIds: [],
     createdById: null,
@@ -48,13 +44,46 @@ describe('TaskTemplatesService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     workers.find.mockResolvedValue([]);
+    templates.query.mockResolvedValue(undefined);
     service = new TaskTemplatesService(
       templates as unknown as Repository<TaskTemplate>,
       tasks as unknown as Repository<Task>,
       workers as unknown as Repository<Worker>,
       follows as unknown as Repository<TaskTemplateFollow>,
-      taskTypes as unknown as TaskTypesService,
     );
+  });
+
+  it('启动时幂等补齐未知任务与项目开发交付系统定义', async () => {
+    templates.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...template(6), name: '未知任务' })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        ...template(7),
+        name: '技术-项目开发交付',
+      });
+
+    await service.onModuleInit();
+
+    expect(templates.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO task_templates'),
+      [6, '未知任务', expect.any(String), '[]'],
+    );
+    expect(templates.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO task_templates'),
+      [7, '技术-项目开发交付', expect.any(String), '[2]'],
+    );
+    expect(templates.query).toHaveBeenCalledWith(
+      expect.stringContaining("pg_get_serial_sequence('task_templates', 'id')"),
+      [999],
+    );
+  });
+
+  it('项目开发交付系统定义不可删除', async () => {
+    await expect(service.remove(7)).rejects.toThrow(
+      '系统任务定义（ID=7）由平台保留，不能删除',
+    );
+    expect(templates.findOne).not.toHaveBeenCalled();
   });
 
   it('列表返回当前用户是否已关注', async () => {
@@ -97,7 +126,6 @@ describe('TaskTemplatesService', () => {
 
   it('创建任务定义时记录创建人', async () => {
     templates.findOne.mockResolvedValue(null);
-    taskTypes.assertExists.mockResolvedValue('其它');
     templates.save.mockResolvedValue({ ...template(4), createdById: 7 });
 
     await service.create({ name: '新定义' }, { id: 7, name: '张三' });
@@ -145,7 +173,6 @@ describe('TaskTemplatesService', () => {
 
   it('保存任务定义时剔除个人 AGENT 处理机器人', async () => {
     templates.findOne.mockResolvedValue(null);
-    taskTypes.assertExists.mockResolvedValue('其它');
     templates.save.mockImplementation((value: TaskTemplate) =>
       Promise.resolve({ ...value, id: 1001 }),
     );
@@ -205,7 +232,7 @@ describe('TaskTemplatesService', () => {
 
       const markdown = await service.findOneMarkdown(6);
 
-      expect(markdown).toContain('系统（不可改名、不可修改类型、不可删除）');
+      expect(markdown).toContain('系统（不可改名、不可删除）');
       expect(markdown).toContain('任务范围');
       expect(markdown).toContain('交付要求');
     });
@@ -220,7 +247,6 @@ describe('TaskTemplatesService', () => {
 
     it('机器人 Token 创建时记录机器人名称但不伪造用户 ID', async () => {
       templates.findOne.mockResolvedValue(null);
-      taskTypes.assertExists.mockResolvedValue('其它');
       templates.save.mockImplementation((value: TaskTemplate) =>
         Promise.resolve({ ...value, id: 1000 }),
       );
@@ -241,15 +267,15 @@ describe('TaskTemplatesService', () => {
     });
 
     it('删除结果不再返回失效的详情链接', async () => {
-      const target = { ...template(7), name: '待删除定义' };
+      const target = { ...template(1007), name: '待删除定义' };
       templates.findOne.mockResolvedValue(target);
       templates.remove.mockResolvedValue(target);
 
-      const markdown = await service.removeMarkdown(7);
+      const markdown = await service.removeMarkdown(1007);
 
       expect(markdown).toContain('# 任务定义已删除');
       expect(markdown).toContain('已创建的历史任务不受影响');
-      expect(markdown).not.toContain('/api/task-templates/7.md');
+      expect(markdown).not.toContain('/api/task-templates/1007.md');
     });
   });
 });

@@ -10,7 +10,6 @@ describe('TaskDispatchService 显式申请验收', () => {
       id: 1,
       code: 'TK-0001',
       title: '活动页开发',
-      type: '其它',
       status: TaskStatus.RUNNING,
       subStatus: TaskSubStatus.EXECUTING,
       description: '开发活动页',

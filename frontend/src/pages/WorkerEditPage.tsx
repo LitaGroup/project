@@ -34,6 +34,8 @@ import {
   api,
   WORKER_GITHUB_PERMISSIONS,
   WORKER_GITHUB_PERMISSION_LABELS,
+  WORKER_RESOURCE_PERMISSIONS,
+  WORKER_RESOURCE_PERMISSION_LABELS,
   type Executor,
   type PlatformUser,
   type Worker,
@@ -43,6 +45,7 @@ import {
   type WorkerInitializeSnapshot,
   type WorkerInitializeStatus,
   type WorkerOptimizeSnapshot,
+  type WorkerResourcePermission,
   type WorkerRole,
   type WorkerSkill,
   type WorkerSkillCatalogItem,
@@ -76,7 +79,7 @@ const NEW_PROMPT_TEMPLATE = `## 角色定义
 - （待补充：工具、技术栈、方法论与协作能力）
 
 ## 接受任务
-- 可接受的任务类型：（待补充）
+- 可接受的任务范围：（待补充）
 - 输入要求：（待补充）
 - 产出要求：（待补充）
 - 边界与拒收条件：（待补充）`
@@ -117,6 +120,8 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const [enabled, setEnabled] = useState(true)
   const [githubPermission, setGithubPermission] =
     useState<WorkerGithubPermission>('develop')
+  const [resourcePermission, setResourcePermission] =
+    useState<WorkerResourcePermission>('none')
   const [error, setError] = useState<string | null>(null)
   /** 配置已落库但工作环境初始化失败时的提示（重试保存不会再重复创建） */
   const [initError, setInitError] = useState<string | null>(null)
@@ -255,6 +260,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
         setOwnerUserId(w.ownerUserId ? String(w.ownerUserId) : '')
         setEnabled(w.enabled)
         setGithubPermission(w.githubPermission ?? 'develop')
+        setResourcePermission(w.resourcePermission ?? 'none')
       })
       .catch((e: Error) => setLoadError(e.message))
       .finally(() => {
@@ -426,8 +432,10 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       standards,
       ownerUserId: ownerUserId ? Number(ownerUserId) : null,
       enabled,
-      // 真人机器人与个人 AGENT 不提交该字段；后端固定为 none
-      ...(personal || worker?.runtime === 'human' ? {} : { githubPermission }),
+      // 真人机器人与个人 AGENT 不提交权限字段；后端按默认值 / 原值维护
+      ...(personal || worker?.runtime === 'human'
+        ? {}
+        : { githubPermission, resourcePermission }),
     }
     let stage: 'save' | 'init' = 'save'
     setSaving(true)
@@ -872,6 +880,31 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
                   <span className="text-xs text-foreground-muted">
                     开发权限可拉代码、push 普通分支和提 PR；发布权限额外允许写
                     main/stable、审批与合并 PR。保存后会重新初始化工位说明。
+                  </span>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  资源权限
+                  <Select
+                    value={resourcePermission}
+                    onValueChange={(v) =>
+                      setResourcePermission(v as WorkerResourcePermission)
+                    }
+                    items={WORKER_RESOURCE_PERMISSION_LABELS}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {WORKER_RESOURCE_PERMISSIONS.map((permission) => (
+                        <SelectItem key={permission} value={permission}>
+                          {WORKER_RESOURCE_PERMISSION_LABELS[permission]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-foreground-muted">
+                    全部资源可访问所有 MySQL 资源；只读资源仅能访问标记为只读的资源。
+                    默认无权限，GitHub 与资源权限相互独立。
                   </span>
                 </label>
               </>

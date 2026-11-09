@@ -9,13 +9,6 @@ import {
 import { Button } from '@appica/ui-react/button'
 import { Input } from '@appica/ui-react/input'
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@appica/ui-react/select'
-import {
   Combobox,
   ComboboxChips,
   ComboboxChip,
@@ -29,7 +22,6 @@ import {
 import {
   api,
   type TaskTemplate,
-  type TaskTypeDef,
   type Worker,
 } from '../lib/api'
 import { matchesPinyinSearch } from '../lib/pinyin-search'
@@ -41,10 +33,7 @@ import {
 
 const LIST_PATH = '/admin/task-templates'
 
-/** 默认兜底任务类型（与后端 TASK_TYPE_DEFAULT 一致） */
-const DEFAULT_TASK_TYPE = '其它'
-
-/** 系统任务定义：名称与类型由平台保留，只允许维护描述和处理机器人 */
+/** 系统任务定义：名称由平台保留，只允许维护描述和处理机器人 */
 const SYSTEM_TASK_TEMPLATE_IDS = new Set([6, 10, 11, 12, 13, 14, 15])
 
 interface AgentOption {
@@ -68,19 +57,17 @@ const DESCRIPTION_TEMPLATE = `## 任务定义描述
 
 /**
  * 任务定义新建与编辑（独立页面）。
- * 任务定义用于沉淀一类任务的可复用类型、描述与多个默认处理机器人。
+ * 任务定义用于沉淀一类任务的可复用描述与多个默认处理机器人。
  */
 export function TaskTemplateEditPage() {
   const { templateId } = useParams<{ templateId: string }>()
   const navigate = useNavigate()
 
   const [workers, setWorkers] = useState<Worker[]>([])
-  const [taskTypes, setTaskTypes] = useState<TaskTypeDef[]>([])
   const [template, setTemplate] = useState<TaskTemplate | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [name, setName] = useState('')
-  const [taskType, setTaskType] = useState(DEFAULT_TASK_TYPE)
   const [description, setDescription] = useState(DESCRIPTION_TEMPLATE)
   const [agentIds, setAgentIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -108,16 +95,6 @@ export function TaskTemplateEditPage() {
     () => new Map(agentOptions.map((worker) => [worker.id, worker.name])),
     [agentOptions],
   )
-  const typeNames = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...taskTypes.map((type) => type.name),
-          taskType || DEFAULT_TASK_TYPE,
-        ]),
-      ),
-    [taskTypes, taskType],
-  )
 
   const systemTemplate = Boolean(
     template && SYSTEM_TASK_TEMPLATE_IDS.has(template.id),
@@ -136,7 +113,6 @@ export function TaskTemplateEditPage() {
 
   useEffect(() => {
     api.listWorkers({ role: '工作者' }).then(setWorkers).catch(() => undefined)
-    api.listTaskTypes().then(setTaskTypes).catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -149,7 +125,6 @@ export function TaskTemplateEditPage() {
         setLoadError(null)
         setTemplate(t)
         setName(t.name)
-        setTaskType(t.type || DEFAULT_TASK_TYPE)
         setDescription(t.description ?? '')
         setAgentIds((t.agentIds ?? []).map(String))
       })
@@ -168,7 +143,6 @@ export function TaskTemplateEditPage() {
       descriptionRef.current?.getMarkdown() ?? description
     const payload = {
       name,
-      type: taskType,
       description: descriptionText.trim() || null,
       agentIds: agentIds.map(Number),
     }
@@ -182,7 +156,7 @@ export function TaskTemplateEditPage() {
       .finally(() => setSaving(false))
   }
 
-  const canSave = !!name.trim() && !!taskType.trim() && !saving
+  const canSave = !!name.trim() && !saving
 
   if (loading) {
     return <p className="text-sm text-foreground-muted">加载中…</p>
@@ -207,7 +181,7 @@ export function TaskTemplateEditPage() {
           />
           <h1 className="mt-2 text-2xl font-semibold">{pageTitle}</h1>
           <p className="mt-1 text-sm text-foreground-muted">
-            沉淀一类任务的可复用定义：任务类型、统一描述、所需输入、交付方式与多个默认处理机器人
+            沉淀一类任务的可复用定义：统一描述、所需输入、交付方式与多个默认处理机器人
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -252,7 +226,7 @@ export function TaskTemplateEditPage() {
           <CardHeader className="flex-none">
             <CardTitle>基础信息</CardTitle>
             <CardDescription>
-              任务类型用于分类与筛选，处理机器人可多选并作为默认执行者
+              处理机器人可多选并作为默认执行者
             </CardDescription>
           </CardHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-4 pb-4">
@@ -266,33 +240,9 @@ export function TaskTemplateEditPage() {
               />
               {systemTemplate && (
                 <span className="text-xs text-foreground-muted">
-                  系统任务定义名称与类型由平台保留，只允许维护描述和处理机器人
+                  系统任务定义名称由平台保留，只允许维护描述和处理机器人
                 </span>
               )}
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              任务类型
-              <Select
-                value={taskType}
-                onValueChange={(value) =>
-                  setTaskType((value as string) || DEFAULT_TASK_TYPE)
-                }
-                items={Object.fromEntries(
-                  typeNames.map((name) => [name, name]),
-                )}
-                disabled={systemTemplate}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {typeNames.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               处理机器人
@@ -333,7 +283,7 @@ export function TaskTemplateEditPage() {
                 </ComboboxContent>
               </Combobox>
               <span className="text-xs text-foreground-muted">
-                可添加多个，支持名称、全拼或首字母搜索；不选择时平台按任务类型继续匹配，仍无法匹配则归入未知任务
+                可添加多个，支持名称、全拼或首字母搜索；不选择时平台按任务定义继续匹配，仍无法匹配则归入未知任务
               </span>
             </label>
           </div>

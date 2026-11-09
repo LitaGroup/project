@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -88,6 +89,10 @@ export interface TaskWorkbenchPanelProps {
   agent: ReactNode
   /** 任务操作完成后刷新任务、聊天、交付文档与角色 */
   onRefresh: () => Promise<unknown> | unknown
+  /** 面板当前是否可见；收起时统计其他参与方的新消息 */
+  visible?: boolean
+  /** 未读消息数变化 */
+  onUnreadChange?: (count: number) => void
   className?: string
 }
 
@@ -104,6 +109,8 @@ export function TaskWorkbenchPanel({
   handoffEditing = false,
   agent,
   onRefresh,
+  visible = true,
+  onUnreadChange,
   className,
 }: TaskWorkbenchPanelProps) {
   const { user } = useAuth()
@@ -122,6 +129,11 @@ export function TaskWorkbenchPanel({
   const [subtaskInput, setSubtaskInput] = useState('')
   const [subtaskOutputSpec, setSubtaskOutputSpec] = useState('')
   const imeEnter = useImeEnterGuard()
+  const onUnreadChangeRef = useRef(onUnreadChange)
+  const visibleRef = useRef(visible)
+  const unreadCountRef = useRef(0)
+  const unreadTaskRef = useRef<number | null>(null)
+  const seenMessageIdsRef = useRef(new Set<string>())
 
   const assignWorkers = useMemo(
     () => workers.filter((worker) => worker.id !== task?.agentId),
@@ -208,6 +220,58 @@ export function TaskWorkbenchPanel({
   const requesterSubtaskAvailable = Boolean(task) && isRequester && !finished
   const responsibleSubtaskAvailable =
     Boolean(task) && isAgent && executing && !delivered
+
+  useEffect(() => {
+    onUnreadChangeRef.current = onUnreadChange
+  }, [onUnreadChange])
+
+  const emitUnread = useCallback((next: number) => {
+    if (unreadCountRef.current === next) return
+    unreadCountRef.current = next
+    onUnreadChangeRef.current?.(next)
+  }, [])
+
+  useEffect(() => {
+    emitUnread(0)
+  }, [task?.id, emitUnread])
+
+  useEffect(() => {
+    visibleRef.current = visible
+    if (!visible) return
+    emitUnread(0)
+    for (const message of activeMessages) {
+      seenMessageIdsRef.current.add(message.id)
+    }
+  }, [visible, activeMessages, emitUnread])
+
+  useEffect(() => {
+    if (!task) return
+    if (unreadTaskRef.current !== task.id) {
+      unreadTaskRef.current = task.id
+      seenMessageIdsRef.current.clear()
+      for (const message of activeMessages) {
+        seenMessageIdsRef.current.add(message.id)
+      }
+      emitUnread(0)
+      return
+    }
+    const ownSenderId = user ? `user:${user.name ?? user.id}` : null
+    let added = 0
+    for (const message of activeMessages) {
+      if (seenMessageIdsRef.current.has(message.id)) continue
+      seenMessageIdsRef.current.add(message.id)
+      if (visibleRef.current) continue
+      if (
+        ownSenderId &&
+        message.sender.kind === 'user' &&
+        message.sender.id === ownSenderId
+      ) {
+        continue
+      }
+      added += 1
+    }
+    if (added > 0) emitUnread(unreadCountRef.current + added)
+  }, [task, activeMessages, emitUnread, user])
 
   useEffect(() => {
     // 切换任务时清空草稿和未完成弹窗，避免把上一个任务的内容带过来
@@ -405,7 +469,7 @@ export function TaskWorkbenchPanel({
         }`}
       >
         {/* 右侧预留详情抽屉关闭按钮的位置 */}
-        <header className="shrink-0 border-b border-border px-3 py-2.5 pr-12">
+        <header className="shrink-0 px-3 py-2.5 pr-14">
           <div className="flex items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1">
               {rightTabs.map(([key, label]) => (
@@ -769,14 +833,11 @@ export function TaskWorkbenchPanel({
                       setSubtaskTemplateId(String(value ?? ''))
                     }
                     filter={(template: TaskTemplate, query: string) =>
-                      matchesPinyinSearch(query, [
-                        template.name,
-                        template.type,
-                      ])
+                      matchesPinyinSearch(query, [template.name])
                     }
                   >
                     <ComboboxInput
-                      placeholder="搜索任务定义名称或类型"
+                      placeholder="搜索任务定义名称"
                       aria-label="任务定义"
                     />
                     <ComboboxContent>
@@ -787,7 +848,7 @@ export function TaskWorkbenchPanel({
                             key={template.id}
                             value={String(template.id)}
                           >
-                            {template.name} · {template.type}
+                            {template.name}
                           </ComboboxItem>
                         )}
                       </ComboboxList>

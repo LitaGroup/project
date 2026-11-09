@@ -20,6 +20,7 @@ import {
   UserRole,
   WorkerGithubPermission,
   WorkerLiveStatus,
+  WorkerResourcePermission,
   WorkerRole,
   WorkerRuntime,
 } from '../common/enums';
@@ -61,6 +62,7 @@ class CreateWorkerDto implements CreateWorkerInput {
   ownerUserId?: number | null;
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
+  resourcePermission?: WorkerResourcePermission;
 }
 
 class UpdateWorkerDto implements UpdateWorkerInput {
@@ -80,6 +82,7 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   ownerUserId?: number | null;
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
+  resourcePermission?: WorkerResourcePermission;
 }
 
 class OptimizePromptDto implements OptimizePromptInput {

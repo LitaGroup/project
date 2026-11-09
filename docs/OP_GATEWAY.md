@@ -71,6 +71,11 @@ workers.githubPermission
 - none / develop / release
 - 默认 develop；none 表示未配置
 - 全部机器人（含真人机器人）可在管理区「GitHub 权限」页配置
+
+workers.resourcePermission
+- write / read / none
+- 默认 none；与 GitHub 权限相互独立
+- write 可访问全部资源；read 仅可访问 readOnly 资源
 ```
 
 ### 3.2 凭证
@@ -140,7 +145,20 @@ X-Worker-Token: <LITA_WORK_TOKEN>
 - 每次请求实时校验权限，不缓存授权结果。
 - 成功响应包含短有效期 `leaseId` 与凭证明文，只允许 Gateway 当前请求使用。
 
-### 5.2 管理接口
+### 5.2 资源权限验证
+
+```http
+POST /api/internal/gateway/v1/resource-permissions/verify
+X-Gateway-Token: <OP_GATEWAY_SHARED_TOKEN>
+X-Worker-Token: <LITA_WORK_TOKEN>
+```
+
+- 只返回 `{ workerId, permission }`，不返回任何凭证。
+- `permission` 为 `write/read/none`，与 `githubPermission` 独立；默认 `none`。
+- 每次请求实时读取，机器人停用或权限变更后立即生效。
+- 供 `admin-api` 的 Agent 资源列表与 MySQL SQL 执行前验权使用；接口细节见 [OP_GATEWAY_API.md](./OP_GATEWAY_API.md) 第九节。
+
+### 5.3 管理接口
 
 ```text
 GET    /api/github-access                    档位凭证清单（仅管理员，固定两条，不含 PAT）
@@ -156,7 +174,7 @@ PATCH /api/workers/:id
 POST /api/workers/:id/update.md
 ```
 
-字段为 `githubPermission: develop | release`（AI 机器人仅这两档；`none` 为真人/个人 AGENT 内部兜底）。
+字段为 `githubPermission: develop | release`（AI 机器人仅这两档；`none` 为真人/个人 AGENT 内部兜底），以及独立的 `resourcePermission: none | read | write`。
 
 ---
 
@@ -173,12 +191,11 @@ POST /api/workers/:id/update.md
 
 ### 6.2 机器人配置页
 
-机器人右侧「基础信息」新增 `GitHub 权限`：
+机器人右侧「基础信息」新增 `GitHub 权限` 与 `资源权限`：
 
-- 默认「开发权限」；
-- 可改为「发布权限」或「无权限」；
-- 全部机器人（含真人机器人）均可配置；
-- 保存后触发初始化，工位 `AGENTS.md` 同步更新。
+- GitHub 权限默认「开发权限」，可改为「发布权限」或「无权限」；全部机器人（含真人机器人）均可配置。
+- 资源权限默认「无权限」，可改为「只读资源」或「全部资源」；与 GitHub 权限独立。
+- 保存后触发初始化，工位 `AGENTS.md` 同步更新两类权限说明。
 
 ### 6.3 初始化告知
 
@@ -194,8 +211,9 @@ POST /api/workers/:id/update.md
 - `develop`：列出允许事项，明确禁止直推保护分支和审批/合并；
 - `release`：明确可写 `main/stable`、审批与合并，但要求确认符合当前任务；
 - 有权限但未配置凭证时明确说明远端 GitHub 操作暂不可用。
+- 资源权限 `none`：禁止调用 AI Gateway 资源接口；`read`：仅可访问只读资源；`write`：可访问全部资源，但只读资源仍由数据库只读事务限制。
 
-`AGENTS.md` 中只写权限与使用规则，不写 PAT、密文、SecretRef。
+`AGENTS.md` 中只写权限与使用规则，不写 PAT、密码、Token、密文或 SecretRef。
 
 ---
 
@@ -228,8 +246,8 @@ POST /api/workers/:id/update.md
 ## 九、后续扩展
 
 - 接口协议已按 `credentialType/resource/action` 通用化，可扩展 `postgresql.account`、`redis.auth`；
-- 数据库、Redis 权限默认无权限，必须单独授权；
-- 后续由 Gateway 代理数据库/Redis 连接，不把密码转发给 AI；
+- 资源网关已实现 MySQL 资源发现与 SQL 执行；Redis/Nacos 当前仅支持资源发现，后续再扩展执行；
+- 数据库权限默认无权限，必须单独授权；资源密码始终由 admin-api 持有，不转发给 AI；
 - SSH Git、Git LFS、任务级授权与 PR 合并流程按原三期计划演进。
 
 ---

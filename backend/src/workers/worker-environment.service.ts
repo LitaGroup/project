@@ -11,7 +11,11 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter } from 'events';
 import { Observable } from 'rxjs';
 import { Repository } from 'typeorm';
-import { WorkerRuntime, WorkerGithubPermission } from '../common/enums';
+import {
+  WorkerGithubPermission,
+  WorkerResourcePermission,
+  WorkerRuntime,
+} from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeEventHub } from '../executors/opencode-event-hub.service';
 import type { OpencodeEvent } from '../executors/opencode-event-hub.service';
@@ -60,7 +64,7 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 
 - 待分配 → 待接受：平台按任务定义分配机器人并发送邀约。
 - 待接受 → 执行中：确认任务匹配后调用 task-accept。接受失败或提示忙碌时不要执行，保持等待。
-- 待接受 → 已拒绝：任务不匹配自己的职责时，只能在待接受阶段调用 task-refuse，必须填写拒绝理由 reason，并尽量给出发送建议 suggestion（推荐任务定义、任务类型或机器人）。不得接受后再拒绝，也不得把不匹配任务转交他人代替拒绝接口。
+- 待接受 → 已拒绝：任务不匹配自己的职责时，只能在待接受阶段调用 task-refuse，必须填写拒绝理由 reason，并尽量给出发送建议 suggestion（推荐任务定义或机器人）。不得接受后再拒绝，也不得把不匹配任务转交他人代替拒绝接口。
 - 执行中 → 待反馈：需要需求方澄清时调用 task-question-ask，由 project 创建和展示提问；不要使用 opencode 原生 question。调用后停止本轮，等待平台恢复。
 - 待反馈 → 待继续 → 执行中：需求方答复后，平台在机器人空闲时恢复原任务会话。
 - 执行中维护交付文档：接受任务并开始处理后，立即调用 task-handoff-update 创建 HANDOFF（首次使用 baseVersion=0）；每完成一个重要阶段、取得关键产物、完成验证或出现阻塞时及时更新，申请验收前补齐最终交付内容。
@@ -655,6 +659,7 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       worker,
       githubCredentialStatus,
     );
+    const resourceSection = this.buildResourceAgentsSection(worker);
 
     return `接下来，更新当前的工作环境：
 
@@ -676,6 +681,14 @@ ${TASK_COLLABORATION_AGENTS}
 
 \`\`\`\`markdown
 ${githubSection}
+\`\`\`\`
+
+### 资源访问权限（必须写入 AGENTS.md）
+
+把以下内容原样写入 AGENTS.md 的「## 资源访问权限」小节，权限与允许/禁止事项不得删减或改写：
+
+\`\`\`\`markdown
+${resourceSection}
 \`\`\`\`
 
 ### 规范与规则（必须写入 AGENTS.md）
@@ -701,18 +714,19 @@ ${rulesSection}
 
 1. 把「工作职责定义」和「平台固定协同协议」中的 Markdown 原文完整写入当前工作目录的 AGENTS.md；不要改写、缩写或额外发挥。协同协议放在工作职责定义之后。
 2. 把「GitHub 操作权限（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## GitHub 操作权限」小节；权限、允许/禁止事项与凭证状态不得删减。
-3. 把「规范与规则（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 规范与规则」小节；规范名称、说明、工位目录与文档清单不得删减。
-4. 确保 AGENTS.md 中包含上面的目录结构说明。
-5. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
-6. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
-7. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
-8. .opencode/rules/ 中的规范文档以本次规范清单为准：
+3. 把「资源访问权限（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 资源访问权限」小节；权限与允许/禁止事项不得删减。
+4. 把「规范与规则（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 规范与规则」小节；规范名称、说明、工位目录与文档清单不得删减。
+5. 确保 AGENTS.md 中包含上面的目录结构说明。
+6. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
+7. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
+8. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
+9. .opencode/rules/ 中的规范文档以本次规范清单为准：
    - 如果 .opencode/rules/.standards-manifest.json 存在，先读取其中 files 数组作为旧受管文件清单；不存在或内容非法时旧受管清单视为空。
    - 如果旧的 .opencode/docs/.standards-manifest.json 存在：先按其 files 清单删除 .opencode/docs/ 下对应的旧受管文件，再删除该旧清单；这是目录从 docs 迁移到 rules 的一次性清理，其他 docs 文档不要动。
    - 按下方「需存在的规范文件」下载并写入 .opencode/rules/ 下同名相对路径；保持文件内容与链接内容一致，不要改写或摘要。
    - 只删除「旧受管文件清单中存在、但本次需存在清单中没有」的文件；不要删除 .opencode/docs/ 或其他流程产生的文档。
    - 同步完成后把本次需存在的全部相对路径写入 .opencode/rules/.standards-manifest.json，格式为 {"version":1,"files":[...]}，路径按字典序排序；manifest 自身不要写入 files。
-9. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
+10. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
 
 ## 从以下链接中，安装或更新技能
 
@@ -801,6 +815,57 @@ ${requiredFileLines}
 - 审批或合并 PR。
 - 修改仓库权限、Secret、Ruleset 或删除仓库。
 - 试图读取、展示、导出或绕过 OP Gateway 获取 GitHub PAT。`;
+  }
+
+  /**
+   * 生成写入工位 AGENTS.md 的资源网关权限说明。
+   * 只描述权限与允许/禁止事项；不得出现资源密码、Token 或连接串。
+   */
+  private buildResourceAgentsSection(worker: Worker): string {
+    const permission =
+      worker.resourcePermission ?? WorkerResourcePermission.NONE;
+    if (permission === WorkerResourcePermission.NONE) {
+      return `## 资源访问权限
+
+当前权限：无权限。
+
+禁止事项：
+- 不要调用 AI Gateway 的资源列表或 SQL 执行接口。
+- 不要尝试通过管理接口修改资源配置或申请更高权限。
+- 不要获取、展示或推断数据库密码。
+
+如果当前任务确实需要访问内部资源，应向需求方说明：机器人尚未配置资源权限，需管理员在机器人配置页授权。`;
+    }
+    if (permission === WorkerResourcePermission.READ) {
+      return `## 资源访问权限
+
+当前权限：只读资源。
+
+允许事项：
+- 通过 AI Gateway 查询可访问的只读资源。
+- 对 readOnly=true 的 MySQL 资源执行单条只读 SQL。
+- 使用 .opencode/skills 中已安装的 resource-gateway 技能调用资源接口。
+
+禁止事项：
+- 不要访问或尝试执行 readOnly=false 的可写资源；网关会返回 403。
+- 不要执行 INSERT、UPDATE、DELETE、DDL 等写操作。
+- 不要通过管理接口修改资源只读标记或权限。
+- 不要获取、展示或写入数据库密码、Token 或连接串。`;
+    }
+    return `## 资源访问权限
+
+当前权限：全部资源。
+
+允许事项：
+- 通过 AI Gateway 查询并访问全部已登记资源。
+- 对 MySQL 资源执行任务所需的单条 SQL。
+- 使用 .opencode/skills 中已安装的 resource-gateway 技能调用资源接口。
+
+禁止事项：
+- readOnly=true 的资源仍执行只读事务；不要尝试绕过该限制。
+- 未获得用户明确确认时，不要在生产环境执行写操作。
+- 不要通过管理接口修改资源配置或权限。
+- 不要获取、展示或写入数据库密码、Token 或连接串。`;
   }
 
   private githubPermissionLabel(

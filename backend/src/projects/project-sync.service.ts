@@ -79,6 +79,7 @@ export interface SyncResources {
   frontend?: string;
   backend?: string;
   qa?: string;
+  product?: string;
   client?: string;
 }
 
@@ -129,14 +130,16 @@ const ROLE_LINK_FIELDS = {
   frontend: '前端人员/新',
   backend: '后端资源/新',
   qa: '测试人员/新',
+  product: '产品人员/新',
   client: '客户端人员/新',
 } as const;
 
-/** 资源人员兜底：旧字段（前端/后端/测试/客户端人员；后端为文本备注、可能夹 mention） */
+/** 资源人员兜底：旧字段（前端/后端/测试/产品/客户端人员；后端为文本备注、可能夹 mention） */
 const ROLE_LEGACY_FIELDS = {
   frontend: '前端人员',
   backend: '后端人员',
   qa: '测试人员',
+  product: '产品人员',
   client: '客户端人员',
 } as const;
 
@@ -357,6 +360,9 @@ export class ProjectSyncService {
       qa:
         extractLinkedNames(f[ROLE_LINK_FIELDS.qa], linkedNames) ??
         extractPeople(f[ROLE_LEGACY_FIELDS.qa]),
+      product:
+        extractLinkedNames(f[ROLE_LINK_FIELDS.product], linkedNames) ??
+        extractPeople(f[ROLE_LEGACY_FIELDS.product]),
       client:
         extractLinkedNames(f[ROLE_LINK_FIELDS.client], linkedNames) ??
         extractPeople(f[ROLE_LEGACY_FIELDS.client]),

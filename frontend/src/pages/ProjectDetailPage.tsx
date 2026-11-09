@@ -60,6 +60,13 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from '@appica/ui-react/tooltip'
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@appica/ui-react/popover'
 import { Switch } from '@appica/ui-react/switch'
 import {
   api,
@@ -88,7 +95,7 @@ import {
   type ProjectStatus,
   type ProjectSchedule,
   type ProjectType,
-  type ReleaseBranch,
+  type ProjectWorkItem,
   type ReleaseStatus,
   type RepoPlatform,
 } from '../lib/api'
@@ -100,9 +107,12 @@ import {
   ReleaseStatusBadge,
   ResourceStatusBadge,
   StatusBadge,
+  TaskStatusBadge,
+  TicketStatusBadge,
 } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
+import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import { RunStats } from '../components/RunStats'
 import { CountRow } from '../components/CountRow'
 import { TestFormDialog } from '../components/TestFormDialog'
@@ -113,15 +123,13 @@ import {
 } from '../components/TestActionButtons'
 import { NewDefectDialog } from '../components/NewDefectDialog'
 import { MarkdownViewer } from '../components/MarkdownViewer'
-import {
-  MarkdownEditor,
-  type MarkdownEditorHandle,
-} from '../components/MarkdownEditor'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [project, setProject] = useState<Project | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiUnread, setAiUnread] = useState(0)
 
   const reload = useCallback(() => {
     if (!id) return
@@ -137,9 +145,52 @@ export function ProjectDetailPage() {
   if (!project) return <p>加载中…</p>
 
   return (
-    <DetailPageLayout>
-      {/* 单栏内容区：属性摘要置顶，业务板块自上而下平铺 */}
-      <div className="flex min-w-0 flex-col gap-6">
+    <DetailPageLayout
+      aiCollapsible
+      aiOutsideContent
+      aiLabel="AI助理"
+      aiOpen={aiOpen}
+      onAiOpenChange={setAiOpen}
+      aiUnreadCount={aiUnread}
+      ai={
+        <DetailAgentPanel
+          title="AI助理"
+          visible={aiOpen}
+          onUnreadChange={setAiUnread}
+          context={{
+            type: 'project',
+            id: `project:${project.id}`,
+            title: project.name,
+            summary: [
+              `类型：${project.type}`,
+              `状态：${project.status}`,
+              project.expectedReleaseAt
+                ? `预期发布：${project.expectedReleaseAt}`
+                : '',
+              project.priority ? `优先级：${project.priority}` : '',
+            ]
+              .filter(Boolean)
+              .join('；'),
+            readUrl: `/api/projects/${project.id}.md`,
+          }}
+          emptyTitle={`「${project.name}」的独立 AI 会话`}
+          emptyHint="让助理读取当前项目、梳理资料或协助推进实施交付"
+          placeholder="询问当前项目或让助理执行操作…"
+        />
+      }
+    >
+      {/* 内容区：属性摘要置顶，业务板块自上而下平铺；双栏时独立滚动 */}
+      <div className="flex h-full min-h-0 min-w-0 flex-col gap-6 overflow-y-auto">
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xl font-semibold">任务</h2>
+            <span className="text-sm text-foreground-muted">
+              {project.projectWorkItems?.length ?? 0} 项
+            </span>
+          </div>
+          <ProjectWorkItemsPanel items={project.projectWorkItems ?? []} />
+        </section>
+
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-xl font-semibold">文档</h2>
@@ -383,13 +434,17 @@ export function ProjectDetailPage() {
                 <dd>{project.resources?.qa ?? '—'}</dd>
               </div>
               <div className="flex justify-between pl-3">
+                <dt>产品</dt>
+                <dd>{project.resources?.product ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between pl-3">
                 <dt>客户端</dt>
                 <dd>{project.resources?.client ?? '—'}</dd>
               </div>
             </dl>
-            {/* 提测入口：固定在右侧面板最下面 */}
+            {/* 项目交付入口：固定在属性卡最下面 */}
             <div className="border-t border-border px-6 py-4">
-              <SubmitReleaseDialog project={project} onSubmitted={reload} />
+              <ProjectDeliveryButton project={project} onCreated={reload} />
             </div>
           </Card>
         </TooltipProvider>
@@ -4004,9 +4059,7 @@ function ReleasesSection({
           })}
           {releases.length === 0 && (
             <TableRow>
-              <TableCell colSpan={5}>
-                暂无提测记录，点右侧面板底部「提测」发起提测（状态将流转「测试中」并通知提测群与项目人员）
-              </TableCell>
+              <TableCell colSpan={5}>暂无提测记录</TableCell>
             </TableRow>
           )}
           <CountRow colSpan={5} total={releases.length} displayed={displayed.length} />
@@ -4166,364 +4219,224 @@ function ReleaseStatusSelect({
   )
 }
 
-/** 提测弹窗：内容/访问地址/代码分支/测试人员 + 提测时间（当前时间只读）；成功后状态流转「测试中」 */
-function SubmitReleaseDialog({
+const SUCCESS_FEEDBACK_MS = 2_000
+const FAILURE_FEEDBACK_MS = 5_000
+
+type ProjectDeliveryFeedback =
+  | { kind: 'success'; message: string }
+  | { kind: 'failure'; message: string }
+  | null
+
+/** 项目任务板块：项目任务、子任务与关联工单统一展示状态和最近进度 */
+function ProjectWorkItemsPanel({ items }: { items: ProjectWorkItem[] }) {
+  return (
+    <Table hoverableRows>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-24">类型</TableHead>
+          <TableHead className="w-28">编号</TableHead>
+          <TableHead>标题</TableHead>
+          <TableHead className="w-32">状态</TableHead>
+          <TableHead>当前进度</TableHead>
+          <TableHead className="w-36">执行方</TableHead>
+          <TableHead className="w-44">更新时间</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((item) => {
+          const isTask = item.kind === 'task'
+          const typeLabel = isTask
+            ? item.parentTaskId !== null
+              ? '子任务'
+              : '任务'
+            : '工单'
+          return (
+            <TableRow key={`${item.kind}-${item.id}`}>
+              <TableCell>
+                <Badge variant={isTask ? 'secondary' : 'info'}>
+                  {typeLabel}
+                </Badge>
+              </TableCell>
+              <TableCell>
+                <Link
+                  to={isTask ? `/tasks/${item.id}` : `/tickets/${item.id}`}
+                  className="font-mono text-xs font-medium hover:underline"
+                >
+                  {item.code}
+                </Link>
+              </TableCell>
+              <TableCell className="max-w-md truncate" title={item.title}>
+                {item.parentTaskId !== null && (
+                  <span className="text-foreground-muted">└ </span>
+                )}
+                <Link
+                  to={isTask ? `/tasks/${item.id}` : `/tickets/${item.id}`}
+                  className="hover:underline"
+                >
+                  {item.title}
+                </Link>
+              </TableCell>
+              <TableCell>
+                {isTask ? (
+                  <TaskStatusBadge
+                    status={item.status}
+                    subStatus={item.subStatus ?? item.status}
+                  />
+                ) : (
+                  <TicketStatusBadge status={item.status} />
+                )}
+              </TableCell>
+              <TableCell
+                className="max-w-md truncate text-sm"
+                title={item.progress}
+              >
+                {item.progress}
+              </TableCell>
+              <TableCell
+                className="max-w-36 truncate"
+                title={item.agentName ?? ''}
+              >
+                {item.agentName ?? '—'}
+              </TableCell>
+              <TableCell
+                className="text-xs text-foreground-muted"
+                title={new Date(item.updatedAt).toLocaleString()}
+              >
+                {new Date(item.updatedAt).toLocaleString()}
+              </TableCell>
+            </TableRow>
+          )
+        })}
+        {items.length === 0 && (
+          <TableRow>
+            <TableCell colSpan={7} className="text-foreground-muted">
+              暂无任务或工单，可点击项目属性卡底部的「安排项目机器人」创建
+            </TableCell>
+          </TableRow>
+        )}
+      </TableBody>
+    </Table>
+  )
+}
+
+/** 已有项目任务时进入任务详情，否则一键创建项目开发交付任务 */
+function ProjectDeliveryButton({
   project,
-  onSubmitted,
+  onCreated,
 }: {
   project: Project
-  onSubmitted: () => void
+  onCreated: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [content, setContent] = useState('')
-  const [urls, setUrls] = useState<string[]>([])
-  const [branches, setBranches] = useState<ReleaseBranch[]>([])
-  const [testers, setTesters] = useState<string[]>([])
-  const [userNames, setUserNames] = useState<string[]>([])
-  // GitHub 仓库候选（组织内）：输入联想 + 提交校验（见 useGithubRepoCandidates）
-  const {
-    repoOptions,
-    reposState,
-    repoFilteredItems,
-    load: loadRepoOptions,
-    search: searchRepoOptions,
-    confirmExists,
-  } = useGithubRepoCandidates()
-  // 各仓库的分支候选（key = 仓库全名），供分支联想与校验
-  const [branchOptions, setBranchOptions] = useState<Record<string, string[]>>({})
-  const [submittedAt, setSubmittedAt] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const releaseEditorRef = useRef<MarkdownEditorHandle>(null)
+  const navigate = useNavigate()
+  const [pending, setPending] = useState(false)
+  const [feedback, setFeedback] = useState<ProjectDeliveryFeedback>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  /** 拉取某仓库的分支候选（按仓库全名缓存），供分支联想与提交校验 */
-  const loadBranchOptions = useCallback((repo: string) => {
-    const name = repo.trim()
-    if (!name) return
-    api
-      .listGithubBranches(name)
-      .then((list) => setBranchOptions((m) => ({ ...m, [name]: list })))
-      .catch(() => setBranchOptions((m) => ({ ...m, [name]: [] })))
-  }, [])
-
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next)
-    if (next) {
-      setContent('')
-      setUrls([])
-      // 代码分支默认带入项目已登记的 仓库+分支，并预取其分支候选
-      const initial = (project.projectBranches ?? []).map((b) => ({
-        repo: b.repo,
-        branch: b.branch,
-      }))
-      setBranches(initial)
-      // 测试人员预填项目配置的测试人员（resources.qa 支持多人串，按常见分隔符拆分）
-      setTesters(
-        (project.resources?.qa ?? '')
-          .split(/[、,，;；\s]+/)
-          .filter(Boolean),
-      )
-      setSubmittedAt(new Date().toLocaleString())
-      setError(null)
-      setBranchOptions({})
-      loadRepoOptions()
-      for (const b of initial) loadBranchOptions(b.repo)
-      api
-        .listUsers()
-        .then((users) => setUserNames(users.map((u) => u.name)))
-        .catch(() => setUserNames([]))
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
     }
   }
 
-  const validTesters = testers.map((t) => t.trim()).filter(Boolean)
-  const canSave = validTesters.length > 0 && !saving
+  useEffect(() => clearTimer, [])
 
-  /** 校验代码分支：字段成对、仓库属于组织且存在、分支存在（仅针对已加载到候选的仓库） */
-  const validateBranches = (): string | null => {
-    const rows = branches.filter((b) => b.repo.trim() || b.branch.trim())
-    if (rows.length === 0) return null
-    for (const b of rows) {
-      if (!b.repo.trim() || !b.branch.trim()) {
-        return '代码分支需同时选择仓库与分支'
-      }
-    }
-    if (reposState === 'error') {
-      return '无法加载 GitHub 仓库列表，请检查 GitHub 集成配置后再选择代码分支'
-    }
-    if (reposState !== 'ready') return '正在加载 GitHub 仓库列表，请稍候重试'
-    for (const b of rows) {
-      const opts = branchOptions[b.repo.trim()]
-      if (opts && !opts.includes(b.branch.trim())) {
-        return `分支不存在：${b.repo.trim()} @ ${b.branch.trim()}`
-      }
-    }
-    return null
+  const existing = project.projectDeliveryTask
+  const canceled =
+    existing?.task.status === '已结束' && existing.task.subStatus === '取消'
+  if (existing && !canceled) {
+    return (
+      <Button
+        className="w-full"
+        onClick={() => navigate(`/tasks/${existing.task.id}`)}
+      >
+        查看任务进展
+      </Button>
+    )
   }
 
-  const submit = async () => {
-    setError(null)
-    const branchError = validateBranches()
-    if (branchError) {
-      setError(branchError)
-      return
-    }
-    setSaving(true)
+  const showFeedback = (
+    next: NonNullable<ProjectDeliveryFeedback>,
+    stayMs: number,
+    after?: () => void,
+  ) => {
+    clearTimer()
+    setFeedback(next)
+    timerRef.current = setTimeout(() => {
+      setFeedback(null)
+      after?.()
+    }, stayMs)
+  }
+
+  const createDeliveryTask = async () => {
+    if (pending) return
+    setPending(true)
     try {
-      // 仓库存在性不靠初始候选（仅最近更新前 50 条）includes 判断，逐个实时确认
-      for (const b of branches) {
-        const repo = b.repo.trim()
-        if (repo && !(await confirmExists(repo))) {
-          throw new Error(`仓库不存在或不属于组织：${repo}`)
-        }
-      }
-      await api.submitRelease(project.id, {
-        // 取编辑器当前内容：onChange 有防抖，避免刚输入就提测丢字
-        content:
-          (releaseEditorRef.current?.getMarkdown() ?? content).trim() || undefined,
-        urls: urls.map((u) => u.trim()).filter(Boolean),
-        branches: branches
-          .filter((b) => b.repo.trim() && b.branch.trim())
-          .map((b) => ({ repo: b.repo.trim(), branch: b.branch.trim() })),
-        testers: validTesters,
-      })
-      setOpen(false)
-      onSubmitted()
-    } catch (e) {
-      setError((e as Error).message)
+      const delivery = await api.ensureProjectDeliveryTask(project.id)
+      showFeedback(
+        {
+          kind: 'success',
+          message: `${canceled ? '新的项目任务' : '项目任务'} ${delivery.task.code} 已就绪，正在打开…`,
+        },
+        SUCCESS_FEEDBACK_MS,
+        () => {
+          onCreated()
+          navigate(`/tasks/${delivery.task.id}`)
+        },
+      )
+    } catch (error) {
+      showFeedback(
+        {
+          kind: 'failure',
+          message:
+            error instanceof Error ? error.message : '创建任务失败，请稍后重试',
+        },
+        FAILURE_FEEDBACK_MS,
+      )
     } finally {
-      setSaving(false)
+      setPending(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button className="w-full" />}>提测</DialogTrigger>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>项目提测</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          <div className="flex flex-col gap-4">
-            {/* 提测时间：当前时间自动填入，不允许修改 */}
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-foreground-muted">提测时间</span>
-              <span>{submittedAt}</span>
-            </div>
-            <label className="flex flex-col gap-1 text-sm">
-              测试人员（至少 1 人，须为用户系统内用户；提测后机器人私聊通知）
-              <div className="flex flex-col gap-2">
-                {testers.map((tester, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <Autocomplete
-                        items={userNames}
-                        value={tester}
-                        onValueChange={(v) =>
-                          setTesters((list) =>
-                            list.map((t, j) => (j === i ? (v as string) : t)),
-                          )
-                        }
-                        clearable
-                      >
-                        <AutocompleteInput
-                          placeholder="如 王五"
-                          aria-label={`测试人员 ${i + 1}`}
-                        />
-                        <AutocompleteContent>
-                          <AutocompleteEmpty>未找到匹配的用户（须为登录过本平台的用户）</AutocompleteEmpty>
-                          <AutocompleteList>
-                            {(item: string) => (
-                              <AutocompleteItem key={item} value={item}>
-                                {item}
-                              </AutocompleteItem>
-                            )}
-                          </AutocompleteList>
-                        </AutocompleteContent>
-                      </Autocomplete>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setTesters((list) => list.filter((_, j) => j !== i))}
-                    >
-                      移除
-                    </Button>
-                  </div>
-                ))}
-                <div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setTesters((list) => [...list, ''])}
-                  >
-                    添加人员
-                  </Button>
-                </div>
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              代码分支（默认带入项目已登记的 仓库+分支，仅可选组织内存在的仓库与分支）
-              <div className="flex flex-col gap-2">
-                {branches.map((branch, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <Autocomplete
-                        items={repoOptions}
-                        filteredItems={repoFilteredItems}
-                        value={branch.repo}
-                        onValueChange={(v) => {
-                          const next = v as string
-                          setBranches((list) =>
-                            list.map((b, j) =>
-                              j === i
-                                ? {
-                                    repo: next,
-                                    // 仓库变化时清空分支（原分支可能不属于新仓库）
-                                    branch: b.repo === next ? b.branch : '',
-                                  }
-                                : b,
-                            ),
-                          )
-                          searchRepoOptions(next)
-                          loadBranchOptions(next)
-                        }}
-                        clearable
-                      >
-                        <AutocompleteInput
-                          placeholder="仓库，如 LitaGroup/lita-h5"
-                          aria-label={`仓库 ${i + 1}`}
-                        />
-                        <AutocompleteContent>
-                          <AutocompleteEmpty>未找到匹配的仓库</AutocompleteEmpty>
-                          <AutocompleteList>
-                            {(item: string) => (
-                              <AutocompleteItem key={item} value={item}>
-                                {item}
-                              </AutocompleteItem>
-                            )}
-                          </AutocompleteList>
-                        </AutocompleteContent>
-                      </Autocomplete>
-                    </div>
-                    <div className="w-40 shrink-0">
-                      <Autocomplete
-                        items={branchOptions[branch.repo.trim()] ?? []}
-                        value={branch.branch}
-                        onValueChange={(v) =>
-                          setBranches((list) =>
-                            list.map((b, j) =>
-                              j === i ? { ...b, branch: v as string } : b,
-                            ),
-                          )
-                        }
-                        clearable
-                      >
-                        <AutocompleteInput
-                          placeholder="分支，如 test"
-                          aria-label={`分支 ${i + 1}`}
-                        />
-                        <AutocompleteContent>
-                          <AutocompleteEmpty>
-                            {branch.repo.trim() ? '未找到匹配的分支' : '先选择仓库'}
-                          </AutocompleteEmpty>
-                          <AutocompleteList>
-                            {(item: string) => (
-                              <AutocompleteItem key={item} value={item}>
-                                {item}
-                              </AutocompleteItem>
-                            )}
-                          </AutocompleteList>
-                        </AutocompleteContent>
-                      </Autocomplete>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setBranches((list) => list.filter((_, j) => j !== i))}
-                    >
-                      移除
-                    </Button>
-                  </div>
-                ))}
-                <div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setBranches((list) => [...list, { repo: '', branch: '' }])}
-                  >
-                    添加分支
-                  </Button>
-                </div>
-                {reposState === 'error' && branches.length > 0 && (
-                  <p className="text-foreground-muted">
-                    无法加载 GitHub 仓库列表（请检查 GitHub 集成配置）
-                  </p>
-                )}
-              </div>
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              访问地址（可多个，可为空）
-              <div className="flex flex-col gap-2">
-                {urls.map((url, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Input
-                      value={url}
-                      onChange={(e) =>
-                        setUrls((list) =>
-                          list.map((u, j) => (j === i ? e.target.value : u)),
-                        )
-                      }
-                      placeholder="https://…"
-                      aria-label={`访问地址 ${i + 1}`}
-                      className="flex-1"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setUrls((list) => list.filter((_, j) => j !== i))}
-                    >
-                      移除
-                    </Button>
-                  </div>
-                ))}
-                <div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setUrls((list) => [...list, ''])}
-                  >
-                    添加地址
-                  </Button>
-                </div>
-              </div>
-            </label>
-            <div className="flex flex-col gap-1 text-sm">
-              <span>提测内容（Markdown，可为空）</span>
-              <div className="md-editor-scroll h-72 rounded-md border border-border-strong bg-background">
-                {/* key 用打开时间：每次打开弹窗都从空白重新挂载（Milkdown 编辑器为非受控） */}
-                <MarkdownEditor
-                  key={submittedAt}
-                  ref={releaseEditorRef}
-                  value={content}
-                  appica
-                  onChange={setContent}
-                />
-              </div>
-            </div>
-            {error && <p className="text-sm">{error}</p>}
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <DialogClose>
-            <Button variant="outline" size="sm">
-              取消
-            </Button>
-          </DialogClose>
-          <Button onClick={submit} disabled={!canSave}>
-            {saving ? '提测中…' : '确认提测'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <Popover
+      open={feedback !== null}
+      onOpenChange={(open) => {
+        if (!open && feedback?.kind === 'failure') {
+          clearTimer()
+          setFeedback(null)
+        }
+      }}
+    >
+      <PopoverTrigger
+        render={
+          <Button
+            className="w-full"
+            onClick={createDeliveryTask}
+            disabled={pending || feedback?.kind === 'success'}
+          />
+        }
+      >
+        {pending
+          ? '创建中…'
+          : canceled
+            ? '该需求交给机器人负责'
+            : '安排项目机器人'}
+      </PopoverTrigger>
+      <PopoverContent side="top" align="center">
+        {feedback?.kind === 'success' && (
+          <>
+            <PopoverTitle>成功</PopoverTitle>
+            <PopoverDescription>{feedback.message}</PopoverDescription>
+          </>
+        )}
+        {feedback?.kind === 'failure' && (
+          <>
+            <PopoverTitle>失败</PopoverTitle>
+            <PopoverDescription>{feedback.message}</PopoverDescription>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }

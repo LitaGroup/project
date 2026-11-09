@@ -1,10 +1,10 @@
 ---
-description: "> AI 助手提示：OP Gateway 必须先携带 Gateway Token 与机器人 Token 调用平台凭证获取接口；接口只对可信 Gateway 开放，响应中的 Token/密码不得转发给 AI、写入日志或缓存超过有效期。"
-version: 1.0.0
+description: "> AI 助手提示：OP Gateway 必须先携带 Gateway Token 与机器人 Token 调用平台凭证或资源权限接口；接口只对可信 Gateway 开放，响应中的 Token/密码/权限结果不得转发给 AI、写入日志或长期缓存。"
+version: 1.1.0
 type: docs
 ---
 
-# OP Gateway 凭证获取接口
+# OP Gateway 凭证与资源权限接口
 
 > AI 助手提示：本接口是 OP Gateway 与平台之间的内部控制面接口。AI/普通机器人没有 `X-Gateway-Token`，不能直接调用；返回的凭证只能由 Gateway 在当前操作内使用。
 
@@ -249,6 +249,62 @@ curl -X POST 'https://platform.internal/api/internal/gateway/v1/credentials/acqu
 ```bash
 # HTTP 403
 {"code":"PERMISSION_NONE","message":"当前机器人没有 GitHub 权限","requestId":"req-124"}
+```
+
+---
+
+## 九、资源权限验证接口
+
+```http
+POST /api/internal/gateway/v1/resource-permissions/verify
+```
+
+用途：验证 AI Gateway 服务身份与机器人 Token，返回机器人当前的资源网关权限。**该接口不返回任何凭证**，只用于资源列表与数据库/缓存访问前的资源级授权。
+
+### 9.1 请求头
+
+| Header | 必填 | 说明 |
+|:---|:---:|:---|
+| `X-Gateway-Token` | 是 | 平台与 Gateway 共享的服务 Token，对应 `OP_GATEWAY_SHARED_TOKEN` |
+| `X-Worker-Token` | 是 | 机器人独立令牌，即工位 `LITA_WORK_TOKEN` |
+| `X-Request-Id` | 否 | Gateway 生成的请求 ID |
+
+请求体为空。接口不缓存结果，机器人停用或权限变更后立即生效。
+
+### 9.2 成功响应
+
+```json
+{
+  "workerId": 1001,
+  "permission": "read"
+}
+```
+
+| permission | 含义 |
+|:---|:---|
+| `write` | 可访问全部资源 |
+| `read` | 仅可访问 `readOnly=true` 的资源 |
+| `none` | 无资源权限；由调用方拒绝业务操作 |
+
+`permission` 与 `workers.githubPermission` 相互独立，默认 `none`，由机器人配置页的「资源权限」维护。
+
+### 9.3 错误响应
+
+| HTTP | code | 场景 |
+|---:|:---|:---|
+| 401 | `WORKER_UNAUTHORIZED` | 机器人 Token 缺失、无效或机器人已停用 |
+| 401 | `GATEWAY_UNAUTHORIZED` | Gateway Token 缺失/无效，或平台未配置共享 Token |
+| 5xx | — | 平台内部错误；Gateway 按验权不可用处理，不降级放行 |
+
+所有响应带 `Cache-Control: no-store`。4xx 不重试；网络错误或 5xx 最多重试一次。
+
+### 9.4 调用示例
+
+```bash
+curl -X POST 'https://platform.internal/api/internal/gateway/v1/resource-permissions/verify' \
+  -H 'X-Gateway-Token: gateway-token' \
+  -H 'X-Worker-Token: worker-token' \
+  -H 'X-Request-Id: req-123'
 ```
 
 ---

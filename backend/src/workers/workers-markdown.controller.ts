@@ -15,6 +15,7 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import {
   UserRole,
   WorkerGithubPermission,
+  WorkerResourcePermission,
   WorkerRole,
   WorkerRuntime,
 } from '../common/enums';
@@ -43,6 +44,7 @@ class CreateWorkerMarkdownDto implements CreateWorkerInput {
   ownerUserId?: number | null;
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
+  resourcePermission?: WorkerResourcePermission;
 }
 
 class UpdateWorkerMarkdownDto implements UpdateWorkerInput {
@@ -62,6 +64,7 @@ class UpdateWorkerMarkdownDto implements UpdateWorkerInput {
   ownerUserId?: number | null;
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
+  resourcePermission?: WorkerResourcePermission;
 }
 
 /** GET /api/workers.md：Agent 用的机器人清单 */

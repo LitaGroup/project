@@ -10,15 +10,17 @@ import { In, Repository } from 'typeorm';
 import { WorkerRole } from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
 import { markdownCell, markdownLabel } from '../common/markdown-table';
-import { TASK_TYPE_DEFAULT } from '../task-types/task-type.entity';
-import { TaskTypesService } from '../task-types/task-types.service';
 import { Worker } from '../workers/worker.entity';
+import { SYSTEM_PROJECT_MANAGER_WORKER_ID } from '../workers/system-workers';
 import { Task } from './task.entity';
 import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import {
   ensureTaskTemplateSequenceFloor,
   isSystemTaskTemplateId,
+  SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_DESCRIPTION,
+  SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
+  SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_NAME,
   SYSTEM_UNKNOWN_TASK_TEMPLATE_DESCRIPTION,
   SYSTEM_UNKNOWN_TASK_TEMPLATE_ID,
   SYSTEM_UNKNOWN_TASK_TEMPLATE_NAME,
@@ -26,8 +28,6 @@ import {
 
 export interface CreateTaskTemplateInput {
   name: string;
-  /** 任务类型名称（task_types.name，缺省「其它」） */
-  type?: string | null;
   /** Markdown 描述：包含任务范围、所需输入与交付方式 */
   description?: string | null;
   /** 默认处理机器人 workers.id 列表（可多选，空数组=不指定） */
@@ -45,7 +45,7 @@ export interface TaskTemplateActor {
 /** 任务定义列表项：附带当前用户是否已关注 */
 export type TaskTemplateWithFollow = TaskTemplate & { followedByMe: boolean };
 
-/** 任务定义管理（TaskTemplate）：一类任务的可复用类型、描述与默认处理机器人 */
+/** 任务定义管理（TaskTemplate）：一类任务的可复用描述与默认处理机器人 */
 @Injectable()
 export class TaskTemplatesService implements OnModuleInit {
   private readonly logger = new Logger(TaskTemplatesService.name);
@@ -59,51 +59,64 @@ export class TaskTemplatesService implements OnModuleInit {
     private readonly workers: Repository<Worker>,
     @InjectRepository(TaskTemplateFollow)
     private readonly follows: Repository<TaskTemplateFollow>,
-    private readonly taskTypes: TaskTypesService,
   ) {}
 
   /** 系统任务定义使用 id < 1000；网页新建的自定义定义从 1000 开始 */
   async onModuleInit(): Promise<void> {
-    await this.ensureUnknownTemplate();
+    await this.ensureSystemTemplate({
+      id: SYSTEM_UNKNOWN_TASK_TEMPLATE_ID,
+      name: SYSTEM_UNKNOWN_TASK_TEMPLATE_NAME,
+      description: SYSTEM_UNKNOWN_TASK_TEMPLATE_DESCRIPTION,
+    });
+    await this.ensureSystemTemplate({
+      id: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
+      name: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_NAME,
+      description: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_DESCRIPTION,
+      agentIds: [SYSTEM_PROJECT_MANAGER_WORKER_ID],
+    });
     await ensureTaskTemplateSequenceFloor(this.templates);
   }
 
-  /** 保证系统未知任务定义（固定 ID=6）存在，供无法匹配的任务兜底 */
-  private async ensureUnknownTemplate(): Promise<void> {
+  /** 保证系统任务定义按固定 ID 存在，供平台流程直接引用 */
+  private async ensureSystemTemplate(definition: {
+    id: number;
+    name: string;
+    description: string;
+    agentIds?: number[];
+  }): Promise<void> {
     const existing = await this.templates.findOne({
-      where: { id: SYSTEM_UNKNOWN_TASK_TEMPLATE_ID },
+      where: { id: definition.id },
     });
     if (existing) {
-      if (existing.name !== SYSTEM_UNKNOWN_TASK_TEMPLATE_NAME) {
+      if (existing.name !== definition.name) {
         this.logger.warn(
-          `任务定义 ID=${SYSTEM_UNKNOWN_TASK_TEMPLATE_ID} 已存在但名称为「${existing.name}」，按系统未知任务定义使用`,
+          `任务定义 ID=${definition.id} 已存在但名称为「${existing.name}」，按系统任务定义「${definition.name}」使用`,
         );
       }
       return;
     }
     await this.templates.query(
-      `INSERT INTO task_templates ("id", "name", "type", "description", "agentIds")
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO task_templates ("id", "name", "description", "agentIds")
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT DO NOTHING`,
       [
-        SYSTEM_UNKNOWN_TASK_TEMPLATE_ID,
-        SYSTEM_UNKNOWN_TASK_TEMPLATE_NAME,
-        TASK_TYPE_DEFAULT,
-        SYSTEM_UNKNOWN_TASK_TEMPLATE_DESCRIPTION,
-        '[]',
+        definition.id,
+        definition.name,
+        definition.description,
+        JSON.stringify(definition.agentIds ?? []),
       ],
     );
     const created = await this.templates.findOne({
-      where: { id: SYSTEM_UNKNOWN_TASK_TEMPLATE_ID },
+      where: { id: definition.id },
     });
     if (!created) {
       this.logger.warn(
-        `系统未知任务定义「${SYSTEM_UNKNOWN_TASK_TEMPLATE_NAME}」#${SYSTEM_UNKNOWN_TASK_TEMPLATE_ID} 未能创建（名称可能已被其他任务定义占用）`,
+        `系统任务定义「${definition.name}」#${definition.id} 未能创建（名称可能已被其他任务定义占用）`,
       );
       return;
     }
     this.logger.log(
-      `已内置系统未知任务定义「${SYSTEM_UNKNOWN_TASK_TEMPLATE_NAME}」#${SYSTEM_UNKNOWN_TASK_TEMPLATE_ID}（请配置处理机器人）`,
+      `已内置系统任务定义「${definition.name}」#${definition.id}（请配置处理机器人）`,
     );
   }
 
@@ -170,25 +183,25 @@ export class TaskTemplatesService implements OnModuleInit {
       '',
       `共 ${templates.length} 个任务定义。`,
       '',
-      '| ID | 名称 | 任务类型 | 处理机器人 | 来源 | 创建人 | 更新时间 |',
-      '| --- | --- | --- | --- | --- | --- | --- |',
+      '| ID | 名称 | 处理机器人 | 来源 | 创建人 | 更新时间 |',
+      '| --- | --- | --- | --- | --- | --- |',
     ];
     for (const template of templates) {
       lines.push(
-        `| [${template.id}](/api/task-templates/${template.id}.md) | ${markdownCell(template.name)} | ${markdownCell(template.type)} | ${markdownCell(this.agentLabel(template.agentIds, agentNames))} | ${isSystemTaskTemplateId(template.id) ? '系统' : '自定义'} | ${markdownCell(template.createdByName ?? '-')} | ${template.updatedAt.toISOString()} |`,
+        `| [${template.id}](/api/task-templates/${template.id}.md) | ${markdownCell(template.name)} | ${markdownCell(this.agentLabel(template.agentIds, agentNames))} | ${isSystemTaskTemplateId(template.id) ? '系统' : '自定义'} | ${markdownCell(template.createdByName ?? '-')} | ${template.updatedAt.toISOString()} |`,
       );
     }
     if (templates.length === 0) {
-      lines.push('| - | （暂无任务定义） | - | - | - | - | - |');
+      lines.push('| - | （暂无任务定义） | - | - | - | - |');
     }
     lines.push(
       '',
-      '系统任务定义（ID 6）不可改名、不可修改类型、不可删除；描述和处理机器人仍可维护。',
+      '系统任务定义（ID 6「未知任务」、ID 7「技术-项目开发交付」）不可改名、不可删除；描述和处理机器人仍可维护。',
       '',
       '## AI 操作',
       '',
       '```bash',
-      'curl -X POST /api/task-templates/create.md -H \'Content-Type: application/json\' -d \'{"name":"活动前端开发","type":"前端开发","description":"任务定义描述","agentIds":[1001]}\'  # 创建',
+      'curl -X POST /api/task-templates/create.md -H \'Content-Type: application/json\' -d \'{"name":"活动前端开发","description":"任务定义描述","agentIds":[1001]}\'  # 创建',
       'curl -X POST /api/task-templates/{id}/update.md -H \'Content-Type: application/json\' -d \'{"description":"新的任务定义描述","agentIds":[1001,1002]}\'  # 编辑',
       'curl -X POST /api/task-templates/{id}/delete.md  # 删除（系统定义拒绝）',
       '```',
@@ -206,8 +219,7 @@ export class TaskTemplatesService implements OnModuleInit {
       `# ${template.name}`,
       '',
       `- ID：${template.id}`,
-      `- 任务类型：${template.type}`,
-      `- 来源：${isSystemTaskTemplateId(id) ? '系统（不可改名、不可修改类型、不可删除）' : '自定义'}`,
+      `- 来源：${isSystemTaskTemplateId(id) ? '系统（不可改名、不可删除）' : '自定义'}`,
       `- 处理机器人：${this.agentLabel(template.agentIds, agentNames)}`,
       `- 创建人：${template.createdByName ?? '—'}`,
       `- 创建时间：${template.createdAt.toISOString()}`,
@@ -255,7 +267,6 @@ export class TaskTemplatesService implements OnModuleInit {
       '',
       `- ID：${template.id}`,
       `- 名称：${template.name}`,
-      `- 任务类型：${template.type}`,
       '',
       '已创建的历史任务不受影响。',
       '',
@@ -272,7 +283,6 @@ export class TaskTemplatesService implements OnModuleInit {
       '',
       `- ID：${template.id}`,
       `- 名称：${template.name}`,
-      `- 任务类型：${template.type}`,
       `- 来源：${isSystemTaskTemplateId(template.id) ? '系统' : '自定义'}`,
       `- 阅读地址：GET /api/task-templates/${template.id}.md`,
       '',
@@ -317,14 +327,11 @@ export class TaskTemplatesService implements OnModuleInit {
     const name = input.name?.trim();
     if (!name) throw new BadRequestException('模板名称不能为空');
     await this.assertNameAvailable(name, null);
-    const type =
-      (await this.taskTypes.assertExists(input.type)) ?? TASK_TYPE_DEFAULT;
     const agentIds = await this.normalizeAgents(input.agentIds);
 
     const template = await this.templates.save(
       this.templates.create({
         name,
-        type,
         description: input.description?.trim() || null,
         agentIds,
         createdById: actor?.id ?? null,
@@ -350,16 +357,6 @@ export class TaskTemplatesService implements OnModuleInit {
       }
       await this.assertNameAvailable(name, id);
       template.name = name;
-    }
-    if (input.type !== undefined) {
-      const type = await this.taskTypes.assertExists(input.type);
-      if (!type) throw new BadRequestException('任务类型不能为空');
-      if (system && type !== template.type) {
-        throw new BadRequestException(
-          `系统任务定义「${template.name}」（ID=${id}）不允许修改任务类型`,
-        );
-      }
-      template.type = type;
     }
     if (input.description !== undefined) {
       template.description = input.description?.trim() || null;

@@ -10,7 +10,9 @@ import {
   Patch,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
+import type { AuthedRequest } from '../auth/auth.guard';
 import { ProjectStatus, ProjectType } from '../common/enums';
 import { Project } from './project.entity';
 import { ProjectSyncService, SyncProjectsResult } from './project-sync.service';
@@ -46,11 +48,12 @@ class UpdateProjectDto {
   feishuWebhook?: string;
   /** 项目描述（Markdown），空串清除 */
   description?: string;
-  /** 人员：{frontend?, backend?, qa?, client?}，空值移除键，{} / null 清除 */
+  /** 人员：{frontend?, backend?, qa?, product?, client?}，空值移除键，{} / null 清除 */
   resources?: {
     frontend?: string;
     backend?: string;
     qa?: string;
+    product?: string;
     client?: string;
   } | null;
 }
@@ -63,11 +66,12 @@ class UpdateProjectMarkdownDto {
   feishuWebhook?: string;
   /** 项目描述（Markdown），空串清除 */
   description?: string;
-  /** 人员：{frontend?, backend?, qa?, client?}，空值移除键，{} / null 清除 */
+  /** 人员：{frontend?, backend?, qa?, product?, client?}，空值移除键，{} / null 清除 */
   resources?: {
     frontend?: string;
     backend?: string;
     qa?: string;
+    product?: string;
     client?: string;
   } | null;
 }
@@ -139,6 +143,18 @@ export class ProjectsController {
   @Post()
   create(@Body() dto: CreateProjectDto): Promise<Project> {
     return this.projectsService.create(dto);
+  }
+
+  /** 幂等创建项目开发交付任务，并返回任务进展快照 */
+  @Post(':id/delivery-task')
+  ensureDeliveryTask(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.projectsService.ensureProjectDeliveryTask(
+      id,
+      req.user ? { userId: req.user.id, userName: req.user.name } : undefined,
+    );
   }
 
   @Patch(':id')

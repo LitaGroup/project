@@ -49,7 +49,6 @@ function baseTask(over: Partial<Task> = {}): Task {
     id: 1,
     code: 'TK-0001',
     title: '活动页开发',
-    type: '前端开发',
     templateId: null,
     templateName: null,
     parentId: null,

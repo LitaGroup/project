@@ -30,7 +30,6 @@ import { TaskCreatePage } from './pages/TaskCreatePage'
 import { TaskDefinitionsPage } from './pages/TaskDefinitionsPage'
 import { TaskDefinitionDetailPage } from './pages/TaskDefinitionDetailPage'
 import { TaskTemplatesPage } from './pages/TaskTemplatesPage'
-import { TaskTypesPage } from './pages/TaskTypesPage'
 import { TaskTemplateEditPage } from './pages/TaskTemplateEditPage'
 import { TaskPackageDetailPage } from './pages/TaskPackageDetailPage'
 import { WorkersLivePage } from './pages/WorkersLivePage'
@@ -187,10 +186,10 @@ function App() {
             path="/tasks/definitions/:templateId"
             element={<TaskDefinitionDetailPage />}
           />
-          {/* 任务类型 / 任务定义 / 机器人 / 执行器已迁移到管理模块：旧链接兼容 */}
+          {/* 任务定义 / 机器人 / 执行器已迁移到管理模块：旧链接兼容 */}
           <Route
             path="/tasks/types"
-            element={<Navigate to="/admin/task-types" replace />}
+            element={<Navigate to="/admin/task-templates" replace />}
           />
           <Route
             path="/tasks/templates"
@@ -233,7 +232,6 @@ function App() {
             element={<Navigate to="/admin/executors" replace />}
           />
           <Route element={<RequireAdmin />}>
-            <Route path="/admin/task-types" element={<TaskTypesPage />} />
             <Route path="/admin/task-templates" element={<TaskTemplatesPage />} />
             <Route
               path="/admin/task-templates/new"

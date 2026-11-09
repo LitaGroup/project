@@ -27,6 +27,12 @@ interface DetailAgentPanelProps {
   onRunFinished?: () => void
   /** 嵌入其他面板时去掉外层边框与圆角 */
   embedded?: boolean
+  /** 面板当前是否可见；收起时仍保持会话订阅并累计未读消息 */
+  visible?: boolean
+  /** 未读 AI 消息数变化 */
+  onUnreadChange?: (count: number) => void
+  /** 面板标题 */
+  title?: string
 }
 
 /**
@@ -42,10 +48,16 @@ export function DetailAgentPanel({
   placeholder,
   onRunFinished,
   embedded = false,
+  visible = true,
+  onUnreadChange,
+  title = '我的助理',
 }: DetailAgentPanelProps) {
   const [info, setInfo] = useState<WorkbenchAgentInfo | null>(null)
   const [infoError, setInfoError] = useState<string | null>(null)
-  const [snapshot, setSnapshot] = useState<WorkerDebugSnapshot | null>(null)
+  const [snapshotState, setSnapshotState] = useState<{
+    contextKey: string
+    snapshot: WorkerDebugSnapshot
+  } | null>(null)
   const [catalog, setCatalog] = useState<WorkerDebugModelCatalog | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
@@ -53,10 +65,38 @@ export function DetailAgentPanel({
   const [reloadKey, setReloadKey] = useState(0)
   const wasRunning = useRef(false)
   const onRunFinishedRef = useRef(onRunFinished)
+  const onUnreadChangeRef = useRef(onUnreadChange)
+  const visibleRef = useRef(visible)
+  const unreadCountRef = useRef(0)
+  const unreadContextRef = useRef<string | null>(null)
+  const seenMessageIdsRef = useRef(new Set<string>())
+
+  const contextKey = context
+    ? `${context.type}:${context.id}`
+    : taskId
+      ? `task:${taskId}`
+      : 'global'
+  const snapshot =
+    snapshotState?.contextKey === contextKey
+      ? snapshotState.snapshot
+      : null
+
+  const setSnapshot = useCallback(
+    (next: WorkerDebugSnapshot | null) => {
+      setSnapshotState(
+        next ? { contextKey, snapshot: next } : null,
+      )
+    },
+    [contextKey],
+  )
 
   useEffect(() => {
     onRunFinishedRef.current = onRunFinished
   }, [onRunFinished])
+
+  useEffect(() => {
+    onUnreadChangeRef.current = onUnreadChange
+  }, [onUnreadChange])
 
   useEffect(() => {
     const running = snapshot?.status === 'running'
@@ -64,11 +104,49 @@ export function DetailAgentPanel({
     wasRunning.current = running
   }, [snapshot?.status])
 
-  const contextKey = context
-    ? `${context.type}:${context.id}`
-    : taskId
-      ? `task:${taskId}`
-      : 'global'
+  const emitUnread = useCallback((next: number) => {
+    if (unreadCountRef.current === next) return
+    unreadCountRef.current = next
+    onUnreadChangeRef.current?.(next)
+  }, [])
+
+  // 会话切换时清空未读，避免把上一个页面的角标带到新页面。
+  useEffect(() => {
+    emitUnread(0)
+  }, [contextKey, emitUnread])
+
+  // 打开面板立即清零，并把当前消息全部视为已读。
+  useEffect(() => {
+    visibleRef.current = visible
+    if (!visible) return
+    emitUnread(0)
+    if (snapshotState?.contextKey === contextKey) {
+      for (const message of snapshotState.snapshot.messages) {
+        seenMessageIdsRef.current.add(message.id)
+      }
+    }
+  }, [visible, contextKey, snapshotState, emitUnread])
+
+  // 收起时只累计新的 AI 消息；流式更新复用同一消息 ID，不会重复计数。
+  useEffect(() => {
+    if (!snapshot) return
+    if (unreadContextRef.current !== contextKey) {
+      unreadContextRef.current = contextKey
+      seenMessageIdsRef.current.clear()
+      for (const message of snapshot.messages) {
+        seenMessageIdsRef.current.add(message.id)
+      }
+      emitUnread(0)
+      return
+    }
+    let added = 0
+    for (const message of snapshot.messages) {
+      if (seenMessageIdsRef.current.has(message.id)) continue
+      seenMessageIdsRef.current.add(message.id)
+      if (!visibleRef.current && message.role === 'assistant') added += 1
+    }
+    if (added > 0) emitUnread(unreadCountRef.current + added)
+  }, [snapshot, contextKey, emitUnread])
 
   const loadInfo = useCallback(() => {
     setInfoError(null)
@@ -154,7 +232,7 @@ export function DetailAgentPanel({
         throw e
       }
     },
-    [context, taskId],
+    [context, taskId, setSnapshot],
   )
 
   const changeModel = useCallback(
@@ -173,7 +251,7 @@ export function DetailAgentPanel({
         setModelBusy(false)
       }
     },
-    [context, taskId],
+    [context, taskId, setSnapshot],
   )
 
   const replyQuestion = useCallback(
@@ -193,7 +271,7 @@ export function DetailAgentPanel({
         throw e
       }
     },
-    [context, taskId],
+    [context, taskId, setSnapshot],
   )
 
   const resetConversation = useCallback(async () => {
@@ -206,12 +284,10 @@ export function DetailAgentPanel({
     } finally {
       setResetting(false)
     }
-  }, [context, taskId])
+  }, [context, taskId, setSnapshot])
 
   const label = context
-    ? context.type === 'document'
-      ? '文档'
-      : '脚本'
+    ? { document: '文档', script: '脚本', project: '项目' }[context.type]
     : taskId
       ? '任务'
       : null
@@ -225,10 +301,10 @@ export function DetailAgentPanel({
       }`}
     >
       {!embedded && (
-        <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+        <header className="flex shrink-0 items-center gap-2 px-3 py-2">
           <div className="flex min-w-0 items-center gap-2">
             <span className="text-sm font-medium text-foreground-intense">
-              我的助理
+              {title}
             </span>
             {label && (
               <Badge variant="soft" size="sm">
