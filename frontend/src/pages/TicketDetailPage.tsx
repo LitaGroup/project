@@ -29,6 +29,7 @@ import { MarkdownViewer } from '../components/MarkdownViewer'
 import { TicketStatusBadge } from '../components/StatusBadge'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
+import { TaskActions } from '../components/task-detail/TaskActions'
 import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel'
 import { TicketCurrentNodePanel } from '../components/ticket-detail/TicketCurrentNodePanel'
 import { TaskDocumentsPanel } from '../components/task-detail/TaskDocumentsPanel'
@@ -443,31 +444,44 @@ export function TicketDetailPage() {
 
     const pageHeader = (
       <>
-        <div>
-          <nav className="flex items-center gap-1 text-sm text-foreground-muted">
-            <Link to="/tickets" className="hover:text-foreground">工单</Link>
-            <span>/</span>
-            <Link to={listPath} className="hover:text-foreground">
-              {workflow.definitionName}
-            </Link>
-            <span>/</span>
-            <span className="text-foreground">{ticket.code}</span>
-          </nav>
-          <h1 className="mt-2 text-2xl font-semibold">
-            {ticket.code} {ticket.title}
-          </h1>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <TicketStatusBadge status={ticket.status} />
-            <Badge variant="outline" size="sm">
-              {workflow.definitionName} v{workflow.version}
-            </Badge>
-            <Badge variant="secondary" size="sm">
-              发起机器人 · {ticket.initiatorWorkerName ?? ticket.createdByName}
-            </Badge>
-            {workflow.autoAcceptance && (
-              <Badge variant="soft" size="sm">含自动验收</Badge>
-            )}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <nav className="flex items-center gap-1 text-sm text-foreground-muted">
+              <Link to="/tickets" className="hover:text-foreground">工单</Link>
+              <span>/</span>
+              <Link to={listPath} className="hover:text-foreground">
+                {workflow.definitionName}
+              </Link>
+              <span>/</span>
+              <span className="text-foreground">{ticket.code}</span>
+            </nav>
+            <h1 className="mt-2 text-2xl font-semibold">
+              {ticket.code} {ticket.title}
+            </h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <TicketStatusBadge status={ticket.status} />
+              <Badge variant="outline" size="sm">
+                {workflow.definitionName} v{workflow.version}
+              </Badge>
+              <Badge variant="secondary" size="sm">
+                发起机器人 · {ticket.initiatorWorkerName ?? ticket.createdByName}
+              </Badge>
+              {workflow.autoAcceptance && (
+                <Badge variant="soft" size="sm">含自动验收</Badge>
+              )}
+            </div>
           </div>
+          <TaskActions
+            task={isTaskNode ? currentNodeTask : null}
+            chat={isTaskNode ? currentNodeChat : null}
+            handoffDoc={
+              currentNodeTaskId && currentNodeTaskId === activeTaskId
+                ? handoffDoc
+                : null
+            }
+            onRefresh={refreshTicket}
+            className="pt-1"
+          />
         </div>
 
         {(actionError || error) && (
@@ -496,11 +510,6 @@ export function TicketDetailPage() {
                 chat={isTaskNode ? currentNodeChat : null}
                 visible={collaborationOpen}
                 onUnreadChange={setCollaborationUnread}
-                handoffDoc={
-                  currentNodeTaskId && currentNodeTaskId === activeTaskId
-                    ? handoffDoc
-                    : null
-                }
                 onRefresh={refreshTicket}
                 agent={
                   <DetailAgentPanel

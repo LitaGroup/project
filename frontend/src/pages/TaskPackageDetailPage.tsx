@@ -20,6 +20,7 @@ import { TaskStatusBadge } from '../components/StatusBadge'
 import { PageBreadcrumb, type Crumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
+import { TaskActions } from '../components/task-detail/TaskActions'
 import { TaskConversationView } from '../components/task-detail/TaskConversationView'
 import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel'
 import { TaskDocumentsPanel } from '../components/task-detail/TaskDocumentsPanel'
@@ -521,33 +522,43 @@ export function TaskDetailView({
       )}
 
       <header className="shrink-0">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate text-xl font-semibold text-foreground-intense">
-              {title ?? `${currentTask.code} ${currentTask.title}`}
-            </h1>
-            {extraBadges}
-            <TaskStatusBadge
-              status={currentTask.status}
-              subStatus={currentTask.subStatus}
-              showMain
-            />
-            <Badge variant="soft" size="sm">
-              定义 · {currentTask.templateName ?? '未设置'}
-            </Badge>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-xl font-semibold text-foreground-intense">
+                {title ?? `${currentTask.code} ${currentTask.title}`}
+              </h1>
+              {extraBadges}
+              <TaskStatusBadge
+                status={currentTask.status}
+                subStatus={currentTask.subStatus}
+                showMain
+              />
+              <Badge variant="soft" size="sm">
+                定义 · {currentTask.templateName ?? '未设置'}
+              </Badge>
+            </div>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
+              <span>
+                创建于 {new Date(currentTask.createdAt).toLocaleString()}
+              </span>
+              <span>·</span>
+              <span>
+                {currentTask.status === '已结束' ? '持续时间' : '已运行'}{' '}
+                {formatDuration(durationMs)}
+              </span>
+              <span>·</span>
+              <span>人工介入 {interventionCount} 次</span>
+            </p>
           </div>
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
-            <span>
-              创建于 {new Date(currentTask.createdAt).toLocaleString()}
-            </span>
-            <span>·</span>
-            <span>
-              {currentTask.status === '已结束' ? '持续时间' : '已运行'}{' '}
-              {formatDuration(durationMs)}
-            </span>
-            <span>·</span>
-            <span>人工介入 {interventionCount} 次</span>
-          </p>
+          <TaskActions
+            task={interactiveTask}
+            chat={interactiveChat}
+            handoffDoc={handoffDoc}
+            handoffEditing={handoffEditing}
+            onRefresh={refreshTaskPanel}
+            className="pt-0.5"
+          />
         </div>
       </header>
 
@@ -578,8 +589,6 @@ export function TaskDetailView({
             <TaskWorkbenchPanel
               task={interactiveTask}
               chat={interactiveChat}
-              handoffDoc={handoffDoc}
-              handoffEditing={handoffEditing}
               visible={collapsibleCollaboration ? collaborationOpen : true}
               onUnreadChange={setCollaborationUnread}
               onRefresh={refreshTaskPanel}
