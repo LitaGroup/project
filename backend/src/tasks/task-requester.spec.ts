@@ -5,6 +5,7 @@ import type { Task } from './task.entity';
 import {
   assertTaskRequester,
   isTaskRequester,
+  isTaskRequesterUser,
   workerRequesterActor,
 } from './task-requester';
 
@@ -99,6 +100,47 @@ describe('TaskActor 需求方身份校验', () => {
         task({ requesterType: null, requesterId: null }),
         workerRequesterActor(worker()),
       ),
+    ).toBe(false);
+  });
+});
+
+describe('登录用户的任务发起者校验', () => {
+  const workerIds = {
+    humanWorkerId: HUMAN_WORKER_ID,
+    personalAgentId: PERSONAL_AGENT_ID,
+  };
+
+  it('真人机器人、历史个人 AGENT 与历史创建人均可识别为发起者', () => {
+    expect(isTaskRequesterUser(task(), USER_ID, workerIds)).toBe(true);
+    expect(
+      isTaskRequesterUser(
+        task({ requesterId: PERSONAL_AGENT_ID }),
+        USER_ID,
+        workerIds,
+      ),
+    ).toBe(true);
+    expect(
+      isTaskRequesterUser(
+        task({ requesterType: null, requesterId: null }),
+        USER_ID,
+        workerIds,
+      ),
+    ).toBe(true);
+  });
+
+  it('用户需求方按用户 ID 匹配，其他用户不能匹配', () => {
+    expect(
+      isTaskRequesterUser(
+        task({ requesterType: 'user', requesterId: USER_ID }),
+        USER_ID,
+        workerIds,
+      ),
+    ).toBe(true);
+    expect(
+      isTaskRequesterUser(task(), USER_ID + 1, {
+        humanWorkerId: OTHER_WORKER_ID,
+        personalAgentId: null,
+      }),
     ).toBe(false);
   });
 });

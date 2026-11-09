@@ -3138,7 +3138,7 @@ export const api = {
     request<TaskPackage>(`/workbench/tasks/${id}/handoff/accept`, {
       method: 'POST',
     }),
-  /** 需求方取消任务 */
+  /** 停止任务（发起者或管理员，级联停止全部未结束子任务） */
   workbenchCancelTask: (id: number) =>
     request<TaskPackage>(`/workbench/tasks/${id}/cancel`, {
       method: 'POST',
@@ -3383,7 +3383,7 @@ export const api = {
     request<{ accepted: true }>(`/tasks/${id}/handoff`, {
       method: 'POST',
     }),
-  /** 取消（任意未结束任务） */
+  /** 停止任务（发起者或管理员，级联停止全部未结束子任务） */
   cancelTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/cancel`, { method: 'POST' }),
   /** 知识目录（目录地址以 /detail/.../ 结尾） */

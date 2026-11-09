@@ -316,7 +316,7 @@ export class WorkbenchController {
     );
   }
 
-  /** 需求方取消任务 */
+  /** 停止任务：发起者或管理员；级联取消全部未结束子任务 */
   @Post('tasks/:id/cancel')
   cancel(
     @Req() req: AuthedRequest,

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   MessageEvent,
@@ -9,7 +10,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import { Observable } from 'rxjs';
 import { Brackets, In, IsNull, Repository } from 'typeorm';
-import { TaskStatus, TaskSubStatus, WorkerRole } from '../common/enums';
+import {
+  TaskStatus,
+  TaskSubStatus,
+  UserRole,
+  WorkerRole,
+} from '../common/enums';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import {
   unescapeMarkdown,
@@ -27,6 +33,7 @@ import { TaskMessage } from './task-message.entity';
 import { TaskTemplate } from './task-template.entity';
 import { deriveTaskTitle } from './task-title';
 import { TaskDispatchService } from './task-dispatch.service';
+import { isTaskRequesterUser } from './task-requester';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
 import {
   TaskRealtimeEvent,
@@ -1098,7 +1105,37 @@ export class TasksService {
     return active;
   }
 
-  /** 取消：任意未结束任务可取消（执行中先中断会话） */
+  /**
+   * 停止任务（对外入口）：任务发起者或管理员可操作。
+   * 停止父任务会级联取消其全部未结束后代，不受后代发起者限制。
+   */
+  async cancelForUser(id: number, user: User): Promise<Task> {
+    const task = await this.mustFind(id);
+    if (user.role !== UserRole.ADMIN) {
+      const [humanWorker, personalAgent] = await Promise.all([
+        this.workersService.findByHumanUserId(user.id),
+        this.workers.findOne({
+          where: { personalAgentUserId: user.id },
+          select: { id: true },
+        }),
+      ]);
+      if (
+        !isTaskRequesterUser(task, user.id, {
+          humanWorkerId: humanWorker?.id ?? null,
+          personalAgentId: personalAgent?.id ?? null,
+        })
+      ) {
+        throw new ForbiddenException('仅任务发起者或管理员可以停止任务');
+      }
+    }
+    return this.cancel(id, user.name ?? null);
+  }
+
+  /**
+   * 取消任务：先停止目标，再按任务树父级优先取消全部未结束后代。
+   * 先取消父节点可立即阻止继续创建子任务，再逐层读取并取消其子节点。
+   * 已结束的后代保持原状态，但仍继续遍历其子节点，确保深层未结束任务也被停止。
+   */
   async cancel(id: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(id);
     if (task.status === TaskStatus.FINISHED) {
@@ -1106,13 +1143,43 @@ export class TasksService {
         `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可取消`,
       );
     }
+    const target = await this.cancelOne(task, operator);
+    try {
+      const queue: Task[] = [task];
+      const visited = new Set<number>([task.id]);
+      for (let index = 0; index < queue.length; index += 1) {
+        const parent = queue[index];
+        const children = await this.tasks.find({
+          where: { parentId: parent.id },
+          order: { id: 'ASC' },
+        });
+        for (const child of children) {
+          if (visited.has(child.id)) continue;
+          visited.add(child.id);
+          queue.push(child);
+          if (child.status !== TaskStatus.FINISHED) {
+            await this.cancelOne(child, operator);
+          }
+        }
+      }
+      return target;
+    } finally {
+      // 只向树外父任务通知一次；被级联停止的父任务和后代无需再互相唤醒
+      await this.workerInbox.enqueue(target, 'cancelled', {
+        payload: { reason: '任务已停止，其全部未结束子任务已级联取消' },
+      });
+    }
+  }
+
+  /** 取消单个任务节点（执行中先中断会话，不负责子任务遍历） */
+  private async cancelOne(task: Task, operator: string | null): Promise<Task> {
     if (
       task.status === TaskStatus.RUNNING &&
       task.subStatus === TaskSubStatus.EXECUTING
     ) {
       // 中断是取消流程的内部步骤，本次操作只记录一条人工介入
       await this.dispatchService
-        .interrupt(id, operator, false)
+        .interrupt(task.id, operator, false)
         .catch(() => undefined);
     }
     const from = `${task.status}-${task.subStatus}`;
@@ -1120,13 +1187,10 @@ export class TasksService {
     task.subStatus = TaskSubStatus.CANCELED;
     task.canceledAt = new Date();
     const saved = await this.tasks.save(task);
-    await this.dispatchService.discardQueuedConversations(id);
-    await this.workerInbox.completeForChild(id);
-    await this.workerInbox.enqueue(saved, 'cancelled', {
-      payload: { reason: '任务已取消' },
-    });
+    await this.dispatchService.discardQueuedConversations(task.id);
+    await this.workerInbox.completeForChild(task.id);
     await this.addEvent(
-      id,
+      task.id,
       '状态变更',
       `状态变更：${from} → 已结束-取消`,
       operator,

@@ -812,10 +812,11 @@ export class TasksController {
     return this.taskHandoff.request(id);
   }
 
-  /** 取消（任意未结束任务） */
+  /** 停止任务：仅发起者或管理员；级联取消全部未结束子任务 */
   @Post(':id/cancel')
   cancel(@Param('id', ParseIntPipe) id: number, @Req() req: AuthedRequest) {
-    return this.tasksService.cancel(id, req.user?.name ?? null);
+    if (!req.user) throw new ForbiddenException('停止任务需要用户身份');
+    return this.tasksService.cancelForUser(id, req.user);
   }
 
   /** 实时输出流（SSE）：执行器事件行 + 状态推送 */

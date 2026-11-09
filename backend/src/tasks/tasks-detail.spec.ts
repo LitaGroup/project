@@ -37,6 +37,7 @@ describe('TasksService 任务详情与对话', () => {
 
   let tasksRepo: {
     findOne: jest.Mock;
+    find: jest.Mock;
     save: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
@@ -55,6 +56,7 @@ describe('TasksService 任务详情与对话', () => {
   beforeEach(() => {
     tasksRepo = {
       findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
       save: jest.fn((task: Task) => Promise.resolve(task)),
       create: jest.fn((task: Partial<Task>) => task),
       update: jest

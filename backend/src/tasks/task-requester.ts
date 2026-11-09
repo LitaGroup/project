@@ -59,6 +59,28 @@ export function isTaskRequester(task: Task, actor: TaskActor): boolean {
   );
 }
 
+/**
+ * 登录用户是否为任务发起者（需求方）。
+ * 真人需求方归属其绑定机器人；历史个人 AGENT 需求方仍归属同一用户。
+ */
+export function isTaskRequesterUser(
+  task: Pick<Task, 'requesterType' | 'requesterId' | 'createdById'>,
+  userId: number,
+  workerIds: {
+    humanWorkerId?: number | null;
+    personalAgentId?: number | null;
+  },
+): boolean {
+  if (!task.requesterType) return task.createdById === userId;
+  if (task.requesterType === 'user') return task.requesterId === userId;
+  return (
+    (workerIds.humanWorkerId != null &&
+      task.requesterId === workerIds.humanWorkerId) ||
+    (workerIds.personalAgentId != null &&
+      task.requesterId === workerIds.personalAgentId)
+  );
+}
+
 /** 新数据按显式需求方校验；历史空值仅回退当前任务创建人。 */
 export function assertTaskRequester(task: Task, actor: TaskActor): void {
   if (!isTaskRequester(task, actor)) {

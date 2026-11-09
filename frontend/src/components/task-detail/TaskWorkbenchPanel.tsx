@@ -52,6 +52,7 @@ import {
 } from '../../lib/api'
 import { matchesPinyinSearch } from '../../lib/pinyin-search'
 import { useImeEnterGuard } from '../../lib/ime-enter'
+import { useAuth } from '../../context/AuthContext'
 import { TaskStatusBadge } from '../StatusBadge'
 import {
   TaskChatMessageItem,
@@ -71,7 +72,7 @@ type DialogKind =
   | 'handoff'
   | 'assign'
   | 'subtask'
-  | 'cancel'
+  | 'stop'
   | null
 
 export interface TaskWorkbenchPanelProps {
@@ -105,6 +106,7 @@ export function TaskWorkbenchPanel({
   onRefresh,
   className,
 }: TaskWorkbenchPanelProps) {
+  const { user } = useAuth()
   const [rightTab, setRightTab] = useState<RightTab>('requester')
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -190,6 +192,10 @@ export function TaskWorkbenchPanel({
   const awaitingAnswer = task?.subStatus === '待反馈'
   const finished = task?.status === '已结束'
   const completed = finished && task?.subStatus === '完成'
+  /** 任务发起者或管理员可停止任务（后端再次校验） */
+  const canStop = Boolean(
+    task && !finished && (isRequester || user?.role === '管理员'),
+  )
   const delivered = activeChat?.hasAcceptanceApplication ?? false
   const handoffReady = Boolean(
     handoffDoc?.exists &&
@@ -350,7 +356,7 @@ export function TaskWorkbenchPanel({
     } else if (dialog === 'assign') {
       if (!assignWorkerId) return
       failure = await run(() => api.assignTask(task.id, Number(assignWorkerId)))
-    } else if (dialog === 'cancel') {
+    } else if (dialog === 'stop') {
       failure = await run(() => api.workbenchCancelTask(task.id))
     } else if (dialog === 'subtask') {
       if (!subtaskTemplateId || !subtaskTitle.trim()) return
@@ -417,15 +423,30 @@ export function TaskWorkbenchPanel({
                 </button>
               ))}
             </div>
-            {currentRightTab !== 'agent' && task && (
-              <TaskStatusBadge
-                status={task.status}
-                subStatus={task.subStatus}
-                showMain
-              />
-            )}
+            <div className="flex shrink-0 items-center gap-2">
+              {canStop && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-error-foreground"
+                  disabled={busy}
+                  onClick={() => openDialog('stop')}
+                >
+                  <CircleX className="size-3.5" />
+                  停止任务
+                </Button>
+              )}
+              {currentRightTab !== 'agent' && task && (
+                <TaskStatusBadge
+                  status={task.status}
+                  subStatus={task.subStatus}
+                  showMain
+                />
+              )}
+            </div>
           </div>
-          {currentRightTab !== 'agent' && error && (
+          {error && (
             <p role="alert" className="mt-2 text-[11px] text-error-foreground">
               {error}
             </p>
@@ -498,13 +519,6 @@ export function TaskWorkbenchPanel({
                             icon={ArrowsExchange}
                             disabled={busy || !assignAvailable}
                             onClick={() => openDialog('assign')}
-                          />
-                          <ChatActionIcon
-                            label="取消任务"
-                            icon={CircleX}
-                            tone="danger"
-                            disabled={busy || !assignAvailable}
-                            onClick={() => openDialog('cancel')}
                           />
                           {completed && (
                             <ChatActionIcon
@@ -666,8 +680,8 @@ export function TaskWorkbenchPanel({
                   ? '发起交付'
                   : dialog === 'assign'
                     ? '分配任务'
-                    : dialog === 'cancel'
-                      ? '取消任务'
+                    : dialog === 'stop'
+                      ? '停止任务'
                       : '创建子任务'}
             </DialogTitle>
           </DialogHeader>
@@ -813,10 +827,10 @@ export function TaskWorkbenchPanel({
             </DialogBody>
           )}
 
-          {dialog === 'cancel' && (
+          {dialog === 'stop' && (
             <DialogBody>
               <p className="text-sm leading-relaxed text-foreground-muted">
-                取消后任务将进入「已结束-取消」，执行中的机器人会被中断，且不可恢复。确认取消
+                停止后任务将进入「已结束-取消」，执行中的机器人会被中断，且不可恢复。该任务下所有未结束的子任务（含更深层级）也会被强制停止。确认停止
                 {task ? ` ${task.code}「${task.title}」` : '当前任务'}？
               </p>
             </DialogBody>
@@ -845,7 +859,7 @@ export function TaskWorkbenchPanel({
               }
               onClick={() => void submitDialog()}
             >
-              {dialog === 'cancel' ? '确认取消' : '提交'}
+              {dialog === 'stop' ? '确认停止' : '提交'}
             </Button>
           </DialogFooter>
         </DialogContent>

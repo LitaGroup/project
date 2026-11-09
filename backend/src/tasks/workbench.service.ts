@@ -453,10 +453,9 @@ export class WorkbenchService {
     return this.collaboration.createSubtaskForActor(taskId, actor, input);
   }
 
-  /** 需求方取消任务 */
+  /** 停止任务：发起者或管理员；级联取消全部未结束子任务 */
   async cancelTask(user: User, taskId: number): Promise<Task> {
-    await this.requesterTask(user, taskId);
-    return this.tasksService.cancel(taskId, user.name ?? null);
+    return this.tasksService.cancelForUser(taskId, user);
   }
 
   /** 需求方身份：优先真人机器人 / 个人 AGENT，历史数据回退用户本人 */
