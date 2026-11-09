@@ -52,8 +52,7 @@ export class McpController {
       req.originalUrl ?? req.url ?? '',
       'http://localhost',
     ).searchParams.get('token');
-    const token =
-      bearer || agentToken?.trim() || queryToken?.trim() || '';
+    const token = bearer || agentToken?.trim() || queryToken?.trim() || '';
     if (!token) {
       throw new UnauthorizedException(
         '缺少鉴权：请在 Authorization: Bearer 或 X-Agent-Token 头（或 ?token= 参数）携带 agent 访问令牌（个人中心获取；工位环境变量 LITA_WORK_TOKEN，旧名 LITA_PROJECT_TOKEN 兜底）',

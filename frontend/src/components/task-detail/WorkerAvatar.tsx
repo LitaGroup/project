@@ -3,7 +3,7 @@ import {
   AvatarFallback,
   AvatarImage,
 } from '@appica/ui-react/avatar'
-import { Robot, User } from '@appica/icons-react'
+import { PlugConnected, Robot, User } from '@appica/icons-react'
 import type { TaskChatSender } from '../../lib/api'
 
 /** 用户/系统消息的底色（机器人头像走 RobotAvatar，不使用配色轮换） */
@@ -21,23 +21,42 @@ interface RobotAvatarProps {
   avatarUrl?: string | null
   size?: number
   className?: string
+  /** 已绑定独立飞书应用：右下角小角标 */
+  feishu?: boolean
 }
 
 /**
  * 机器人头像（机器人/调度机器人通用）：
  * 设置了头像显示图片；未设置或加载失败显示纯黑占位（黑图）+ 一圈边框。
+ * feishu=true 时右下角叠加「已连接飞书」小角标。
  */
 export function RobotAvatar({
   name,
   avatarUrl,
   size = 32,
   className = '',
+  feishu = false,
 }: RobotAvatarProps) {
+  const badge = Math.max(12, Math.round(size * 0.42))
   return (
-    <Avatar size={size} className={`shrink-0 ${className}`}>
-      {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
-      <AvatarFallback className="worker-avatar-empty ring-1 ring-border-strong" />
-    </Avatar>
+    <span
+      className={`relative inline-flex shrink-0 ${className}`}
+      style={{ width: size, height: size }}
+    >
+      <Avatar size={size} className="shrink-0">
+        {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
+        <AvatarFallback className="worker-avatar-empty ring-1 ring-border-strong" />
+      </Avatar>
+      {feishu && (
+        <span
+          title="已连接飞书"
+          className="absolute -right-1 -bottom-1 flex items-center justify-center rounded-full border border-border bg-background"
+          style={{ width: badge, height: badge }}
+        >
+          <PlugConnected className="size-[62%] text-foreground-intense" />
+        </span>
+      )}
+    </span>
   )
 }
 

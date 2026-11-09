@@ -1129,6 +1129,8 @@ export interface Worker {
   workdir: string | null
   liveStatus: WorkerLiveStatus
   activeTask: { id: number; code: string; title: string; status: string } | null
+  /** 已绑定独立飞书应用（头像角标用） */
+  feishuBound?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -1883,6 +1885,34 @@ export interface GithubAccessCredential {
   rotatedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+/** 飞书机器人应用配置（Secret 只写不回显） */
+export interface FeishuBotConfigView {
+  id: number
+  kind: 'official' | 'worker'
+  workerId: number | null
+  name: string | null
+  appId: string
+  enabled: boolean
+  secretConfigured: boolean
+  verificationTokenConfigured: boolean
+  encryptKeyConfigured: boolean
+  callbackUrl: string
+  boundAt: string | null
+  lastVerifiedAt: string | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 飞书配置保存输入：已配置时 Secret 类字段留空即保持不变 */
+export interface FeishuBotSaveInput {
+  appId?: string
+  appSecret?: string | null
+  verificationToken?: string | null
+  encryptKey?: string | null
+  enabled?: boolean
 }
 
 /** OP Gateway 可获取的凭证类型（第一期仅 GitHub PAT） */
@@ -2682,10 +2712,35 @@ export const api = {
   deleteGithubAccess: (permission: WorkerGithubPermission) =>
     request<void>(`/github-access/${permission}`, { method: 'DELETE' }),
 
-  /** 机器人列表（role 筛选） */
-  listWorkers: (params?: { role?: WorkerRole }) => {
+  /** 飞书机器人配置视图（不含 Secret） */
+  listFeishuBotConfigs: () =>
+    request<{
+      official: FeishuBotConfigView | null
+      workers: FeishuBotConfigView[]
+    }>('/feishu-bot'),
+  saveFeishuBotOfficial: (input: FeishuBotSaveInput) =>
+    request<FeishuBotConfigView>('/feishu-bot/official', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  saveFeishuBotWorker: (workerId: number, input: FeishuBotSaveInput) =>
+    request<FeishuBotConfigView>(`/feishu-bot/workers/${workerId}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  testFeishuBot: (id: number) =>
+    request<FeishuBotConfigView>(`/feishu-bot/${id}/test`, { method: 'POST' }),
+  deleteFeishuBot: (id: number) =>
+    request<{ ok: true }>(`/feishu-bot/${id}`, { method: 'DELETE' }),
+
+  /** 机器人列表（role 筛选；includePersonal=true 仅管理员，含个人 AGENT） */
+  listWorkers: (params?: {
+    role?: WorkerRole
+    includePersonal?: boolean
+  }) => {
     const qs = new URLSearchParams()
     if (params?.role) qs.set('role', params.role)
+    if (params?.includePersonal) qs.set('includePersonal', 'true')
     const q = qs.toString()
     return request<Worker[]>(`/workers${q ? `?${q}` : ''}`)
   },

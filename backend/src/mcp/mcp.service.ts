@@ -147,9 +147,8 @@ export class McpService {
             .min(1)
             .max(50_000)
             .describe('发给机器人的消息（Markdown）'),
-          session_id: SessionArg.optional().describe(
-            '续聊会话 ID；不传则新开会话',
-          ),
+          session_id:
+            SessionArg.optional().describe('续聊会话 ID；不传则新开会话'),
           auto_skip_questions: z
             .boolean()
             .default(false)
@@ -160,7 +159,9 @@ export class McpService {
             .min(10)
             .max(1800)
             .optional()
-            .describe('单轮超时秒数（10-1800，默认 600），超时自动中断并返回已完成部分'),
+            .describe(
+              '单轮超时秒数（10-1800，默认 600），超时自动中断并返回已完成部分',
+            ),
         },
       },
       async (args, extra) => {
@@ -218,41 +219,53 @@ export class McpService {
       },
     );
 
-    server.registerTool('bot_interrupt', {
-      title: '中断机器人',
-      description: '中断机器人当前正在执行的一轮（会话保留，可继续续聊）。',
-      inputSchema: { bot: BotArg, session_id: SessionArg },
-    }, async (args) => {
-      try {
-        return textResult(await this.interruptBot(user, args));
-      } catch (error) {
-        return toolError(error);
-      }
-    });
+    server.registerTool(
+      'bot_interrupt',
+      {
+        title: '中断机器人',
+        description: '中断机器人当前正在执行的一轮（会话保留，可继续续聊）。',
+        inputSchema: { bot: BotArg, session_id: SessionArg },
+      },
+      async (args) => {
+        try {
+          return textResult(await this.interruptBot(user, args));
+        } catch (error) {
+          return toolError(error);
+        }
+      },
+    );
 
-    server.registerTool('bot_reset', {
-      title: '重置机器人会话',
-      description: '清空指定会话并解绑 opencode 上下文；下次调用将新开会话。',
-      inputSchema: { bot: BotArg, session_id: SessionArg },
-    }, async (args) => {
-      try {
-        return textResult(await this.resetBot(user, args));
-      } catch (error) {
-        return toolError(error);
-      }
-    });
+    server.registerTool(
+      'bot_reset',
+      {
+        title: '重置机器人会话',
+        description: '清空指定会话并解绑 opencode 上下文；下次调用将新开会话。',
+        inputSchema: { bot: BotArg, session_id: SessionArg },
+      },
+      async (args) => {
+        try {
+          return textResult(await this.resetBot(user, args));
+        } catch (error) {
+          return toolError(error);
+        }
+      },
+    );
 
-    server.registerTool('get_session', {
-      title: '读取机器人会话',
-      description: '读取指定会话的消息摘要、工具调用与执行状态。',
-      inputSchema: { bot: BotArg, session_id: SessionArg },
-    }, async (args) => {
-      try {
-        return textResult(await this.getSession(user, args));
-      } catch (error) {
-        return toolError(error);
-      }
-    });
+    server.registerTool(
+      'get_session',
+      {
+        title: '读取机器人会话',
+        description: '读取指定会话的消息摘要、工具调用与执行状态。',
+        inputSchema: { bot: BotArg, session_id: SessionArg },
+      },
+      async (args) => {
+        try {
+          return textResult(await this.getSession(user, args));
+        } catch (error) {
+          return toolError(error);
+        }
+      },
+    );
   }
 
   // ---- 工具实现 ----
@@ -376,7 +389,13 @@ export class McpService {
       ? { reject: true }
       : { answers: input.answers };
     try {
-      await this.debug.replyQuestion(user.id, worker.id, questionId, input_, scope);
+      await this.debug.replyQuestion(
+        user.id,
+        worker.id,
+        questionId,
+        input_,
+        scope,
+      );
     } catch (error) {
       await this.logs.record({
         userId: user.id,
@@ -433,9 +452,10 @@ export class McpService {
       content: artifacts.content,
       tools: artifacts.tools,
       todos: artifacts.todos,
-      error: snapshot.status === 'idle' && !artifacts.content
-        ? '该会话当前没有正在执行的一轮'
-        : undefined,
+      error:
+        snapshot.status === 'idle' && !artifacts.content
+          ? '该会话当前没有正在执行的一轮'
+          : undefined,
     };
   }
 
@@ -553,64 +573,73 @@ export class McpService {
         finish({
           status: 'interrupted',
           content: '',
-          error: '调用方已断开（本轮在平台继续执行，可用 get_session 查看结果）',
+          error:
+            '调用方已断开（本轮在平台继续执行，可用 get_session 查看结果）',
         });
       };
       options.signal?.addEventListener('abort', onAbort, { once: true });
 
-      const subscription = this.debug.stream(userId, workerId, scope).subscribe({
-        next: ({ data }: { data: DebugStreamPayload }) => {
-          if (settled || data.type !== 'snapshot' || !data.snapshot) return;
-          const snapshot = data.snapshot;
-          const questions = pendingQuestionsOf(snapshot.messages);
-          if (questions.length > 0) {
-            const group: McpBotQuestionGroup = questions[0];
-            if (options.autoSkip) {
-              if (skipping.has(group.id)) return;
-              skipping.add(group.id);
-              void push('（提问已自动跳过，继续执行）');
-              this.debug
-                .replyQuestion(userId, workerId, group.id, { reject: true }, scope)
-                .catch((error: Error) =>
-                  finish({
-                    status: 'error',
-                    content: currentRunText(snapshot),
-                    error: `自动跳过提问失败：${error.message}`,
-                  }),
-                );
+      const subscription = this.debug
+        .stream(userId, workerId, scope)
+        .subscribe({
+          next: ({ data }: { data: DebugStreamPayload }) => {
+            if (settled || data.type !== 'snapshot' || !data.snapshot) return;
+            const snapshot = data.snapshot;
+            const questions = pendingQuestionsOf(snapshot.messages);
+            if (questions.length > 0) {
+              const group: McpBotQuestionGroup = questions[0];
+              if (options.autoSkip) {
+                if (skipping.has(group.id)) return;
+                skipping.add(group.id);
+                void push('（提问已自动跳过，继续执行）');
+                this.debug
+                  .replyQuestion(
+                    userId,
+                    workerId,
+                    group.id,
+                    { reject: true },
+                    scope,
+                  )
+                  .catch((error: Error) =>
+                    finish({
+                      status: 'error',
+                      content: currentRunText(snapshot),
+                      error: `自动跳过提问失败：${error.message}`,
+                    }),
+                  );
+                return;
+              }
+              finish({
+                status: 'question',
+                content: currentRunText(snapshot),
+                ...runArtifactsOf(snapshot),
+                questions,
+              });
               return;
             }
-            finish({
-              status: 'question',
-              content: currentRunText(snapshot),
-              ...runArtifactsOf(snapshot),
-              questions,
-            });
-            return;
-          }
-          const step = diffRunProgress(state, snapshot);
-          if (step?.toolEvents?.length) {
-            for (const event of step.toolEvents) void push(event);
-          }
-          if (step?.text) {
-            textBuffer += step.text;
-            scheduleText();
-          }
-          if (snapshot.status === 'idle') {
-            const settledResult = settleRunResult(snapshot);
-            if (settledResult) {
-              finish({
-                status: settledResult.status,
-                content: settledResult.content,
-                error: settledResult.error,
-                ...runArtifactsOf(snapshot),
-              });
+            const step = diffRunProgress(state, snapshot);
+            if (step?.toolEvents?.length) {
+              for (const event of step.toolEvents) void push(event);
             }
-          }
-        },
-        error: (error: Error) =>
-          finish({ status: 'error', content: '', error: error.message }),
-      });
+            if (step?.text) {
+              textBuffer += step.text;
+              scheduleText();
+            }
+            if (snapshot.status === 'idle') {
+              const settledResult = settleRunResult(snapshot);
+              if (settledResult) {
+                finish({
+                  status: settledResult.status,
+                  content: settledResult.content,
+                  error: settledResult.error,
+                  ...runArtifactsOf(snapshot),
+                });
+              }
+            }
+          },
+          error: (error: Error) =>
+            finish({ status: 'error', content: '', error: error.message }),
+        });
 
       timeoutTimer = setTimeout(() => {
         if (settled) return;

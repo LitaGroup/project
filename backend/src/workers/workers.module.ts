@@ -8,6 +8,7 @@ import { TaskTemplate } from '../tasks/task-template.entity';
 import { Worker } from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
 import { GithubPermissionCredential } from '../github-gateway/github-permission-credential.entity';
+import { FeishuBotConfig } from '../feishu-bot/feishu-bot-config.entity';
 import { GithubPermissionCredentialService } from './github-permission-credential.service';
 import { SystemWorkersService } from './system-workers.service';
 import { WorkerAiService } from './worker-ai.service';
@@ -39,6 +40,7 @@ import { WorkersService } from './workers.service';
       Executor,
       WorkerDebugSession,
       GithubPermissionCredential,
+      FeishuBotConfig,
     ]),
     ExecutorsModule,
   ],

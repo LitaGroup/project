@@ -1,4 +1,7 @@
-import type { WorkerDebugMessage, WorkerDebugSnapshot } from '../workers/worker-debug.types';
+import type {
+  WorkerDebugMessage,
+  WorkerDebugSnapshot,
+} from '../workers/worker-debug.types';
 import {
   diffRunProgress,
   initialRunState,
@@ -53,7 +56,12 @@ describe('lastAssistantOf', () => {
       message({ id: 'u1', role: 'user', content: 'hi' }),
       message({ id: 'q1', role: 'assistant', content: '', kind: 'question' }),
       message({ id: 'a1', role: 'assistant', content: '第一段' }),
-      message({ id: 'a2', role: 'assistant', content: '最终', status: 'running' }),
+      message({
+        id: 'a2',
+        role: 'assistant',
+        content: '最终',
+        status: 'running',
+      }),
     ];
     expect(lastAssistantOf(messages)?.id).toBe('a2');
   });
@@ -118,12 +126,32 @@ describe('diffRunProgress', () => {
     const state = initialRunState();
     const first = diffRunProgress(
       state,
-      snap({ status: 'running', messages: [message({ id: 'a1', role: 'assistant', content: '你好', status: 'running' })] }),
+      snap({
+        status: 'running',
+        messages: [
+          message({
+            id: 'a1',
+            role: 'assistant',
+            content: '你好',
+            status: 'running',
+          }),
+        ],
+      }),
     );
     expect(first?.text).toBe('你好');
     const second = diffRunProgress(
       state,
-      snap({ status: 'running', messages: [message({ id: 'a1', role: 'assistant', content: '你好世界', status: 'running' })] }),
+      snap({
+        status: 'running',
+        messages: [
+          message({
+            id: 'a1',
+            role: 'assistant',
+            content: '你好世界',
+            status: 'running',
+          }),
+        ],
+      }),
     );
     expect(second?.text).toBe('世界');
     expect(diffRunProgress(state, snap({ status: 'running' }))).toBeNull();
@@ -133,11 +161,31 @@ describe('diffRunProgress', () => {
     const state = initialRunState();
     diffRunProgress(
       state,
-      snap({ status: 'running', messages: [message({ id: 'a1', role: 'assistant', content: '长文本内容', status: 'running' })] }),
+      snap({
+        status: 'running',
+        messages: [
+          message({
+            id: 'a1',
+            role: 'assistant',
+            content: '长文本内容',
+            status: 'running',
+          }),
+        ],
+      }),
     );
     const next = diffRunProgress(
       state,
-      snap({ status: 'running', messages: [message({ id: 'a1', role: 'assistant', content: '新', status: 'running' })] }),
+      snap({
+        status: 'running',
+        messages: [
+          message({
+            id: 'a1',
+            role: 'assistant',
+            content: '新',
+            status: 'running',
+          }),
+        ],
+      }),
     );
     expect(next?.text).toBe('新');
   });
@@ -145,11 +193,19 @@ describe('diffRunProgress', () => {
   it('工具签名变化时输出新增工具事件', () => {
     const state = initialRunState();
     const tools = [
-      { id: 't1', name: 'bash', status: 'running' as const, argsText: 'git status' },
+      {
+        id: 't1',
+        name: 'bash',
+        status: 'running' as const,
+        argsText: 'git status',
+      },
     ];
     const first = diffRunProgress(
       state,
-      snap({ status: 'running', messages: [message({ id: 'a1', role: 'assistant', tools })] }),
+      snap({
+        status: 'running',
+        messages: [message({ id: 'a1', role: 'assistant', tools })],
+      }),
     );
     expect(first?.toolEvents).toEqual(['[running] bash：git status']);
     const done = diffRunProgress(
@@ -190,7 +246,14 @@ describe('settleRunResult', () => {
       settleRunResult(
         snap({
           status: 'running',
-          messages: [message({ id: 'a1', role: 'assistant', content: 'x', status: 'running' })],
+          messages: [
+            message({
+              id: 'a1',
+              role: 'assistant',
+              content: 'x',
+              status: 'running',
+            }),
+          ],
         }),
       ),
     ).toBeNull();
@@ -211,7 +274,14 @@ describe('settleRunResult', () => {
       snap({
         status: 'idle',
         error: '执行失败',
-        messages: [message({ id: 'a1', role: 'assistant', content: '', status: 'error' })],
+        messages: [
+          message({
+            id: 'a1',
+            role: 'assistant',
+            content: '',
+            status: 'error',
+          }),
+        ],
       }),
     );
     expect(result?.status).toBe('error');
@@ -223,7 +293,12 @@ describe('settleRunResult', () => {
       snap({
         status: 'running',
         messages: [
-          message({ id: 'a1', role: 'assistant', content: '部分文本', status: 'running' }),
+          message({
+            id: 'a1',
+            role: 'assistant',
+            content: '部分文本',
+            status: 'running',
+          }),
           message({
             id: 'q1',
             role: 'assistant',
@@ -249,7 +324,14 @@ describe('settleRunResult', () => {
       settleRunResult(
         snap({
           status: 'idle',
-          messages: [message({ id: 'a1', role: 'assistant', content: 'x', status: 'running' })],
+          messages: [
+            message({
+              id: 'a1',
+              role: 'assistant',
+              content: 'x',
+              status: 'running',
+            }),
+          ],
         }),
       ),
     ).toBeNull();
@@ -266,7 +348,8 @@ describe('interruptedResultFrom', () => {
             id: 'a1',
             role: 'assistant',
             status: 'error',
-            content: '第一部分已完成。本轮回复已中断。你可以继续发送消息，仍使用当前会话。',
+            content:
+              '第一部分已完成。本轮回复已中断。你可以继续发送消息，仍使用当前会话。',
           }),
         ],
       }),

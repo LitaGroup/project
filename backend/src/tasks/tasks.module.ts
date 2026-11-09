@@ -97,6 +97,7 @@ import { WorkbenchService } from './workbench.service';
   exports: [
     TasksService,
     TaskChatService,
+    TaskDeliveryService,
     TaskDispatchService,
     TaskDocumentService,
     TaskHandoffService,

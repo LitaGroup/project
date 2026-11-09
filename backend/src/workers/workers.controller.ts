@@ -169,10 +169,21 @@ export class WorkersController {
     );
   }
 
-  /** 机器人列表（role 筛选，附实时状态与工位路径） */
+  /** 机器人列表（role 筛选，附实时状态与工位路径；includePersonal=true 仅管理员，含个人 AGENT） */
   @Get()
-  findAll(@Query('role') role?: WorkerRole): Promise<WorkerView[]> {
-    return this.workersService.findAll({ role: role || undefined });
+  findAll(
+    @Query('role') role?: WorkerRole,
+    @Query('includePersonal') includePersonal?: string,
+    @Req() req?: AuthedRequest,
+  ): Promise<WorkerView[]> {
+    const withPersonal = includePersonal === 'true';
+    if (withPersonal && req?.user?.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('仅管理员可查看含个人 AGENT 的机器人清单');
+    }
+    return this.workersService.findAll({
+      role: role || undefined,
+      includePersonal: withPersonal,
+    });
   }
 
   /** 技能库目录：从 Gitea docs/skills 发现可选 SKILL.md */

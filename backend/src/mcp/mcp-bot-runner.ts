@@ -1,9 +1,9 @@
 import type { OpencodeTodo } from '../executors/opencode-todos';
-import type { WorkerDebugMessage, WorkerDebugSnapshot } from '../workers/worker-debug.types';
 import type {
-  McpBotQuestionGroup,
-  McpToolSummary,
-} from './mcp.types';
+  WorkerDebugMessage,
+  WorkerDebugSnapshot,
+} from '../workers/worker-debug.types';
+import type { McpBotQuestionGroup, McpToolSummary } from './mcp.types';
 
 /**
  * bot_call / bot_answer 执行等待的纯函数集：
@@ -58,7 +58,9 @@ export function pendingQuestionsOf(
           ? {
               options: question.options.map((option) => ({
                 label: option.label,
-                ...(option.description ? { description: option.description } : {}),
+                ...(option.description
+                  ? { description: option.description }
+                  : {}),
               })),
             }
           : {}),
@@ -82,7 +84,9 @@ export function toolSummariesOf(
 }
 
 function toolSignatureOf(tools: McpToolSummary[]): string {
-  return tools.map((tool) => `${tool.id ?? tool.name}:${tool.status}`).join('|');
+  return tools
+    .map((tool) => `${tool.id ?? tool.name}:${tool.status}`)
+    .join('|');
 }
 
 /**
@@ -105,9 +109,7 @@ export function diffRunProgress(
   const signature = toolSignatureOf(tools);
   const toolEvents: string[] = [];
   if (signature !== state.toolSignature) {
-    const previous = new Set(
-      state.toolSignature.split('|').filter(Boolean),
-    );
+    const previous = new Set(state.toolSignature.split('|').filter(Boolean));
     for (const tool of tools) {
       const key = `${tool.id ?? tool.name}:${tool.status}`;
       if (previous.has(key)) continue;
@@ -145,9 +147,7 @@ export function runArtifactsOf(snapshot: WorkerDebugSnapshot): {
  * - 存在待回答提问 → question（会话保持 running，等 bot_answer 续跑）
  * - snapshot.status === 'idle' → complete / error
  */
-export function settleRunResult(
-  snapshot: WorkerDebugSnapshot,
-): {
+export function settleRunResult(snapshot: WorkerDebugSnapshot): {
   status: 'complete' | 'question' | 'error';
   content: string;
   error?: string;

@@ -1,4 +1,8 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import type { WorkerDebugSnapshot } from '../workers/worker-debug.types';
 import { McpService } from './mcp.service';
 import type { McpRunPayload, McpSessionPayload } from './mcp.types';
@@ -73,9 +77,7 @@ function internalsOf(service: McpService): {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** 构造被测服务（debug / chats / logs 全部 mock） */
-function buildService(overrides?: {
-  debug?: Record<string, unknown>;
-}): {
+function buildService(overrides?: { debug?: Record<string, unknown> }): {
   service: McpService;
   debug: Record<string, jest.Mock>;
   chats: Record<string, jest.Mock>;
@@ -107,11 +109,7 @@ function buildService(overrides?: {
   const logs: Record<string, jest.Mock> = {
     record: jest.fn().mockResolvedValue(undefined),
   };
-  const service = new McpService(
-    debug as never,
-    chats as never,
-    logs as never,
-  );
+  const service = new McpService(debug as never, chats as never, logs as never);
   return { service, debug, chats, logs };
 }
 
@@ -134,9 +132,11 @@ describe('McpService', () => {
         variant: 'high',
       },
     ]);
-    const result = await (service as unknown as {
-      listBots: (userId: number) => Promise<{ bots: { model: string }[] }>;
-    }).listBots(3);
+    const result = await (
+      service as unknown as {
+        listBots: (userId: number) => Promise<{ bots: { model: string }[] }>;
+      }
+    ).listBots(3);
     expect(result.bots).toHaveLength(1);
     expect(result.bots[0].model).toBe('openai/gpt-test/high');
     expect(chats.listWorkers).toHaveBeenCalledWith(3);
@@ -145,7 +145,12 @@ describe('McpService', () => {
   it('callBot 未找到机器人时抛 NotFound', async () => {
     const { service } = buildService();
     await expect(
-      internalsOf(service).callBot(user, { bot: '不存在', message: 'x' }, null, undefined),
+      internalsOf(service).callBot(
+        user,
+        { bot: '不存在', message: 'x' },
+        null,
+        undefined,
+      ),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -160,7 +165,12 @@ describe('McpService', () => {
       },
     });
     await expect(
-      internalsOf(service).callBot(user, { bot: '测试机器人', message: 'x' }, null, undefined),
+      internalsOf(service).callBot(
+        user,
+        { bot: '测试机器人', message: 'x' },
+        null,
+        undefined,
+      ),
     ).rejects.toThrow(ConflictException);
     expect(logs.record).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'conflict', tool: 'bot_call' }),
@@ -176,7 +186,8 @@ describe('McpService', () => {
   it('callBot 完整执行：complete 终态返回文本、工具与 session_id', async () => {
     const { service, debug, logs } = buildService();
     bindStream(debug);
-    const promise = internalsOf(service).callBot(      user,
+    const promise = internalsOf(service).callBot(
+      user,
       { bot: '测试机器人', message: '跑个任务' },
       null,
       undefined,
@@ -231,7 +242,8 @@ describe('McpService', () => {
   it('callBot 提问时返回 question 与答复提示', async () => {
     const { service, debug } = buildService();
     bindStream(debug);
-    const promise = internalsOf(service).callBot(      user,
+    const promise = internalsOf(service).callBot(
+      user,
       { bot: '测试机器人', message: 'x' },
       null,
       undefined,
@@ -268,7 +280,8 @@ describe('McpService', () => {
   it('callBot auto_skip_questions 时自动 reject 并继续等待', async () => {
     const { service, debug } = buildService();
     bindStream(debug);
-    const promise = internalsOf(service).callBot(      user,
+    const promise = internalsOf(service).callBot(
+      user,
       { bot: '测试机器人', message: 'x', auto_skip_questions: true },
       null,
       undefined,
@@ -339,7 +352,8 @@ describe('McpService', () => {
   it('session_id 非法时 400', async () => {
     const { service } = buildService();
     await expect(
-      internalsOf(service).callBot(        user,
+      internalsOf(service).callBot(
+        user,
         { bot: '测试机器人', message: 'x', session_id: '非法 id!!' },
         null,
         undefined,

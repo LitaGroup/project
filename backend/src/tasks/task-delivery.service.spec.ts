@@ -449,47 +449,38 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     );
   });
 
-  it('第 4 次拒绝验收转负责人待反馈，不再自动派发机器人', async () => {
+  it('累计多次拒绝验收仍退回原执行机器人', async () => {
     tasksRepo.findOne.mockResolvedValue(baseTask({ acceptRejectCount: 3 }));
     const md = await service.reply(1, user(), {
       action: 'refuse',
       content: '仍然缺少错误提示',
     });
 
-    expect(dispatchService.continueConversation).not.toHaveBeenCalled();
-    expect(tasksRepo.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 1,
-        status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_ACCEPT,
-      }),
-      expect.objectContaining({
-        status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_FEEDBACK,
-        ownerTakeoverUserId: 9,
-        ownerTakeoverName: '王五',
-        acceptRejectCount: 4,
-      }),
-    );
-    expect(taskNotify.notifyTaskAgentOwner).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 1, acceptRejectCount: 4 }),
-      'feedback',
-      expect.stringContaining('任务待负责人处理'),
-      expect.stringContaining('仍然缺少错误提示'),
-    );
-    expect(dispatchService.addEvent).toHaveBeenCalledWith(
+    expect(dispatchService.claimExecution).toHaveBeenCalledWith(
       1,
-      '状态变更',
-      expect.stringContaining('转任务负责人「王五」处理'),
+      TaskSubStatus.PENDING_ACCEPT,
+    );
+    expect(dispatchService.continueConversation).toHaveBeenCalledWith(
+      1,
+      '仍然缺少错误提示',
       '张三',
       expect.objectContaining({
-        acceptRejectCount: 4,
-        ownerTakeover: true,
+        modelContent: expect.stringContaining('仍然缺少错误提示') as string,
       }),
     );
-    expect(md).toContain('# 任务验收已拒绝并转负责人');
-    expect(md).toContain('- 状态：等待中-待反馈');
+    expect(taskNotify.notifyTaskAgentOwner).not.toHaveBeenCalled();
+    expect(tasksRepo.update).not.toHaveBeenCalled();
+    expect(dispatchService.addEvent).toHaveBeenCalledWith(
+      1,
+      '操作',
+      '需求方拒绝验收（累计 4 次），已退回执行机器人重新处理',
+      '张三',
+      expect.objectContaining({ acceptRejectCount: 4, queued: false }),
+    );
+    expect(md).toContain('# 任务验收已拒绝');
+    expect(md).not.toContain('转负责人');
     expect(md).toContain('- 累计验收不通过：4 次');
+    expect(md).toContain('任务已退回原执行机器人继续处理');
   });
 
   it('待验收期间发送消息也按验收不通过计数', async () => {

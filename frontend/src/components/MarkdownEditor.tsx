@@ -225,6 +225,28 @@ function bindEditorBlocks(
   }
 }
 
+/**
+ * Markdown 里的链接统一在新窗口打开（只读展示与编辑态一致）：
+ * 编辑器渲染的 <a> 不带 target，浏览器点击会在当前页跳转并丢掉编辑/阅读位置，
+ * 这里在 host 上代理 click，改用 window.open 新开页；preventDefault 不影响
+ * mousedown 驱动的光标落点，编辑态仍可正常定位光标。
+ */
+function openAnchorLinksInNewTab(host: HTMLElement): () => void {
+  const onClick = (event: MouseEvent) => {
+    if (event.defaultPrevented || event.button !== 0) return
+    const target = event.target
+    if (!(target instanceof Element)) return
+    const anchor = target.closest('a[href]')
+    if (!anchor || !host.contains(anchor)) return
+    const href = anchor.getAttribute('href') ?? ''
+    if (!href || href.startsWith('#')) return
+    event.preventDefault()
+    window.open(href, '_blank', 'noopener,noreferrer')
+  }
+  host.addEventListener('click', onClick)
+  return () => host.removeEventListener('click', onClick)
+}
+
 export interface MarkdownEditorHandle {
   /** 取编辑器当前 Markdown（含尚未触发 onChange 的输入，保存时使用） */
   getMarkdown: () => string
@@ -299,6 +321,7 @@ export function MarkdownEditor({
     const detachBlockTypes = blockTypesEnabledRef.current
       ? attachBlockTypeLabels(host)
       : undefined
+    const detachAnchorLinks = openAnchorLinksInNewTab(host)
     void (async () => {
       const [
         { Crepe },
@@ -421,6 +444,7 @@ export function MarkdownEditor({
     return () => {
       disposed = true
       detachBlockTypes?.()
+      detachAnchorLinks()
       const crepe = crepeRef.current
       crepeRef.current = null
       if (crepe) {

@@ -11,10 +11,7 @@ import {
 } from './task-assignment.service';
 import { TaskDispatchService } from './task-dispatch.service';
 import { TaskMessage } from './task-message.entity';
-import {
-  TaskNotifyService,
-  type TaskNotifyResult,
-} from './task-notify.service';
+import { TaskNotifyService } from './task-notify.service';
 import {
   mapLegacyTaskStatus,
   nextInboxRetryDelay,
@@ -947,9 +944,6 @@ export class TaskLoopService implements OnApplicationBootstrap {
         requesterId: true,
         parentId: true,
         rootId: true,
-        ownerTakeoverAt: true,
-        ownerTakeoverUserId: true,
-        ownerTakeoverName: true,
       },
       order: { id: 'ASC' },
       take: REMIND_BATCH_SIZE,
@@ -989,42 +983,14 @@ export class TaskLoopService implements OnApplicationBootstrap {
         .join('、');
       const description =
         kind === 'feedback'
-          ? task.ownerTakeoverAt
-            ? `验收不通过已达阈值，请任务负责人「${task.ownerTakeoverName ?? '未配置'}」补充处理意见。待处理事项：${feedbackText || '见任务详情'}`
-            : `请答复任务提问或补充资料。待反馈事项：${feedbackText || '见任务详情'}`
+          ? `请答复任务提问或补充资料。待反馈事项：${feedbackText || '见任务详情'}`
           : '机器人已完成执行，请需求方验收产出。';
-      let result: TaskNotifyResult;
-      if (kind === 'accept') {
-        result = await this.taskNotify.notifyTaskRequester(
-          task,
-          kind,
-          title,
-          description,
-        );
-      } else if (task.ownerTakeoverAt) {
-        result = await this.taskNotify.notifyTaskAgentOwner(
-          task,
-          kind,
-          title,
-          description,
-        );
-        if (!result.sent) {
-          result = await this.taskNotify.notifyTaskRequester(
-            task,
-            kind,
-            title,
-            description,
-            { fallbackToRequesterOwner: true },
-          );
-        }
-      } else {
-        result = await this.taskNotify.notifyTaskRequester(
-          task,
-          kind,
-          title,
-          description,
-        );
-      }
+      const result = await this.taskNotify.notifyTaskRequester(
+        task,
+        kind,
+        title,
+        description,
+      );
       await this.tasks.update(
         { id: task.id, status: TaskStatus.WAITING, subStatus: task.subStatus },
         { remindCount: count, firstRemindedAt, lastRemindedAt: now },

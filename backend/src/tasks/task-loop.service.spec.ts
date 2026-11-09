@@ -1027,26 +1027,6 @@ describe('TaskLoopService 多机器人协同', () => {
     expect(taskNotify.notifyTaskRequester).not.toHaveBeenCalled();
   });
 
-  it('验收升级后的待反馈优先提醒执行机器人负责人', async () => {
-    const task = baseTask({
-      subStatus: TaskSubStatus.PENDING_FEEDBACK,
-      missingItems: [{ item: '验收不通过已达 4 次，等待任务负责人处理' }],
-      ownerTakeoverAt: new Date(),
-      ownerTakeoverUserId: 9,
-      ownerTakeoverName: '王五',
-    });
-    returnForStatus(TaskSubStatus.PENDING_FEEDBACK, task);
-
-    await service.tick();
-
-    expect(taskNotify.notifyTaskAgentOwner).toHaveBeenCalledWith(
-      task,
-      'feedback',
-      expect.stringContaining('任务待反馈'),
-      expect.stringContaining('请任务负责人「王五」补充处理意见'),
-    );
-  });
-
   it('待反馈提醒按 30 分钟节流并通知需求方', async () => {
     const task = baseTask({
       subStatus: TaskSubStatus.PENDING_FEEDBACK,

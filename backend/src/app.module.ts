@@ -37,6 +37,7 @@ import { ReleasesModule } from './releases/releases.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { McpModule } from './mcp/mcp.module';
+import { FeishuBotModule } from './feishu-bot/feishu-bot.module';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { McpModule } from './mcp/mcp.module';
     McpModule,
     ScriptsModule,
     FeishuModule,
+    FeishuBotModule,
     GithubModule,
     GithubGatewayModule,
     SettingsModule,

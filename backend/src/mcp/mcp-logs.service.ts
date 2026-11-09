@@ -59,7 +59,12 @@ export class McpLogsService {
     q?: string;
     page?: number;
     pageSize?: number;
-  }): Promise<{ items: McpCallLog[]; total: number; page: number; pageSize: number }> {
+  }): Promise<{
+    items: McpCallLog[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
     const page = Math.max(1, Math.floor(options.page ?? 1));
     const pageSize = Math.min(
       PAGE_SIZE_MAX,

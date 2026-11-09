@@ -186,19 +186,19 @@ export class Task {
   @Column({ type: 'timestamptz', nullable: true })
   deliveredAt: Date | null;
 
-  /** 累计验收不通过次数（申请验收不重置；超过 3 次转任务负责人） */
+  /** 累计验收不通过次数（申请验收不重置；仅作统计展示，不再触发升级） */
   @Column({ type: 'int', default: 0 })
   acceptRejectCount: number;
 
-  /** 验收不通过超过 3 次后转任务负责人处理的时间 */
+  /** 历史兼容：旧「多次验收不通过转负责人」逻辑的接管时间快照，新任务不再写入 */
   @Column({ type: 'timestamptz', nullable: true })
   ownerTakeoverAt: Date | null;
 
-  /** 接管任务的负责人（workers.ownerUserId 快照） */
+  /** 历史兼容：接管任务的负责人（workers.ownerUserId 快照） */
   @Column({ type: 'int', nullable: true })
   ownerTakeoverUserId: number | null;
 
-  /** 接管任务的负责人姓名快照 */
+  /** 历史兼容：接管任务的负责人姓名快照 */
   @Column({ type: 'varchar', length: 100, nullable: true })
   ownerTakeoverName: string | null;
 

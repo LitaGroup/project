@@ -705,10 +705,7 @@ export class TasksController {
     );
   }
 
-  /**
-   * 验收不通过：累计计数；前 3 次退回原机器人，
-   * 第 4 次起转等待中-待反馈，由执行机器人负责人处理。
-   */
+  /** 验收不通过：累计计数并始终退回原执行机器人（忙碌时进入待继续）。 */
   @Post(':id/reject')
   async reject(
     @Param('id', ParseIntPipe) id: number,

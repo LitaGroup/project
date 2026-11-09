@@ -288,7 +288,12 @@ export function WorkersPage() {
             <TableRow key={w.id}>
               <TableCell className="max-w-64">
                 <p className="flex items-center gap-2 truncate font-medium" title={w.name}>
-                  <RobotAvatar name={w.name} avatarUrl={w.avatarUrl} size={26} />
+                  <RobotAvatar
+                    name={w.name}
+                    avatarUrl={w.avatarUrl}
+                    size={26}
+                    feishu={w.feishuBound}
+                  />
                   <span className="truncate">{w.name}</span>
                   <span className="text-xs font-normal text-foreground-muted">#{w.id}</span>
                   {w.system && (

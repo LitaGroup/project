@@ -35,10 +35,7 @@ describe('McpController.authenticate（经 handlePost 验证）', () => {
     );
   }
 
-  async function post(
-    controller: McpController,
-    req: never,
-  ): Promise<void> {
+  async function post(controller: McpController, req: never): Promise<void> {
     await controller.handlePost(req, { on: jest.fn() } as never, {});
   }
 

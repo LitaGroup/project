@@ -32,9 +32,6 @@ import {
 } from './task-requester';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
 
-/** 验收不通过超过该次数后转任务负责人处理（第 4 次触发） */
-export const MAX_ACCEPT_REJECTS = 3;
-
 export interface DeliveryReplyInput {
   /** accept=通过验收；refuse=拒绝并退回执行 */
   action?: string;
@@ -170,15 +167,12 @@ export class TaskDeliveryService {
       { type: 'user', user: actor },
       content,
     );
-    const escalated =
-      saved.status === TaskStatus.WAITING &&
-      saved.subStatus === TaskSubStatus.PENDING_FEEDBACK;
     return [
       mdFrontmatter({
         update: saved.updatedAt,
-        title: escalated ? '任务验收已拒绝并转负责人' : '任务验收已拒绝',
+        title: '任务验收已拒绝',
       }),
-      escalated ? '# 任务验收已拒绝并转负责人' : '# 任务验收已拒绝',
+      '# 任务验收已拒绝',
       '',
       `- ID：${saved.id}`,
       `- 编号：${saved.code}`,
@@ -190,9 +184,7 @@ export class TaskDeliveryService {
       '',
       content,
       '',
-      escalated
-        ? `验收不通过已超过 ${MAX_ACCEPT_REJECTS} 次，任务已转交执行机器人负责人处理。负责人补充意见后会重新识别并派发机器人。`
-        : '任务已退回原执行机器人继续处理，完成后需重新申请验收。',
+      '任务已退回原执行机器人继续处理，完成后需重新申请验收。',
       '',
     ].join('\n');
   }
@@ -514,7 +506,7 @@ export class TaskDeliveryService {
   }
 
   /**
-   * 记录一次验收不通过：前 3 次退回原机器人，超过 3 次转执行机器人负责人。
+   * 记录一次验收不通过并退回原执行机器人；计数仅作累计统计，不再转任务负责人。
    * 计数使用原子递增，申请验收不会重置，确保同一任务持续累计。
    */
   private async refuse(
@@ -536,144 +528,68 @@ export class TaskDeliveryService {
     const operator = actorName(actor);
     const reworkPrompt = this.buildReworkPrompt(task.id, content);
 
-    if (count <= MAX_ACCEPT_REJECTS) {
-      const claimed = await this.dispatchService.claimExecution(
-        task.id,
-        TaskSubStatus.PENDING_ACCEPT,
-      );
-      let saved: Task;
-      if (!claimed) {
-        // 等待验收期间机器人可能已接受其他任务，返工先排队，避免并行执行。
-        const queued = await this.tasks.update(
-          {
-            id: task.id,
-            status: TaskStatus.WAITING,
-            subStatus: TaskSubStatus.PENDING_ACCEPT,
-          },
-          {
-            subStatus: TaskSubStatus.PENDING_RESUME,
-            resumePrompt: reworkPrompt,
-            remindCount: 0,
-            firstRemindedAt: null,
-            lastRemindedAt: null,
-          },
-        );
-        if (!queued.affected) {
-          throw new BadRequestException('任务状态已变化，请刷新后重试');
-        }
-        saved = await this.mustFind(task.id);
-      } else {
-        try {
-          saved = await this.dispatchService.continueConversation(
-            task.id,
-            content,
-            operator,
-            { modelContent: reworkPrompt },
-          );
-        } catch (error) {
-          await this.tasks.update(
-            { id: task.id, status: TaskStatus.RUNNING },
-            {
-              status: TaskStatus.WAITING,
-              subStatus: TaskSubStatus.PENDING_RESUME,
-              resumePrompt: reworkPrompt,
-            },
-          );
-          throw error;
-        }
-      }
-      saved.acceptRejectCount = count;
-      await this.workerInbox.completeForChild(task.id, 'handoff');
-      await this.dispatchService.addEvent(
-        task.id,
-        '操作',
-        `需求方拒绝验收（累计 ${count} 次），${
-          claimed
-            ? '已退回执行机器人重新处理'
-            : '机器人忙碌，已转入等待中-待继续'
-        }`,
-        operator,
+    const claimed = await this.dispatchService.claimExecution(
+      task.id,
+      TaskSubStatus.PENDING_ACCEPT,
+    );
+    let saved: Task;
+    if (!claimed) {
+      // 等待验收期间机器人可能已接受其他任务，返工先排队，避免并行执行。
+      const queued = await this.tasks.update(
         {
-          intervention: true,
-          deliveryReply: 'refuse',
-          feedback: content,
-          acceptRejectCount: count,
-          queued: !claimed,
+          id: task.id,
+          status: TaskStatus.WAITING,
+          subStatus: TaskSubStatus.PENDING_ACCEPT,
+        },
+        {
+          subStatus: TaskSubStatus.PENDING_RESUME,
+          resumePrompt: reworkPrompt,
+          remindCount: 0,
+          firstRemindedAt: null,
+          lastRemindedAt: null,
         },
       );
-      return saved;
-    }
-
-    const worker = current.agentId
-      ? await this.workers.findOne({ where: { id: current.agentId } })
-      : null;
-    const ownerUserId = worker?.ownerUserId ?? null;
-    const ownerName = worker?.ownerName ?? null;
-    const now = new Date();
-    const updated = await this.tasks.update(
-      {
-        id: current.id,
-        status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_ACCEPT,
-      },
-      {
-        status: TaskStatus.WAITING,
-        subStatus: TaskSubStatus.PENDING_FEEDBACK,
-        acceptRejectCount: count,
-        ownerTakeoverAt: now,
-        ownerTakeoverUserId: ownerUserId,
-        ownerTakeoverName: ownerName,
-        missingItems: [
+      if (!queued.affected) {
+        throw new BadRequestException('任务状态已变化，请刷新后重试');
+      }
+      saved = await this.mustFind(task.id);
+    } else {
+      try {
+        saved = await this.dispatchService.continueConversation(
+          task.id,
+          content,
+          operator,
+          { modelContent: reworkPrompt },
+        );
+      } catch (error) {
+        await this.tasks.update(
+          { id: task.id, status: TaskStatus.RUNNING },
           {
-            item: `验收不通过已达 ${count} 次，等待任务负责人处理`,
-            reason: content,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_RESUME,
+            resumePrompt: reworkPrompt,
           },
-        ],
-        remindCount: 0,
-        firstRemindedAt: null,
-        lastRemindedAt: null,
-      },
-    );
-    if (!updated.affected) {
-      throw new BadRequestException('任务状态已变化，请刷新后重试');
+        );
+        throw error;
+      }
     }
-    const saved = await this.mustFind(task.id);
+    saved.acceptRejectCount = count;
+    await this.workerInbox.completeForChild(task.id, 'handoff');
     await this.dispatchService.addEvent(
       task.id,
-      '状态变更',
-      `状态变更：等待中-待验收 → 等待中-待反馈（验收不通过累计 ${count} 次，转任务负责人${
-        ownerName ? `「${ownerName}」` : '（未配置，回退需求方）'
-      }处理）`,
+      '操作',
+      `需求方拒绝验收（累计 ${count} 次），${
+        claimed ? '已退回执行机器人重新处理' : '机器人忙碌，已转入等待中-待继续'
+      }`,
       operator,
       {
         intervention: true,
         deliveryReply: 'refuse',
         feedback: content,
         acceptRejectCount: count,
-        ownerTakeover: true,
-        ownerTakeoverUserId: ownerUserId,
-        ownerTakeoverName: ownerName,
+        queued: !claimed,
       },
     );
-
-    await this.workerInbox.completeForChild(task.id, 'handoff');
-    const notifyTitle = `任务待负责人处理：${saved.code} ${saved.title}`;
-    const notifyDescription = `验收不通过已达 ${count} 次，请负责人补充处理意见。最近反馈：${content}`;
-    const ownerNotified = await this.taskNotify.notifyTaskAgentOwner(
-      saved,
-      'feedback',
-      notifyTitle,
-      notifyDescription,
-    );
-    if (!ownerNotified.sent) {
-      await this.taskNotify.notifyTaskRequester(
-        saved,
-        'feedback',
-        notifyTitle,
-        notifyDescription,
-        { fallbackToRequesterOwner: true },
-      );
-    }
     return saved;
   }
 

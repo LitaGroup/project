@@ -173,6 +173,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
       { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
       { to: '/admin/github-access', label: 'GitHub 权限', icon: Settings, ready: true },
+      { to: '/admin/feishu-config', label: '飞书配置', icon: PlugConnected, ready: true },
       { to: '/admin/task-types', label: '任务类型', icon: Label, ready: true },
       { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },
       { to: '/admin/workers', label: '机器人', icon: Robot, ready: true },

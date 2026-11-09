@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
-import { In, IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository, type FindOptionsWhere } from 'typeorm';
 import {
   TaskStatus,
   TaskSubStatus,
@@ -28,6 +28,7 @@ import {
   WorkerTaskDef,
 } from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
+import { FeishuBotConfig } from '../feishu-bot/feishu-bot-config.entity';
 import { SYSTEM_WORKER_ID_LIMIT, isSystemWorkerId } from './system-workers';
 import { ensureWorkerSequenceFloor } from './system-workers.service';
 import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
@@ -101,6 +102,8 @@ export interface WorkerView extends Worker {
     title: string;
     status: string;
   } | null;
+  /** 已绑定独立飞书应用（头像角标用；配置未启用也标记为已配置） */
+  feishuBound: boolean;
 }
 
 /** 未结束任务（互斥优先级：执行中 > 待验收 > 其他等待） */
@@ -130,6 +133,8 @@ export class WorkersService implements OnApplicationBootstrap {
     private readonly taskTemplates: Repository<TaskTemplate>,
     @InjectRepository(WorkerDebugSession)
     private readonly debugSessions: Repository<WorkerDebugSession>,
+    @InjectRepository(FeishuBotConfig)
+    private readonly feishuConfigs: Repository<FeishuBotConfig>,
     private readonly skillCatalog: WorkerSkillCatalogService,
     private readonly standardCatalog: WorkerStandardCatalogService,
     config: ConfigService,
@@ -165,17 +170,23 @@ export class WorkersService implements OnApplicationBootstrap {
     return `${this.workerBaseDir.replace(/\/+$/, '')}/${this.workerDirSegment}/${id}`;
   }
 
-  /** 列表（role 筛选），附实时状态与工位路径；个人 AGENT 不进入对外机器人清单 */
-  async findAll(filter?: { role?: WorkerRole }): Promise<WorkerView[]> {
+  /** 列表（role 筛选），附实时状态与工位路径；个人 AGENT 默认不进入对外机器人清单 */
+  async findAll(filter?: {
+    role?: WorkerRole;
+    /** 仅管理员飞书配置使用：包含个人 AGENT */
+    includePersonal?: boolean;
+  }): Promise<WorkerView[]> {
+    const where: FindOptionsWhere<Worker> = {};
+    if (filter?.role) where.role = filter.role;
+    // TypeORM 不接受 undefined 作为 where 条件值：按需拼装查询条件
+    if (!filter?.includePersonal) where.personalAgentUserId = IsNull();
     const workers = await this.workers.find({
-      where: {
-        ...(filter?.role ? { role: filter.role } : {}),
-        personalAgentUserId: IsNull(),
-      },
+      where,
       order: { id: 'ASC' },
     });
     const live = await this.liveByWorker(workers);
-    return workers.map((w) => this.toView(w, live));
+    const feishuBound = await this.boundWorkerIds(workers.map((w) => w.id));
+    return workers.map((w) => this.toView(w, live, feishuBound));
   }
 
   async findOne(id: number): Promise<Worker> {
@@ -187,7 +198,8 @@ export class WorkersService implements OnApplicationBootstrap {
   async findOneView(id: number): Promise<WorkerView> {
     const worker = await this.findOne(id);
     const live = await this.liveByWorker([worker]);
-    return this.toView(worker, live);
+    const feishuBound = await this.boundWorkerIds([worker.id]);
+    return this.toView(worker, live, feishuBound);
   }
 
   /**
@@ -288,6 +300,7 @@ export class WorkersService implements OnApplicationBootstrap {
   private toView(
     worker: Worker,
     live: Map<number, { status: WorkerLiveStatus; task: Task | null }>,
+    feishuBound: Set<number> = new Set(),
   ): WorkerView {
     const entry = live.get(worker.id);
     return {
@@ -295,6 +308,7 @@ export class WorkersService implements OnApplicationBootstrap {
       system: Boolean(worker.systemKey) || isSystemWorkerId(worker.id),
       workdir: this.workdirOf(worker.id),
       liveStatus: entry?.status ?? WorkerLiveStatus.IDLE,
+      feishuBound: feishuBound.has(worker.id),
       activeTask: entry?.task
         ? {
             id: entry.task.id,
@@ -304,6 +318,20 @@ export class WorkersService implements OnApplicationBootstrap {
           }
         : null,
     };
+  }
+
+  /** 已绑定飞书应用的机器人 id 集合（头像角标） */
+  private async boundWorkerIds(ids: number[]): Promise<Set<number>> {
+    if (ids.length === 0) return new Set();
+    const rows = await this.feishuConfigs.find({
+      where: { kind: 'worker', workerId: In(ids) },
+      select: { workerId: true },
+    });
+    return new Set(
+      rows
+        .map((row) => row.workerId)
+        .filter((id): id is number => typeof id === 'number'),
+    );
   }
 
   async create(input: CreateWorkerInput): Promise<WorkerView> {
