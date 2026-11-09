@@ -191,7 +191,7 @@ export class TaskWorkerInboxService {
     return Boolean(result.affected);
   }
 
-  /** 暂缓处理并记录一次失败尝试；达到阈值后由 LOOP 转人工。 */
+  /** 暂缓处理并记录一次失败尝试；后续继续重试，不转移任务身份。 */
   async defer(id: number, nextRetryAt: Date, reason: string): Promise<void> {
     await this.inbox.update(
       { id, status: In([...OPEN_STATUSES]) },

@@ -71,10 +71,8 @@ export interface AcceptanceApplicationInput {
 /** 任务会话绑定保留期：7 天不活跃后解除（执行中任务不清理） */
 const TASK_SESSION_TTL_MS = 7 * 24 * 60 * 60_000;
 
-/** 会话已完成但未申请验收：提醒间隔、最大自动唤回次数与升级提醒间隔 */
+/** 会话已完成但未申请验收：提醒间隔；超过后保持最长间隔继续唤醒 */
 const APPLY_REMIND_DELAYS_MS = [2 * 60_000, 10 * 60_000, 30 * 60_000];
-const APPLY_REMIND_MAX_ATTEMPTS = APPLY_REMIND_DELAYS_MS.length;
-const APPLY_ESCALATE_INTERVAL_MS = 30 * 60_000;
 
 /** 执行中任务超过该时间没有状态进展时提醒负责人（只告警，不强杀会话） */
 const EXECUTION_STALL_WARN_MS = 30 * 60_000;
@@ -147,10 +145,7 @@ export class TaskDispatchService
   /** 派发中的任务（对账时避免释放刚占用的连接） */
   private readonly dispatching = new Set<number>();
 
-  /** 正在从待发送队列取消息的任务（避免并发投递） */
-  private readonly queueDraining = new Set<number>();
-
-  /** prompt 已接受但执行器尚未发出首个事件（期间继续输入必须入队，不能再次 prompt） */
+  /** prompt 已接受但执行器尚未发出首个事件（用于 LOOP 避让仍在启动的回合） */
   private readonly awaitingTurnStart = new Set<number>();
 
   /** taskId → 未申请验收的催办状态（首次时间/已催办次数/下次时间） */
@@ -183,9 +178,9 @@ export class TaskDispatchService
   }
 
   /**
-   * 原子占用机器人并把指定等待任务推进到执行中。
+   * 原子占用机器人执行容量并把指定等待任务推进到执行中。
    * 所有接受、答复恢复、验收返工和 LOOP 恢复都经过同一机器人行锁；
-   * 返回 null 表示机器人已有其他进行中任务，调用方应保持/转为待继续。
+   * 返回 null 表示机器人执行容量已满，调用方应保持/转为待继续等待。
    */
   async claimExecution(
     taskId: number,
@@ -198,10 +193,14 @@ export class TaskDispatchService
       if (!initial.agentId) {
         throw new BadRequestException(`任务 ${initial.code} 尚未分配机器人`);
       }
-      // 同一机器人的所有执行占用都按 workers 行串行化。
+      // 同一机器人的所有执行占用都按 workers 行串行化，保证并行上限计数准确。
       await manager.query('SELECT id FROM workers WHERE id = $1 FOR UPDATE', [
         initial.agentId,
       ]);
+      const worker = await manager.findOne(Worker, {
+        where: { id: initial.agentId },
+        select: { id: true, runtime: true, maxParallelTasks: true },
+      });
       const task = await manager.findOne(Task, { where: { id: taskId } });
       if (!task) throw new NotFoundException(`Task ${taskId} not found`);
       if (
@@ -213,20 +212,13 @@ export class TaskDispatchService
           `任务 ${task.code} 当前状态「${task.status}-${task.subStatus}」不可进入执行中`,
         );
       }
-      const running = await manager.findOne(Task, {
-        where: { agentId: task.agentId!, status: TaskStatus.RUNNING },
-      });
-      // 真人机器人可并行执行；AI 机器人仍保持一个进行中任务的互斥约束。
-      if (
-        running &&
-        (
-          await manager.findOne(Worker, {
-            where: { id: task.agentId! },
-            select: { id: true, runtime: true },
-          })
-        )?.runtime !== WorkerRuntime.HUMAN
-      ) {
-        return null;
+      // 真人机器人可并行执行；AI 机器人受 maxParallelTasks 并行上限约束。
+      if (worker?.runtime !== WorkerRuntime.HUMAN) {
+        const running = await manager.count(Task, {
+          where: { agentId: task.agentId!, status: TaskStatus.RUNNING },
+        });
+        const limit = Math.max(1, worker?.maxParallelTasks ?? 3);
+        if (running >= limit) return null;
       }
       task.status = TaskStatus.RUNNING;
       task.subStatus = TaskSubStatus.EXECUTING;
@@ -238,21 +230,18 @@ export class TaskDispatchService
     });
   }
 
-  /** 机器人是否已有执行中任务（LOOP 快速筛选；真人可并行，最终占用仍以 claimExecution 为准）。 */
-  async isWorkerBusy(workerId: number): Promise<boolean> {
+  /** 机器人是否还有执行容量（LOOP 快速筛选；真人恒可执行，最终占用仍以 claimExecution 为准）。 */
+  async hasExecutionCapacity(workerId: number): Promise<boolean> {
     const worker = await this.workers.findOne({
       where: { id: workerId },
-      select: { id: true, runtime: true },
+      select: { id: true, runtime: true, maxParallelTasks: true },
     });
-    if (worker?.runtime === WorkerRuntime.HUMAN) return false;
-    return this.tasks.exists({
+    if (worker?.runtime === WorkerRuntime.HUMAN) return true;
+    const limit = Math.max(1, worker?.maxParallelTasks ?? 3);
+    const running = await this.tasks.count({
       where: { agentId: workerId, status: TaskStatus.RUNNING },
     });
-  }
-
-  /** 当前任务是否还有等待投递的用户消息（LOOP 在子任务事件抢占用时应避让）。 */
-  hasQueuedUserMessages(taskId: number): boolean {
-    return this.taskChat.hasQueuedUserMessages(taskId);
+    return running < limit;
   }
 
   /** 是否真人执行机器人 */
@@ -280,6 +269,7 @@ export class TaskDispatchService
     userMessage?: string,
     mode: 'execute' | 'offer' = 'execute',
     perspective?: TaskChatPerspective,
+    options?: { queueInOpencode?: boolean },
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
     const offering = mode === 'offer';
@@ -438,8 +428,8 @@ export class TaskDispatchService
             `${previousExecutorId}:${previousSessionId}`,
           );
         }
-      } else if (wasExecuting) {
-        // 同一会话内重新派发：先中断仍在跑的本轮
+      } else if (wasExecuting && !options?.queueInOpencode) {
+        // LOOP 重新派发/恢复时先中断仍在跑的本轮；用户续聊直接交给 opencode 排队。
         await client
           .interrupt(sessionId)
           .catch((e: Error) =>
@@ -612,53 +602,7 @@ export class TaskDispatchService
     if (!text) throw new BadRequestException('消息内容不能为空');
     // 模型可见内容可补充返工等系统指令，聊天展示始终保留用户原始输入。
     const modelText = options?.modelContent?.trim() || text;
-    const queuedPrompt = modelText !== text ? modelText : undefined;
-    // 机器人本轮仍在执行（或平台正在派发）时先入队；当前轮结束后再逐条投递。
-    if (
-      this.taskChat.isRunning(taskId) ||
-      this.dispatching.has(taskId) ||
-      this.queueDraining.has(taskId) ||
-      this.awaitingTurnStart.has(taskId)
-    ) {
-      if (options?.perspective) {
-        await this.taskChat.enqueueUserMessage(
-          taskId,
-          text,
-          operator,
-          queuedPrompt,
-          options.perspective,
-        );
-      } else {
-        await this.taskChat.enqueueUserMessage(
-          taskId,
-          text,
-          operator,
-          queuedPrompt,
-        );
-      }
-      return task;
-    }
-    // 上一次投递失败/暂停后仍有积压：新消息排到队尾，并触发队首继续发送。
-    if (this.taskChat.hasQueuedUserMessages(taskId)) {
-      if (options?.perspective) {
-        await this.taskChat.enqueueUserMessage(
-          taskId,
-          text,
-          operator,
-          queuedPrompt,
-          options.perspective,
-        );
-      } else {
-        await this.taskChat.enqueueUserMessage(
-          taskId,
-          text,
-          operator,
-          queuedPrompt,
-        );
-      }
-      this.scheduleQueueDrain(taskId);
-      return task;
-    }
+    // 机器人本轮仍在执行时也直接投递，由 opencode 在同一会话内按序处理。
     return this.sendConversationTurn(taskId, modelText, operator, text, {
       actorWorkerId: options?.actorWorkerId,
       perspective: options?.perspective,
@@ -681,6 +625,7 @@ export class TaskDispatchService
     },
   ): Promise<Task> {
     await this.taskChat.archiveResult(taskId);
+    const dispatchOptions = { queueInOpencode: true };
     const saved = options?.perspective
       ? await this.dispatch(
           taskId,
@@ -688,8 +633,16 @@ export class TaskDispatchService
           prompt,
           'execute',
           options.perspective,
+          dispatchOptions,
         )
-      : await this.dispatch(taskId, operator, prompt);
+      : await this.dispatch(
+          taskId,
+          operator,
+          prompt,
+          'execute',
+          undefined,
+          dispatchOptions,
+        );
     await this.addEvent(taskId, '反馈', chatContent, operator, {
       intervention: true,
       chat: true,
@@ -702,78 +655,6 @@ export class TaskDispatchService
         : {}),
     });
     return saved;
-  }
-
-  /** 当前轮结束后投递队首消息；一次只发一条，下一轮完成后再发下一条 */
-  private scheduleQueueDrain(taskId: number): void {
-    void this.drainQueuedConversation(taskId).catch((error: Error) => {
-      this.logger.warn(`任务 #${taskId} 发送队列投递失败: ${error.message}`);
-    });
-  }
-
-  private async drainQueuedConversation(taskId: number): Promise<void> {
-    if (this.queueDraining.has(taskId)) return;
-    this.queueDraining.add(taskId);
-    try {
-      const task = await this.mustFind(taskId);
-      if (
-        task.status !== TaskStatus.RUNNING ||
-        task.subStatus !== TaskSubStatus.EXECUTING ||
-        this.taskChat.isRunning(taskId) ||
-        this.dispatching.has(taskId) ||
-        this.awaitingTurnStart.has(taskId)
-      ) {
-        return;
-      }
-      const [next] = this.taskChat.queuedUserMessages(taskId);
-      if (!next) return;
-      const sending = await this.taskChat.markQueuedUserMessageSending(
-        taskId,
-        next.id,
-      );
-      if (!sending) return;
-      try {
-        const operator =
-          sending.sender.name && sending.sender.name !== '需求方'
-            ? sending.sender.name
-            : null;
-        const prompt =
-          this.taskChat.queuedUserMessagePrompt(taskId, sending.id) ??
-          sending.content;
-        if (sending.perspective) {
-          await this.sendConversationTurn(
-            taskId,
-            prompt,
-            operator,
-            sending.content,
-            { perspective: sending.perspective },
-          );
-        } else {
-          await this.sendConversationTurn(
-            taskId,
-            prompt,
-            operator,
-            sending.content,
-          );
-        }
-        await this.taskChat.removeQueuedUserMessage(taskId, sending.id);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await this.taskChat.restoreQueuedUserMessage(
-          taskId,
-          sending.id,
-          message,
-        );
-        throw error;
-      }
-    } finally {
-      this.queueDraining.delete(taskId);
-    }
-  }
-
-  /** 取消/删除/改派时清理待发送队列；人工暂停不清理。 */
-  async discardQueuedConversations(taskId: number): Promise<void> {
-    await this.taskChat.discardQueuedUserMessages(taskId);
   }
 
   /**
@@ -888,8 +769,6 @@ export class TaskDispatchService
       toolDetail: '会话已中断，未收到工具终态事件',
     });
     this.awaitingTurnStart.delete(taskId);
-    // 人工「暂停」保留队列；取消、改派等内部中断直接丢弃不再发送的消息。
-    if (!intervention) await this.taskChat.discardQueuedUserMessages(taskId);
     this.releaseTask(taskId);
     await this.requeueInboxAfterTurn(taskId);
     return this.mustFind(taskId);
@@ -1160,8 +1039,7 @@ export class TaskDispatchService
     return (
       this.taskChat.isRunning(taskId) ||
       this.dispatching.has(taskId) ||
-      this.awaitingTurnStart.has(taskId) ||
-      this.queueDraining.has(taskId)
+      this.awaitingTurnStart.has(taskId)
     );
   }
 
@@ -1728,7 +1606,7 @@ export class TaskDispatchService
 
   /**
    * 执行器会话已不存在（执行器重启/清理）：结束失联的本轮，
-   * 回到待继续并由 LOOP 在机器人空闲时新建会话恢复，避免任务永久卡在执行中。
+   * 回到待继续并由 LOOP 在机器人仍有执行容量时新建会话恢复，避免任务永久卡在执行中。
    */
   private async recoverMissingSession(task: {
     id: number;
@@ -1773,18 +1651,13 @@ export class TaskDispatchService
 
   /**
    * 执行器会话成功：保存产出并释放机器人。
-   * 同一任务还有排队消息时保持执行中并继续下一轮；没有排队消息时进入
-   * 「等待中-待申请验收」（不占用机器人），机器人可立即承接其它任务。
+   * opencode 会在同一会话内按序处理执行期间收到的消息，平台不再维护发送队列；
+   * 会话结束后进入「等待中-待申请验收」（不占用机器人），机器人可立即承接其它任务。
    * 仍必须由执行机器人显式调用验收申请接口后才进入「等待中-待验收」。
    */
   private async finalizeSuccess(taskId: number): Promise<void> {
     this.awaitingTurnStart.delete(taskId);
-    try {
-      await this.finalizeSuccessTurn(taskId);
-    } finally {
-      // 仅当任务仍处于执行中时才会真正发送；待申请验收/待验收/待反馈等状态保持队列不动。
-      this.scheduleQueueDrain(taskId);
-    }
+    await this.finalizeSuccessTurn(taskId);
   }
 
   private async finalizeSuccessTurn(taskId: number): Promise<void> {
@@ -1826,19 +1699,6 @@ export class TaskDispatchService
       return;
     }
     const resultText = await this.collectResult(task);
-    // 当前任务仍有用户补充：优先把同一任务的消息处理完，避免把同一任务拆成多个并发回合。
-    if (this.taskChat.hasQueuedUserMessages(taskId)) {
-      await this.tasks.update(
-        {
-          id: taskId,
-          status: TaskStatus.RUNNING,
-          subStatus: TaskSubStatus.EXECUTING,
-        },
-        { result: resultText ?? task.result },
-      );
-      await this.taskChat.finishTask(taskId);
-      return;
-    }
     const updated = await this.tasks.update(
       {
         id: taskId,
@@ -1887,8 +1747,8 @@ export class TaskDispatchService
   }
 
   /**
-   * 会话已完成但机器人迟迟不调用验收申请：在前三次由平台重新唤醒并明确要求
-   * 立即申请验收；超过阈值只提醒负责人，不代替机器人申请或验收。
+   * 会话已完成但机器人迟迟不调用验收申请：平台按退避持续重新唤醒并明确要求
+   * 立即申请验收，不代替机器人申请或验收，也不转移任务身份。
    */
   private async remindAcceptanceApply(task: {
     id: number;
@@ -1910,78 +1770,50 @@ export class TaskDispatchService
       this.releaseTask(task.id);
       return;
     }
-    if (state.attempts < APPLY_REMIND_MAX_ATTEMPTS) {
-      const attempt = state.attempts + 1;
-      state.attempts = attempt;
-      state.nextAt =
-        now +
-        APPLY_REMIND_DELAYS_MS[
-          Math.min(attempt, APPLY_REMIND_DELAYS_MS.length - 1)
-        ];
-      const pendingApply =
-        task.status === TaskStatus.WAITING &&
-        task.subStatus === TaskSubStatus.PENDING_APPLY;
-      const updated = await this.tasks.update(
-        pendingApply
-          ? {
-              id: task.id,
-              status: TaskStatus.WAITING,
-              subStatus: TaskSubStatus.PENDING_APPLY,
-            }
-          : {
-              id: task.id,
-              status: TaskStatus.RUNNING,
-              subStatus: TaskSubStatus.EXECUTING,
-            },
-        {
-          status: TaskStatus.WAITING,
-          subStatus: TaskSubStatus.PENDING_RESUME,
-          resumePrompt: [
-            '# 验收申请提醒',
-            '',
-            '上一轮会话已经结束，交付文档已保存，但尚未申请验收。',
-            '不要重复执行已完成的工作；请检查交付文档，确认满足要求后立即调用：',
-            `POST ${this.apiUrl}/tasks/${task.id}/handoff/apply.md`,
-          ].join('\n'),
-        },
-      );
-      this.releaseTask(task.id);
-      if (!updated.affected) return;
-      this.pushLine(task.id, '↻ 会话已完成但未申请验收，已重新唤醒机器人');
-      await this.addEvent(
-        task.id,
-        '系统',
-        `会话已完成但机器人未申请验收，平台第 ${attempt} 次重新唤醒并提醒调用 handoff/apply`,
-        null,
-        { watchdog: true, reason: 'acceptance-apply-missing', attempt },
-      );
-      return;
-    }
-    state.nextAt = now + APPLY_ESCALATE_INTERVAL_MS;
-    state.attempts += 1;
-    const notified = await this.taskNotify.notifyTaskAgentOwner(
-      task as Task,
-      'notice',
-      `任务未申请验收：${task.code ?? task.id} ${task.title ?? ''}`.trim(),
-      `平台已 ${APPLY_REMIND_MAX_ATTEMPTS} 次重新唤醒机器人，仍未调用验收申请接口，请人工检查机器人会话与交付文档。`,
+    const attempt = state.attempts + 1;
+    state.attempts = attempt;
+    state.nextAt =
+      now +
+      APPLY_REMIND_DELAYS_MS[
+        Math.min(attempt, APPLY_REMIND_DELAYS_MS.length - 1)
+      ];
+    const pendingApply =
+      task.status === TaskStatus.WAITING &&
+      task.subStatus === TaskSubStatus.PENDING_APPLY;
+    const updated = await this.tasks.update(
+      pendingApply
+        ? {
+            id: task.id,
+            status: TaskStatus.WAITING,
+            subStatus: TaskSubStatus.PENDING_APPLY,
+          }
+        : {
+            id: task.id,
+            status: TaskStatus.RUNNING,
+            subStatus: TaskSubStatus.EXECUTING,
+          },
+      {
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_RESUME,
+        resumePrompt: [
+          '# 验收申请提醒',
+          '',
+          '上一轮会话已经结束，交付文档已保存，但尚未申请验收。',
+          '不要重复执行已完成的工作；请检查交付文档，确认满足要求后立即调用：',
+          `POST ${this.apiUrl}/tasks/${task.id}/handoff/apply.md`,
+        ].join('\n'),
+      },
     );
-    if (!notified.sent) {
-      await this.taskNotify.notifyTaskRequester(
-        task as Task,
-        'notice',
-        `任务未申请验收：${task.code ?? task.id} ${task.title ?? ''}`.trim(),
-        `机器人会话已完成但未申请验收，请人工检查任务。`,
-        { fallbackToRequesterOwner: true },
-      );
-    }
+    this.releaseTask(task.id);
+    if (!updated.affected) return;
+    this.pushLine(task.id, '↻ 会话已完成但未申请验收，已重新唤醒机器人');
     await this.addEvent(
       task.id,
       '系统',
-      `机器人在 ${APPLY_REMIND_MAX_ATTEMPTS} 次催办后仍未申请验收，已通知负责人人工介入`,
+      `会话已完成但机器人未申请验收，平台第 ${attempt} 次重新唤醒并提醒调用 handoff/apply`,
       null,
-      { watchdog: true, reason: 'acceptance-apply-escalated' },
+      { watchdog: true, reason: 'acceptance-apply-missing', attempt },
     );
-    this.releaseTask(task.id);
   }
 
   /** 执行中长时间无状态进展只提醒，不自动中断仍可能正常工作的会话。 */
@@ -2219,7 +2051,7 @@ export class TaskDispatchService
       '  -d \'{"reason":"不属于我的职责范围","suggestion":"建议的任务定义或机器人"}\'',
       '```',
       '',
-      '接受或拒绝只能二选一。若接受接口提示机器人忙碌，不要执行本任务，保持待接受并结束本轮。',
+      '接受或拒绝只能二选一。若接受接口提示执行容量已满，不要执行本任务，保持待接受并结束本轮。',
       '',
       '---',
       '',
@@ -2362,7 +2194,7 @@ export class TaskDispatchService
       [
         '# 完成与验收',
         '',
-        '完成并自检后，必须主动申请验收；会话结束不会自动进入待验收。本轮答复结束且没有后续排队消息时，平台会释放机器人并把任务转为「等待中-待申请验收」，稍后会重新唤醒你；不要因为已经开始处理其它任务而忘记申请验收。',
+        '完成并自检后，必须主动申请验收；会话结束不会自动进入待验收。本轮答复结束且 opencode 会话没有后续排队消息时，平台会释放机器人并把任务转为「等待中-待申请验收」，稍后会重新唤醒你；不要因为已经开始处理其它任务而忘记申请验收。',
         '',
         '1. 先完成交付物，并把最终交付结果、验证结果、遗留事项写入上面的交付文档。',
         `2. 确认交付文档已经是最终内容（当前读取版本会在更新后变化，以最近一次更新返回的版本为准）。`,

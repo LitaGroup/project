@@ -15,13 +15,10 @@ import { Worker } from '../workers/worker.entity';
 import { agentTokenShell } from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
-import { TaskNotifyService } from './task-notify.service';
 import { TasksService } from './tasks.service';
 
 /** 需求方机器人自动验收：单次会话最长耗时 */
 const VERIFY_TIMEOUT_MS = 180_000;
-/** 连续未推进验收的自动尝试上限，超过后通知负责人转人工 */
-const MAX_VERIFY_ATTEMPTS = 3;
 /** 提示词里任务描述的截断长度 */
 const MAX_CONTEXT_CHARS = 4_000;
 
@@ -43,7 +40,7 @@ function clip(value: string | null | undefined, limit: number): string {
  * 根任务机器人需求方自动验收：
  * 根任务没有父任务收件箱可唤醒，平台使用需求方机器人自己的执行器创建一次性会话，
  * 读取交付文档并调用验收接口（通过 / 返工 / 失败）。
- * 会话结束仍未推进验收时重试，连续超过阈值后通知负责人转人工处理。
+ * 会话结束仍未推进验收时持续重试，不转移任务需求方或执行方。
  * 子任务仍由父任务收件箱唤醒其执行机器人，不走本服务。
  */
 @Injectable()
@@ -51,10 +48,8 @@ export class TaskRequesterVerifyService {
   private readonly logger = new Logger(TaskRequesterVerifyService.name);
   /** 正在自动验收的任务 */
   private readonly activeTasks = new Set<number>();
-  /** 正在被自动验收占用的需求方机器人（同一机器人一次只处理一个任务） */
+  /** 正在被自动验收占用的需求方机器人（同一机器人同一时刻只运行一个一次性会话） */
   private readonly activeWorkers = new Set<number>();
-  /** taskId → 连续未推进会话次数（进程内，重启后重新计算） */
-  private readonly attempts = new Map<number, number>();
   private readonly apiUrl: string;
 
   constructor(
@@ -66,7 +61,6 @@ export class TaskRequesterVerifyService {
     private readonly workers: Repository<Worker>,
     private readonly workersService: WorkersService,
     private readonly tasksService: TasksService,
-    private readonly taskNotify: TaskNotifyService,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -78,14 +72,9 @@ export class TaskRequesterVerifyService {
     return this.activeTasks.has(taskId);
   }
 
-  /** 是否还允许继续自动验收（超过阈值后转人工） */
-  canVerify(taskId: number): boolean {
-    return (this.attempts.get(taskId) ?? 0) < MAX_VERIFY_ATTEMPTS;
-  }
-
   /**
    * 尝试一次自动验收。
-   * 返回 false 表示未发起（状态不满足、需求方不可用、机器人忙碌等）。
+   * 返回 false 表示未发起（状态不满足、需求方不可用、同一机器人已有一次性会话在运行等）。
    */
   async verify(task: Task): Promise<boolean> {
     if (this.activeTasks.has(task.id)) return false;
@@ -134,7 +123,6 @@ export class TaskRequesterVerifyService {
         latest.subStatus !== TaskSubStatus.PENDING_ACCEPT
       ) {
         // 机器人已通过动作接口推进任务（通过/返工/失败）。
-        this.attempts.delete(task.id);
         return true;
       }
       await this.recordNotAdvanced(task, endpoint.worker);
@@ -157,7 +145,7 @@ export class TaskRequesterVerifyService {
     }
   }
 
-  /** 需求方机器人必须启用、有执行器与可用模型；否则回退人工通知。 */
+  /** 需求方机器人必须启用、有执行器与可用模型；否则本轮跳过并等待下次重试。 */
   private async resolveEndpoint(
     workerId: number,
   ): Promise<VerifyEndpoint | null> {
@@ -252,24 +240,13 @@ export class TaskRequesterVerifyService {
   }
 
   private async recordNotAdvanced(task: Task, worker: Worker): Promise<void> {
-    const count = (this.attempts.get(task.id) ?? 0) + 1;
-    this.attempts.set(task.id, count);
     await this.tasksService.addEvent(
       task.id,
       '系统',
-      `需求方机器人「${worker.name}」自动验收未完成（第 ${count} 次），交付仍等待验收`,
+      `需求方机器人「${worker.name}」自动验收未完成，交付仍等待验收，将继续重试`,
       null,
-      { autoVerify: true, attempt: count, workerId: worker.id },
+      { autoVerify: true, workerId: worker.id },
     );
-    if (count >= MAX_VERIFY_ATTEMPTS) {
-      await this.taskNotify.notifyTaskRequester(
-        task,
-        'notice',
-        `任务待验收：${task.code} ${task.title}`,
-        `需求方机器人「${worker.name}」连续 ${count} 次自动验收未推进，已转负责人人工处理`,
-        { fallbackToRequesterOwner: true },
-      );
-    }
   }
 
   private async recordFailure(
@@ -277,32 +254,20 @@ export class TaskRequesterVerifyService {
     worker: Worker,
     error: Error,
   ): Promise<void> {
-    const count = (this.attempts.get(task.id) ?? 0) + 1;
-    this.attempts.set(task.id, count);
     this.logger.warn(
-      `任务 ${task.code} 需求方机器人「${worker.name}」自动验收失败（第 ${count} 次）：${error.message}`,
+      `任务 ${task.code} 需求方机器人「${worker.name}」自动验收失败：${error.message}`,
     );
     await this.tasksService.addEvent(
       task.id,
       '系统',
-      `需求方机器人「${worker.name}」自动验收失败（第 ${count} 次）：${error.message}`,
+      `需求方机器人「${worker.name}」自动验收失败，将继续重试：${error.message}`,
       null,
       {
         autoVerify: true,
         autoVerifyFailed: true,
-        attempt: count,
         workerId: worker.id,
         error: error.message,
       },
     );
-    if (count >= MAX_VERIFY_ATTEMPTS) {
-      await this.taskNotify.notifyTaskRequester(
-        task,
-        'notice',
-        `任务待验收：${task.code} ${task.title}`,
-        `需求方机器人「${worker.name}」连续 ${count} 次自动验收失败，已转负责人人工处理`,
-        { fallbackToRequesterOwner: true },
-      );
-    }
   }
 }

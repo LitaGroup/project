@@ -241,34 +241,6 @@ export function TicketDetailPage() {
               : current,
           )
           break
-        case 'queue.upsert':
-          if (data.message.taskId !== activeTaskId) break
-          setTaskChat((current) => {
-            if (!current) return current
-            const index = current.queuedMessages.findIndex(
-              (item) => item.id === data.message.id,
-            )
-            const queued =
-              index < 0
-                ? [...current.queuedMessages, data.message]
-                : current.queuedMessages.map((item, itemIndex) =>
-                    itemIndex === index ? data.message : item,
-                  )
-            return { ...current, queuedMessages: queued }
-          })
-          break
-        case 'queue.delete':
-          setTaskChat((current) =>
-            current
-              ? {
-                  ...current,
-                  queuedMessages: current.queuedMessages.filter(
-                    (item) => !data.ids.includes(item.id),
-                  ),
-                }
-              : current,
-          )
-          break
         case 'stage.upsert':
           setTaskChat((current) =>
             current
@@ -385,7 +357,7 @@ export function TicketDetailPage() {
     [currentNodeTaskId, loadTaskData],
   )
 
-  /** 提交补充内容：执行中进入发送队列，等待阶段并入恢复提示 */
+  /** 提交补充内容：执行中直接投递 opencode 会话，等待阶段并入恢复提示 */
   const sendSupplement = useCallback(
     async (content: string) => {
       if (!currentNodeTaskId) return

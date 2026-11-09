@@ -399,7 +399,7 @@ export class TaskDeliveryService {
 
   /**
    * 人工修改交付文档后告知执行机器人：
-   * - 执行中：进入当前会话的发送队列，本轮结束后读取最新版本
+   * - 执行中：直接投递当前 opencode 会话，由 opencode 排队并在后续轮次读取最新版本
    * - 待反馈/待继续/待申请验收：并入下一次恢复提示（待申请验收同时转入待继续）
    */
   private async notifyAgentOfHandoffUpdate(
@@ -469,7 +469,6 @@ export class TaskDeliveryService {
     const task = await this.mustFind(taskId);
     await this.assertRequester(task, actor);
     const saved = await this.tasksService.accept(taskId, actorName(actor));
-    await this.dispatchService.discardQueuedConversations(taskId);
     await this.workerInbox.completeForChild(taskId, 'handoff');
     // 验收成功后的总结与会话清理均为异步收尾，不阻塞验收结果
     void this.taskHandoff.request(taskId).catch((error: Error) => {
@@ -492,7 +491,7 @@ export class TaskDeliveryService {
     return this.refuseHandoff(taskId, { type: 'user', user: actor }, content);
   }
 
-  /** 人或机器人需求方拒绝验收；机器人忙碌时进入待继续而不是并行执行。 */
+  /** 人或机器人需求方拒绝验收；执行容量已满时进入待继续而不是并行执行。 */
   async refuseHandoff(
     taskId: number,
     actor: TaskActor,
@@ -534,7 +533,7 @@ export class TaskDeliveryService {
     );
     let saved: Task;
     if (!claimed) {
-      // 等待验收期间机器人可能已接受其他任务，返工先排队，避免并行执行。
+      // 等待验收期间机器人可能已承接其他任务占满并行上限，返工先排队，避免超限执行。
       const queued = await this.tasks.update(
         {
           id: task.id,
@@ -579,7 +578,9 @@ export class TaskDeliveryService {
       task.id,
       '操作',
       `需求方拒绝验收（累计 ${count} 次），${
-        claimed ? '已退回执行机器人重新处理' : '机器人忙碌，已转入等待中-待继续'
+        claimed
+          ? '已退回执行机器人重新处理'
+          : '机器人执行中任务已达并行上限，已转入等待中-待继续'
       }`,
       operator,
       {

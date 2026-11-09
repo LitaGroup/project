@@ -21,13 +21,12 @@ import { runOpencodePrompt } from '../executors/opencode-run';
 
 describe('TaskReleaseNotificationService 提测状态通知', () => {
   const runPrompt = runOpencodePrompt as jest.Mock;
-  let tasksRepo: { exists: jest.Mock; findOne: jest.Mock };
+  let tasksRepo: { findOne: jest.Mock };
   let executorsRepo: { findOne: jest.Mock };
   let workersRepo: { findOne: jest.Mock };
   let workersService: {
     ensureWorkToken: jest.Mock;
     workdirOf: jest.Mock;
-    ownerOpenId: jest.Mock;
   };
   let inbox: {
     markEventDelivered: jest.Mock;
@@ -35,7 +34,6 @@ describe('TaskReleaseNotificationService 提测状态通知', () => {
     markDead: jest.Mock;
     defer: jest.Mock;
   };
-  let feishu: { sendUserCard: jest.Mock };
   let service: TaskReleaseNotificationService;
 
   const worker = {
@@ -83,7 +81,6 @@ describe('TaskReleaseNotificationService 提测状态通知', () => {
   beforeEach(() => {
     runPrompt.mockReset().mockResolvedValue('已了解提测状态');
     tasksRepo = {
-      exists: jest.fn().mockResolvedValue(false),
       findOne: jest.fn().mockResolvedValue({
         id: 12,
         code: 'TK-0012',
@@ -98,7 +95,6 @@ describe('TaskReleaseNotificationService 提测状态通知', () => {
     workersService = {
       ensureWorkToken: jest.fn().mockResolvedValue('token'),
       workdirOf: jest.fn().mockReturnValue('/tmp/worker/101'),
-      ownerOpenId: jest.fn().mockResolvedValue('ou_owner'),
     };
     inbox = {
       markEventDelivered: jest.fn().mockResolvedValue(true),
@@ -106,14 +102,12 @@ describe('TaskReleaseNotificationService 提测状态通知', () => {
       markDead: jest.fn().mockResolvedValue(undefined),
       defer: jest.fn().mockResolvedValue(undefined),
     };
-    feishu = { sendUserCard: jest.fn().mockResolvedValue(undefined) };
     service = new TaskReleaseNotificationService(
       tasksRepo as never,
       executorsRepo as never,
       workersRepo as never,
       workersService as never,
       inbox as never,
-      feishu as never,
       {
         get: jest.fn((key: string) =>
           key === 'API_URL' ? 'http://api.example/api' : undefined,
@@ -122,21 +116,9 @@ describe('TaskReleaseNotificationService 提测状态通知', () => {
     );
   });
 
-  it('机器人忙碌时保持 pending，不启动会话', async () => {
-    tasksRepo.exists.mockResolvedValue(true);
-
+  it('收到事件即创建一次性会话；会话成功后事件关闭', async () => {
     await service.handle(entry);
 
-    expect(inbox.markEventDelivered).not.toHaveBeenCalled();
-    expect(runPrompt).not.toHaveBeenCalled();
-  });
-
-  it('空闲机器人收到事件上下文；会话成功后事件关闭', async () => {
-    await service.handle(entry);
-
-    expect(tasksRepo.exists).toHaveBeenCalledWith({
-      where: { agentId: 101, status: '进行中' },
-    });
     expect(inbox.markEventDelivered).toHaveBeenCalledWith(31);
     expect(runPrompt).toHaveBeenCalledTimes(1);
     const calls = runPrompt.mock.calls as unknown as unknown[][];
@@ -170,20 +152,18 @@ describe('TaskReleaseNotificationService 提测状态通知', () => {
     expect(inbox.markDead).not.toHaveBeenCalled();
   });
 
-  it('连续失败达到上限后关闭事件并通知负责人', async () => {
+  it('历史失败次数超过旧阈值后仍继续重试，不关闭事件', async () => {
     runPrompt.mockRejectedValue(new Error('executor down'));
-    const failed = { ...entry, attempts: 2 };
+    const failed = { ...entry, attempts: 20 };
 
     await service.handle(failed);
 
-    expect(inbox.markDead).toHaveBeenCalledWith(31);
-    expect(inbox.defer).not.toHaveBeenCalled();
-    expect(feishu.sendUserCard).toHaveBeenCalledTimes(1);
-    const cardCalls = feishu.sendUserCard.mock.calls as unknown as unknown[][];
-    const card = (cardCalls[0]?.[1] ?? {}) as {
-      header?: { title?: { content?: string } };
-    };
-    expect(card.header?.title?.content).toBe('提测通知处理失败');
+    expect(inbox.markDead).not.toHaveBeenCalledWith(31);
+    expect(inbox.defer).toHaveBeenCalledWith(
+      31,
+      expect.any(Date),
+      'executor down',
+    );
   });
 
   it('真人机器人不是自动收件人，事件直接关闭', async () => {

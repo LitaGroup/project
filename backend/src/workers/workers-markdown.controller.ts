@@ -45,6 +45,7 @@ class CreateWorkerMarkdownDto implements CreateWorkerInput {
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
   resourcePermission?: WorkerResourcePermission;
+  maxParallelTasks?: number;
 }
 
 class UpdateWorkerMarkdownDto implements UpdateWorkerInput {
@@ -65,6 +66,7 @@ class UpdateWorkerMarkdownDto implements UpdateWorkerInput {
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
   resourcePermission?: WorkerResourcePermission;
+  maxParallelTasks?: number;
 }
 
 /** GET /api/workers.md：Agent 用的机器人清单 */

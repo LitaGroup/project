@@ -49,7 +49,6 @@ describe('TasksService 停止任务', () => {
   let dispatchService: {
     addEvent: jest.Mock;
     interrupt: jest.Mock;
-    discardQueuedConversations: jest.Mock;
   };
   let workerInbox: {
     completeForChild: jest.Mock;
@@ -72,7 +71,6 @@ describe('TasksService 停止任务', () => {
     dispatchService = {
       addEvent: jest.fn().mockResolvedValue(undefined),
       interrupt: jest.fn().mockResolvedValue(undefined),
-      discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
     };
     workerInbox = {
       completeForChild: jest.fn().mockResolvedValue(undefined),
@@ -148,9 +146,6 @@ describe('TasksService 停止任务', () => {
     expect(finishedChild.status).toBe(TaskStatus.FINISHED);
     expect(finishedChild.subStatus).toBe(TaskSubStatus.COMPLETED);
     expect(callIds(dispatchService.interrupt)).toEqual([1, 4, 5]);
-    expect(callIds(dispatchService.discardQueuedConversations)).toEqual([
-      1, 2, 4, 5,
-    ]);
     expect(callIds(workerInbox.completeForChild)).toEqual([1, 2, 4, 5]);
     // 只向树外父任务通知一次；被级联取消的父子任务不再互相唤醒
     expect(workerInbox.enqueue).toHaveBeenCalledTimes(1);

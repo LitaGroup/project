@@ -37,17 +37,14 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
   let taskChat: {
     isRunning: jest.Mock;
     archiveResult: jest.Mock;
-    hasQueuedUserMessages: jest.Mock;
-    enqueueUserMessage: jest.Mock;
-    queuedUserMessages: jest.Mock;
-    queuedUserMessagePrompt: jest.Mock;
-    markQueuedUserMessageSending: jest.Mock;
-    removeQueuedUserMessage: jest.Mock;
-    restoreQueuedUserMessage: jest.Mock;
-    discardQueuedUserMessages: jest.Mock;
     finishTask: jest.Mock;
   };
-  let taskRealtime: { taskChanged: jest.Mock };
+  let taskRealtime: { taskChanged: jest.Mock; lineAppended: jest.Mock };
+  let workersService: {
+    workdirOf: jest.Mock;
+    ensureWorkToken: jest.Mock;
+  };
+  let hub: { onEvent: jest.Mock; retain: jest.Mock; release: jest.Mock };
   let service: TaskDispatchService;
   let dispatchSpy: jest.SpyInstance;
 
@@ -60,6 +57,7 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
         ip: '127.0.0.1',
         port: 4096,
         token: null,
+        online: true,
       }),
     };
     eventsRepo = {
@@ -69,18 +67,22 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
     taskChat = {
       isRunning: jest.fn().mockReturnValue(false),
       archiveResult: jest.fn().mockResolvedValue(undefined),
-      hasQueuedUserMessages: jest.fn().mockReturnValue(false),
-      enqueueUserMessage: jest.fn().mockResolvedValue(undefined),
-      queuedUserMessages: jest.fn().mockReturnValue([]),
-      queuedUserMessagePrompt: jest.fn().mockReturnValue(null),
-      markQueuedUserMessageSending: jest.fn(),
-      removeQueuedUserMessage: jest.fn().mockResolvedValue(undefined),
-      restoreQueuedUserMessage: jest.fn().mockResolvedValue(undefined),
-      discardQueuedUserMessages: jest.fn().mockResolvedValue(undefined),
       finishTask: jest.fn().mockResolvedValue(undefined),
     };
-    taskRealtime = { taskChanged: jest.fn() };
+    taskRealtime = {
+      taskChanged: jest.fn(),
+      lineAppended: jest.fn(),
+    };
     workersRepo = { findOne: jest.fn() };
+    workersService = {
+      workdirOf: jest.fn().mockReturnValue('/tmp/worker/1'),
+      ensureWorkToken: jest.fn().mockResolvedValue('worker-token'),
+    };
+    hub = {
+      onEvent: jest.fn(),
+      retain: jest.fn(),
+      release: jest.fn(),
+    };
     inbox = {
       enqueue: jest.fn().mockResolvedValue(null),
       requeueDelivered: jest.fn().mockResolvedValue(undefined),
@@ -91,8 +93,8 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       executorsRepo as never,
       workersRepo as never,
       { findOne: jest.fn() } as never,
-      { workdirOf: jest.fn() } as never,
-      { onEvent: jest.fn() } as never,
+      workersService as never,
+      hub as never,
       {} as never,
       taskRealtime as never,
       taskChat as never,
@@ -123,32 +125,46 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
         content: '继续修改文案',
       }),
     );
-    expect(dispatchSpy).toHaveBeenCalledWith(1, '张三', '继续修改文案');
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      1,
+      '张三',
+      '继续修改文案',
+      'execute',
+      undefined,
+      { queueInOpencode: true },
+    );
   });
 
-  it('机器人正在回复时消息进入发送队列，不立即派发或生成用户气泡', async () => {
-    tasksRepo.findOne.mockResolvedValue(
-      baseTask({
-        status: TaskStatus.RUNNING,
-        subStatus: TaskSubStatus.EXECUTING,
-      }),
-    );
+  it('机器人正在回复时消息仍直接投递，由 opencode 会话排队', async () => {
+    const running = baseTask({
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+    });
+    tasksRepo.findOne.mockResolvedValue(running);
+    dispatchSpy.mockResolvedValue(running);
     taskChat.isRunning.mockReturnValue(true);
 
     const saved = await service.continueConversation(1, '补充说明', '张三');
 
-    expect(taskChat.enqueueUserMessage).toHaveBeenCalledWith(
+    expect(dispatchSpy).toHaveBeenCalledWith(
       1,
-      '补充说明',
       '张三',
+      '补充说明',
+      'execute',
       undefined,
+      { queueInOpencode: true },
     );
-    expect(dispatchSpy).not.toHaveBeenCalled();
-    expect(eventsRepo.save).not.toHaveBeenCalled();
+    expect(eventsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 1,
+        type: '反馈',
+        content: '补充说明',
+      }),
+    );
     expect(saved.subStatus).toBe(TaskSubStatus.EXECUTING);
   });
 
-  it('返工消息入队时保留原始展示内容，模型 Prompt 单独保存', async () => {
+  it('执行中返工消息直接投递完整 Prompt，用户气泡仍展示原始反馈', async () => {
     tasksRepo.findOne.mockResolvedValue(
       baseTask({
         status: TaskStatus.RUNNING,
@@ -161,90 +177,13 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       modelContent: '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
     });
 
-    expect(taskChat.enqueueUserMessage).toHaveBeenCalledWith(
-      1,
-      '请补充错误提示',
-      '张三',
-      '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
-    );
-  });
-
-  it('队首消息投递成功后才移出队列并生成用户气泡', async () => {
-    tasksRepo.findOne.mockResolvedValue(
-      baseTask({
-        status: TaskStatus.RUNNING,
-        subStatus: TaskSubStatus.EXECUTING,
-      }),
-    );
-    const queued = {
-      id: 'queue:1:first',
-      taskId: 1,
-      sender: { id: 'user:张三', name: '张三', kind: 'user' },
-      content: '补充说明',
-      createdAt: new Date().toISOString(),
-      status: 'queued' as const,
-    };
-    taskChat.queuedUserMessages.mockReturnValue([queued]);
-    taskChat.markQueuedUserMessageSending.mockResolvedValue({
-      ...queued,
-      status: 'sending',
-    });
-
-    await (
-      service as unknown as {
-        drainQueuedConversation(taskId: number): Promise<void>;
-      }
-    ).drainQueuedConversation(1);
-
-    expect(taskChat.markQueuedUserMessageSending).toHaveBeenCalledWith(
-      1,
-      queued.id,
-    );
-    expect(dispatchSpy).toHaveBeenCalledWith(1, '张三', '补充说明');
-    expect(eventsRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 1,
-        type: '反馈',
-        content: '补充说明',
-      }),
-    );
-    expect(taskChat.removeQueuedUserMessage).toHaveBeenCalledWith(1, queued.id);
-  });
-
-  it('队列中的返工消息投递完整 Prompt，用户气泡仍展示原始反馈', async () => {
-    tasksRepo.findOne.mockResolvedValue(
-      baseTask({
-        status: TaskStatus.RUNNING,
-        subStatus: TaskSubStatus.EXECUTING,
-      }),
-    );
-    const queued = {
-      id: 'queue:1:rework',
-      taskId: 1,
-      sender: { id: 'user:张三', name: '张三', kind: 'user' },
-      content: '请补充错误提示',
-      createdAt: new Date().toISOString(),
-      status: 'queued' as const,
-    };
-    taskChat.queuedUserMessages.mockReturnValue([queued]);
-    taskChat.markQueuedUserMessageSending.mockResolvedValue({
-      ...queued,
-      status: 'sending',
-    });
-    taskChat.queuedUserMessagePrompt.mockReturnValue(
-      '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
-    );
-
-    await (
-      service as unknown as {
-        drainQueuedConversation(taskId: number): Promise<void>;
-      }
-    ).drainQueuedConversation(1);
-
     expect(dispatchSpy).toHaveBeenCalledWith(
       1,
       '张三',
       '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
+      'execute',
+      undefined,
+      { queueInOpencode: true },
     );
     expect(eventsRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -255,43 +194,75 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
     );
   });
 
-  it('队首投递失败时保留消息并记录错误，不生成用户气泡', async () => {
+  it('直接投递失败时返回错误，不生成用户气泡或平台队列', async () => {
     tasksRepo.findOne.mockResolvedValue(
       baseTask({
         status: TaskStatus.RUNNING,
         subStatus: TaskSubStatus.EXECUTING,
       }),
     );
-    const queued = {
-      id: 'queue:1:first',
-      taskId: 1,
-      sender: { id: 'user:张三', name: '张三', kind: 'user' },
-      content: '补充说明',
-      createdAt: new Date().toISOString(),
-      status: 'queued' as const,
-    };
-    taskChat.queuedUserMessages.mockReturnValue([queued]);
-    taskChat.markQueuedUserMessageSending.mockResolvedValue({
-      ...queued,
-      status: 'sending',
-    });
+    taskChat.isRunning.mockReturnValue(true);
     dispatchSpy.mockRejectedValue(new Error('执行器离线'));
 
     await expect(
-      (
-        service as unknown as {
-          drainQueuedConversation(taskId: number): Promise<void>;
-        }
-      ).drainQueuedConversation(1),
+      service.continueConversation(1, '补充说明', '张三'),
     ).rejects.toThrow('执行器离线');
 
-    expect(taskChat.restoreQueuedUserMessage).toHaveBeenCalledWith(
-      1,
-      queued.id,
-      '执行器离线',
-    );
-    expect(taskChat.removeQueuedUserMessage).not.toHaveBeenCalled();
     expect(eventsRepo.save).not.toHaveBeenCalled();
+    expect(taskChat.archiveResult).toHaveBeenCalledWith(1);
+  });
+
+  it('执行中续聊复用会话时直接调用 prompt，不中断当前轮', async () => {
+    dispatchSpy.mockRestore();
+    const running = baseTask({
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+    });
+    tasksRepo.findOne.mockResolvedValue(running);
+    workersRepo.findOne.mockResolvedValue({
+      id: 1001,
+      name: '执行机器人',
+      enabled: true,
+      runtime: WorkerRuntime.OPENCODE,
+      executorId: 3,
+      providerId: 'provider',
+      modelId: 'model',
+      variant: null,
+    });
+    (
+      service as unknown as {
+        buildPrompt: jest.Mock;
+      }
+    ).buildPrompt = jest.fn().mockResolvedValue('任务上下文');
+    const shell = jest
+      .spyOn(OpencodeClient.prototype, 'shell')
+      .mockResolvedValue('');
+    const session = jest
+      .spyOn(OpencodeClient.prototype, 'session')
+      .mockResolvedValue({ id: 'session-1' });
+    const prompt = jest
+      .spyOn(OpencodeClient.prototype, 'prompt')
+      .mockResolvedValue(null);
+    const interrupt = jest
+      .spyOn(OpencodeClient.prototype, 'interrupt')
+      .mockResolvedValue(undefined);
+
+    await service.continueConversation(1, '补充说明', '张三');
+
+    expect(prompt).toHaveBeenCalledWith('session-1', { text: '补充说明' });
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(eventsRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 1,
+        type: '反馈',
+        content: '补充说明',
+      }),
+    );
+
+    shell.mockRestore();
+    session.mockRestore();
+    prompt.mockRestore();
+    interrupt.mockRestore();
   });
 
   it('待识别任务仍要求先补充需求并重新识别', async () => {

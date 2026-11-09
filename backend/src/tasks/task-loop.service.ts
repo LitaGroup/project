@@ -17,7 +17,6 @@ import {
   nextInboxRetryDelay,
   nextReminderAction,
   nextResumeRetryDelay,
-  TASK_INBOX_MAX_ATTEMPTS,
   TASK_INBOX_STALE_MS,
   TASK_REMIND_TIMEOUT_DAYS,
 } from './task-loop.rules';
@@ -45,7 +44,7 @@ const ROOT_MESSAGE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * 多机器人任务 LOOP（每秒）：
- * 待分配→分配；待接受→任务邀约；待继续→机器人空闲后恢复；
+ * 待分配→分配；待接受→任务邀约；待继续→机器人仍有执行容量时恢复；
  * 机器人需求方收件箱→父任务待继续 / 根任务需求方一次性回复；
  * 待申请验收不占用机器人，收到补充消息或子任务事件时转待继续；
  * 待反馈/待验收仅提醒，不占用机器人。
@@ -58,7 +57,6 @@ export class TaskLoopService implements OnApplicationBootstrap {
   private readonly reminding = new Set<number>();
   private readonly offering = new Set<number>();
   private readonly resuming = new Set<number>();
-  private readonly fallbacking = new Set<number>();
   private readonly offerStalledNotifiedAt = new Map<number, number>();
   private readonly resumeFailures = new Map<
     number,
@@ -154,8 +152,9 @@ export class TaskLoopService implements OnApplicationBootstrap {
         ]);
         continue;
       }
-      // 忙碌机器人继续等待；待接受邀约也只在空闲后发送。
-      if (await this.dispatchService.isWorkerBusy(result.agentId)) continue;
+      // 执行容量已满的机器人继续等待；待接受邀约也只在有容量后发送。
+      if (!(await this.dispatchService.hasExecutionCapacity(result.agentId)))
+        continue;
       const updated = await this.tasks.update(
         {
           id: task.id,
@@ -249,7 +248,8 @@ export class TaskLoopService implements OnApplicationBootstrap {
         if (now - attemptedAt < OFFER_RETRY_MS) continue;
       }
       if (this.dispatchService.taskChatRunning(task.id)) continue;
-      if (await this.dispatchService.isWorkerBusy(task.agentId)) continue;
+      if (!(await this.dispatchService.hasExecutionCapacity(task.agentId)))
+        continue;
       // 多实例下用 offerAttemptAt 原子抢占，只允许一个实例发送任务邀约。
       const cutoff = new Date(now - OFFER_RETRY_MS);
       const claimed = await this.tasks.update(
@@ -359,7 +359,8 @@ export class TaskLoopService implements OnApplicationBootstrap {
       const retry = this.resumeFailures.get(task.id);
       if (retry && retry.nextRetryAt > now) continue;
       if (this.dispatchService.taskChatRunning(task.id)) continue;
-      if (await this.dispatchService.isWorkerBusy(task.agentId)) continue;
+      if (!(await this.dispatchService.hasExecutionCapacity(task.agentId)))
+        continue;
       this.resuming.add(task.id);
       const resumePrompt = task.resumePrompt?.trim() || '请继续处理当前任务。';
       try {
@@ -405,14 +406,6 @@ export class TaskLoopService implements OnApplicationBootstrap {
           null,
           { watchdog: true, failures, nextRetryAt: Date.now() + delay },
         );
-        if (failures === TASK_INBOX_MAX_ATTEMPTS) {
-          await this.taskNotify.notifyTaskAgentOwner(
-            task,
-            'notice',
-            `任务恢复失败：${task.code} ${task.title}`,
-            `已连续 ${failures} 次恢复失败，请检查机器人、执行器或会话配置。`,
-          );
-        }
       } finally {
         this.resuming.delete(task.id);
       }
@@ -557,41 +550,15 @@ export class TaskLoopService implements OnApplicationBootstrap {
         parent.status === TaskStatus.FINISHED ||
         parent.agentId !== entry.workerId
       ) {
-        if (
-          (entry.kind === 'refused' || entry.kind === 'cancelled') &&
-          child.status === TaskStatus.FINISHED
-        ) {
-          await this.workerInbox.markDead(entry.id);
-          continue;
-        }
-        await this.fallbackChildToHuman(
-          child,
-          entry.parentTaskId,
-          '父任务已结束或处理机器人已变化',
-          entry.id,
+        // 父任务不可用时只关闭当前事件，不改写子任务需求方或执行方。
+        this.logger.warn(
+          `子任务 ${child.code} 的 ${entry.kind} 事件无法处理：父任务已结束或处理机器人已变化`,
         );
+        await this.workerInbox.markDead(entry.id);
         continue;
       }
       if (!this.childEventNeedsAction(entry, child)) {
         await this.workerInbox.markDone(entry.id);
-        continue;
-      }
-      const attempts = entry.attempts ?? 0;
-      if (attempts >= TASK_INBOX_MAX_ATTEMPTS) {
-        if (
-          entry.kind === 'question' ||
-          entry.kind === 'handoff' ||
-          entry.kind === 'message'
-        ) {
-          await this.fallbackChildToHuman(
-            child,
-            parent.id,
-            `已连续 ${attempts} 次唤醒父机器人但事件仍未处理`,
-            entry.id,
-          );
-        } else {
-          await this.workerInbox.markDead(entry.id);
-        }
         continue;
       }
 
@@ -698,12 +665,8 @@ export class TaskLoopService implements OnApplicationBootstrap {
         parent.subStatus === TaskSubStatus.EXECUTING
       ) {
         // 会话已结束但任务仍停在执行中（历史/竞态兜底）时，机器人实际空闲，
-        // 可以把子任务事件排入待继续并唤醒；当前回合仍在输出或还有本任务
-        // 排队消息时保持 pending，优先把当前任务自己的消息处理完。
-        if (
-          this.dispatchService.taskChatRunning(parent.id) ||
-          this.dispatchService.hasQueuedUserMessages(parent.id)
-        ) {
+        // 可以把子任务事件排入待继续并唤醒；当前回合仍在输出时保持 pending。
+        if (this.dispatchService.taskChatRunning(parent.id)) {
           continue;
         }
         if (entry.status !== 'pending') {
@@ -731,7 +694,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
         );
       } else {
         // 父任务自身的待分配、待接受、待反馈等状态不能被覆盖；
-        // 记录一次失败尝试并退避，达到阈值后自动把子任务需求方转人工。
+        // 保持事件排队并退避重试，等待父任务进入可处理状态。
         await this.deferInboxEntry(
           entry,
           parent,
@@ -795,8 +758,6 @@ export class TaskLoopService implements OnApplicationBootstrap {
     for (const task of rows) {
       if (!task.requesterId) continue;
       if (this.requesterVerify.isActive(task.id)) continue;
-      if (!this.requesterVerify.canVerify(task.id)) continue;
-      if (await this.dispatchService.isWorkerBusy(task.requesterId)) continue;
       void this.requesterVerify.verify(task);
     }
   }
@@ -837,7 +798,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     await this.tasksService.addEvent(
       child.id,
       '系统',
-      `子任务协同事件暂时无法处理：${reason}；平台将在 ${Math.round(delay / 60_000)} 分钟后重试，连续 ${TASK_INBOX_MAX_ATTEMPTS} 次失败将转人工`,
+      `子任务协同事件暂时无法处理：${reason}；平台将在 ${Math.round(delay / 60_000)} 分钟后继续重试`,
       null,
       {
         watchdog: true,
@@ -847,72 +808,6 @@ export class TaskLoopService implements OnApplicationBootstrap {
         nextRetryAt: nextRetryAt.toISOString(),
       },
     );
-  }
-
-  /** 父机器人链路不可恢复时，把机器人需求方回退为根任务创建人并通知。 */
-  private async fallbackChildToHuman(
-    child: Task,
-    parentTaskId: number,
-    reason: string,
-    inboxId: number,
-  ): Promise<void> {
-    if (this.fallbacking.has(child.id)) return;
-    this.fallbacking.add(child.id);
-    try {
-      const root =
-        child.rootId && child.rootId !== child.id
-          ? await this.tasks.findOne({ where: { id: child.rootId } })
-          : null;
-      const userId = root?.createdById ?? child.createdById ?? null;
-      if (userId) {
-        const updated = await this.tasks.update(
-          {
-            id: child.id,
-            status: child.status,
-            subStatus: child.subStatus,
-            requesterType: 'worker',
-          },
-          { requesterType: 'user', requesterId: userId },
-        );
-        if (!updated.affected) {
-          // 子任务已被正常答复/验收或需求方已变化，不能覆盖最新状态。
-          await this.workerInbox.markDone(inboxId);
-          return;
-        }
-        child.requesterType = 'user';
-        child.requesterId = userId;
-      }
-      await this.tasksService.addEvent(
-        child.id,
-        '系统',
-        `子任务需要人工介入：${reason}，需求方${userId ? '已自动回退为根任务创建人' : '未能回退（未找到创建人）'}`,
-        null,
-        {
-          watchdog: true,
-          parentTaskId,
-          inboxId,
-          reason,
-        },
-      );
-      const notified = await this.taskNotify.notifyTaskRequester(
-        child,
-        'notice',
-        `子任务需要人工介入：${child.code} ${child.title}`,
-        `${reason}，请到任务详情处理提问或验收。`,
-        { fallbackToRequesterOwner: true },
-      );
-      if (!notified.sent) {
-        await this.taskNotify.notifyTaskAgentOwner(
-          child,
-          'notice',
-          `子任务需要人工介入：${child.code} ${child.title}`,
-          `${reason}，请人工处理子任务。`,
-        );
-      }
-      await this.workerInbox.markDead(inboxId);
-    } finally {
-      this.fallbacking.delete(child.id);
-    }
   }
 
   // ===== 待反馈 / 待验收提醒 =====

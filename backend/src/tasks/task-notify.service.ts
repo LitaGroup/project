@@ -191,10 +191,7 @@ export class TaskNotifyService {
     );
   }
 
-  /**
-   * 通知当前执行机器人配置的负责人（不按调度机器人优先）。
-   * 用于验收不通过超过阈值后的负责人接管提醒。
-   */
+  /** 通知当前执行机器人配置的负责人（不按调度机器人优先）。 */
   async notifyTaskAgentOwner(
     task: Task,
     kind: TaskNotifyKind,

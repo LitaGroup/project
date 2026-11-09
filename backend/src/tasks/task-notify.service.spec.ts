@@ -228,7 +228,7 @@ describe('TaskNotifyService 飞书任务通知', () => {
         }),
         'notice',
         '任务待验收：TK-0054 咱们APP的主要业务是什么',
-        '需求方机器人连续 3 次自动验收失败，已转负责人人工处理。',
+        '需求方机器人自动验收失败，已通知负责人检查。',
         { fallbackToRequesterOwner: true },
       ),
     ).resolves.toEqual({ sent: true, ownerName: '胡峰' });

@@ -182,7 +182,7 @@ export class TaskCollaborationService {
     return child;
   }
 
-  /** task-accept：只有负责机器人且机器人空闲时可接受。 */
+  /** task-accept：只有负责机器人且仍有执行容量时可接受。 */
   async accept(taskId: number, worker: Worker): Promise<Task> {
     const task = await this.mustFind(taskId);
     this.assertAgent(task, worker);
@@ -199,7 +199,7 @@ export class TaskCollaborationService {
       TaskSubStatus.PENDING_ACCEPTANCE,
     );
     if (!claimed) {
-      throw new ConflictException('机器人已有进行中的任务，请稍后接受');
+      throw new ConflictException('机器人执行中任务已达并行上限，请稍后接受');
     }
     await this.tasksService.addEvent(
       taskId,
@@ -528,7 +528,6 @@ export class TaskCollaborationService {
       { reason: text },
     );
     await this.workerInbox.completeForChild(taskId, 'handoff');
-    await this.dispatchService.discardQueuedConversations(taskId);
     void this.dispatchService
       .destroyAcceptedSession(taskId)
       .catch(() => undefined);

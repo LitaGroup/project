@@ -103,9 +103,6 @@ export function TaskDetailView({
   const [workbenchTask, setWorkbenchTask] = useState<WorkbenchTask | null>(null)
   const [pipeline, setPipeline] = useState<TaskPipelineStage[]>([])
   const [messages, setMessages] = useState<TaskChatMessage[]>([])
-  const [queuedMessages, setQueuedMessages] = useState<
-    TaskChatSnapshot['queuedMessages']
-  >([])
   const [hasAcceptanceApplication, setHasAcceptanceApplication] =
     useState(false)
   const [requesterName, setRequesterName] = useState<string | null>(null)
@@ -148,9 +145,6 @@ export function TaskDetailView({
       setPipeline(data.pipeline)
       // 后端已按当前任务返回消息；这里再按 taskId 收敛一次，避免旧服务或异常数据串任务
       setMessages(data.messages.filter((message) => message.taskId === taskId))
-      setQueuedMessages(
-        data.queuedMessages.filter((message) => message.taskId === taskId),
-      )
       setHasAcceptanceApplication(data.hasAcceptanceApplication)
       setRequesterName(data.requesterName)
       setAgentOwnerName(data.agentOwnerName)
@@ -340,23 +334,6 @@ export function TaskDetailView({
           if (data.message.taskId !== taskId) break
           setMessages((current) => upsertMessage(current, data.message))
           break
-        case 'queue.upsert':
-          if (data.message.taskId !== taskId) break
-          setQueuedMessages((current) => {
-            const index = current.findIndex(
-              (item) => item.id === data.message.id,
-            )
-            if (index < 0) return [...current, data.message]
-            const next = current.slice()
-            next[index] = data.message
-            return next
-          })
-          break
-        case 'queue.delete':
-          setQueuedMessages((current) =>
-            current.filter((item) => !data.ids.includes(item.id)),
-          )
-          break
         case 'stage.upsert':
           setPipeline((current) => upsertStage(current, data.stage))
           setTask((current) =>
@@ -455,7 +432,6 @@ export function TaskDetailView({
         rootTask: currentTask,
         pipeline,
         messages,
-        queuedMessages,
         requesterName,
         agentOwnerName,
         interventionCount,

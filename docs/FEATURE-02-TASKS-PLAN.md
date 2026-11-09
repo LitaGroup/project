@@ -119,7 +119,7 @@ type: docs
 - `workdir`：`NODE_ENV=production` 时为 `{WORKER_BASE_DIR}/worker/{worker.id}/`，其余环境为 `{WORKER_BASE_DIR}/worker-dev/{worker.id}/`；`WORKER_BASE_DIR` 为平台后端 `.env` 环境变量（执行器机器上的路径约定），`NODE_ENV` 仅 `production` 使用生产目录。
 - 不落库，服务层实时计算；worker API 响应附带 `workdir`；任务包不带 workdir 字段。
 - **创建时机**：派发前由后端调执行器 `POST /api/shell` 执行 `mkdir -p {workdir}/.opencode`（幂等），并写入机器人独立令牌 `.opencode/agent-token`（权限 600），成功后再建会话。
-- **串行约束**：同一机器人 P1 串行执行（workdir 共享工位，避免并行互踩；与智能体状态模型天然一致）。P2 如需并行，按 `{workdir}/{taskId}/` 或 worktree 再隔离。
+- **并行约束**：同一 AI 机器人按 `workers.maxParallelTasks`（默认 3，1 即串行）并行执行任务；同一工位目录共享，任务间存在产物互踩风险。后续拟按 `{workdir}/{taskId}/` 或 worktree 做任务级隔离。
 
 ---
 

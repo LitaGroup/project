@@ -9,13 +9,9 @@ import { runOpencodePrompt } from '../executors/opencode-run';
 import { Worker } from '../workers/worker.entity';
 import { agentTokenShell } from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
-import {
-  nextInboxRetryDelay,
-  TASK_INBOX_MAX_ATTEMPTS,
-} from './task-loop.rules';
+import { nextInboxRetryDelay } from './task-loop.rules';
 import { TaskMessage } from './task-message.entity';
 import { Task } from './task.entity';
-import { TaskNotifyService } from './task-notify.service';
 import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
 import { TasksService } from './tasks.service';
@@ -49,7 +45,7 @@ function payloadText(value: unknown): string {
  * 根任务机器人需求方消息回复：
  * 根任务没有父任务会话可唤醒，平台使用需求方机器人自己的执行器创建一次性会话，
  * 读取最近对话并调用 messages/reply.md 回复执行方，不改变任务状态。
- * 会话结束仍未回复时按收件箱退避重试，连续超过阈值后通知负责人转人工处理。
+ * 会话结束仍未回复时按收件箱退避持续重试，不转移任务需求方或执行方。
  * 子任务仍由父任务收件箱唤醒其执行机器人，不走本服务。
  */
 @Injectable()
@@ -57,7 +53,7 @@ export class TaskRequesterReplyService {
   private readonly logger = new Logger(TaskRequesterReplyService.name);
   /** 正在生成需求方回复的任务 */
   private readonly activeTasks = new Set<number>();
-  /** 正在被回复会话占用的需求方机器人（同一机器人一次只处理一个任务） */
+  /** 正在被回复会话占用的需求方机器人（同一机器人同一时刻只运行一个一次性会话） */
   private readonly activeWorkers = new Set<number>();
   private readonly apiUrl: string;
 
@@ -72,7 +68,6 @@ export class TaskRequesterReplyService {
     private readonly workers: Repository<Worker>,
     private readonly workersService: WorkersService,
     private readonly tasksService: TasksService,
-    private readonly taskNotify: TaskNotifyService,
     private readonly workerInbox: TaskWorkerInboxService,
     config: ConfigService,
   ) {
@@ -87,7 +82,7 @@ export class TaskRequesterReplyService {
 
   /**
    * 尝试回复一条根任务执行方消息。
-   * 返回 false 表示本次未完成（机器人不可用、忙碌、会话未调用回复接口等）。
+   * 返回 false 表示本次未完成（机器人不可用、同一机器人已有一次性会话在运行、会话未调用回复接口等）。
    */
   async reply(task: Task, entry: TaskWorkerInbox): Promise<boolean> {
     if (this.activeTasks.has(task.id)) return false;
@@ -318,8 +313,7 @@ export class TaskRequesterReplyService {
   }
 
   /**
-   * 记录一次未完成并退避；达到上限后关闭事件并通知需求方机器人负责人。
-   * 先 markDead 再通知，避免下一轮 LOOP 立即重复启动会话。
+   * 记录一次未完成并退避；事件保持开放并持续重试，不转人工。
    */
   private async recordNotReplied(
     task: Task,
@@ -329,31 +323,6 @@ export class TaskRequesterReplyService {
   ): Promise<void> {
     const count = (entry.attempts ?? 0) + 1;
     const workerLabel = worker ? `「${worker.name}」` : '';
-    if (count >= TASK_INBOX_MAX_ATTEMPTS) {
-      await this.workerInbox.markDead(entry.id);
-      await this.tasksService.addEvent(
-        task.id,
-        '系统',
-        `需求方机器人${workerLabel}连续 ${count} 次未能回复执行方消息，已转负责人人工处理：${reason}`,
-        null,
-        {
-          autoReply: true,
-          autoReplyFailed: true,
-          attempt: count,
-          workerId: worker?.id ?? task.requesterId,
-          error: reason,
-        },
-      );
-      await this.taskNotify.notifyTaskRequester(
-        task,
-        'notice',
-        `任务消息待回复：${task.code} ${task.title}`,
-        `需求方机器人${workerLabel}连续 ${count} 次未能回复执行方消息，已转负责人人工处理。`,
-        { fallbackToRequesterOwner: true },
-      );
-      return;
-    }
-
     const delay = nextInboxRetryDelay(entry.attempts ?? 0);
     await this.workerInbox.defer(
       entry.id,
@@ -363,10 +332,11 @@ export class TaskRequesterReplyService {
     await this.tasksService.addEvent(
       task.id,
       '系统',
-      `需求方机器人${workerLabel}自动回复未完成（第 ${count} 次），将在 ${Math.round(delay / 60_000)} 分钟后重试：${reason}`,
+      `需求方机器人${workerLabel}自动回复未完成，将在 ${Math.round(delay / 60_000)} 分钟后继续重试：${reason}`,
       null,
       {
         autoReply: true,
+        autoReplyFailed: true,
         attempt: count,
         workerId: worker?.id ?? task.requesterId,
         error: reason,

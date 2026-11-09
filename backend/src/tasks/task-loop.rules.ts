@@ -11,10 +11,7 @@ export const TASK_REMIND_TIMEOUT_MS =
 /** 子任务事件超过该时间仍未消费，视为陈旧并由 LOOP 主动恢复 */
 export const TASK_INBOX_STALE_MS = 60 * 1000;
 
-/** 主动唤醒达到该次数仍未通过动作接口处理，转人工需求方，避免无限循环 */
-export const TASK_INBOX_MAX_ATTEMPTS = 3;
-
-/** 每次主动唤醒失败后的退避间隔（按已尝试次数取） */
+/** 每次主动唤醒失败后的退避间隔（按已尝试次数取，达到上限后保持最长间隔继续重试） */
 export const TASK_INBOX_RETRY_DELAYS_MS = [
   2 * 60_000,
   10 * 60_000,

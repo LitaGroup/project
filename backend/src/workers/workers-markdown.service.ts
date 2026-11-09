@@ -44,17 +44,17 @@ export class WorkersMarkdownService {
       '',
       `共 ${workers.length} 个机器人${filter?.role ? `（角色：${filter.role}）` : ''}。`,
       '',
-      '| ID | 名称 | 归属 | 角色 | 运行时 | GitHub 权限 | 资源权限 | 实时状态 | 启用 | 执行器 | 模型 | 负责人 | 当前任务 |',
-      '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| ID | 名称 | 归属 | 角色 | 运行时 | GitHub 权限 | 资源权限 | 并行上限 | 实时状态 | 启用 | 执行器 | 模型 | 负责人 | 当前任务 |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ];
     for (const worker of workers) {
       lines.push(
-        `| [${worker.id}](/api/workers/${worker.id}.md) | ${markdownCell(worker.name)} | ${this.workerKind(worker)} | ${worker.role} | ${worker.runtime} | ${this.githubPermissionLabel(worker.githubPermission)} | ${this.resourcePermissionLabel(worker.resourcePermission)} | ${worker.liveStatus} | ${worker.enabled ? '是' : '否'} | ${worker.executorId ?? '-'} | ${markdownCell(worker.modelId)} | ${markdownCell(worker.ownerName)} | ${markdownCell(this.activeTaskLabel(worker))} |`,
+        `| [${worker.id}](/api/workers/${worker.id}.md) | ${markdownCell(worker.name)} | ${this.workerKind(worker)} | ${worker.role} | ${worker.runtime} | ${this.githubPermissionLabel(worker.githubPermission)} | ${this.resourcePermissionLabel(worker.resourcePermission)} | ${worker.humanUserId ? '不限' : worker.maxParallelTasks} | ${worker.liveStatus} | ${worker.enabled ? '是' : '否'} | ${worker.executorId ?? '-'} | ${markdownCell(worker.modelId)} | ${markdownCell(worker.ownerName)} | ${markdownCell(this.activeTaskLabel(worker))} |`,
       );
     }
     if (workers.length === 0) {
       lines.push(
-        '| - | （暂无机器人） | - | - | - | - | - | - | - | - | - | - | - |',
+        '| - | （暂无机器人） | - | - | - | - | - | - | - | - | - | - | - | - |',
       );
     }
     lines.push(
@@ -86,6 +86,7 @@ export class WorkersMarkdownService {
       `- 运行时：${worker.runtime}`,
       `- GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}`,
       `- 资源权限：${this.resourcePermissionLabel(worker.resourcePermission)}`,
+      `- 并行上限：${worker.humanUserId ? '不限（真人可并行）' : worker.maxParallelTasks}`,
       `- 启用：${worker.enabled ? '是' : '否'}`,
       `- 实时状态：${worker.liveStatus}`,
       `- 当前任务：${this.activeTaskLabel(worker)}`,
@@ -233,6 +234,7 @@ export class WorkersMarkdownService {
       `- 运行时：${worker.runtime}`,
       `- GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}`,
       `- 资源权限：${this.resourcePermissionLabel(worker.resourcePermission)}`,
+      `- 并行上限：${worker.humanUserId ? '不限（真人可并行）' : worker.maxParallelTasks}`,
       `- 启用：${worker.enabled ? '是' : '否'}`,
       `- 执行器：${worker.executorId ?? '—'}`,
       `- 供应商：${worker.providerId ?? '—'}`,

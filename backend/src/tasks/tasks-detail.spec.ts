@@ -48,7 +48,6 @@ describe('TasksService 任务详情与对话', () => {
     addEvent: jest.Mock;
     continueConversation: jest.Mock;
     interrupt: jest.Mock;
-    discardQueuedConversations: jest.Mock;
   };
   let service: TasksService;
 
@@ -75,7 +74,6 @@ describe('TasksService 任务详情与对话', () => {
       addEvent: jest.fn().mockResolvedValue(undefined),
       continueConversation: jest.fn().mockResolvedValue(baseTask()),
       interrupt: jest.fn().mockResolvedValue(baseTask()),
-      discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
     };
     service = new TasksService(
       tasksRepo as never,
@@ -134,7 +132,7 @@ describe('TasksService 任务详情与对话', () => {
     expect(saved.resumePrompt).toBeNull();
   });
 
-  it('待申请验收收到补充消息后转入待继续，机器人空闲时恢复', async () => {
+  it('待申请验收收到补充消息后转入待继续，机器人仍有执行容量时恢复', async () => {
     tasksRepo.findOne.mockResolvedValue(
       baseTask({
         subStatus: TaskSubStatus.PENDING_APPLY,

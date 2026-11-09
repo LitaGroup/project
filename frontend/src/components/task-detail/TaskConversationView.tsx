@@ -20,7 +20,7 @@ const FOLLOW_BOTTOM_THRESHOLD = 24
 
 /**
  * 任务详情「会话」：只读、实时展示多方交互内容。
- * 不渲染输入框、发送队列、操作按钮、工具调用和思考过程；
+ * 不渲染输入框、操作按钮、工具调用和思考过程；
  * question 以普通时间线文本展示问题与回答结果，不使用交互式问答组件。
  */
 export function TaskConversationView({

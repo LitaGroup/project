@@ -61,7 +61,6 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     claimExecution: jest.Mock;
     addEvent: jest.Mock;
     destroyAcceptedSession: jest.Mock;
-    discardQueuedConversations: jest.Mock;
     notifyRequesterWorkerMessage: jest.Mock;
   };
   let taskChat: { postAssistantMessage: jest.Mock };
@@ -142,7 +141,6 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
       ),
       addEvent: jest.fn().mockResolvedValue(undefined),
       destroyAcceptedSession: jest.fn().mockResolvedValue(undefined),
-      discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
       notifyRequesterWorkerMessage: jest.fn().mockResolvedValue(undefined),
     };
     taskChat = {
@@ -330,7 +328,6 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
 
     expect(tasksService.accept).toHaveBeenCalledWith(1, '前端工程师');
     expect(workerInbox.completeForChild).toHaveBeenCalledWith(1, 'handoff');
-    expect(dispatchService.discardQueuedConversations).toHaveBeenCalledWith(1);
     expect(handoffService.request).toHaveBeenCalledWith(1);
     expect(dispatchService.destroyAcceptedSession).toHaveBeenCalledWith(1);
   });
@@ -427,7 +424,7 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     expect(md).toContain('- 累计验收不通过：1 次');
   });
 
-  it('机器人忙碌时验收返工进入待继续，不并行执行', async () => {
+  it('执行容量已满时验收返工进入待继续，不并行执行', async () => {
     tasksRepo.findOne.mockResolvedValue(baseTask());
     dispatchService.claimExecution.mockResolvedValue(null);
 
@@ -442,7 +439,7 @@ describe('TaskDeliveryService 验收 Agent 接口', () => {
     expect(dispatchService.addEvent).toHaveBeenCalledWith(
       1,
       '操作',
-      '需求方拒绝验收（累计 1 次），机器人忙碌，已转入等待中-待继续',
+      '需求方拒绝验收（累计 1 次），机器人执行中任务已达并行上限，已转入等待中-待继续',
       '张三',
       expect.objectContaining({ queued: true }),
     );

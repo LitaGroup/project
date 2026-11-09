@@ -46,7 +46,6 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
   let dispatchService: {
     claimExecution: jest.Mock;
     destroyAcceptedSession: jest.Mock;
-    discardQueuedConversations: jest.Mock;
   };
   let tasksService: { addEvent: jest.Mock; create: jest.Mock };
   let taskChat: {
@@ -84,7 +83,6 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
         return Promise.resolve(task);
       }),
       destroyAcceptedSession: jest.fn().mockResolvedValue(undefined),
-      discardQueuedConversations: jest.fn().mockResolvedValue(undefined),
     };
     tasksService = {
       addEvent: jest.fn().mockResolvedValue(undefined),
@@ -139,7 +137,7 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
     );
   });
 
-  it('机器人忙碌时接受返回冲突，不改变等待状态', async () => {
+  it('机器人执行容量已满时接受返回冲突，不改变等待状态', async () => {
     dispatchService.claimExecution.mockResolvedValue(null);
 
     await expect(service.accept(1, worker)).rejects.toThrow(ConflictException);

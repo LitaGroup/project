@@ -4,7 +4,6 @@ import type {
   TaskChatPerspective,
   TaskChatQuestion,
   TaskChatSender,
-  TaskQueuedUserMessage,
 } from '../../lib/api'
 import { questionStatusLabel } from '../../lib/question'
 import { QuestionCard } from '../QuestionCard'
@@ -339,60 +338,5 @@ function QuestionBubble({
 function StreamingCaret() {
   return (
     <span className="ml-1 inline-block h-3.5 w-1 animate-pulse rounded-full bg-foreground-muted align-middle" />
-  )
-}
-
-/** 发送队列：机器人当前轮结束前，用户消息按顺序等待投递 */
-export function TaskChatQueuedMessages({
-  messages,
-  className = '',
-}: {
-  messages: TaskQueuedUserMessage[]
-  className?: string
-}) {
-  if (messages.length === 0) return null
-  return (
-    <div
-      className={`rounded-[var(--radius-md)] border border-border bg-background-subtle ${className}`}
-    >
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-[11px]">
-        <span className="font-medium text-foreground-emphasis">发送队列</span>
-        <span className="text-foreground-muted">
-          {messages.length} 条待发送
-        </span>
-      </div>
-      <ol className="max-h-36 overflow-y-auto px-3 py-2">
-        {messages.map((message, index) => (
-          <li
-            key={message.id}
-            className="flex gap-2 border-b border-border py-1.5 text-xs last:border-b-0 last:pb-0 first:pt-0"
-          >
-            <span className="mt-0.5 shrink-0 font-mono text-[10px] text-foreground-subtle">
-              {index + 1}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="whitespace-pre-wrap break-words leading-relaxed text-foreground-emphasis">
-                {message.content}
-              </p>
-              <p
-                className={`mt-1 text-[10px] ${
-                  message.error
-                    ? 'text-error-foreground'
-                    : message.status === 'sending'
-                      ? 'text-info-foreground'
-                      : 'text-foreground-muted'
-                }`}
-              >
-                {message.error
-                  ? `发送失败：${message.error}（保留在队列，下一次发送时重试）`
-                  : message.status === 'sending'
-                    ? '正在发送…'
-                    : '等待发送'}
-              </p>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </div>
   )
 }

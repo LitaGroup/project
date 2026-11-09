@@ -795,11 +795,6 @@ export class TasksService {
     }
     const children = await this.tasks.find({ where: { rootId: id } });
     const ids = children.map((c) => c.id);
-    await Promise.all(
-      [...new Set([id, ...ids])].map((taskId) =>
-        this.dispatchService.discardQueuedConversations(taskId),
-      ),
-    );
     await this.workerInbox.deleteForTasks([...new Set([id, ...ids])]);
     if (ids.length > 0) {
       await this.events.delete({ taskId: In(ids) });
@@ -817,7 +812,7 @@ export class TasksService {
 
   // ===== 等待中状态的人工动作 =====
 
-  /** 兼容旧提交入口：待反馈 → 待继续（LOOP 空闲后恢复执行） */
+  /** 兼容旧提交入口：待反馈 → 待继续（LOOP 在机器人仍有执行容量时恢复执行） */
   async requeueForIdentify(id: number, operator: string | null): Promise<Task> {
     const task = await this.mustFind(id);
     if (
@@ -981,7 +976,7 @@ export class TasksService {
       previousSubStatus === TaskSubStatus.PENDING_APPLY
     ) {
       // 已在等待机器人继续：补充消息并入恢复提示，机器人恢复时一并读取。
-      // 待申请验收收到新消息时转为待继续，机器人空闲后立即恢复原任务。
+      // 待申请验收收到新消息时转为待继续，机器人仍有执行容量后立即恢复原任务。
       task.subStatus = TaskSubStatus.PENDING_RESUME;
       task.resumePrompt = [
         task.resumePrompt?.trim(),
@@ -1190,7 +1185,6 @@ export class TasksService {
     task.subStatus = TaskSubStatus.CANCELED;
     task.canceledAt = new Date();
     const saved = await this.tasks.save(task);
-    await this.dispatchService.discardQueuedConversations(task.id);
     await this.workerInbox.completeForChild(task.id);
     await this.addEvent(
       task.id,

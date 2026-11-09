@@ -2,18 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TaskStatus, WorkerRole, WorkerRuntime } from '../common/enums';
+import { WorkerRole, WorkerRuntime } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
 import { runOpencodePrompt } from '../executors/opencode-run';
-import { FeishuService } from '../feishu/feishu.service';
 import { Worker } from '../workers/worker.entity';
 import { agentTokenShell } from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
-import {
-  nextInboxRetryDelay,
-  TASK_INBOX_MAX_ATTEMPTS,
-} from './task-loop.rules';
+import { nextInboxRetryDelay } from './task-loop.rules';
 import { Task } from './task.entity';
 import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
@@ -126,8 +122,9 @@ export function releaseNotificationPrompt(
 /**
  * 提测状态变化通知：
  * ReleasesService 把 release 事件写入机器人收件箱，LOOP 在这里消费。
- * 事件不改变原任务状态；机器人忙碌时等待空闲，空闲后用其执行器创建一次性会话。
- * 会话正常结束即视为送达并关闭事件；失败按收件箱退避重试，超限转负责人。
+ * 事件不改变原任务状态；不占用任务的执行容量，收到事件即用其执行器创建一次性会话
+ * （进程内按机器人防重入）。
+ * 会话正常结束即视为送达并关闭事件；失败按收件箱退避持续重试，不转移任务身份。
  */
 @Injectable()
 export class TaskReleaseNotificationService {
@@ -135,7 +132,6 @@ export class TaskReleaseNotificationService {
   /** 正在被一次性提测通知占用的机器人 */
   private readonly activeWorkers = new Set<number>();
   private readonly apiUrl: string;
-  private readonly appUrl: string;
 
   constructor(
     @InjectRepository(Task)
@@ -146,14 +142,10 @@ export class TaskReleaseNotificationService {
     private readonly workers: Repository<Worker>,
     private readonly workersService: WorkersService,
     private readonly workerInbox: TaskWorkerInboxService,
-    private readonly feishu: FeishuService,
     config: ConfigService,
   ) {
     this.apiUrl = (
       config.get<string>('API_URL') ?? 'http://localhost:3100/api'
-    ).replace(/\/+$/, '');
-    this.appUrl = (
-      config.get<string>('APP_URL') ?? 'http://localhost:5273'
     ).replace(/\/+$/, '');
   }
 
@@ -178,8 +170,6 @@ export class TaskReleaseNotificationService {
       await this.workerInbox.markDone(entry.id);
       return;
     }
-    if (await this.isWorkerBusy(entry.workerId)) return;
-
     const endpoint = await this.resolveEndpoint(worker);
     if (!endpoint) {
       await this.recordFailure(entry, worker, '机器人执行器离线或缺少可用模型');
@@ -236,13 +226,6 @@ export class TaskReleaseNotificationService {
     }
   }
 
-  /** AI 机器人单执行互斥：有执行中任务时保持收件箱 pending，空闲后再唤醒。 */
-  private async isWorkerBusy(workerId: number): Promise<boolean> {
-    return this.tasks.exists({
-      where: { agentId: workerId, status: TaskStatus.RUNNING },
-    });
-  }
-
   private async loadSourceTask(entry: TaskWorkerInbox): Promise<Task | null> {
     const taskId = Number(entry.childTaskId ?? 0);
     if (!Number.isInteger(taskId) || taskId <= 0) return null;
@@ -296,78 +279,21 @@ export class TaskReleaseNotificationService {
     };
   }
 
-  /** 记录一次失败并退避；达到上限后关闭事件并通知机器人负责人。 */
+  /** 记录一次失败并退避；事件保持开放并持续重试，不转移任务身份。 */
   private async recordFailure(
     entry: TaskWorkerInbox,
     worker: Worker,
     reason: string,
   ): Promise<void> {
-    const count = (entry.attempts ?? 0) + 1;
-    this.logger.warn(
-      `提测通知 #${entry.id} 处理失败（第 ${count} 次）：${reason}`,
-    );
-    if (count >= TASK_INBOX_MAX_ATTEMPTS) {
-      await this.workerInbox.markDead(entry.id);
-      await this.notifyOwner(worker, entry, count, reason);
-      return;
-    }
+    this.logger.warn(`提测通知 #${entry.id} 处理失败：${reason}`);
     await this.workerInbox.defer(
       entry.id,
       new Date(Date.now() + nextInboxRetryDelay(entry.attempts ?? 0)),
       reason,
     );
-  }
-
-  private async notifyOwner(
-    worker: Worker,
-    entry: TaskWorkerInbox,
-    attempts: number,
-    reason: string,
-  ): Promise<void> {
-    const openId = await this.workersService.ownerOpenId(worker);
-    if (!openId) return;
-    const payload = entry.payload ?? {};
-    const projectId = Number(payload.projectId ?? 0);
-    const projectName = payloadText(payload, 'projectName') || `#${projectId}`;
-    const status = `${payloadText(payload, 'fromStatus')} → ${payloadText(payload, 'toStatus')}`;
-    try {
-      await this.feishu.sendUserCard(openId, {
-        config: { wide_screen_mode: true },
-        header: {
-          title: { tag: 'plain_text', content: '提测通知处理失败' },
-          template: 'orange',
-        },
-        elements: [
-          {
-            tag: 'div',
-            text: {
-              tag: 'lark_md',
-              content: [
-                `**机器人**：${worker.name}`,
-                `**项目**：${projectName}`,
-                `**提测状态**：${status}`,
-                `**说明**：连续 ${attempts} 次未能处理提测状态通知，已转人工：${reason}`,
-              ].join('\n'),
-            },
-          },
-          {
-            tag: 'action',
-            actions: [
-              {
-                tag: 'button',
-                text: { tag: 'plain_text', content: '打开项目' },
-                type: 'primary',
-                url: `${this.appUrl}/projects/${projectId}`,
-              },
-            ],
-          },
-        ],
-      });
-    } catch (error) {
+    if (worker.ownerName) {
       this.logger.warn(
-        `提测通知负责人消息发送失败（${worker.ownerName ?? worker.name}）：${
-          (error as Error).message
-        }`,
+        `提测通知 #${entry.id} 将继续重试（机器人负责人：${worker.ownerName}）`,
       );
     }
   }

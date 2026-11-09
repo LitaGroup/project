@@ -35,8 +35,6 @@ describe('TaskDispatchService 显式申请验收', () => {
     failTask: jest.Mock;
     finishTask: jest.Mock;
     isRunning: jest.Mock;
-    hasQueuedUserMessages: jest.Mock;
-    queuedUserMessages: jest.Mock;
   };
   let taskNotify: {
     notifyTaskRequester: jest.Mock;
@@ -77,8 +75,6 @@ describe('TaskDispatchService 显式申请验收', () => {
       failTask: jest.fn().mockResolvedValue(undefined),
       finishTask: jest.fn().mockResolvedValue(undefined),
       isRunning: jest.fn().mockReturnValue(false),
-      hasQueuedUserMessages: jest.fn().mockReturnValue(false),
-      queuedUserMessages: jest.fn().mockReturnValue([]),
     };
     taskNotify = {
       notifyTaskRequester: jest.fn().mockResolvedValue({ sent: true }),
@@ -399,8 +395,9 @@ describe('TaskDispatchService 显式申请验收', () => {
     );
   });
 
-  it('多次催办仍未申请验收时通知负责人且不代替验收', async () => {
+  it('历史催办次数超过旧阈值后仍继续唤醒机器人，不代替验收', async () => {
     const task = baseTask();
+    tasksRepo.findOne.mockResolvedValue(task);
     const internals = service as unknown as {
       applyReminders: Map<
         number,
@@ -410,20 +407,31 @@ describe('TaskDispatchService 显式申请验收', () => {
     };
     internals.applyReminders.set(1, {
       firstAt: Date.now() - 60 * 60_000,
-      attempts: 3,
+      attempts: 20,
       nextAt: Date.now() - 1,
     });
 
     await internals.remindAcceptanceApply(task);
 
-    expect(tasksRepo.update).not.toHaveBeenCalled();
-    expect(task.status).toBe(TaskStatus.RUNNING);
+    expect(task.status).toBe(TaskStatus.WAITING);
+    expect(task.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
+    expect(tasksRepo.update).toHaveBeenCalledWith(
+      {
+        id: 1,
+        status: TaskStatus.RUNNING,
+        subStatus: TaskSubStatus.EXECUTING,
+      },
+      expect.objectContaining({
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_RESUME,
+      }),
+    );
     expect(taskNotify.notifyTaskRequester).not.toHaveBeenCalled();
     expect(eventsRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining('仍未申请验收') as string,
+        content: expect.stringContaining('第 21 次重新唤醒') as string,
         meta: expect.objectContaining({
-          reason: 'acceptance-apply-escalated',
+          reason: 'acceptance-apply-missing',
         }) as unknown,
       }),
     );
@@ -511,23 +519,6 @@ describe('TaskDispatchService 显式申请验收', () => {
       }),
     );
     expect(taskNotify.notifyTaskRequester).not.toHaveBeenCalled();
-  });
-
-  it('本轮仍有同一任务的排队消息时保持执行中，优先处理队列', async () => {
-    const task = baseTask();
-    tasksRepo.findOne.mockResolvedValue(task);
-    taskChat.hasQueuedUserMessages.mockReturnValue(true);
-
-    await (
-      service as unknown as {
-        finalizeSuccess(taskId: number): Promise<void>;
-      }
-    ).finalizeSuccess(1);
-
-    expect(task.status).toBe(TaskStatus.RUNNING);
-    expect(task.subStatus).toBe(TaskSubStatus.EXECUTING);
-    expect(taskChat.finishTask).toHaveBeenCalledWith(1);
-    expect(eventsRepo.save).not.toHaveBeenCalled();
   });
 
   it('待申请验收任务仍可由执行机器人申请验收', async () => {

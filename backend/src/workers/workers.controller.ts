@@ -63,6 +63,7 @@ class CreateWorkerDto implements CreateWorkerInput {
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
   resourcePermission?: WorkerResourcePermission;
+  maxParallelTasks?: number;
 }
 
 class UpdateWorkerDto implements UpdateWorkerInput {
@@ -83,6 +84,7 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
   resourcePermission?: WorkerResourcePermission;
+  maxParallelTasks?: number;
 }
 
 class OptimizePromptDto implements OptimizePromptInput {
@@ -108,6 +110,10 @@ export interface WorkerLiveCard {
   ownerName: string | null;
   liveStatus: WorkerLiveStatus;
   activeTask: WorkerView['activeTask'];
+  /** 当前执行中的任务数 */
+  executingCount: number;
+  /** 并行执行上限（仅 AI 机器人生效） */
+  maxParallelTasks: number;
   workdir: string | null;
   /** 系统机器人（id < 1000，代码内置） */
   system: boolean;
@@ -166,6 +172,8 @@ export class WorkersController {
         ownerName: w.ownerName,
         liveStatus: w.liveStatus,
         activeTask: w.activeTask,
+        executingCount: w.executingCount,
+        maxParallelTasks: w.maxParallelTasks,
         workdir: w.workdir,
         system: w.system,
       })),

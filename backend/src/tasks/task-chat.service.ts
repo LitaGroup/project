@@ -27,7 +27,6 @@ import type {
   TaskChatStreamMessage,
   TaskChatTool,
   TaskPipelineStage,
-  TaskQueuedUserMessage,
 } from './task-chat.types';
 import type { TaskRealtimeEvent } from './task-realtime.service';
 import { TaskRealtimeService } from './task-realtime.service';
@@ -39,7 +38,7 @@ interface InternalChatMessage extends TaskChatMessage {
 
 interface InternalStreamEvent {
   rootTaskId: number;
-  /** 事件所属任务：消息与队列只推送给当前任务，避免串入父子任务会话 */
+  /** 事件所属任务：消息只推送给当前任务，避免串入父子任务会话 */
   taskId: number;
   event: TaskChatStreamMessage;
 }
@@ -95,12 +94,6 @@ export class TaskChatService implements OnModuleDestroy {
   /** taskId → rootTaskId（rootId 不会变化，可长期缓存） */
   private readonly rootCache = new Map<number, number>();
 
-  /** taskId → 等待投递给机器人的用户消息（FIFO） */
-  private readonly queuedUsers = new Map<number, TaskQueuedUserMessage[]>();
-
-  /** 队列消息 id → 实际发给模型的 Prompt（展示内容保持用户原始输入） */
-  private readonly queuedPrompts = new Map<string, string>();
-
   constructor(
     @InjectRepository(Task)
     private readonly tasks: Repository<Task>,
@@ -119,8 +112,6 @@ export class TaskChatService implements OnModuleDestroy {
     for (const timer of this.flushTimers.values()) clearTimeout(timer);
     this.flushTimers.clear();
     this.creating.clear();
-    this.queuedUsers.clear();
-    this.queuedPrompts.clear();
     this.subject.complete();
   }
 
@@ -341,7 +332,6 @@ export class TaskChatService implements OnModuleDestroy {
       rootTask,
       pipeline,
       messages: entries.map((item) => item.message),
-      queuedMessages: this.queuedUserMessages(task.id),
       requesterName: requester?.name ?? null,
       agentOwnerName: agent?.ownerName ?? null,
       interventionCount: currentEvents.filter(
@@ -380,15 +370,11 @@ export class TaskChatService implements OnModuleDestroy {
           send({ type: 'ready', at: Date.now() });
           chatSub = this.subject
             .pipe(
-              filter((item) => {
-                const taskScoped =
-                  item.event.type === 'message.upsert' ||
-                  item.event.type === 'queue.upsert' ||
-                  item.event.type === 'queue.delete';
-                return taskScoped
+              filter((item) =>
+                item.event.type === 'message.upsert'
                   ? item.taskId === taskId
-                  : item.rootTaskId === rootId;
-              }),
+                  : item.rootTaskId === rootId,
+              ),
             )
             .subscribe({
               next: (item) => send(item.event),
@@ -485,141 +471,6 @@ export class TaskChatService implements OnModuleDestroy {
   /** 当前任务是否有机器人在回复（用于续聊并发保护） */
   isRunning(taskId: number): boolean {
     return this.activeMessage(taskId)?.status === 'running';
-  }
-
-  /** 当前任务的待发送消息（副本，避免调用方直接修改进程内队列） */
-  queuedUserMessages(taskId: number): TaskQueuedUserMessage[] {
-    return (this.queuedUsers.get(taskId) ?? []).map((message) => ({
-      ...message,
-      sender: { ...message.sender },
-    }));
-  }
-
-  hasQueuedUserMessages(taskId: number): boolean {
-    return (this.queuedUsers.get(taskId)?.length ?? 0) > 0;
-  }
-
-  /** 入队一条执行中的用户消息；opencode 接受后再落任务事件并移出队列 */
-  async enqueueUserMessage(
-    taskId: number,
-    content: string,
-    operator: string | null,
-    prompt?: string,
-    perspective: TaskChatPerspective = 'requester',
-  ): Promise<TaskQueuedUserMessage> {
-    const text = content.trim();
-    if (!text) throw new BadRequestException('消息内容不能为空');
-    const message: TaskQueuedUserMessage = {
-      id: `queue:${taskId}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
-      taskId,
-      sender: this.userSender(
-        operator,
-        perspective === 'responsible' ? '执行方' : '需求方',
-      ),
-      perspective,
-      content: text,
-      createdAt: new Date().toISOString(),
-      status: 'queued',
-    };
-    const modelText = prompt?.trim();
-    if (modelText && modelText !== text) {
-      this.queuedPrompts.set(message.id, modelText);
-    }
-    const queue = this.queuedUsers.get(taskId) ?? [];
-    queue.push(message);
-    this.queuedUsers.set(taskId, queue);
-    await this.broadcastQueueMessage(message);
-    return { ...message, sender: { ...message.sender } };
-  }
-
-  /** 标记队首正在投递；失败时由 restore 恢复为 queued */
-  async markQueuedUserMessageSending(
-    taskId: number,
-    messageId: string,
-  ): Promise<TaskQueuedUserMessage | null> {
-    const message = (this.queuedUsers.get(taskId) ?? []).find(
-      (item) => item.id === messageId,
-    );
-    if (!message) return null;
-    message.status = 'sending';
-    delete message.error;
-    await this.broadcastQueueMessage(message);
-    return { ...message, sender: { ...message.sender } };
-  }
-
-  /** 投递失败：恢复队首状态并记录原因，等待下次触发 */
-  async restoreQueuedUserMessage(
-    taskId: number,
-    messageId: string,
-    error: string,
-  ): Promise<void> {
-    const message = (this.queuedUsers.get(taskId) ?? []).find(
-      (item) => item.id === messageId,
-    );
-    if (!message) return;
-    message.status = 'queued';
-    message.error = error;
-    await this.broadcastQueueMessage(message);
-  }
-
-  /** 队列消息实际发给模型的 Prompt（未单独指定时由调用方回退展示内容） */
-  queuedUserMessagePrompt(taskId: number, messageId: string): string | null {
-    const exists = (this.queuedUsers.get(taskId) ?? []).some(
-      (message) => message.id === messageId,
-    );
-    return exists ? (this.queuedPrompts.get(messageId) ?? null) : null;
-  }
-
-  /** opencode 已接受：移出队列（随后任务事件会生成正式用户气泡） */
-  async removeQueuedUserMessage(
-    taskId: number,
-    messageId: string,
-  ): Promise<void> {
-    const queue = this.queuedUsers.get(taskId) ?? [];
-    const next = queue.filter((message) => message.id !== messageId);
-    if (next.length === 0) this.queuedUsers.delete(taskId);
-    else this.queuedUsers.set(taskId, next);
-    this.queuedPrompts.delete(messageId);
-    await this.broadcastQueueDelete(taskId, [messageId]);
-  }
-
-  /** 清空任务队列（取消/删除等不再继续发送的场景） */
-  async discardQueuedUserMessages(taskId: number): Promise<void> {
-    const queue = this.queuedUsers.get(taskId) ?? [];
-    if (queue.length === 0) return;
-    this.queuedUsers.delete(taskId);
-    for (const message of queue) this.queuedPrompts.delete(message.id);
-    await this.broadcastQueueDelete(
-      taskId,
-      queue.map((message) => message.id),
-    );
-  }
-
-  private async broadcastQueueMessage(
-    message: TaskQueuedUserMessage,
-  ): Promise<void> {
-    const rootTaskId = await this.rootIdOf(message.taskId);
-    this.subject.next({
-      rootTaskId,
-      taskId: message.taskId,
-      event: {
-        type: 'queue.upsert',
-        message: { ...message, sender: { ...message.sender } },
-        at: Date.now(),
-      },
-    });
-  }
-
-  private async broadcastQueueDelete(
-    taskId: number,
-    ids: string[],
-  ): Promise<void> {
-    const rootTaskId = await this.rootIdOf(taskId);
-    this.subject.next({
-      rootTaskId,
-      taskId,
-      event: { type: 'queue.delete', ids, at: Date.now() },
-    });
   }
 
   /**

@@ -701,7 +701,7 @@ export class TasksController {
     );
   }
 
-  /** 验收不通过：累计计数并始终退回原执行机器人（忙碌时进入待继续）。 */
+  /** 验收不通过：累计计数并始终退回原执行机器人（执行容量已满时进入待继续）。 */
   @Post(':id/reject')
   async reject(
     @Param('id', ParseIntPipe) id: number,

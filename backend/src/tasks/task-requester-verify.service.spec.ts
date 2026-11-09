@@ -52,7 +52,6 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
   let executors: { findOne: jest.Mock };
   let workers: { findOne: jest.Mock };
   let tasksService: { addEvent: jest.Mock };
-  let taskNotify: { notifyTaskRequester: jest.Mock };
   let service: TaskRequesterVerifyService;
 
   beforeEach(() => {
@@ -67,9 +66,6 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
     };
     workers = { findOne: jest.fn().mockResolvedValue(requester) };
     tasksService = { addEvent: jest.fn().mockResolvedValue(undefined) };
-    taskNotify = {
-      notifyTaskRequester: jest.fn().mockResolvedValue({ sent: true }),
-    };
     service = new TaskRequesterVerifyService(
       tasks as never,
       executors as never,
@@ -79,7 +75,6 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
         workdirOf: jest.fn().mockReturnValue('/tmp/worker-1002'),
       } as never,
       tasksService as never,
-      taskNotify as never,
       {
         get: jest.fn().mockReturnValue('http://api.example/api'),
       } as never,
@@ -131,10 +126,9 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
     );
     expect(deleteSession).toHaveBeenCalledWith('verify-session');
     expect(tasksService.addEvent).not.toHaveBeenCalled();
-    expect(service.canVerify(53)).toBe(true);
   });
 
-  it('会话结束仍未推进验收时记录失败，超过 3 次通知负责人', async () => {
+  it('会话结束仍未推进验收时持续重试，不转人工', async () => {
     jest
       .spyOn(opencodeRun, 'runOpencodePrompt')
       .mockResolvedValue('我认为可以验收');
@@ -143,33 +137,18 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
       .spyOn(OpencodeClient.prototype, 'deleteSession')
       .mockResolvedValue(undefined);
 
-    await expect(service.verify(task())).resolves.toBe(false);
-    expect(tasksService.addEvent).toHaveBeenCalledWith(
+    for (let index = 0; index < 5; index += 1) {
+      await expect(service.verify(task())).resolves.toBe(false);
+    }
+
+    expect(tasksService.addEvent).toHaveBeenCalledTimes(5);
+    expect(tasksService.addEvent).toHaveBeenLastCalledWith(
       53,
       '系统',
-      expect.stringContaining('自动验收未完成（第 1 次）'),
+      expect.stringContaining('将继续重试'),
       null,
-      expect.objectContaining({ autoVerify: true, attempt: 1 }),
+      expect.objectContaining({ autoVerify: true, workerId: 1002 }),
     );
-
-    await service.verify(task());
-    await service.verify(task());
-
-    expect(tasksService.addEvent).toHaveBeenCalledWith(
-      53,
-      '系统',
-      expect.stringContaining('自动验收未完成（第 3 次）'),
-      null,
-      expect.objectContaining({ attempt: 3 }),
-    );
-    expect(taskNotify.notifyTaskRequester).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 53 }),
-      'notice',
-      expect.stringContaining('任务待验收'),
-      expect.stringContaining('连续 3 次自动验收未推进'),
-      { fallbackToRequesterOwner: true },
-    );
-    expect(service.canVerify(53)).toBe(false);
   });
 
   it('子任务、非待验收状态和真人需求方不自动验收', async () => {
@@ -207,6 +186,5 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
 
     expect(run).not.toHaveBeenCalled();
     expect(tasksService.addEvent).not.toHaveBeenCalled();
-    expect(service.canVerify(53)).toBe(true);
   });
 });

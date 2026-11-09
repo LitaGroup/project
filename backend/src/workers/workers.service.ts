@@ -54,9 +54,24 @@ export interface CreateWorkerInput {
   enabled?: boolean;
   githubPermission?: WorkerGithubPermission;
   resourcePermission?: WorkerResourcePermission;
+  /** 并行执行上限（仅 AI 机器人；1 表示串行，默认 3） */
+  maxParallelTasks?: number;
 }
 
 export type UpdateWorkerInput = Partial<CreateWorkerInput>;
+
+/**
+ * 并行执行上限归一：仅接受 1-20 的整数；未传时默认 3，设 1 即恢复串行行为。
+ * 只约束 AI 机器人，真人机器人不受此限制。
+ */
+function normalizeMaxParallelTasks(value: unknown): number {
+  if (value === undefined || value === null || value === '') return 3;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) {
+    throw new BadRequestException('并行上限必须是 1-20 的整数');
+  }
+  return parsed;
+}
 
 /** 头像归一：仅接受 POST /api/images 上传后返回的 /images/... 路径，空值清除 */
 function normalizeAvatarUrl(value: string | null | undefined): string | null {
@@ -124,6 +139,8 @@ export interface WorkerView extends Worker {
     title: string;
     status: string;
   } | null;
+  /** 当前执行中的任务数（AI 机器人配合 maxParallelTasks 展示并行占用） */
+  executingCount: number;
   /** 已绑定独立飞书应用（头像角标用；配置未启用也标记为已配置） */
   feishuBound: boolean;
 }
@@ -273,13 +290,18 @@ export class WorkersService implements OnApplicationBootstrap {
     return token;
   }
 
-  /** 实时状态：只有进行中任务占用机器人；待接受/待反馈等待处理 > 空闲。待申请验收/待验收不占用机器人。 */
+  /** 实时状态：执行中按并行数展示；待接受/待反馈等待处理 > 空闲。待申请验收/待验收不占用执行容量。 */
   private async liveByWorker(
     workers: Worker[],
-  ): Promise<Map<number, { status: WorkerLiveStatus; task: Task | null }>> {
+  ): Promise<
+    Map<
+      number,
+      { status: WorkerLiveStatus; task: Task | null; executingCount: number }
+    >
+  > {
     const map = new Map<
       number,
-      { status: WorkerLiveStatus; task: Task | null }
+      { status: WorkerLiveStatus; task: Task | null; executingCount: number }
     >();
     if (workers.length === 0) return map;
     const ids = workers.map((w) => w.id);
@@ -307,6 +329,9 @@ export class WorkersService implements OnApplicationBootstrap {
         ].includes(t.subStatus),
       );
       const current = executing ?? accepting ?? waiting ?? null;
+      const executingCount = own.filter(
+        (t) => t.subStatus === TaskSubStatus.EXECUTING,
+      ).length;
       const status = executing
         ? WorkerLiveStatus.WORKING
         : accepting
@@ -314,14 +339,17 @@ export class WorkersService implements OnApplicationBootstrap {
           : waiting
             ? WorkerLiveStatus.WAITING
             : WorkerLiveStatus.IDLE;
-      map.set(worker.id, { status, task: current });
+      map.set(worker.id, { status, task: current, executingCount });
     }
     return map;
   }
 
   private toView(
     worker: Worker,
-    live: Map<number, { status: WorkerLiveStatus; task: Task | null }>,
+    live: Map<
+      number,
+      { status: WorkerLiveStatus; task: Task | null; executingCount: number }
+    >,
     feishuBound: Set<number> = new Set(),
   ): WorkerView {
     const entry = live.get(worker.id);
@@ -331,6 +359,7 @@ export class WorkersService implements OnApplicationBootstrap {
       workdir: this.workdirOf(worker.id),
       liveStatus: entry?.status ?? WorkerLiveStatus.IDLE,
       feishuBound: feishuBound.has(worker.id),
+      executingCount: entry?.executingCount ?? 0,
       activeTask: entry?.task
         ? {
             id: entry.task.id,
@@ -390,6 +419,7 @@ export class WorkersService implements OnApplicationBootstrap {
       enabled: input.enabled ?? true,
       githubPermission: normalizeGithubPermission(input.githubPermission),
       resourcePermission: normalizeResourcePermission(input.resourcePermission),
+      maxParallelTasks: normalizeMaxParallelTasks(input.maxParallelTasks),
     });
     await this.assertConfig(worker);
     await this.resolveOwner(worker, input.ownerUserId ?? null);
@@ -478,6 +508,11 @@ export class WorkersService implements OnApplicationBootstrap {
     if (input.resourcePermission !== undefined) {
       worker.resourcePermission = normalizeResourcePermission(
         input.resourcePermission,
+      );
+    }
+    if (input.maxParallelTasks !== undefined && !worker.humanUserId) {
+      worker.maxParallelTasks = normalizeMaxParallelTasks(
+        input.maxParallelTasks,
       );
     }
     await this.assertConfig(worker);

@@ -122,6 +122,8 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
     useState<WorkerGithubPermission>('develop')
   const [resourcePermission, setResourcePermission] =
     useState<WorkerResourcePermission>('none')
+  /** 并行执行上限（同一时刻可执行的任务数，1 表示串行） */
+  const [maxParallelTasks, setMaxParallelTasks] = useState('3')
   const [error, setError] = useState<string | null>(null)
   /** 配置已落库但工作环境初始化失败时的提示（重试保存不会再重复创建） */
   const [initError, setInitError] = useState<string | null>(null)
@@ -261,6 +263,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
         setEnabled(w.enabled)
         setGithubPermission(w.githubPermission ?? 'develop')
         setResourcePermission(w.resourcePermission ?? 'none')
+        setMaxParallelTasks(String(w.maxParallelTasks ?? 3))
       })
       .catch((e: Error) => setLoadError(e.message))
       .finally(() => {
@@ -435,7 +438,14 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       // 真人机器人与个人 AGENT 不提交权限字段；后端按默认值 / 原值维护
       ...(personal || worker?.runtime === 'human'
         ? {}
-        : { githubPermission, resourcePermission }),
+        : {
+            githubPermission,
+            resourcePermission,
+            maxParallelTasks: Math.min(
+              20,
+              Math.max(1, Math.trunc(Number(maxParallelTasks)) || 3),
+            ),
+          }),
     }
     let stage: 'save' | 'init' = 'save'
     setSaving(true)
@@ -905,6 +915,21 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
                   <span className="text-xs text-foreground-muted">
                     全部资源可访问所有 MySQL 资源；只读资源仅能访问标记为只读的资源。
                     默认无权限，GitHub 与资源权限相互独立。
+                  </span>
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  并行上限
+                  <Input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={maxParallelTasks}
+                    onChange={(e) => setMaxParallelTasks(e.target.value)}
+                    placeholder="3"
+                  />
+                  <span className="text-xs text-foreground-muted">
+                    同一时刻可执行的「进行中」任务数（1 表示串行，默认 3）。
+                    达到上限后新任务保持等待，等待状态不占用执行容量。
                   </span>
                 </label>
               </>

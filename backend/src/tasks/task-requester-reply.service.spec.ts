@@ -65,7 +65,6 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
   let executors: { findOne: jest.Mock };
   let workers: { findOne: jest.Mock };
   let tasksService: { addEvent: jest.Mock };
-  let taskNotify: { notifyTaskRequester: jest.Mock };
   let inbox: {
     markEventDelivered: jest.Mock;
     findById: jest.Mock;
@@ -97,9 +96,6 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
     };
     workers = { findOne: jest.fn().mockResolvedValue(requester) };
     tasksService = { addEvent: jest.fn().mockResolvedValue(undefined) };
-    taskNotify = {
-      notifyTaskRequester: jest.fn().mockResolvedValue({ sent: true }),
-    };
     inbox = {
       markEventDelivered: jest.fn().mockResolvedValue(true),
       findById: jest.fn().mockResolvedValue(entry({ status: 'done' })),
@@ -117,7 +113,6 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
         workdirOf: jest.fn().mockReturnValue('/tmp/worker-1002'),
       } as never,
       tasksService as never,
-      taskNotify as never,
       inbox as never,
       {
         get: jest.fn().mockReturnValue('http://api.example/api'),
@@ -168,7 +163,7 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
     expect(tasksService.addEvent).not.toHaveBeenCalled();
   });
 
-  it('会话结束未调用回复接口时退避重试，连续 3 次后转人工', async () => {
+  it('会话结束未调用回复接口时持续退避重试，不转人工', async () => {
     jest
       .spyOn(opencodeRun, 'runOpencodePrompt')
       .mockResolvedValue('只输出了文字');
@@ -178,29 +173,25 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
       .mockResolvedValue(undefined);
     inbox.findById.mockResolvedValue(entry({ status: 'delivered' }));
 
-    await expect(service.reply(task(), entry({ attempts: 0 }))).resolves.toBe(
-      false,
-    );
-    expect(inbox.defer).toHaveBeenCalledWith(
+    for (const attempts of [0, 1, 2, 20]) {
+      await expect(service.reply(task(), entry({ attempts }))).resolves.toBe(
+        false,
+      );
+    }
+
+    expect(inbox.defer).toHaveBeenCalledTimes(4);
+    expect(inbox.defer).toHaveBeenLastCalledWith(
       7,
       expect.any(Date),
       expect.stringContaining('未调用回复接口'),
     );
-
-    await expect(service.reply(task(), entry({ attempts: 1 }))).resolves.toBe(
-      false,
-    );
-    await expect(service.reply(task(), entry({ attempts: 2 }))).resolves.toBe(
-      false,
-    );
-
-    expect(inbox.markDead).toHaveBeenCalledWith(7);
-    expect(taskNotify.notifyTaskRequester).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 54 }),
-      'notice',
-      expect.stringContaining('任务消息待回复'),
-      expect.stringContaining('连续 3 次'),
-      { fallbackToRequesterOwner: true },
+    expect(inbox.markDead).not.toHaveBeenCalledWith(7);
+    expect(tasksService.addEvent).toHaveBeenCalledWith(
+      54,
+      '系统',
+      expect.stringContaining('继续重试'),
+      null,
+      expect.objectContaining({ autoReplyFailed: true }),
     );
   });
 

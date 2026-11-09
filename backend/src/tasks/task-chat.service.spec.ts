@@ -725,7 +725,7 @@ describe('TaskChatService 任务会话隔离', () => {
     });
   });
 
-  it('实时消息与队列只推送给所属任务，阶段刷新仍按任务树推送', async () => {
+  it('实时消息只推送给所属任务，阶段刷新仍按任务树推送', async () => {
     const service = createService();
     const subject = (service as unknown as { subject: Subject<unknown> })
       .subject;
@@ -766,16 +766,6 @@ describe('TaskChatService 任务会话隔离', () => {
     subject.next({
       rootTaskId: 34,
       taskId: 34,
-      event: { type: 'queue.delete', ids: ['queue:34'], at: Date.now() },
-    });
-    subject.next({
-      rootTaskId: 34,
-      taskId: 35,
-      event: { type: 'queue.delete', ids: ['queue:35'], at: Date.now() },
-    });
-    subject.next({
-      rootTaskId: 34,
-      taskId: 34,
       event: { type: 'refresh', at: Date.now() },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -792,127 +782,11 @@ describe('TaskChatService 任务会话隔离', () => {
         )
         .map((event) => event.message.taskId),
     ).toEqual([35]);
-    expect(
-      received.filter((event) => event.type === 'queue.delete'),
-    ).toMatchObject([{ type: 'queue.delete', ids: ['queue:35'] }]);
     expect(received.filter((event) => event.type === 'refresh')).toHaveLength(
       1,
     );
 
     subscription.unsubscribe();
     service.onModuleDestroy();
-  });
-});
-
-describe('TaskChatService 发送队列', () => {
-  const task = {
-    id: 7,
-    rootId: null,
-    agentId: null,
-    schedulerId: null,
-    createdById: null,
-    result: null,
-    description: '任务需求',
-    title: '任务标题',
-    createdAt: new Date('2026-10-27T10:00:00Z'),
-    updatedAt: new Date('2026-10-27T10:00:00Z'),
-  } as Task;
-
-  let service: TaskChatService;
-
-  beforeEach(() => {
-    service = new TaskChatService(
-      {
-        findOne: jest.fn().mockResolvedValue(task),
-        find: jest.fn().mockResolvedValue([]),
-      } as never,
-      { find: jest.fn().mockResolvedValue([]) } as never,
-      { find: jest.fn().mockResolvedValue([]) } as never,
-      { findOne: jest.fn().mockResolvedValue(null) } as never,
-      { findOne: jest.fn().mockResolvedValue(null) } as never,
-      {} as never,
-    );
-  });
-
-  it('排队消息保留需求方/执行方身份与标签', async () => {
-    const requester = await service.enqueueUserMessage(7, '补充需求', '张三');
-    const responsible = await service.enqueueUserMessage(
-      7,
-      '执行反馈',
-      '李四',
-      undefined,
-      'responsible',
-    );
-
-    expect(requester).toMatchObject({
-      perspective: 'requester',
-      sender: { name: '张三', roleLabel: '需求方' },
-    });
-    expect(responsible).toMatchObject({
-      perspective: 'responsible',
-      sender: { name: '李四', roleLabel: '执行方' },
-    });
-  });
-
-  it('按 FIFO 保存待发送消息，并支持发送中、失败恢复与移除', async () => {
-    const first = await service.enqueueUserMessage(7, '第一条', '张三');
-    const second = await service.enqueueUserMessage(7, '第二条', '张三');
-
-    expect(service.queuedUserMessages(7).map((item) => item.content)).toEqual([
-      '第一条',
-      '第二条',
-    ]);
-
-    await service.markQueuedUserMessageSending(7, first.id);
-    expect(service.queuedUserMessages(7)[0]).toMatchObject({
-      id: first.id,
-      status: 'sending',
-    });
-
-    await service.restoreQueuedUserMessage(7, first.id, '执行器离线');
-    expect(service.queuedUserMessages(7)[0]).toMatchObject({
-      id: first.id,
-      status: 'queued',
-      error: '执行器离线',
-    });
-
-    await service.removeQueuedUserMessage(7, first.id);
-    expect(service.queuedUserMessages(7)).toEqual([
-      expect.objectContaining({ id: second.id, content: '第二条' }),
-    ]);
-
-    await service.discardQueuedUserMessages(7);
-    expect(service.queuedUserMessages(7)).toEqual([]);
-  });
-
-  it('队列消息单独保存模型 Prompt，原始内容仍用于展示', async () => {
-    const message = await service.enqueueUserMessage(
-      7,
-      '请补充错误提示',
-      '张三',
-      '# 验收返工\n\n请补充错误提示\n\n必须重新申请验收',
-    );
-
-    expect(service.queuedUserMessages(7)[0].content).toBe('请补充错误提示');
-    expect(service.queuedUserMessagePrompt(7, message.id)).toContain(
-      '必须重新申请验收',
-    );
-
-    await service.discardQueuedUserMessages(7);
-    expect(service.queuedUserMessagePrompt(7, message.id)).toBeNull();
-  });
-
-  it('聊天快照包含当前任务的待发送队列', async () => {
-    await service.enqueueUserMessage(7, '刷新后仍要看到', '张三');
-
-    const snapshot = await service.snapshot(7);
-
-    expect(snapshot.queuedMessages).toEqual([
-      expect.objectContaining({
-        taskId: 7,
-        content: '刷新后仍要看到',
-        status: 'queued',
-      }),
-    ]);
   });
 });

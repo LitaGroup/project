@@ -22,10 +22,7 @@ import {
 import { useImeEnterGuard } from '../../lib/ime-enter'
 import { useAuth } from '../../context/AuthContext'
 import { TaskStatusBadge } from '../StatusBadge'
-import {
-  TaskChatMessageItem,
-  TaskChatQueuedMessages,
-} from './TaskChatMessages'
+import { TaskChatMessageItem } from './TaskChatMessages'
 import { toTaskChatThreadMessage } from './task-chat-message'
 import {
   ChatComposerDock,
@@ -109,13 +106,6 @@ export function TaskWorkbenchPanel({
   const activeMessages = useMemo(
     () =>
       activeChat?.messages.filter(
-        (message) => message.taskId === activeChat.task.id,
-      ) ?? [],
-    [activeChat],
-  )
-  const activeQueuedMessages = useMemo(
-    () =>
-      activeChat?.queuedMessages.filter(
         (message) => message.taskId === activeChat.task.id,
       ) ?? [],
     [activeChat],
@@ -350,10 +340,6 @@ export function TaskWorkbenchPanel({
           </AssistantRuntimeProvider>
 
           <ChatComposerDock>
-            <TaskChatQueuedMessages
-              messages={activeQueuedMessages}
-              className="mb-2"
-            />
             <ChatComposerFrame
               right={
                 <ChatSendButton

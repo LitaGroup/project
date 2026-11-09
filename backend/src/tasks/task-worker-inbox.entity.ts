@@ -53,7 +53,7 @@ export class TaskWorkerInbox {
   @Column({ type: 'varchar', length: 20, default: 'pending' })
   status: TaskWorkerInboxStatus;
 
-  /** 已尝试唤醒父机器人的次数；达到阈值后转人工，避免无限循环 */
+  /** 已尝试唤醒父机器人的次数，用于事件展示和退避判断 */
   @Column({ type: 'int', default: 0 })
   attempts: number;
 

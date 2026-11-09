@@ -1129,6 +1129,8 @@ export interface Worker {
   githubPermission: WorkerGithubPermission
   /** 资源网关权限：none（无权限）/ read（仅只读资源）/ write（全部资源） */
   resourcePermission: WorkerResourcePermission
+  /** 并行执行上限：同一时刻可执行的任务数（仅 AI 机器人；1 表示串行，默认 3） */
+  maxParallelTasks: number
   enabled: boolean
   /** 系统机器人（代码内置，网页不可新增/删除） */
   system: boolean
@@ -1136,6 +1138,8 @@ export interface Worker {
   workdir: string | null
   liveStatus: WorkerLiveStatus
   activeTask: { id: number; code: string; title: string; status: string } | null
+  /** 当前执行中的任务数（与 maxParallelTasks 对照展示并行占用） */
+  executingCount: number
   /** 已绑定独立飞书应用（头像角标用） */
   feishuBound?: boolean
   createdAt: string
@@ -1721,20 +1725,6 @@ export interface TaskChatMessage {
   meta?: Record<string, unknown>
 }
 
-/** 等待投递给机器人的用户消息（机器人本轮结束后按顺序发送） */
-export interface TaskQueuedUserMessage {
-  id: string
-  taskId: number
-  sender: TaskChatSender
-  /** 发送身份：需求方 / 执行方 */
-  perspective?: TaskChatPerspective
-  content: string
-  createdAt: string
-  status: 'queued' | 'sending'
-  /** 上一次投递失败原因（保留队列，等待下次恢复） */
-  error?: string
-}
-
 /** PIPELINE 阶段：主任务或子任务 + 分配的机器人与调度机器人 */
 export interface TaskPipelineStage {
   task: TaskPackage
@@ -1748,8 +1738,6 @@ export interface TaskChatSnapshot {
   rootTask: TaskPackage
   pipeline: TaskPipelineStage[]
   messages: TaskChatMessage[]
-  /** 当前任务等待投递的消息 */
-  queuedMessages: TaskQueuedUserMessage[]
   /** 当前任务需求方姓名 */
   requesterName: string | null
   /** 当前执行机器人执行方姓名 */
@@ -1882,8 +1870,6 @@ export interface TaskDocumentContent extends TaskDocumentEntry {
 export type TaskChatStreamMessage =
   | { type: 'ready'; at: number }
   | { type: 'message.upsert'; message: TaskChatMessage; at: number }
-  | { type: 'queue.upsert'; message: TaskQueuedUserMessage; at: number }
-  | { type: 'queue.delete'; ids: string[]; at: number }
   | { type: 'stage.upsert'; stage: TaskPipelineStage; at: number }
   | { type: 'stage.delete'; ids: number[]; at: number }
   | { type: 'refresh'; at: number }
@@ -3342,7 +3328,7 @@ export const api = {
     }),
   deleteTaskPackage: (id: number) =>
     request<void>(`/tasks/${id}`, { method: 'DELETE' }),
-  /** 重新提交：等待中-待反馈 → 等待中-待继续（机器人空闲后恢复执行） */
+  /** 重新提交：等待中-待反馈 → 等待中-待继续（机器人仍有执行容量后恢复执行） */
   submitTask: (id: number) =>
     request<TaskPackage>(`/tasks/${id}/submit`, { method: 'POST' }),
   /** 提交反馈并等待继续（反馈正文追加到任务描述） */

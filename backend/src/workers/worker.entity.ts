@@ -187,6 +187,13 @@ export class Worker {
   })
   resourcePermission: WorkerResourcePermission;
 
+  /**
+   * 并行执行上限：同一时刻允许处于「进行中-执行中」的任务数。
+   * 仅 AI（runtime=opencode）机器人生效，1 表示串行；真人机器人不受此限制。
+   */
+  @Column({ type: 'int', default: 3 })
+  maxParallelTasks: number;
+
   @Column({ default: true })
   enabled: boolean;
 
