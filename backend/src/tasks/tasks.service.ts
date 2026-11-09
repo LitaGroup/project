@@ -1304,6 +1304,7 @@ export class TasksService {
   async ensureProjectDeliveryTask(
     projectId: number,
     creator?: { userId: number; userName?: string | null },
+    projectName?: string | null,
   ): Promise<ProjectDeliveryTaskView> {
     const existing = await this.findProjectDeliveryTask(projectId);
     const canceled =
@@ -1313,10 +1314,13 @@ export class TasksService {
     const humanWorker = creator
       ? await this.workersService.findByHumanUserId(creator.userId)
       : null;
+    const projectTaskTitle = projectName?.trim()
+      ? `项目任务-${projectName.trim()}`
+      : SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_NAME;
     await this.create({
       projectId,
       templateId: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
-      title: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_NAME,
+      title: projectTaskTitle.slice(0, 200),
       description: `项目ID：${projectId} 的实施交付`,
       createdById: creator?.userId ?? null,
       operatorName: creator?.userName ?? undefined,

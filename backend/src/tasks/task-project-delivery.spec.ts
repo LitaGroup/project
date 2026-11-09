@@ -183,7 +183,7 @@ describe('TasksService 项目交付任务', () => {
     expect(result).toBe(created);
   });
 
-  it('创建项目交付任务时带上项目、系统定义和固定描述', async () => {
+  it('创建项目交付任务时带项目名标题、系统定义和固定描述', async () => {
     const created = {
       task: task(),
       agentName: null,
@@ -197,16 +197,20 @@ describe('TasksService 项目交付任务', () => {
       .mockResolvedValueOnce(created);
     const create = jest.spyOn(service, 'create').mockResolvedValue(task());
 
-    const result = await service.ensureProjectDeliveryTask(3708, {
-      userId: 7,
-      userName: '张三',
-    });
+    const result = await service.ensureProjectDeliveryTask(
+      3708,
+      {
+        userId: 7,
+        userName: '张三',
+      },
+      '需求池项目',
+    );
 
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: 3708,
         templateId: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
-        title: '技术-项目开发交付',
+        title: '项目任务-需求池项目',
         description: '项目ID：3708 的实施交付',
         createdById: 7,
         operatorName: '张三',

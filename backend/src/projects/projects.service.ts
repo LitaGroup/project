@@ -530,14 +530,15 @@ export class ProjectsService {
     projectId: number,
     creator?: { userId: number; userName?: string | null },
   ): Promise<ProjectDeliveryTaskView> {
-    const exists = await this.projects.findOne({
+    const project = await this.projects.findOne({
       where: { id: projectId },
-      select: { id: true },
+      select: { id: true, name: true },
     });
-    if (!exists) throw new NotFoundException(`Project ${projectId} not found`);
+    if (!project) throw new NotFoundException(`Project ${projectId} not found`);
     const result = await this.tasksService.ensureProjectDeliveryTask(
       projectId,
       creator,
+      project.name,
     );
     // 建群失败不能影响任务创建；绑定与重试由沟通群服务持久化处理。
     try {
