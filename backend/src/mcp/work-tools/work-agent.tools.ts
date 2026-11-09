@@ -34,7 +34,7 @@ const SkillArg = z.object({
   name: z.string().describe('技能展示名'),
   path: z
     .string()
-    .describe('技能库内 SKILL.md 相对路径，如 work/main/SKILL.md'),
+    .describe('技能库内 SKILL.md 相对路径，如 active/rank/SKILL.md'),
   url: z.string().describe('SKILL.md 原始下载地址'),
   description: z.string().nullish().describe('技能说明'),
   version: z.string().nullish().describe('版本'),

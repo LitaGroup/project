@@ -293,7 +293,7 @@ export class AuthService {
             '**2. opencode 配置**：在 ~/.config/opencode/opencode.json 或项目 .opencode/opencode.json 的 mcp.servers 下添加 lita-work（type=remote、oauth=false、Authorization: Bearer {env:LITA_WORK_TOKEN}）',
             '**3. 令牌**：登录网页 → 个人中心 → 「Agent 访问令牌」复制并写入环境变量 LITA_WORK_TOKEN',
             `**4. 接入文档与工具清单**：${mcpDocUrl}`,
-            '旧 SKILL.md 技能已标记废弃，过渡期仍可使用。',
+            '旧 SKILL.md 技能已下线，平台能力请使用 lita-work MCP 工具。',
           ].join('\n'),
         ),
         { tag: 'hr' },

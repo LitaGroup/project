@@ -1,1 +1,0 @@
-../../skills/lita-work/SKILL.md

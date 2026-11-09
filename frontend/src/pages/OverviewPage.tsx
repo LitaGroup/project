@@ -144,7 +144,6 @@ function McpInstallSection() {
   const origin = window.location.origin
   const mcpUrl = `${origin}/api/mcp/work`
   const docUrl = `${origin}/work-mcp.md`
-  const legacySkillUrl = `${origin}/SKILL.md`
   const opencodeConfig = `{
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
@@ -201,17 +200,9 @@ function McpInstallSection() {
               {docUrl}
             </a>
             <p className="text-sm text-foreground-muted">
-              旧 SKILL.md 技能（lita-work / knowledge-search / file-upload）已标记废弃，
-              过渡期仍可使用：
+              旧 SKILL.md 技能（lita-work / knowledge-search / file-upload）已下线，
+              平台能力请直接使用 lita-work MCP 工具。
             </p>
-            <a
-              href={legacySkillUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="w-fit text-sm text-foreground-muted underline"
-            >
-              {legacySkillUrl}
-            </a>
           </div>
         </div>
       </Card>

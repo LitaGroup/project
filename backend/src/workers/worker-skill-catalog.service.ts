@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isDeprecatedSkill } from './worker-skill-deprecation';
 
 /** 技能目录条目（供机器人表单选择） */
 export interface SkillCatalogItem {
@@ -177,9 +178,11 @@ export class WorkerSkillCatalogService {
     const byPath = new Map<string, SkillCatalogItem>();
     for (const item of input) {
       const skill = this.normalizeSkill(item);
+      // 已下线的平台能力技能（lita-work / knowledge-search / file-upload 等）静默丢弃
+      if (isDeprecatedSkill(skill)) continue;
       byPath.set(skill.path, skill);
     }
-    return [...byPath.values()];
+    return byPath.size ? [...byPath.values()] : null;
   }
 
   /** 拉取仓库默认分支 + 递归目录树，并读取全部 SKILL.md 元数据 */
@@ -199,9 +202,9 @@ export class WorkerSkillCatalogService {
       )
       .map((item) => item.path!)
       .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
-    const items = await Promise.all(
-      paths.map((path) => this.loadItem(branch, path)),
-    );
+    const items = (
+      await Promise.all(paths.map((path) => this.loadItem(branch, path)))
+    ).filter((item) => !isDeprecatedSkill(item));
     this.cache = items;
     this.cacheLoadedAt = Date.now();
     return items;

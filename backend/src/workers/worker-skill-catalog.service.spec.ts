@@ -61,6 +61,31 @@ describe('WorkerSkillCatalogService', () => {
     ).toThrow(BadRequestException);
   });
 
+  it('保存时丢弃已下线的平台能力技能', () => {
+    const service = buildService();
+    const skills = service.normalizeSkills([
+      {
+        url: 'http://gitea.cinta.team/docs/skills/raw/branch/main/work/main/SKILL.md',
+      },
+      {
+        url: 'http://gitea.cinta.team/docs/skills/raw/branch/main/project/manage/SKILL.md',
+      },
+      {
+        url: 'http://gitea.cinta.team/docs/skills/raw/branch/main/public/lita-api/SKILL.md',
+      },
+    ]);
+    expect(skills?.map((item) => item.path)).toEqual([
+      'public/lita-api/SKILL.md',
+    ]);
+    expect(
+      service.normalizeSkills([
+        {
+          url: 'http://gitea.cinta.team/docs/skills/raw/branch/main/work/main/SKILL.md',
+        },
+      ]),
+    ).toBeNull();
+  });
+
   it('支持自定义技能库地址', () => {
     const service = buildService('http://gitea.example.com/team/skills/');
     const skill = service.normalizeSkill({

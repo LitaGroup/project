@@ -21,15 +21,13 @@ import type {
   WorkerDebugSnapshot,
 } from './worker-debug.types';
 import { WorkerEnvironmentService } from './worker-environment.service';
-import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
 import { WorkersService } from './workers.service';
 import { ensureWorkerSequenceFloor } from './system-workers.service';
 import {
   buildPersonalAgentPrompt,
   buildPersonalAgentFirstPrompt,
-  isDeprecatedPersonalAgentSkill,
-  PERSONAL_AGENT_SKILL_PATHS,
 } from './personal-agent';
+import { isDeprecatedSkill } from './worker-skill-deprecation';
 import {
   agentTokenShell,
   mcpConfigShell,
@@ -92,8 +90,6 @@ export class PersonalAgentsService {
   private readonly logger = new Logger(PersonalAgentsService.name);
   /** 当前进程内已准备好令牌文件的个人 AGENT */
   private readonly prepared = new Set<number>();
-  /** 当前进程内已安装默认技能的个人 AGENT */
-  private readonly skillsInstalled = new Set<number>();
   /** 当前进程内已启动环境初始化的个人 AGENT */
   private readonly envStarted = new Set<number>();
   /** 找不到可用执行器模板时的短期负缓存，避免工作台轮询反复查库 */
@@ -111,7 +107,6 @@ export class PersonalAgentsService {
     private readonly workersService: WorkersService,
     private readonly debug: WorkerDebugService,
     private readonly environment: WorkerEnvironmentService,
-    private readonly skillCatalog: WorkerSkillCatalogService,
     private readonly mcpServers: McpServersService,
     config: ConfigService,
   ) {
@@ -548,40 +543,23 @@ export class PersonalAgentsService {
 
   /**
    * 后台初始化个人 AGENT 工位：MCP 配置由 prepareWorkdir 注入；
-   * 默认技能清单仅作过渡兼容，再调用机器人初始化写入 AGENTS.md。失败只告警，不阻断对话。
+   * 已下线的平台能力技能从清单中移除（不再安装），再调用机器人初始化写入 AGENTS.md。
+   * 失败只告警，不阻断对话。
    */
   private async bootstrapEnvironment(worker: Worker): Promise<void> {
-    // 1) 技能清单：成功后不再重复；旧版 project-manage/project-files 自动替换为 lita-work
+    // 1) 清理历史技能：lita-work / project-manage / project-files 等已由 MCP 取代
     const currentSkills = worker.skills ?? [];
-    const hasDeprecatedSkill = currentSkills.some((skill) =>
-      isDeprecatedPersonalAgentSkill(skill.path),
-    );
-    if (
-      !this.skillsInstalled.has(worker.id) &&
-      (!currentSkills.length || hasDeprecatedSkill)
-    ) {
+    const kept = currentSkills.filter((skill) => !isDeprecatedSkill(skill));
+    if (kept.length !== currentSkills.length) {
       try {
-        const catalog = await this.skillCatalog.list();
-        const wanted = PERSONAL_AGENT_SKILL_PATHS.map((path) =>
-          catalog.find(
-            (item) => item.path === path || item.path.endsWith(`/${path}`),
-          ),
-        ).filter((item): item is NonNullable<typeof item> => Boolean(item));
-        if (wanted.length > 0) {
-          const kept = currentSkills.filter(
-            (skill) => !isDeprecatedPersonalAgentSkill(skill.path),
-          );
-          const merged = [...kept, ...wanted].filter(
-            (skill, index, all) =>
-              all.findIndex((item) => item.path === skill.path) === index,
-          );
-          await this.workers.update({ id: worker.id }, { skills: merged });
-          worker.skills = merged;
-          this.skillsInstalled.add(worker.id);
-        }
+        await this.workers.update(
+          { id: worker.id },
+          { skills: kept.length ? kept : null },
+        );
+        worker.skills = kept.length ? kept : null;
       } catch (error) {
         this.logger.warn(
-          `个人 AGENT #${worker.id} 技能安装清单获取失败: ${(error as Error).message}`,
+          `个人 AGENT #${worker.id} 清理已下线技能失败: ${(error as Error).message}`,
         );
       }
     }

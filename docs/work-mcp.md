@@ -6,7 +6,7 @@
 - 鉴权：平台 Agent 访问令牌（`Authorization: Bearer` / `X-Agent-Token` / `?token=`）或机器人独立令牌（`X-Worker-Token`），与 `.md` 端点同一令牌体系
 - 与 `lita-bots`（`POST /api/mcp/bots`，把平台机器人当子 Agent 调用）相互独立，可同时接入
 
-> 原 SKILL.md 技能（`/SKILL.md`、`/knowledge/SKILL.md`、`/file-upload/SKILL.md`）的全部能力已由 MCP 工具覆盖，端点仅作过渡兼容。
+> 原 SKILL.md 技能（`/SKILL.md`、`/knowledge/SKILL.md`、`/file-upload/SKILL.md`）已下线，前端不再提供这些技能文档；全部能力已由 MCP 工具覆盖，历史 `.md` 业务接口仍保留兼容。
 
 ---
 
