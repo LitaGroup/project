@@ -16,7 +16,9 @@ import { ResourcesModule } from '../resources/resources.module';
 import { SchedulesModule } from '../schedules/schedules.module';
 import { ScriptsModule } from '../scripts/scripts.module';
 import { SettingsModule } from '../settings/settings.module';
+import { TasksModule } from '../tasks/tasks.module';
 import { TestsModule } from '../tests/tests.module';
+import { TicketsModule } from '../tickets/tickets.module';
 import { WorkersModule } from '../workers/workers.module';
 import { McpCallLog } from './mcp-log.entity';
 import { McpController } from './mcp.controller';
@@ -31,6 +33,9 @@ import { WorkGithubTools } from './work-tools/work-github.tools';
 import { WorkKnowledgeTools } from './work-tools/work-knowledge.tools';
 import { WorkProjectTools } from './work-tools/work-project.tools';
 import { WorkRunTools } from './work-tools/work-run.tools';
+import { WorkTaskTools } from './work-tools/work-task.tools';
+import { WorkTicketTools } from './work-tools/work-ticket.tools';
+import { WorkAgentTools } from './work-tools/work-agent.tools';
 
 /**
  * MCP 开放：
@@ -58,6 +63,8 @@ import { WorkRunTools } from './work-tools/work-run.tools';
     ScriptsModule,
     FeishuModule,
     GithubModule,
+    TasksModule,
+    TicketsModule,
   ],
   controllers: [McpController, McpWorkController, McpLogsController],
   providers: [
@@ -70,6 +77,9 @@ import { WorkRunTools } from './work-tools/work-run.tools';
     WorkDefectTools,
     WorkGithubTools,
     WorkFileTools,
+    WorkTaskTools,
+    WorkTicketTools,
+    WorkAgentTools,
   ],
 })
 export class McpModule {}

@@ -63,6 +63,7 @@ describe('WorkersMarkdownService', () => {
     service = new WorkersMarkdownService(
       workers as unknown as WorkersService,
       environment as unknown as WorkerEnvironmentService,
+      { namesOf: jest.fn().mockResolvedValue([]) } as never,
     );
   });
 

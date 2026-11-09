@@ -167,7 +167,7 @@ function McpInstallSection() {
         <CardHeader>
           <CardTitle>lita-work MCP</CardTitle>
           <CardDescription>
-            平台工具已开放为 MCP 服务：搜索项目、读取项目详情与文档、运行检查/用例/导出/定时任务并流式获取结果、知识库检索与维护、缺陷与提测、代码分支、文件上传等。配置一次后，Agent 会话可直接调用带 schema 的工具。
+            平台工具已开放为 MCP 服务：搜索项目、读取项目详情与文档、运行检查/用例/导出/定时任务并流式获取结果、知识库检索与维护、缺陷与提测、代码分支、文件上传、任务协同、工单与机器人/任务定义管理等。配置一次后，Agent 会话可直接调用带 schema 的工具。
           </CardDescription>
         </CardHeader>
         <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">

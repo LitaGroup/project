@@ -56,6 +56,7 @@ function createHarness(
     {} as never,
     {} as never,
     {} as never,
+    { normalizeWorkerIds: jest.fn().mockResolvedValue([]) } as never,
     { get: (key: string) => env[key] } as never,
   );
   return { service, workers };

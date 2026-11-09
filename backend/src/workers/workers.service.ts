@@ -34,6 +34,7 @@ import { SYSTEM_WORKER_ID_LIMIT, isSystemWorkerId } from './system-workers';
 import { ensureWorkerSequenceFloor } from './system-workers.service';
 import { WorkerSkillCatalogService } from './worker-skill-catalog.service';
 import { WorkerStandardCatalogService } from './worker-standard-catalog.service';
+import { McpServersService } from '../mcp-servers/mcp-servers.service';
 
 export interface CreateWorkerInput {
   name: string;
@@ -49,6 +50,8 @@ export interface CreateWorkerInput {
   prompt?: string | null;
   skills?: WorkerSkill[] | null;
   standards?: WorkerStandard[] | null;
+  /** 勾选的 MCP 配置 id（管理区「MCP 配置」） */
+  mcps?: number[] | null;
   taskDefs?: WorkerTaskDef[] | null;
   ownerUserId?: number | null;
   enabled?: boolean;
@@ -176,6 +179,7 @@ export class WorkersService implements OnApplicationBootstrap {
     private readonly feishuConfigs: Repository<FeishuBotConfig>,
     private readonly skillCatalog: WorkerSkillCatalogService,
     private readonly standardCatalog: WorkerStandardCatalogService,
+    private readonly mcpServers: McpServersService,
     config: ConfigService,
   ) {
     this.workerBaseDir = config.get<string>('WORKER_BASE_DIR')?.trim() || null;
@@ -402,6 +406,7 @@ export class WorkersService implements OnApplicationBootstrap {
     const skills = this.skillCatalog.normalizeSkills(input.skills) ?? null;
     const standards =
       this.standardCatalog.normalizeStandards(input.standards) ?? null;
+    const mcps = await this.mcpServers.normalizeWorkerIds(input.mcps ?? []);
     const worker = this.workers.create({
       name,
       intro: input.intro?.trim() || null,
@@ -415,6 +420,7 @@ export class WorkersService implements OnApplicationBootstrap {
       prompt: input.prompt?.trim() || null,
       skills,
       standards,
+      mcps: mcps.length ? mcps : null,
       taskDefs: input.taskDefs?.length ? input.taskDefs : null,
       enabled: input.enabled ?? true,
       githubPermission: normalizeGithubPermission(input.githubPermission),
@@ -495,6 +501,10 @@ export class WorkersService implements OnApplicationBootstrap {
     if (input.standards !== undefined) {
       worker.standards =
         this.standardCatalog.normalizeStandards(input.standards) ?? null;
+    }
+    if (input.mcps !== undefined) {
+      const mcps = await this.mcpServers.normalizeWorkerIds(input.mcps ?? []);
+      worker.mcps = mcps.length ? mcps : null;
     }
     if (input.taskDefs !== undefined) {
       worker.taskDefs = input.taskDefs?.length ? input.taskDefs : null;

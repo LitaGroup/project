@@ -14,6 +14,7 @@ describe('WorkerEnvironmentService.assertDone', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       { get: () => undefined } as never,
     );
 
@@ -66,6 +67,7 @@ describe('WorkerEnvironmentService.buildPrompt', () => {
       {
         resolveManagedFiles: () => Promise.resolve(managedFiles),
       } as never,
+      { namesOf: jest.fn().mockResolvedValue([]) } as never,
       {} as never,
       { get: () => undefined } as never,
     );
@@ -202,6 +204,10 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
             files: [],
           }),
       } as never,
+      {
+        namesOf: jest.fn().mockResolvedValue([]),
+        buildServersConfig: jest.fn().mockResolvedValue({}),
+      } as never,
       // 事件中心 mock：任务后台执行会真正访问 127.0.0.1:4096 失败并转 failed，不影响断言
       {
         retain: () => undefined,
@@ -231,6 +237,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       {} as never,
       {} as never,
       { ensureWorkToken } as never,
+      {} as never,
       {} as never,
       {} as never,
       { get: () => 'test-lita-token' } as never,
@@ -276,6 +283,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       config as never,
     );
     await service['writeLitaUserToken'](
@@ -309,6 +317,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       {
         get: jest.fn((key: string) => {
           if (key === 'WORKER_LITA_USER_TOKEN') return 'worker-user-token';
@@ -334,6 +343,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       {
         get: jest.fn((key: string) =>
           key === 'LITA_USER_TOKEN' ? 'fallback-token' : undefined,
@@ -350,6 +360,7 @@ describe('WorkerEnvironmentService.start / stream / snapshotOf', () => {
 
     const emptyShell = jest.fn();
     const empty = new WorkerEnvironmentService(
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

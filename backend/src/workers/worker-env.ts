@@ -48,31 +48,31 @@ export function workerEnvShell(
   );
 }
 
+/** opencode V2 的单个 MCP 服务配置（remote / local） */
+export interface OpencodeMcpServerConfig {
+  type: 'remote' | 'local';
+  url?: string;
+  command?: string[];
+  oauth?: false;
+  headers?: Record<string, string>;
+  environment?: Record<string, string>;
+}
+
 /**
- * 写入工位 .opencode/opencode.json 的 lita-work MCP 配置（权限 600）：
- * opencode V2 的 mcp.servers 远程 Streamable HTTP 服务，鉴权头使用机器人令牌。
- * 令牌只经服务端拼进 shell 命令落盘，不进入初始化 Prompt、SSE 进度或日志。
+ * 写入工位 .opencode/opencode.json 的 MCP 配置（权限 600）：
+ * `mcp.servers` 由调用方统一生成（平台 lita-work + 机器人勾选的自定义 MCP），
+ * 本地包含令牌时只经服务端拼进 shell 命令落盘，不进入日志与 Prompt。
  */
-export function workMcpConfigShell(
+export function mcpConfigShell(
   workdir: string,
-  baseUrl: string,
-  token: string,
+  servers: Record<string, OpencodeMcpServerConfig>,
 ): string {
   const dir = `${workdir}/.opencode`;
   const path = `${dir}/opencode.json`;
   const config = JSON.stringify(
     {
       $schema: 'https://opencode.ai/config.json',
-      mcp: {
-        servers: {
-          'lita-work': {
-            type: 'remote',
-            url: `${baseUrl.replace(/\/+$/, '')}/api/mcp/work`,
-            oauth: false,
-            headers: { 'X-Worker-Token': token },
-          },
-        },
-      },
+      mcp: { servers },
     },
     null,
     2,

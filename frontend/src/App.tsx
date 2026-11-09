@@ -21,6 +21,7 @@ import { ReposPage } from './pages/ReposPage'
 import { GithubAccessPage } from './pages/GithubAccessPage'
 import { FeishuBotConfigPage } from './pages/FeishuBotConfigPage'
 import { McpLogsPage } from './pages/McpLogsPage'
+import { McpServersPage } from './pages/McpServersPage'
 import { ScriptLibraryPage } from './pages/ScriptLibraryPage'
 import { ScriptLibraryDetailPage } from './pages/ScriptLibraryDetailPage'
 import { SchedulesPage } from './pages/SchedulesPage'
@@ -266,6 +267,7 @@ function App() {
             <Route path="/admin/repos" element={<ReposPage />} />
             <Route path="/admin/github-access" element={<GithubAccessPage />} />
             <Route path="/admin/feishu-config" element={<FeishuBotConfigPage />} />
+            <Route path="/admin/mcp-servers" element={<McpServersPage />} />
             <Route path="/admin/mcp-logs" element={<McpLogsPage />} />
           </Route>
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />

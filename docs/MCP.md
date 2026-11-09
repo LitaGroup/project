@@ -3,7 +3,7 @@
 平台机器人（BOT）已通过 MCP（Model Context Protocol）对外开放：外部机器上的 AI Agent（opencode / Claude Code / Cursor / Codex CLI 等）完成一次配置后，即可把任意平台机器人当作**子 Agent** 调用——BOT 在平台自己的执行器与工位上真实运行（带角色定义、技能、规范），执行过程的文本流与工具调用实时回传给主 Agent，结束后返回最终结果。
 
 - 服务地址：`POST /api/mcp/bots`（MCP Streamable HTTP，响应为 SSE 流）
-- 鉴权：平台 Agent 访问令牌，`Authorization: Bearer` / `X-Agent-Token` / `?token=` 三种方式均可；接入方环境变量 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 兜底），与 lita-work 技能约定一致
+- 鉴权：平台 Agent 访问令牌，`Authorization: Bearer` / `X-Agent-Token` / `?token=` 三种方式均可；接入方环境变量 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 兜底），与 lita-work MCP 约定一致
 - 会话执行复用平台机器人聊天引擎，不产生任务记录、不影响任务派发
 
 > 需要**直接操作平台数据**（项目、知识库、脚本运行、缺陷、提测等，即原 lita-work 技能能力）？请使用独立的 **lita-work MCP**：`POST /api/mcp/work`，接入指南见 [work-mcp.md](./work-mcp.md)。
@@ -17,7 +17,7 @@
 1. 登录平台网页，进入 **个人中心**（右上角头像菜单）；
 2. 在「Agent 访问令牌」卡片复制令牌（48 位随机字符串，尚未生成会自动发放）；
 3. 令牌泄露可在该卡片 **重置**，旧令牌立即失效（重置后需同步更新外部 Agent 配置）；
-4. 按平台约定写入调用方机器的环境变量或本机 `~/.env`（与 lita-work 技能同一变量）：
+4. 按平台约定写入调用方机器的环境变量或本机 `~/.env`（与 lita-work MCP 同一变量）：
 
 ```bash
 # ~/.env
@@ -28,7 +28,7 @@ LITA_WORK_TOKEN=<你的访问令牌>
 
 平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**；未配置时不可用。使用方式与个人令牌相同。
 
-> 令牌环境变量新名为 `LITA_WORK_TOKEN`；过渡期旧名 `LITA_PROJECT_TOKEN` 仍可用，**新名优先**（取值顺序：进程环境 → `~/.env` → 用户单独提供，详见 lita-work 技能）。
+> 令牌环境变量新名为 `LITA_WORK_TOKEN`；过渡期旧名 `LITA_PROJECT_TOKEN` 仍可用，**新名优先**（取值顺序：进程环境 → `~/.env` → 用户单独提供，详见 [work-mcp.md](./work-mcp.md)）。
 
 ## 二、接入配置
 

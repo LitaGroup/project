@@ -36,6 +36,7 @@ import { ReleasesModule } from './releases/releases.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { McpModule } from './mcp/mcp.module';
+import { McpServersModule } from './mcp-servers/mcp-servers.module';
 import { FeishuBotModule } from './feishu-bot/feishu-bot.module';
 
 @Module({
@@ -88,6 +89,7 @@ import { FeishuBotModule } from './feishu-bot/feishu-bot.module';
     TicketsModule,
     WorkflowsModule,
     McpModule,
+    McpServersModule,
     ScriptsModule,
     FeishuModule,
     FeishuBotModule,

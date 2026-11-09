@@ -67,7 +67,7 @@
 - `backend/src/feishu/`、`feishu-bot/`：飞书只读导入、机器人长连接与任务群。
 - `backend/src/github/`、`github-gateway/`：仓库/分支/提交集成与凭证网关。
 - `backend/src/agent/`、`remote-run/`、`app-versions/`：Appium Agent、远程运行与 APP 包。
-- `backend/src/files/`、`images/`、`settings/`、`notify/`、`mcp/`：上传、设置、通知与 MCP 开放（`lita-bots` 调用机器人、`lita-work` 平台工具）。
+- `backend/src/files/`、`images/`、`settings/`、`notify/`、`mcp/`：上传、设置、通知与 MCP 开放（`lita-bots` 调用机器人、`lita-work` 平台工具：项目/知识/运行/缺陷/任务协同/工单/机器人）；`backend/src/mcp-servers/` 为管理区「MCP 配置」（机器人连接的外部 MCP 服务）。
 
 其他入口：
 
@@ -164,7 +164,7 @@
 - 个人 AGENT 通过 `personalAgentUserId` 唯一绑定，只服务「我的 AI」对话，不出现在对外机器人清单，不承接任务分配或工单执行，不可网页删除。
 - 工位目录：production 为 `{WORKER_BASE_DIR}/worker/{id}`，其他环境为 `{WORKER_BASE_DIR}/worker-dev/{id}`。
 - 机器人工位同步 `AGENTS.md`、`.opencode/skills` 和规范到 `.opencode/rules/`；技能引用技能库 `SKILL.md`（已废弃，过渡期保留），规范引用规范库目录的 `README.md`。取消规范只清理 manifest 记录的受管文件，保留机器人自有文档。
-- 工位 `.opencode/opencode.json` 由平台初始化/派发时注入 `lita-work` MCP 配置（`{APP_URL}/api/mcp/work` + 机器人令牌，权限 600），纳入受管文件，机器人不得读取展示、改写或删除；令牌只经服务端落盘。
+- 工位 `.opencode/opencode.json` 由平台初始化/派发时注入 MCP 配置：固定 `lita-work`（`{APP_URL}/api/mcp/work` + 机器人令牌）与机器人勾选的自定义 MCP（管理区「MCP 配置」，`workers.mcps`），权限 600，纳入受管文件，机器人不得读取展示、改写或删除；令牌只经服务端落盘。MCP 鉴权支持固定令牌（明文落盘）、环境变量（`{env:NAME}` 占位，凭据不落盘）与机器人自身 `LITA_WORK_TOKEN`。
 - opencode 集成位于 `executors/`：HTTP Basic 鉴权、会话/prompt/interrupt、SSE 事件和提问。会话终态必须匹配当前 session，不能只凭进程或连接状态判断任务完成。
 - 调试会话落 `worker_debug_sessions`，按 `userId + workerId + contextKey` 唯一绑定；机器人调试、通用我的 AI、每个任务会话相互隔离，7 天不活跃重置。
 

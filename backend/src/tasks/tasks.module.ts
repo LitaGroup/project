@@ -7,6 +7,7 @@ import { FeishuModule } from '../feishu/feishu.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { WorkersModule } from '../workers/workers.module';
 import { Worker } from '../workers/worker.entity';
+import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskMessage } from './task-message.entity';
@@ -34,6 +35,7 @@ import {
   TaskTemplatesMarkdownController,
 } from './task-templates.controller';
 import { TaskTemplatesService } from './task-templates.service';
+import { TaskActorService } from './task-actor.service';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
 import {
@@ -61,6 +63,7 @@ import { WorkbenchService } from './workbench.service';
     ExecutorsModule,
     FeishuModule,
     KnowledgeModule,
+    McpServersModule,
   ],
   controllers: [
     TasksController,
@@ -74,6 +77,7 @@ import { WorkbenchService } from './workbench.service';
   providers: [
     TasksService,
     TasksAgentService,
+    TaskActorService,
     TaskAssignmentService,
     TaskChatService,
     TaskDeliveryService,
@@ -94,7 +98,10 @@ import { WorkbenchService } from './workbench.service';
   ],
   exports: [
     TasksService,
+    TasksAgentService,
+    TaskActorService,
     TaskChatService,
+    TaskCollaborationService,
     TaskDeliveryService,
     TaskDispatchService,
     TaskDocumentService,

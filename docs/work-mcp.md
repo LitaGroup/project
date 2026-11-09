@@ -1,12 +1,12 @@
 # MCP 接入指南：lita-work 平台工具
 
-平台把原 **lita-work / knowledge-search / file-upload** 三个 Agent 技能（`.md` HTTP 端点）改造成 MCP 服务 **`lita-work`**：外部 Agent（opencode / Claude Code / Cursor 等）完成一次配置后，即可直接调用带 schema 的平台工具——项目、文档、知识库、脚本运行、缺陷/提测、代码分支、文件上传等。
+平台把原 **lita-work / knowledge-search / file-upload** 三个 Agent 技能（`.md` HTTP 端点）改造成 MCP 服务 **`lita-work`**：外部 Agent（opencode / Claude Code / Cursor 等）完成一次配置后，即可直接调用带 schema 的平台工具——项目、文档、知识库、脚本运行、缺陷/提测、代码分支、文件上传、任务协同、工单和机器人/任务定义管理等。
 
 - 服务地址：`POST /api/mcp/work`（MCP Streamable HTTP，响应为 SSE 流）
 - 鉴权：平台 Agent 访问令牌（`Authorization: Bearer` / `X-Agent-Token` / `?token=`）或机器人独立令牌（`X-Worker-Token`），与 `.md` 端点同一令牌体系
 - 与 `lita-bots`（`POST /api/mcp/bots`，把平台机器人当子 Agent 调用）相互独立，可同时接入
 
-> 原 SKILL.md 技能（`/SKILL.md`、`/knowledge/SKILL.md`、`/file-upload/SKILL.md`）已标记废弃，端点保留过渡；任务协同、工单与机器人管理能力的 MCP 版本在二期提供。
+> 原 SKILL.md 技能（`/SKILL.md`、`/knowledge/SKILL.md`、`/file-upload/SKILL.md`）的全部能力已由 MCP 工具覆盖，端点仅作过渡兼容。
 
 ---
 
@@ -75,7 +75,7 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | 鉴权头 | `Authorization: Bearer ${LITA_WORK_TOKEN}`（也接受 `X-Agent-Token` / `X-Worker-Token` 头） |
 | URL 参数兜底 | `?token=<令牌>`（三选一即可） |
 
-## 三、工具清单（一期）
+## 三、工具清单
 
 ### 项目 / 文档 / 资源 / 节点
 
@@ -151,6 +151,58 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 
 > MCP 无 multipart：`upload_file` 用 base64 传内容，可带 `data:<mime>;base64,` 前缀。
 
+### 任务协同
+
+| 工具 | 主要入参 | 说明 |
+|---|---|---|
+| `list_my_tasks` | `q?`、`status?`、`subStatus?`、`rootOnly?` | 我的任务清单（需求方/执行方/负责方） |
+| `get_task` | `taskId` | 任务详情与操作指引 |
+| `create_task` | `title?`、`description?`、`input?`、`outputSpec?`、`templateId?` | 创建根任务并自动分配机器人 |
+| `list_task_defines` | — | 可分发任务定义与可用机器人 |
+| `create_subtask` | `parentTaskId`、`templateId`、`title`、`description?`、`input?`、`outputSpec?` | 父任务机器人创建子任务 |
+| `accept_task` / `refuse_task` | `taskId`、`reason?`、`suggestion?` | 接受 / 拒绝邀约（拒绝需理由） |
+| `ask_task_question` | `taskId`、`questions` | 执行机器人向需求方提问 |
+| `answer_task_question` | `taskId`、`questionId`、`answers?`、`reject?` | 需求方答复提问 |
+| `reply_task_message` | `taskId`、`content` | 需求方回复执行方消息 |
+| `list_task_documents` | `taskId` | 任务文档清单 |
+| `upsert_task_document` | `taskId`、`name`、`content?`、`title?` | 写入 API.md / TECH_DESIGN.md 等 |
+| `read_task_handoff` | `taskId` | 读取交付文档 |
+| `update_task_handoff` | `taskId`、`content?`、`append?`、`baseVersion` | 执行机器人维护交付文档 |
+| `apply_task_acceptance` | `taskId`、`delivery?`、`problems?`、`detours?`、`lessons?`、`followUps?`、`other?` | 申请验收 |
+| `accept_task_handoff` / `refuse_task_handoff` | `taskId`、`content?` | 需求方验收通过 / 返工 |
+| `fail_task` | `taskId`、`reason` | 需求方判定失败 |
+
+> 写操作按令牌身份校验：接受/拒绝/提问/申请验收仅机器人令牌（`X-Worker-Token`）；答复/验收/返工/判失败仅任务需求方。`update_task_handoff` 在首次创建时使用 `baseVersion=0`。
+
+### 工单与工单文档
+
+| 工具 | 主要入参 | 说明 |
+|---|---|---|
+| `get_task_ticket` | `taskId` | 调度工单上下文与可转派任务定义 |
+| `route_task_ticket` | `taskId`、`templateId`、`title`、`content`、`outputSpec`、`workPlan` | 澄清后转交任务定义 |
+| `get_ticket` | `ticketId` | 工作流工单完整上下文与节点进度 |
+| `reject_ticket_node` | `ticketId`、`nodeKey`、`reason` | 当前节点处理机器人拒绝节点 |
+| `list_ticket_documents` | `taskId` | 所属工单的交付文档清单 |
+| `read_ticket_document` | `taskId`、`documentId` | 读取一篇交付文档 |
+| `deliver_ticket_document` | `taskId`、`title`、`url?`、`content?` | 交付链接或正文（二选一） |
+| `update_ticket_document` | `taskId`、`documentId`、`title?`、`url?`、`content?` | 更新本任务交付的文档 |
+| `delete_ticket_document` | `taskId`、`documentId` | 删除本任务交付的文档 |
+
+### 机器人与任务定义
+
+| 工具 | 主要入参 | 说明 |
+|---|---|---|
+| `list_workers` / `get_worker` | `role?` / `workerId` | 机器人清单 / 详情 |
+| `create_worker` | `name`、`intro?`、`executorId?`、`providerId?`、`modelId?`、`prompt?`、`skills?`、`standards?`、`mcps?`、`taskDefs?`、`ownerUserId?`、`enabled?`、权限与并行上限 | 创建自定义 AI 工作者（保存后自动初始化） |
+| `update_worker` | `workerId` + 同上字段 | 编辑机器人（未传字段保持不变） |
+| `delete_worker` | `workerId` | 删除自定义机器人 |
+| `list_worker_skill_catalog` | `q?` | 技能库目录（配置 `skills` 前查询） |
+| `list_worker_standard_catalog` | `q?` | 规范库目录（配置 `standards` 前查询） |
+| `list_task_templates` / `get_task_template` | — / `templateId` | 任务定义清单 / 详情 |
+| `create_task_template` | `name`、`description?`、`agentIds?` | 创建任务定义 |
+| `update_task_template` | `templateId`、`name?`、`description?`、`agentIds?` | 编辑任务定义 |
+| `delete_task_template` | `templateId` | 删除任务定义 |
+
 ## 四、流式进度与超时
 
 - 运行类与 `pull_scripts` 工具在客户端携带 `_meta.progressToken` 时（opencode / Claude Code 默认行为），经 `notifications/progress` 实时推送脚本输出；
@@ -161,7 +213,7 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 
 - 用户令牌：写操作记录个人中心令牌对应用户为操作人；公共 Agent 令牌方式记「公共 Agent」；
 - 机器人令牌（`X-Worker-Token`）：平台识别为机器人身份，任务协同、提测来源任务等按机器人规则处理；
-- 任务协同、工单、机器人/任务定义管理仍使用 `.md` 端点（MCP 二期提供）。
+- 任务协同、工单、机器人/任务定义管理的 MCP 工具与 `.md` 端点使用同一套身份与权限校验；`.md` 端点保留兼容。
 
 ## 六、与 lita-bots 的区别
 
@@ -169,7 +221,7 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 |---|---|---|
 | 地址 | `POST /api/mcp/work` | `POST /api/mcp/bots` |
 | 用途 | 直接操作平台数据与脚本 | 把平台机器人当子 Agent 调用 |
-| 工具 | 项目/知识/运行/缺陷等 40+ 工具 | `list_bots`、`bot_call` 等 6 个 |
+| 工具 | 项目/知识/运行/缺陷/任务/工单/机器人等 80+ 工具 | `list_bots`、`bot_call` 等 6 个 |
 | 会话 | 无状态 | 多轮会话（`session_id`） |
 
 两个服务可同时配置，互不影响。
@@ -183,4 +235,4 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | `upload_file` 失败 | 检查 base64 是否为空、文件是否超过 50MB |
 | 运行类工具等待超时 | 调大 `timeout_seconds`（≤1800）或稍后用 `get_run` 查询结果 |
 | 收不到中间进度 | 客户端未带 progressToken；opencode / Claude Code 默认携带 |
-| 需要任务协同能力 | 二期 MCP 工具上线前，继续使用 `.md` 端点（见废弃的 SKILL.md 过渡说明） |
+| 需要任务协同能力 | 使用任务协同工具（`list_my_tasks` / `get_task` / `accept_task` 等）；`.md` 端点保留兼容 |

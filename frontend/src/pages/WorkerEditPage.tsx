@@ -32,11 +32,13 @@ import {
 } from '@appica/ui-react/dialog'
 import {
   api,
+  MCP_SERVER_TYPE_LABELS,
   WORKER_GITHUB_PERMISSIONS,
   WORKER_GITHUB_PERMISSION_LABELS,
   WORKER_RESOURCE_PERMISSIONS,
   WORKER_RESOURCE_PERMISSION_LABELS,
   type Executor,
+  type McpServerConfig,
   type PlatformUser,
   type Worker,
   type WorkerDebugModelCatalog,
@@ -116,6 +118,10 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const [skillPickerOpen, setSkillPickerOpen] = useState(false)
   const [standards, setStandards] = useState<WorkerStandard[]>([])
   const [standardPickerOpen, setStandardPickerOpen] = useState(false)
+  /** 可选的 MCP 配置（管理区维护）与机器人勾选的 id */
+  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([])
+  const [mcps, setMcps] = useState<number[]>([])
+  const [mcpPickerOpen, setMcpPickerOpen] = useState(false)
   const [ownerUserId, setOwnerUserId] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [githubPermission, setGithubPermission] =
@@ -175,6 +181,12 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
     api.listExecutors().then(setExecutors).catch(() => undefined)
     api.listUsers().then(setUsers).catch(() => undefined)
   }, [])
+
+  // MCP 配置仅管理区可维护；个人助理页不展示入口（无管理员权限无法读取清单）
+  useEffect(() => {
+    if (personal) return
+    api.listMcpServers().then(setMcpServers).catch(() => undefined)
+  }, [personal])
 
   /**
    * 旧执行器缓存只有模型 id/name，没有思考等级；选中执行器后自动同步一次，
@@ -261,6 +273,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
         )
         setOwnerUserId(w.ownerUserId ? String(w.ownerUserId) : '')
         setEnabled(w.enabled)
+        setMcps((w.mcps ?? []).filter((id) => Number.isInteger(id)))
         setGithubPermission(w.githubPermission ?? 'develop')
         setResourcePermission(w.resourcePermission ?? 'none')
         setMaxParallelTasks(String(w.maxParallelTasks ?? 3))
@@ -433,6 +446,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       prompt: promptText.trim() || null,
       skills,
       standards,
+      ...(personal ? {} : { mcps }),
       ownerUserId: ownerUserId ? Number(ownerUserId) : null,
       enabled,
       // 真人机器人与个人 AGENT 不提交权限字段；后端按默认值 / 原值维护
@@ -953,6 +967,16 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
               onPickerOpenChange={setStandardPickerOpen}
               disabled={busy}
             />
+            {!personal && (
+              <WorkerMcpSection
+                mcps={mcps}
+                servers={mcpServers}
+                onChange={setMcps}
+                pickerOpen={mcpPickerOpen}
+                onPickerOpenChange={setMcpPickerOpen}
+                disabled={busy}
+              />
+            )}
             <div className="border-t border-border-strong" />
             <label className="flex flex-col gap-1 text-sm">
                 执行器
@@ -1648,5 +1672,205 @@ function OptimizeIcon() {
       <path d="M12 3l1.8 4.7 4.7 1.8-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3Z" />
       <path d="M18.5 15l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z" />
     </svg>
+  )
+}
+
+/**
+ * MCP 服务选择：勾选管理区「MCP 配置」中的服务，保存后初始化时与 lita-work
+ * 一起写入工位 .opencode/opencode.json。
+ */
+function WorkerMcpSection({
+  mcps,
+  servers,
+  onChange,
+  pickerOpen,
+  onPickerOpenChange,
+  disabled,
+}: {
+  mcps: number[]
+  servers: McpServerConfig[]
+  onChange: (ids: number[]) => void
+  pickerOpen: boolean
+  onPickerOpenChange: (open: boolean) => void
+  disabled: boolean
+}) {
+  const selected = servers.filter((server) => mcps.includes(server.id))
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm">MCP 服务</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => onPickerOpenChange(true)}
+        >
+          选择 MCP
+        </Button>
+      </div>
+      {selected.length === 0 ? (
+        <p className="text-xs text-foreground-muted">
+          未选择 MCP；保存初始化时只注入平台 lita-work
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {selected.map((server) => (
+            <div
+              key={server.id}
+              className="flex items-start gap-2 rounded-[var(--radius-md)] bg-background-muted px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm">{server.name}</span>
+                  <Badge variant="soft" size="sm">
+                    {MCP_SERVER_TYPE_LABELS[server.type]}
+                  </Badge>
+                  {!server.enabled && (
+                    <Badge variant="warning" size="sm">
+                      已停用
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-0.5 truncate font-mono text-xs text-foreground-muted">
+                  {server.type === 'remote'
+                    ? (server.url ?? '—')
+                    : (server.command ?? []).join(' ')}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                onClick={() => onChange(mcps.filter((id) => id !== server.id))}
+              >
+                移除
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      <WorkerMcpPickerDialog
+        open={pickerOpen}
+        onOpenChange={onPickerOpenChange}
+        servers={servers}
+        selectedIds={mcps}
+        onToggle={(id, checked) => {
+          if (checked) {
+            if (!mcps.includes(id)) onChange([...mcps, id])
+            return
+          }
+          onChange(mcps.filter((item) => item !== id))
+        }}
+      />
+    </div>
+  )
+}
+
+/** MCP 配置多选弹窗：数据来自管理区「MCP 配置」 */
+function WorkerMcpPickerDialog({
+  open,
+  onOpenChange,
+  servers,
+  selectedIds,
+  onToggle,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  servers: McpServerConfig[]
+  selectedIds: number[]
+  onToggle: (id: number, checked: boolean) => void
+}) {
+  const [query, setQuery] = useState('')
+  const selected = useMemo(() => new Set(selectedIds), [selectedIds])
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return servers
+    return servers.filter(
+      (server) =>
+        server.name.toLowerCase().includes(q) ||
+        (server.url ?? '').toLowerCase().includes(q) ||
+        (server.command ?? []).join(' ').toLowerCase().includes(q),
+    )
+  }, [servers, query])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>选择 MCP 服务</DialogTitle>
+          <DialogDescription>
+            勾选后保存并初始化，服务会写入工位 .opencode/opencode.json；
+            停用的配置保留选择但不会注入。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-3">
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜索名称、地址或命令"
+            />
+            <div className="max-h-96 min-h-32 overflow-auto rounded-[var(--radius-md)] border border-border-strong">
+              {filtered.length === 0 ? (
+                <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-foreground-muted">
+                  {servers.length === 0
+                    ? '暂无 MCP 配置，请先到管理区「MCP 配置」新建'
+                    : '没有匹配的 MCP 配置'}
+                </div>
+              ) : (
+                filtered.map((server) => (
+                  <label
+                    key={server.id}
+                    className="flex cursor-pointer items-start gap-3 border-b border-border-strong px-3 py-3 last:border-b-0 hover:bg-background-muted"
+                  >
+                    <Checkbox
+                      checked={selected.has(server.id)}
+                      onCheckedChange={(checked) =>
+                        onToggle(server.id, checked === true)
+                      }
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-medium">
+                          {server.name}
+                        </span>
+                        <Badge variant="soft" size="sm">
+                          {MCP_SERVER_TYPE_LABELS[server.type]}
+                        </Badge>
+                        {!server.enabled && (
+                          <Badge variant="warning" size="sm">
+                            已停用
+                          </Badge>
+                        )}
+                      </span>
+                      <span className="mt-1 block truncate font-mono text-xs text-foreground-muted">
+                        {server.type === 'remote'
+                          ? (server.url ?? '—')
+                          : (server.command ?? []).join(' ')}
+                      </span>
+                      {server.remark && (
+                        <span className="mt-1 block line-clamp-2 text-xs text-foreground-muted">
+                          {server.remark}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+            <p className="text-xs text-foreground-muted">
+              已选择 {selectedIds.length} 个 MCP 服务
+            </p>
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button size="sm" onClick={() => onOpenChange(false)}>
+            完成
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -40,5 +40,6 @@ import { TicketsService } from './tickets.service';
     TicketDocumentsService,
     TicketWorkflowRuntimeService,
   ],
+  exports: [TicketsService, TicketDocumentsService],
 })
 export class TicketsModule {}

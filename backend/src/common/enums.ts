@@ -232,6 +232,30 @@ export enum WorkerResourcePermission {
   WRITE = 'write',
 }
 
+/**
+ * 机器人 MCP 服务类型（opencode V2 工位配置）：
+ * - remote：MCP Streamable HTTP，填服务地址；
+ * - local：MCP stdio，本地命令（纯 SSE 端点的服务可用 mcp-remote 等命令桥接）。
+ */
+export enum McpServerType {
+  REMOTE = 'remote',
+  LOCAL = 'local',
+}
+
+/**
+ * MCP 服务鉴权方式：
+ * - none：不带鉴权信息；
+ * - fixed：固定令牌，初始化/派发时明文写入工位 opencode.json（权限 600）；
+ * - env：环境变量名，生成 {env:NAME} 占位符，值由工位运行时解析，凭据不落盘；
+ * - work-token：注入当前机器人自己的平台工作令牌（LITA_WORK_TOKEN，与 lita-work 同源）。
+ */
+export enum McpAuthMode {
+  NONE = 'none',
+  FIXED = 'fixed',
+  ENV = 'env',
+  WORK_TOKEN = 'work-token',
+}
+
 /** 机器人实时状态（不落库，由名下任务实时推导，见 workers.service） */
 export enum WorkerLiveStatus {
   IDLE = '空闲中',

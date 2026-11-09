@@ -9,6 +9,7 @@ import { Worker } from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
 import { GithubPermissionCredential } from '../github-gateway/github-permission-credential.entity';
 import { FeishuBotConfig } from '../feishu-bot/feishu-bot-config.entity';
+import { McpServersModule } from '../mcp-servers/mcp-servers.module';
 import { GithubPermissionCredentialService } from './github-permission-credential.service';
 import { SystemWorkersService } from './system-workers.service';
 import { WorkerAiService } from './worker-ai.service';
@@ -43,6 +44,7 @@ import { WorkersService } from './workers.service';
       FeishuBotConfig,
     ]),
     ExecutorsModule,
+    McpServersModule,
   ],
   controllers: [
     WorkerDebugController,
@@ -67,10 +69,13 @@ import { WorkersService } from './workers.service';
   ],
   exports: [
     WorkersService,
+    WorkersMarkdownService,
     PersonalAgentsService,
     GithubPermissionCredentialService,
     WorkerDebugService,
     WorkerChatService,
+    WorkerSkillCatalogService,
+    WorkerStandardCatalogService,
   ],
 })
 export class WorkersModule {}

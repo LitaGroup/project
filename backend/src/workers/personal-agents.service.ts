@@ -32,10 +32,11 @@ import {
 } from './personal-agent';
 import {
   agentTokenShell,
+  mcpConfigShell,
   shellQuote,
-  workMcpConfigShell,
   workerEnvShell,
 } from './worker-env';
+import { McpServersService } from '../mcp-servers/mcp-servers.service';
 
 /** 工作台「我的 AGENT」可用信息（对外只暴露必要字段） */
 export interface PersonalAgentView {
@@ -111,6 +112,7 @@ export class PersonalAgentsService {
     private readonly debug: WorkerDebugService,
     private readonly environment: WorkerEnvironmentService,
     private readonly skillCatalog: WorkerSkillCatalogService,
+    private readonly mcpServers: McpServersService,
     config: ConfigService,
   ) {
     this.apiUrl =
@@ -520,6 +522,11 @@ export class PersonalAgentsService {
     if (this.prepared.has(worker.id)) return;
     // 个人 AGENT 与主人真人机器人共用工作令牌，平台操作身份统一为真人
     const token = await this.workersService.ensureWorkToken(worker.id);
+    const mcpServers = await this.mcpServers.buildServersConfig(
+      this.appUrl,
+      token,
+      worker.mcps ?? [],
+    );
     const client = new OpencodeClient(executor);
     const dir = `${workdir}/.opencode`;
     // 调试/聊天与任务执行共用工位根目录，AGENTS.md 与 .opencode 就是当前目录，
@@ -531,7 +538,7 @@ export class PersonalAgentsService {
           `${workerEnvShell(workdir, {
             LITA_WORK_TOKEN: token,
             LITA_PROJECT_TOKEN: token,
-          })} && ${workMcpConfigShell(workdir, this.appUrl, token)}`,
+          })} && ${mcpConfigShell(workdir, mcpServers)}`,
       ),
       PREPARE_TIMEOUT_MS,
       '准备个人 AGENT 工位超时',
@@ -540,8 +547,8 @@ export class PersonalAgentsService {
   }
 
   /**
-   * 后台初始化个人 AGENT 工位：按默认技能库安装 lita-work 技能，
-   * 再调用机器人初始化写入 AGENTS.md。失败只告警，不阻断对话。
+   * 后台初始化个人 AGENT 工位：MCP 配置由 prepareWorkdir 注入；
+   * 默认技能清单仅作过渡兼容，再调用机器人初始化写入 AGENTS.md。失败只告警，不阻断对话。
    */
   private async bootstrapEnvironment(worker: Worker): Promise<void> {
     // 1) 技能清单：成功后不再重复；旧版 project-manage/project-files 自动替换为 lita-work

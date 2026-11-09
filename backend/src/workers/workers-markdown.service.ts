@@ -8,6 +8,7 @@ import {
 import { mdFrontmatter } from '../common/frontmatter';
 import { markdownCell, markdownLabel } from '../common/markdown-table';
 import { WorkerEnvironmentService } from './worker-environment.service';
+import { McpServersService } from '../mcp-servers/mcp-servers.service';
 import {
   CreateWorkerInput,
   UpdateWorkerInput,
@@ -33,6 +34,7 @@ export class WorkersMarkdownService {
   constructor(
     private readonly workers: WorkersService,
     private readonly environment: WorkerEnvironmentService,
+    private readonly mcpServers: McpServersService,
   ) {}
 
   /** GET /api/workers.md */
@@ -62,7 +64,7 @@ export class WorkersMarkdownService {
       '## AI 操作',
       '',
       '```bash',
-      'curl -X POST /api/workers/create.md -H \'Content-Type: application/json\' -d \'{"name":"活动开发机器人","intro":"负责活动前端开发","executorId":1,"providerId":"openai","modelId":"gpt-5","prompt":"# 角色定义\\n...","skills":[],"standards":[],"enabled":true}\'  # 创建并自动初始化',
+      'curl -X POST /api/workers/create.md -H \'Content-Type: application/json\' -d \'{"name":"活动开发机器人","intro":"负责活动前端开发","executorId":1,"providerId":"openai","modelId":"gpt-5","prompt":"# 角色定义\\n...","skills":[],"standards":[],"mcps":[1],"enabled":true}\'  # 创建并自动初始化',
       'curl -X POST /api/workers/{id}/update.md -H \'Content-Type: application/json\' -d \'{"intro":"新的简介","prompt":"# 新的角色定义"}\'  # 编辑并自动重新初始化',
       'curl -X POST /api/workers/{id}/delete.md  # 删除（系统/真人/个人 AGENT 或存在未完结任务时拒绝）',
       '```',
@@ -136,6 +138,17 @@ export class WorkersMarkdownService {
         );
       }
     }
+    const mcpNames = await this.mcpServers.namesOf(worker.mcps);
+    if (mcpNames.length > 0) {
+      lines.push(
+        '',
+        '## MCP 服务',
+        '',
+        '初始化时与平台 lita-work 一起写入工位 `.opencode/opencode.json`：',
+        '',
+        ...mcpNames.map((name) => `- ${name}`),
+      );
+    }
     if (worker.taskDefs && worker.taskDefs.length > 0) {
       lines.push(
         '',
@@ -174,7 +187,6 @@ export class WorkersMarkdownService {
     const initialization = await this.initialize(worker);
     return this.renderMutationMarkdown('更新', worker, initialization);
   }
-
   /** POST /api/workers/:id/delete.md */
   async removeMarkdown(id: number): Promise<string> {
     const worker = await this.workers.findOneView(id);
@@ -218,11 +230,12 @@ export class WorkersMarkdownService {
     }
   }
 
-  private renderMutationMarkdown(
+  private async renderMutationMarkdown(
     action: string,
     worker: WorkerView,
     initialization: InitializationOutcome,
-  ): string {
+  ): Promise<string> {
+    const mcpNames = await this.mcpServers.namesOf(worker.mcps);
     const lines = [
       mdFrontmatter({ update: worker.updatedAt, title: worker.name }),
       `# 机器人已${action}`,
@@ -234,6 +247,7 @@ export class WorkersMarkdownService {
       `- 运行时：${worker.runtime}`,
       `- GitHub 权限：${this.githubPermissionLabel(worker.githubPermission)}`,
       `- 资源权限：${this.resourcePermissionLabel(worker.resourcePermission)}`,
+      `- MCP 服务：${mcpNames.length ? mcpNames.join('、') : '仅 lita-work'}`,
       `- 并行上限：${worker.humanUserId ? '不限（真人可并行）' : worker.maxParallelTasks}`,
       `- 启用：${worker.enabled ? '是' : '否'}`,
       `- 执行器：${worker.executorId ?? '—'}`,

@@ -992,6 +992,72 @@ export const WORKER_RESOURCE_PERMISSION_LABELS: Record<
   write: '全部资源',
 }
 
+// ===== MCP 配置（管理区） =====
+
+/** MCP 服务类型：opencode V2 支持 remote（Streamable HTTP）与 local（stdio 命令） */
+export const MCP_SERVER_TYPES = ['remote', 'local'] as const
+export type McpServerType = (typeof MCP_SERVER_TYPES)[number]
+
+export const MCP_SERVER_TYPE_LABELS: Record<McpServerType, string> = {
+  remote: 'Streamable HTTP',
+  local: 'stdio 本地命令',
+}
+
+/** MCP 鉴权方式：固定令牌 / 环境变量（{env:NAME} 占位）/ 平台 LITA_WORK_TOKEN */
+export const MCP_AUTH_MODES = ['none', 'fixed', 'env', 'work-token'] as const
+export type McpAuthMode = (typeof MCP_AUTH_MODES)[number]
+
+export const MCP_AUTH_MODE_LABELS: Record<McpAuthMode, string> = {
+  none: '无鉴权',
+  fixed: '固定令牌',
+  env: '环境变量',
+  'work-token': 'LITA_WORK_TOKEN',
+}
+
+/** MCP 配置（列表/详情；固定令牌只返回是否已配置，不回显原文） */
+export interface McpServerConfig {
+  id: number
+  name: string
+  type: McpServerType
+  url: string | null
+  command: string[] | null
+  authMode: McpAuthMode
+  authHeader: string
+  authPrefix: string | null
+  hasSecret: boolean
+  /** env 模式的环境变量名（非敏感） */
+  envName: string | null
+  enabled: boolean
+  remark: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 保存 MCP 配置入参（编辑时未传字段保持原值；固定令牌留空保持不变） */
+export interface McpServerSaveInput {
+  name: string
+  type: McpServerType
+  url?: string | null
+  command?: string[] | string | null
+  authMode: McpAuthMode
+  authHeader?: string | null
+  authPrefix?: string | null
+  authSecret?: string | null
+  enabled?: boolean
+  remark?: string | null
+}
+
+/** MCP 配置连接测试结果 */
+export interface McpServerTestResult {
+  status: 'connected' | 'auth-rejected' | 'unreachable'
+  message: string
+  serverName: string | null
+  serverVersion: string | null
+  toolCount: number | null
+  tools: string[]
+  durationMs: number
+}
+
 /** 任务主状态：等待中 / 进行中 / 已结束 */
 export const TASK_STATUSES = ['等待中', '进行中', '已结束'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
@@ -1117,6 +1183,8 @@ export interface Worker {
   prompt: string | null
   skills: WorkerSkill[] | null
   standards: WorkerStandard[] | null
+  /** 勾选的 MCP 配置 id（管理区「MCP 配置」） */
+  mcps: number[] | null
   taskDefs: WorkerTaskDef[] | null
   ownerUserId: number | null
   ownerName: string | null
@@ -2764,6 +2832,27 @@ export const api = {
   deleteFeishuBot: (id: number) =>
     request<{ ok: true }>(`/feishu-bot/${id}`, { method: 'DELETE' }),
 
+  /** MCP 配置列表（管理区；固定令牌只返回是否已配置） */
+  listMcpServers: () => request<McpServerConfig[]>('/mcp/servers'),
+  createMcpServer: (input: McpServerSaveInput) =>
+    request<McpServerConfig>('/mcp/servers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateMcpServer: (id: number, input: Partial<McpServerSaveInput>) =>
+    request<McpServerConfig>(`/mcp/servers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  /** 平台侧连接测试；work-token 模式可传 workerId 借用该机器人令牌 */
+  testMcpServer: (id: number, workerId?: number | null) =>
+    request<McpServerTestResult>(`/mcp/servers/${id}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ workerId: workerId ?? null }),
+    }),
+  deleteMcpServer: (id: number) =>
+    request<{ ok: true }>(`/mcp/servers/${id}`, { method: 'DELETE' }),
+
   /** 机器人列表（role 筛选；includePersonal=true 仅管理员，含个人 AGENT） */
   listWorkers: (params?: {
     role?: WorkerRole
@@ -2789,6 +2878,7 @@ export const api = {
     prompt?: string | null
     skills?: WorkerSkill[] | null
     standards?: WorkerStandard[] | null
+    mcps?: number[] | null
     taskDefs?: WorkerTaskDef[] | null
     ownerUserId?: number | null
     enabled?: boolean
@@ -2814,6 +2904,7 @@ export const api = {
       prompt: string | null
       skills: WorkerSkill[] | null
       standards: WorkerStandard[] | null
+      mcps: number[] | null
       taskDefs: WorkerTaskDef[] | null
       ownerUserId: number | null
       enabled: boolean

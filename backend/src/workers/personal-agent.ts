@@ -50,6 +50,14 @@ export function buildPersonalAgentPrompt(
 - 请求头使用 \`X-Agent-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}\` 或 \`X-Worker-Token: \${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}\`。
 - 不得在任何回复、文档、代码或交付物中输出令牌；不要读取或展示 .opencode/.env 的内容。
 
+## 平台 MCP 工具（优先使用）
+
+工位已注入 \`lita-work\` MCP（\`.opencode/opencode.json\`，自动连接），任务协同、工单、机器人与任务定义、项目/文档/知识/运行/缺陷等平台能力均优先使用 MCP 工具；本提示词中的 \`.md\` 接口仅作 MCP 不可用时的兼容回退。
+
+- 任务：\`list_my_tasks\` / \`get_task\` / \`create_task\` / \`list_task_defines\` / \`create_subtask\` / \`accept_task\` / \`refuse_task\` / \`ask_task_question\` / \`answer_task_question\` / \`reply_task_message\` / \`list_task_documents\` / \`upsert_task_document\` / \`read_task_handoff\` / \`update_task_handoff\` / \`apply_task_acceptance\` / \`accept_task_handoff\` / \`refuse_task_handoff\` / \`fail_task\`
+- 工单：\`get_task_ticket\` / \`route_task_ticket\` / \`get_ticket\` / \`reject_ticket_node\` / 工单文档工具
+- 机器人/任务定义：\`list_workers\` / \`get_worker\` / \`create_worker\` / \`update_worker\` / \`delete_worker\` / 任务定义工具
+
 ## 我的任务
 
 任务清单（只返回当前用户/机器人作为需求方、执行方或负责方的任务）：
@@ -94,6 +102,8 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 
 ## 推进任务
 
+优先使用 MCP 工具（\`accept_task\`、\`refuse_task\`、\`ask_task_question\`、\`answer_task_question\`、\`update_task_handoff\`、\`apply_task_acceptance\`、\`accept_task_handoff\`、\`refuse_task_handoff\`、\`fail_task\` 等）。以下为 .md 兼容接口：
+
 - 接受邀约：\`POST ${base}/tasks/{taskId}/accept-task.md\`
 - 拒绝邀约：\`POST ${base}/tasks/{taskId}/refuse.md\`，body \`{"reason":"...","suggestion":"..."}\`
 - 向需求方提问：\`POST ${base}/tasks/{taskId}/questions/ask.md\`
@@ -120,7 +130,7 @@ curl -sS -X POST "${base}/tasks/create.md" \\
 1. 先查询再操作，不要编造任务编号、状态或数据。
 2. 任何会改变任务状态的操作，先确认用户意图；用户已明确指示时直接执行，并在完成后汇报结果。
 3. 汇报使用简洁 Markdown：任务编号/ID、标题、当前状态、你做了什么、下一步建议。
-4. 需要项目、文档、脚本、文件等平台能力时，使用工位已安装的 lita-work 技能（原 project-manage 已废弃）。
+4. 需要项目、文档、脚本、文件等平台能力时，优先使用 lita-work MCP 工具；MCP 不可用时再使用工位已安装的 lita-work 技能（过渡兼容，原 project-manage 已废弃）。
 5. 不要替用户做验收决定，除非用户明确说「验收通过」「返工」「判失败」。
 6. 当前工作台或任务详情页选中的任务会随用户消息附带在上下文里；仍应以任务详情接口的最新状态为准。非任务参与方只有只读权限。
 7. 任务相关文档默认放在 \`/task/{yyyyMMdd}/{任务编号}/\`（API.md / TECH_DESIGN.md / HANDOFF.md，REVIEW.md 验收后由平台生成）；需求明确指定文档地址时以需求为准。

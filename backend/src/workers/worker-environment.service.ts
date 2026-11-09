@@ -21,12 +21,9 @@ import { OpencodeEventHub } from '../executors/opencode-event-hub.service';
 import type { OpencodeEvent } from '../executors/opencode-event-hub.service';
 import { isFreshOutcome, OpencodeClient } from '../executors/opencode-client';
 import { Worker } from './worker.entity';
-import {
-  agentTokenShell,
-  workerEnvShell,
-  workMcpConfigShell,
-} from './worker-env';
+import { agentTokenShell, mcpConfigShell, workerEnvShell } from './worker-env';
 import { WorkersService } from './workers.service';
+import { McpServersService } from '../mcp-servers/mcp-servers.service';
 import { GithubPermissionCredentialService } from './github-permission-credential.service';
 import { GithubCredentialStatus } from '../github-gateway/github-permission-credential.entity';
 import {
@@ -68,7 +65,8 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 
 - 工位由平台注入 \`.opencode/opencode.json\`，MCP 服务 \`lita-work\` 指向平台 \`/api/mcp/work\`（Streamable HTTP，机器人令牌鉴权），自动连接，无需手动配置或启动。
 - 项目搜索/详情、项目文档、知识库、检查/用例/导出运行、缺陷、提测、代码分支、文件上传等操作优先使用 lita-work 的 MCP 工具。
-- 任务协同、工单与机器人管理仍使用下方 \`.md\` 接口（MCP 二期提供）。
+- 任务协同、工单与机器人/任务定义管理同样已提供 MCP 工具：任务 \`list_my_tasks\` / \`get_task\` / \`create_task\` / \`create_subtask\` / \`accept_task\` / \`refuse_task\` / \`ask_task_question\` / \`answer_task_question\` / \`reply_task_message\` / \`list_task_documents\` / \`upsert_task_document\` / \`read_task_handoff\` / \`update_task_handoff\` / \`apply_task_acceptance\` / \`accept_task_handoff\` / \`refuse_task_handoff\` / \`fail_task\`；工单 \`get_task_ticket\` / \`route_task_ticket\` / \`get_ticket\` / \`reject_ticket_node\` / 工单文档工具；机器人/任务定义 \`list_workers\` / \`get_worker\` / \`create_worker\` / \`update_worker\` / \`delete_worker\` / 任务定义工具。MCP 不可用时再回退下方 \`.md\` 端点。
+- 任务动作优先使用 MCP：接受邀约 \`accept_task\`、拒绝 \`refuse_task\`、提问 \`ask_task_question\`、更新交付 \`update_task_handoff\`、申请验收 \`apply_task_acceptance\`、验收 \`accept_task_handoff\` / \`refuse_task_handoff\`、判失败 \`fail_task\`。
 
 ### 任务状态与动作
 
@@ -94,11 +92,11 @@ const TASK_COLLABORATION_AGENTS = `## 多机器人任务协同协议（平台固
 
 ### 我的任务与创建根任务
 
-- 任务清单：GET /api/tasks.md?scope=mine（按身份只返回自己作为需求方/执行方的任务）
-- 任务详情：GET /api/tasks/{taskId}.md（仅需求方/执行方可读）
-- 创建根任务：POST /api/tasks/create.md（body 至少提供 title 或 description；平台自动分配机器人）
+- 任务清单：优先 MCP \`list_my_tasks\`（按身份只返回自己作为需求方/执行方的任务）；.md 兼容：GET /api/tasks.md
+- 任务详情：优先 MCP \`get_task\`（仅需求方/执行方可读）；.md 兼容：GET /api/tasks/{taskId}.md
+- 创建根任务：优先 MCP \`create_task\`（至少提供 title 或 description；平台自动分配机器人）；.md 兼容：POST /api/tasks/create.md
 
-### 可用操作
+### 可用操作（.md 兼容，优先使用对应 MCP 工具）
 
 - task-defines：GET /api/tasks/defines.md
 - task-create：POST /api/tasks/{parentTaskId}/subtasks/create.md
@@ -194,6 +192,7 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
     private readonly executors: Repository<Executor>,
     private readonly workersService: WorkersService,
     private readonly standardCatalog: WorkerStandardCatalogService,
+    private readonly mcpServers: McpServersService,
     private readonly eventHub: OpencodeEventHub,
     private readonly config: ConfigService,
     @Optional()
@@ -344,8 +343,8 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       );
       this.pushLine(job, '· 写入机器人身份令牌（agent-token / .env）…');
       await this.writeAgentToken(client, worker.id, workdir);
-      this.pushLine(job, '· 注入 lita-work MCP 配置…');
-      await this.writeWorkMcpConfig(client, worker.id, workdir);
+      this.pushLine(job, '· 注入 MCP 配置（lita-work + 已选服务）…');
+      await this.writeWorkMcpConfig(client, worker, workdir);
       this.pushLine(job, '· 注入 Lita 用户令牌…');
       await this.writeLitaUserToken(client, workdir);
       const githubCredentialStatus = (await this.githubCredentials?.statusOf(
@@ -454,20 +453,25 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
   }
 
   /**
-   * 注入 lita-work MCP 服务配置（.opencode/opencode.json，权限 600）：
-   * opencode 按项目配置自动连接平台 /api/mcp/work，替代技能内的 curl 调用。
+   * 注入工位 MCP 配置（.opencode/opencode.json，权限 600）：
+   * 平台 lita-work + 机器人勾选且启用中的自定义 MCP；opencode 按项目配置自动连接。
    * 令牌只经服务端落盘，不进入 Prompt、SSE 进度或日志。
    */
   private async writeWorkMcpConfig(
     client: OpencodeClient,
-    workerId: number,
+    worker: Worker,
     workdir: string,
   ): Promise<void> {
-    const token = await this.workersService.ensureWorkToken(workerId);
+    const token = await this.workersService.ensureWorkToken(worker.id);
     const appUrl = (
       this.config.get<string>('APP_URL') ?? 'http://localhost:5273'
     ).replace(/\/+$/, '');
-    await client.shell(workMcpConfigShell(workdir, appUrl, token));
+    const servers = await this.mcpServers.buildServersConfig(
+      appUrl,
+      token,
+      worker.mcps ?? [],
+    );
+    await client.shell(mcpConfigShell(workdir, servers));
   }
 
   /**
@@ -689,6 +693,20 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       githubCredentialStatus,
     );
     const resourceSection = this.buildResourceAgentsSection(worker);
+    const mcpNames = await this.mcpServers.namesOf(worker.mcps);
+    const mcpSection = [
+      '## 已配置的 MCP 服务',
+      '',
+      `平台固定注入：lita-work（Streamable HTTP，机器人令牌鉴权）。`,
+      ...(mcpNames.length
+        ? [
+            '',
+            '机器人勾选的自定义 MCP（opencode 自动连接，可直接使用其工具）：',
+            '',
+            ...mcpNames.map((name) => `- ${name}`),
+          ]
+        : ['', '机器人未勾选其它自定义 MCP 服务。']),
+    ].join('\n');
 
     return `接下来，更新当前的工作环境：
 
@@ -728,13 +746,21 @@ ${resourceSection}
 ${rulesSection}
 \`\`\`\`
 
+### MCP 服务清单（必须写入 AGENTS.md）
+
+把以下内容原样写入 AGENTS.md 的「## 已配置的 MCP 服务」小节，服务清单不得删减：
+
+\`\`\`\`markdown
+${mcpSection}
+\`\`\`\`
+
 ### 目录结构
 
 - AGENTS.md    机器人的工作基本原则
 - .opencode/   opencode自身的目录
 - .opencode/agent-token   平台注入的机器人身份令牌（权限 600，不得读取展示、改写或删除）
 - .opencode/.env   平台注入的工位环境变量（权限 600，不得读取展示、改写或删除）：LITA_WORK_TOKEN 访问项目平台 .md 接口（新名，优先，与 agent-token 同值）、LITA_PROJECT_TOKEN 兼容旧名（同值）、LITA_USER_TOKEN 访问 Lita 平台技能
-- .opencode/opencode.json   平台注入的 lita-work MCP 配置（权限 600，不得读取展示、改写或删除）
+- .opencode/opencode.json   平台注入的 MCP 配置（lita-work 与机器人勾选的 MCP 服务，权限 600，不得读取展示、改写或删除）
 - .opencode/skills/   当前机器人的技能
 - .opencode/rules/   平台同步的规范与规则文档（保持规范库原始目录结构；.standards-manifest.json 是受管清单）
 - .opencode/rules/.standards-manifest.json   本次同步的规范文件清单（JSON：{"version":1,"files":[...]}）
@@ -746,18 +772,19 @@ ${rulesSection}
 2. 把「GitHub 操作权限（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## GitHub 操作权限」小节；权限、允许/禁止事项与凭证状态不得删减。
 3. 把「资源访问权限（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 资源访问权限」小节；权限与允许/禁止事项不得删减。
 4. 把「规范与规则（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 规范与规则」小节；规范名称、说明、工位目录与文档清单不得删减。
-5. 确保 AGENTS.md 中包含上面的目录结构说明。
-6. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
-7. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
-8. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
-9. .opencode/rules/ 中的规范文档以本次规范清单为准：
+5. 把「MCP 服务清单（必须写入 AGENTS.md）」中的 Markdown 原样写入 AGENTS.md 的「## 已配置的 MCP 服务」小节；服务清单不得删减。
+6. 确保 AGENTS.md 中包含上面的目录结构说明。
+7. 保留 .opencode/ 下与本次更新无关的配置，尤其不得读取展示、改写或删除 .opencode/agent-token 与 .opencode/.env；不得清空或改写 .opencode/docs/ 中机器人自行维护的文档。
+8. .opencode/skills/ 以本次技能清单为准：安装或更新清单中的全部技能；移除清单之外的旧技能目录。
+9. 安装技能时不要只保存 SKILL.md：按技能目录保持原始结构，并下载技能引用到的脚本、模板等资源文件。
+10. .opencode/rules/ 中的规范文档以本次规范清单为准：
    - 如果 .opencode/rules/.standards-manifest.json 存在，先读取其中 files 数组作为旧受管文件清单；不存在或内容非法时旧受管清单视为空。
    - 如果旧的 .opencode/docs/.standards-manifest.json 存在：先按其 files 清单删除 .opencode/docs/ 下对应的旧受管文件，再删除该旧清单；这是目录从 docs 迁移到 rules 的一次性清理，其他 docs 文档不要动。
    - 按下方「需存在的规范文件」下载并写入 .opencode/rules/ 下同名相对路径；保持文件内容与链接内容一致，不要改写或摘要。
    - 只删除「旧受管文件清单中存在、但本次需存在清单中没有」的文件；不要删除 .opencode/docs/ 或其他流程产生的文档。
    - 同步完成后把本次需存在的全部相对路径写入 .opencode/rules/.standards-manifest.json，格式为 {"version":1,"files":[...]}，路径按字典序排序；manifest 自身不要写入 files。
-10. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
-11. .opencode/opencode.json 由平台注入并维护（lita-work MCP 配置），不得读取展示、改写或删除。
+11. 需要创建目录时保持仓库原始目录结构；同名文件以本次规范库内容覆盖。
+12. .opencode/opencode.json 由平台注入并维护（lita-work 与机器人勾选的 MCP 服务），不得读取展示、改写或删除。
 
 ## 从以下链接中，安装或更新技能
 

@@ -46,13 +46,8 @@ import {
   CreateSubtaskInput,
   TaskCollaborationService,
 } from './task-collaboration.service';
-import {
-  isTaskRequester,
-  type TaskActor,
-  workerRequesterActor,
-} from './task-requester';
+import { TaskActorService } from './task-actor.service';
 import { TasksAgentService } from './tasks-agent.service';
-import { PersonalAgentsService } from '../workers/personal-agents.service';
 
 class CreateTaskDto implements CreateTaskInput {
   title?: string;
@@ -209,7 +204,7 @@ export class TasksController {
     private readonly collaboration: TaskCollaborationService,
     private readonly workersService: WorkersService,
     private readonly tasksAgent: TasksAgentService,
-    private readonly personalAgents: PersonalAgentsService,
+    private readonly taskActors: TaskActorService,
   ) {}
 
   /** 概览统计（任务概览页顶部卡片） */
@@ -413,7 +408,7 @@ export class TasksController {
     const task = await this.collaboration.answer(
       id,
       questionId,
-      await this.requireRequesterActor(req, id),
+      await this.taskActors.resolveRequesterActor(req, id),
       dto,
     );
     return this.collaboration.actionMarkdown('提问已答复', task);
@@ -432,7 +427,7 @@ export class TasksController {
   ): Promise<string> {
     const task = await this.collaboration.replyMessage(
       id,
-      await this.requireRequesterActor(req, id),
+      await this.taskActors.resolveRequesterActor(req, id),
       dto.content ?? '',
     );
     return this.collaboration.actionMarkdown('消息已回复', task);
@@ -464,7 +459,7 @@ export class TasksController {
     @Req() req: AuthedRequest,
   ): Promise<string> {
     const task = await this.tasksService.mustFind(id);
-    const updatedBy = await this.assertTaskDocumentAuthor(task, req);
+    const updatedBy = await this.taskActors.resolveDocumentAuthor(task, req);
     const entry = await this.taskDocuments.upsertTaskDocument(task, {
       name: dto.name ?? '',
       content: dto.content,
@@ -568,7 +563,7 @@ export class TasksController {
   ): Promise<string> {
     const task = await this.collaboration.acceptHandoff(
       id,
-      await this.requireRequesterActor(req, id),
+      await this.taskActors.resolveRequesterActor(req, id),
     );
     return this.collaboration.actionMarkdown('任务验收已通过', task);
   }
@@ -583,7 +578,7 @@ export class TasksController {
   ): Promise<string> {
     const task = await this.collaboration.refuseHandoff(
       id,
-      await this.requireRequesterActor(req, id),
+      await this.taskActors.resolveRequesterActor(req, id),
       dto.content ?? '',
     );
     return this.collaboration.actionMarkdown('任务验收已拒绝', task);
@@ -599,7 +594,7 @@ export class TasksController {
   ): Promise<string> {
     const task = await this.collaboration.fail(
       id,
-      await this.requireRequesterActor(req, id),
+      await this.taskActors.resolveRequesterActor(req, id),
       dto.reason ?? '',
     );
     return this.collaboration.actionMarkdown('任务已判定失败', task, [
@@ -711,7 +706,7 @@ export class TasksController {
     if (!req.user) throw new ForbiddenException('拒绝验收需要用户身份');
     return this.collaboration.refuseHandoff(
       id,
-      await this.requireRequesterActor(req, id),
+      await this.taskActors.resolveRequesterActor(req, id),
       dto.content ?? '',
     );
   }
@@ -726,7 +721,7 @@ export class TasksController {
     if (!req.user) throw new ForbiddenException('判定任务失败需要用户身份');
     return this.collaboration.fail(
       id,
-      await this.requireRequesterActor(req, id),
+      await this.taskActors.resolveRequesterActor(req, id),
       dto.reason ?? '',
     );
   }
@@ -776,7 +771,7 @@ export class TasksController {
       return this.collaboration.answer(
         id,
         questionId,
-        await this.requireRequesterActor(req, id),
+        await this.taskActors.resolveRequesterActor(req, id),
         { answers: dto.answers, reject: dto.reject === true },
       );
     }
@@ -797,7 +792,7 @@ export class TasksController {
   ): Promise<Task> {
     return this.collaboration.acceptHandoff(
       id,
-      await this.requireRequesterActor(req, id),
+      await this.taskActors.resolveRequesterActor(req, id),
     );
   }
 
@@ -826,78 +821,5 @@ export class TasksController {
       throw new ForbiddenException('该操作仅接受机器人身份（X-Worker-Token）');
     }
     return req.worker;
-  }
-
-  /** 机器人令牌只能维护自己执行或自己作为需求方的任务文档；用户令牌按平台既有权限处理。 */
-  private async assertTaskDocumentAuthor(
-    task: Task,
-    req: AuthedRequest,
-  ): Promise<string> {
-    if (!req.worker) return req.user?.name ?? '系统';
-    // 个人 AGENT 仅是用户的 AI 对话通道：文档作者统一按主人的真人机器人身份校验
-    const actorWorker = req.worker.personalAgentUserId
-      ? ((await this.workersService.findByHumanUserId(
-          req.worker.personalAgentUserId,
-        )) ?? req.worker)
-      : req.worker;
-    const actor = workerRequesterActor(
-      actorWorker,
-      req.worker.personalAgentUserId ? req.worker : null,
-    );
-    const isExecutor = task.agentId === actorWorker.id;
-    const isRequester = isTaskRequester(task, actor);
-    if (!isExecutor && !isRequester) {
-      throw new ForbiddenException(
-        '仅任务执行机器人或需求方机器人可以维护任务文档',
-      );
-    }
-    return actorWorker.name;
-  }
-
-  /**
-   * 需求方身份解析：机器人令牌优先；登录用户在“新流程需求方=个人真人机器人”时
-   * 自动映射为绑定机器人，历史 user 需求方仍按用户本人校验。
-   */
-  private async requireRequesterActor(
-    req: AuthedRequest,
-    taskId: number,
-  ): Promise<TaskActor> {
-    if (req.worker) {
-      // 个人 AGENT 只作「我的 AI」通道：需求方动作统一按主人的真人机器人执行
-      if (req.worker.personalAgentUserId) {
-        const human = await this.workersService.findByHumanUserId(
-          req.worker.personalAgentUserId,
-        );
-        if (human) {
-          return workerRequesterActor(human, req.worker);
-        }
-      }
-      return workerRequesterActor(req.worker);
-    }
-    if (!req.user) throw new ForbiddenException('缺少任务需求方身份');
-    const task = await this.tasksService.mustFind(taskId);
-    const humanWorker = await this.workersService.findByHumanUserId(
-      req.user.id,
-    );
-    if (
-      humanWorker &&
-      task.requesterType === 'worker' &&
-      task.requesterId === humanWorker.id
-    ) {
-      return workerRequesterActor(humanWorker);
-    }
-    const personalAgent = await this.personalAgents.findForUser(req.user.id);
-    if (
-      personalAgent &&
-      task.requesterType === 'worker' &&
-      task.requesterId === personalAgent.id
-    ) {
-      // 历史任务需求方是个人 AGENT：由主人的真人机器人操作，
-      // 并保留个人 AGENT Worker ID 作为需求方归属校验别名。
-      return humanWorker
-        ? workerRequesterActor(humanWorker, personalAgent)
-        : workerRequesterActor(personalAgent);
-    }
-    return { type: 'user', user: req.user };
   }
 }

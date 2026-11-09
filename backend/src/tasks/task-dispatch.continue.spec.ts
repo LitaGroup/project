@@ -101,6 +101,7 @@ describe('TaskDispatchService.continueConversation 状态守卫', () => {
       {} as never,
       {} as never,
       inbox as never,
+      { buildServersConfig: jest.fn() } as never,
       { transaction: jest.fn() } as never,
       { get: jest.fn() } as never,
     );

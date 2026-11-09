@@ -36,10 +36,11 @@ import { parseOpencodeToolEvent } from '../executors/opencode-tools';
 import { Worker } from '../workers/worker.entity';
 import {
   agentTokenShell,
-  workMcpConfigShell,
+  mcpConfigShell,
   workerEnvShell,
 } from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
+import { McpServersService } from '../mcp-servers/mcp-servers.service';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskTemplate } from './task-template.entity';
@@ -122,6 +123,7 @@ export class TaskDispatchService
     private readonly taskDocuments: TaskDocumentService,
     private readonly questionAutoAnswer: TaskQuestionAutoAnswerService,
     private readonly workerInbox: TaskWorkerInboxService,
+    private readonly mcpServers: McpServersService,
     private readonly dataSource: DataSource,
     config: ConfigService,
   ) {
@@ -363,6 +365,11 @@ export class TaskDispatchService
     }
     // 机器人独立令牌只在工位文件与数据库中出现（初始化/派发时幂等写入），不进入任务 Prompt/聊天/日志
     const workerToken = await this.workersService.ensureWorkToken(worker.id);
+    const mcpServers = await this.mcpServers.buildServersConfig(
+      this.appUrl,
+      workerToken,
+      worker.mcps ?? [],
+    );
     const client = new OpencodeClient(executor);
     this.dispatching.add(task.id);
     try {
@@ -375,7 +382,7 @@ export class TaskDispatchService
             LITA_PROJECT_TOKEN: workerToken,
           }) +
           ' && ' +
-          workMcpConfigShell(workdir, this.appUrl, workerToken),
+          mcpConfigShell(workdir, mcpServers),
       );
 
       // 2. 固定绑定：一个任务只对应一个 opencode 会话。

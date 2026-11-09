@@ -81,8 +81,9 @@ export function ProfilePage() {
   const apiUrl = settings?.apiUrl ?? '{接口地址}'
   const tokenValue = token ?? '<令牌>'
   const setupScript = `# 一键设置 Agent 访问令牌（写入 ~/.env，Agent 按此读取）
-{ grep -v '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null; echo 'LITA_PROJECT_TOKEN=${tokenValue}'; } > ~/.env.tmp && mv ~/.env.tmp ~/.env
+{ grep -v '^LITA_WORK_TOKEN=' ~/.env 2>/dev/null | grep -v '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null; echo 'LITA_WORK_TOKEN=${tokenValue}'; echo 'LITA_PROJECT_TOKEN=${tokenValue}'; } > ~/.env.tmp && mv ~/.env.tmp ~/.env
 # 当前 shell 立即生效（可选）
+export LITA_WORK_TOKEN=${tokenValue}
 export LITA_PROJECT_TOKEN=${tokenValue}`
 
   return (
@@ -138,7 +139,7 @@ export LITA_PROJECT_TOKEN=${tokenValue}`
           <CardHeader>
             <CardTitle>Agent 访问令牌</CardTitle>
             <CardDescription>
-              AI agent 调用平台 .md 接口（/api/.../xxx.md）的鉴权令牌：请求头携带
+              AI agent 访问平台 <code>.md</code> 接口与 MCP 服务的鉴权令牌：请求头携带
               X-Agent-Token 或 URL 加 ?token= 参数均可；重置后旧令牌立即失效，需同步更新
               agent 侧配置
             </CardDescription>
@@ -189,8 +190,8 @@ export LITA_PROJECT_TOKEN=${tokenValue}`
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium">一键设置令牌（Shell）</p>
               <p className="text-sm text-foreground-muted">
-                在终端执行以下脚本，令牌写入 <code>~/.env</code> 的 LITA_PROJECT_TOKEN，
-                Agent 无需每次手动传参即可调用 .md 接口。
+                在终端执行以下脚本，令牌写入 <code>~/.env</code> 的 LITA_WORK_TOKEN
+                （兼容旧名 LITA_PROJECT_TOKEN），Agent 无需每次手动传参即可调用 .md 接口与 MCP 服务。
               </p>
               <pre className="overflow-auto rounded-[var(--radius-md)] bg-background-muted p-3 text-sm break-all whitespace-pre-wrap">
                 {setupScript}

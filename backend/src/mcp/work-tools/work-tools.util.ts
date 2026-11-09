@@ -1,10 +1,13 @@
 import type { MessageEvent } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import type { Logger } from '@nestjs/common';
 import type { Observable } from 'rxjs';
+import type { AuthedRequest } from '../../auth/auth.guard';
 import {
   renderRunMarkdown,
   type RunDetailLike,
 } from '../../common/run-markdown';
+import type { Worker } from '../../workers/worker.entity';
 import type { ProgressFn } from '../mcp-progress';
 import {
   identityLabelOf,
@@ -28,6 +31,25 @@ export function jsonResult(payload: unknown): WorkToolResult {
 export function toolErrorResult(error: unknown): WorkToolResult {
   const message = error instanceof Error ? error.message : String(error);
   return { isError: true, content: [{ type: 'text', text: message }] };
+}
+
+/**
+ * MCP 调用方 → 任务/工单工具使用的请求身份。
+ * 平台任务服务只读取 worker / user 两个字段，这里构造等价的最小身份对象。
+ */
+export function asAuthedRequest(principal: McpWorkPrincipal): AuthedRequest {
+  return {
+    worker: principal.worker,
+    user: principal.user,
+  } as unknown as AuthedRequest;
+}
+
+/** 仅机器人可执行的动作：机器人独立令牌（X-Worker-Token） */
+export function requireWorkerPrincipal(principal: McpWorkPrincipal): Worker {
+  if (!principal.worker) {
+    throw new ForbiddenException('该操作仅接受机器人身份（X-Worker-Token）');
+  }
+  return principal.worker;
 }
 
 /**

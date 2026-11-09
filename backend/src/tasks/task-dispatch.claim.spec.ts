@@ -47,6 +47,7 @@ describe('TaskDispatchService.claimExecution 执行容量', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
       {
         transaction: jest.fn((callback: (value: unknown) => unknown) =>
           Promise.resolve(callback(manager)),

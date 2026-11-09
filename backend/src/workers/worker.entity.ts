@@ -126,6 +126,10 @@ export class Worker {
   @Column({ type: 'simple-json', nullable: true })
   standards: WorkerStandard[] | null;
 
+  /** 机器人勾选的 MCP 配置 id（管理区「MCP 配置」；初始化/派发时写入工位 opencode.json） */
+  @Column({ type: 'simple-json', nullable: true })
+  mcps: number[] | null;
+
   /** 任务定义（接什么活） */
   @Column({ type: 'simple-json', nullable: true })
   taskDefs: WorkerTaskDef[] | null;
