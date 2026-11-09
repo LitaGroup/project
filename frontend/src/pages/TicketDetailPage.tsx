@@ -26,6 +26,7 @@ import {
   type WorkbenchTask,
 } from '../lib/api'
 import { MarkdownViewer } from '../components/MarkdownViewer'
+import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { TicketStatusBadge } from '../components/StatusBadge'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
@@ -444,48 +445,60 @@ export function TicketDetailPage() {
 
     const pageHeader = (
       <>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <nav className="flex items-center gap-1 text-sm text-foreground-muted">
-              <Link to="/tickets" className="hover:text-foreground">工单</Link>
-              <span>/</span>
-              <Link to={listPath} className="hover:text-foreground">
-                {workflow.definitionName}
-              </Link>
-              <span>/</span>
-              <span className="text-foreground">{ticket.code}</span>
-            </nav>
-            <h1 className="mt-2 text-2xl font-semibold">
-              {ticket.code} {ticket.title}
-            </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <TicketStatusBadge status={ticket.status} />
-              <Badge variant="outline" size="sm">
-                {workflow.definitionName} v{workflow.version}
-              </Badge>
-              <Badge variant="secondary" size="sm">
-                发起机器人 · {ticket.initiatorWorkerName ?? ticket.createdByName}
-              </Badge>
-              {workflow.autoAcceptance && (
-                <Badge variant="soft" size="sm">含自动验收</Badge>
-              )}
+        <PageBreadcrumb
+          items={[
+            { label: '工单', to: '/tickets' },
+            { label: workflow.definitionName, to: listPath },
+            { label: ticket.code },
+          ]}
+        />
+
+        <header className="shrink-0">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-xl font-semibold text-foreground-intense">
+                  {ticket.code} {ticket.title}
+                </h1>
+                <TicketStatusBadge status={ticket.status} />
+                <Badge variant="outline" size="sm">
+                  {workflow.definitionName} v{workflow.version}
+                </Badge>
+                <Badge variant="secondary" size="sm">
+                  发起机器人 ·{' '}
+                  {ticket.initiatorWorkerName ?? ticket.createdByName}
+                </Badge>
+                {workflow.autoAcceptance && (
+                  <Badge variant="soft" size="sm">含自动验收</Badge>
+                )}
+              </div>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
+                <span>
+                  创建于 {new Date(ticket.createdAt).toLocaleString()}
+                </span>
+                <span>·</span>
+                <span>当前节点 {ticket.currentNodeName ?? '未开始'}</span>
+              </p>
             </div>
+            <TaskActions
+              task={isTaskNode ? currentNodeTask : null}
+              chat={isTaskNode ? currentNodeChat : null}
+              handoffDoc={
+                currentNodeTaskId && currentNodeTaskId === activeTaskId
+                  ? handoffDoc
+                  : null
+              }
+              onRefresh={refreshTicket}
+              className="pt-0.5"
+            />
           </div>
-          <TaskActions
-            task={isTaskNode ? currentNodeTask : null}
-            chat={isTaskNode ? currentNodeChat : null}
-            handoffDoc={
-              currentNodeTaskId && currentNodeTaskId === activeTaskId
-                ? handoffDoc
-                : null
-            }
-            onRefresh={refreshTicket}
-            className="pt-1"
-          />
-        </div>
+        </header>
 
         {(actionError || error) && (
-          <p className="rounded-[var(--radius-md)] bg-error-muted px-3 py-2 text-sm text-error-foreground">
+          <p
+            role="alert"
+            className="rounded-[var(--radius-md)] bg-error-muted px-3 py-2 text-sm text-error-foreground"
+          >
             {actionError ?? error}
           </p>
         )}
