@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type { WorkerDebugSnapshot } from '../workers/worker-debug.types';
 import { McpService } from './mcp.service';
+import type { McpRunPayload, McpSessionPayload } from './mcp.types';
 
 /** 构造调试会话快照 */
 function snap(
@@ -45,6 +46,28 @@ function pushSnapshot(snapshot: WorkerDebugSnapshot): void {
 }
 
 const user = { id: 3, name: '张三' } as never;
+
+/** 测试访问私有编排方法（产品代码保持 private，不为测试放宽可见性） */
+function internalsOf(service: McpService): {
+  callBot: (
+    user: unknown,
+    input: Record<string, unknown>,
+    notify: null,
+    signal: undefined,
+  ) => Promise<McpRunPayload>;
+  answerBot: (
+    user: unknown,
+    input: Record<string, unknown>,
+    notify: null,
+    signal: undefined,
+  ) => Promise<McpRunPayload>;
+  getSession: (
+    user: unknown,
+    input: Record<string, unknown>,
+  ) => Promise<McpSessionPayload>;
+} {
+  return service as unknown as ReturnType<typeof internalsOf>;
+}
 
 /** 等待 send/resolveWorker 微任务链跑完（waitForRun 订阅建立） */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -122,7 +145,7 @@ describe('McpService', () => {
   it('callBot 未找到机器人时抛 NotFound', async () => {
     const { service } = buildService();
     await expect(
-      service.callBot(user, { bot: '不存在', message: 'x' }, null, undefined),
+      internalsOf(service).callBot(user, { bot: '不存在', message: 'x' }, null, undefined),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -137,7 +160,7 @@ describe('McpService', () => {
       },
     });
     await expect(
-      service.callBot(user, { bot: '测试机器人', message: 'x' }, null, undefined),
+      internalsOf(service).callBot(user, { bot: '测试机器人', message: 'x' }, null, undefined),
     ).rejects.toThrow(ConflictException);
     expect(logs.record).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'conflict', tool: 'bot_call' }),
@@ -153,8 +176,7 @@ describe('McpService', () => {
   it('callBot 完整执行：complete 终态返回文本、工具与 session_id', async () => {
     const { service, debug, logs } = buildService();
     bindStream(debug);
-    const promise = service.callBot(
-      user,
+    const promise = internalsOf(service).callBot(      user,
       { bot: '测试机器人', message: '跑个任务' },
       null,
       undefined,
@@ -209,8 +231,7 @@ describe('McpService', () => {
   it('callBot 提问时返回 question 与答复提示', async () => {
     const { service, debug } = buildService();
     bindStream(debug);
-    const promise = service.callBot(
-      user,
+    const promise = internalsOf(service).callBot(      user,
       { bot: '测试机器人', message: 'x' },
       null,
       undefined,
@@ -247,8 +268,7 @@ describe('McpService', () => {
   it('callBot auto_skip_questions 时自动 reject 并继续等待', async () => {
     const { service, debug } = buildService();
     bindStream(debug);
-    const promise = service.callBot(
-      user,
+    const promise = internalsOf(service).callBot(      user,
       { bot: '测试机器人', message: 'x', auto_skip_questions: true },
       null,
       undefined,
@@ -307,7 +327,7 @@ describe('McpService', () => {
   it('answerBot 无待回答提问时 400', async () => {
     const { service } = buildService();
     await expect(
-      service.answerBot(
+      internalsOf(service).answerBot(
         user,
         { bot: '测试机器人', session_id: 's12345678', answers: [['选项']] },
         null,
@@ -319,8 +339,7 @@ describe('McpService', () => {
   it('session_id 非法时 400', async () => {
     const { service } = buildService();
     await expect(
-      service.callBot(
-        user,
+      internalsOf(service).callBot(        user,
         { bot: '测试机器人', message: 'x', session_id: '非法 id!!' },
         null,
         undefined,
@@ -352,7 +371,7 @@ describe('McpService', () => {
         ],
       }),
     );
-    const result = await service.getSession(user, {
+    const result = await internalsOf(service).getSession(user, {
       bot: '测试机器人',
       session_id: 's12345678',
     });

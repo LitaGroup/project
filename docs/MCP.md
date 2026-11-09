@@ -3,18 +3,30 @@
 平台机器人（BOT）已通过 MCP（Model Context Protocol）对外开放：外部机器上的 AI Agent（opencode / Claude Code / Cursor / Codex CLI 等）完成一次配置后，即可把任意平台机器人当作**子 Agent** 调用——BOT 在平台自己的执行器与工位上真实运行（带角色定义、技能、规范），执行过程的文本流与工具调用实时回传给主 Agent，结束后返回最终结果。
 
 - 服务地址：`POST /api/mcp`（MCP Streamable HTTP，响应为 SSE 流）
-- 鉴权：平台个人中心的 Agent 访问令牌（Bearer）
+- 鉴权：平台 Agent 访问令牌，`Authorization: Bearer` / `X-Agent-Token` / `?token=` 三种方式均可；接入方环境变量 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 兜底），与 lita-work 技能约定一致
 - 会话执行复用平台机器人聊天引擎，不产生任务记录、不影响任务派发
 
 ---
 
 ## 一、准备工作：获取访问令牌
 
+**方式一：个人令牌（推荐）**
+
 1. 登录平台网页，进入 **个人中心**（右上角头像菜单）；
 2. 在「Agent 访问令牌」卡片复制令牌（48 位随机字符串，尚未生成会自动发放）；
-3. 令牌泄露可在该卡片 **重置**，旧令牌立即失效（重置后需同步更新外部 Agent 配置）。
+3. 令牌泄露可在该卡片 **重置**，旧令牌立即失效（重置后需同步更新外部 Agent 配置）；
+4. 按平台约定写入调用方机器的环境变量或本机 `~/.env`（与 lita-work 技能同一变量）：
 
-> 管理员也可以使用公共 Agent 令牌（环境变量 `PUBLIC_AGENT_TOKEN`），效果等同管理员身份。
+```bash
+# ~/.env
+LITA_WORK_TOKEN=<你的访问令牌>
+```
+
+**方式二：公共 Agent 令牌（管理员下发）**
+
+平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**；未配置时不可用。使用方式与个人令牌相同。
+
+> 令牌环境变量新名为 `LITA_WORK_TOKEN`；过渡期旧名 `LITA_PROJECT_TOKEN` 仍可用，**新名优先**（取值顺序：进程环境 → `~/.env` → 用户单独提供，详见 lita-work 技能）。
 
 ## 二、接入配置
 
@@ -28,8 +40,10 @@ mcp:
     type: streamable-http
     url: http://your-host:3100/api/mcp
     headers:
-      Authorization: Bearer <你的访问令牌>
+      Authorization: Bearer ${LITA_WORK_TOKEN}
 ```
+
+> `${LITA_WORK_TOKEN}` 为占位写法：请替换为实际令牌，或用客户端支持的环境变量引用（如 `Bearer ${LITA_WORK_TOKEN}` 展开自本机环境变量 / `~/.env`）。过渡期旧名 `LITA_PROJECT_TOKEN` 同值可用。
 
 重启 opencode 后，`tools/list` 中会出现 `lita-bots` 的 6 个工具。
 
@@ -37,7 +51,7 @@ mcp:
 
 ```bash
 claude mcp add --transport http lita-bots http://your-host:3100/api/mcp \
-  --header "Authorization: Bearer <你的访问令牌>"
+  --header "Authorization: Bearer ${LITA_WORK_TOKEN}"
 ```
 
 或直接编辑 `~/.claude.json`：
@@ -48,7 +62,7 @@ claude mcp add --transport http lita-bots http://your-host:3100/api/mcp \
     "lita-bots": {
       "type": "http",
       "url": "http://your-host:3100/api/mcp",
-      "headers": { "Authorization": "Bearer <你的访问令牌>" }
+      "headers": { "Authorization": "Bearer ${LITA_WORK_TOKEN}" }
     }
   }
 }
@@ -62,9 +76,8 @@ claude mcp add --transport http lita-bots http://your-host:3100/api/mcp \
 |---|---|
 | 传输类型 | Streamable HTTP（streamable-http / http） |
 | URL | `http://your-host:3100/api/mcp`（生产为平台域名） |
-| 鉴权头 | `Authorization: Bearer <访问令牌>`（也接受 `X-Agent-Token: <令牌>`） |
-
-> 令牌也可放在 URL 上作为兜底：`http://your-host:3100/api/mcp?token=<令牌>`（与平台 `.md` 端点约定一致，二选一即可）。
+| 鉴权头 | `Authorization: Bearer ${LITA_WORK_TOKEN}`（也接受 `X-Agent-Token` 头） |
+| URL 参数兜底 | `?token=<令牌>`（与平台 `.md` 端点一致，三选一即可） |
 
 ## 三、接入验证
 
@@ -74,11 +87,12 @@ claude mcp add --transport http lita-bots http://your-host:3100/api/mcp \
 2. **机器人清单**：让主 Agent 调用 `list_bots`，返回当前可调用的机器人（名称/简介/模型）；
 3. **一轮真实调用**：让主 Agent「调用 技术支持工程师 机器人，问它：MCP链路OK吗」，正常会收到 `status: "complete"` 与回复文本。
 
-curl 直连验证（可选）：
+curl 直连验证（可选，令牌自动取环境变量 `LITA_WORK_TOKEN`，旧名 `LITA_PROJECT_TOKEN` 兜底）：
 
 ```bash
+TOKEN="${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}"
 curl -N -X POST http://your-host:3100/api/mcp \
-  -H "Authorization: Bearer <你的访问令牌>" \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_bots","arguments":{}}}'
@@ -146,7 +160,7 @@ BOT 执行中发起提问时本轮返回：
 
 | 现象 | 原因与处理 |
 |---|---|
-| 401 缺少鉴权 / 无效令牌 | 检查 `Authorization: Bearer` 头；令牌可能已被重置，去个人中心重新复制 |
+| 401 缺少鉴权 / 无效令牌 | 检查 `Authorization: Bearer`（或 `X-Agent-Token` / `?token=`）；令牌可能已被重置，去个人中心重新复制并更新 `LITA_WORK_TOKEN`（旧名 `LITA_PROJECT_TOKEN` 兜底） |
 | `list_bots` 为空 | 平台侧没有满足条件的机器人：需启用、执行器在线且模型配置完整；联系管理员检查执行器 |
 | 找不到机器人「xxx」 | 名称不匹配，先 `list_bots` 获取准确名称或直接用数字 ID |
 | 「机器人正在回复」冲突 | 同一会话上一轮未结束：调 `bot_interrupt` 或改用新 `session_id` |
