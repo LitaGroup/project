@@ -9,6 +9,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import axios, { AxiosInstance } from 'axios';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { mdFrontmatter } from '../common/frontmatter';
 import { imageWebroot } from '../common/paths';
 import {
   bitableRecordsToMarkdown,
@@ -206,6 +207,24 @@ export class FeishuService implements OnModuleInit {
   }
 
   /** 统一入口：传入任意支持的飞书链接（可带 ?sheet= / ?table=&view= 参数），返回标题与 Markdown 内容 */
+  /** 飞书文档转 Markdown 的完整视图（`/api/feishu/read.md` 与 lita-work MCP 工具共用） */
+  async readMarkdown(url: string): Promise<string> {
+    if (!url?.trim()) throw new BadRequestException('缺少飞书文档 url 参数');
+    const result = await this.readByUrl(url.trim());
+    return [
+      mdFrontmatter({
+        update: new Date(),
+        title: result.title,
+        type: result.type,
+        feishuKey: result.feishuKey,
+      }),
+      `# ${result.title}`,
+      '',
+      result.content,
+      '',
+    ].join('\n');
+  }
+
   async readByUrl(url: string): Promise<FeishuReadResult> {
     let query = new URLSearchParams();
     try {

@@ -1,7 +1,9 @@
 ---
 name: knowledge-search
 description: 在项目管理平台知识库中搜索、浏览、读取、创建、更新、移动和删除 Markdown 知识，基于 PGVector + 全文混合检索获取带来源引用的 RAG 上下文
-version: 1.2.2
+version: 1.3.0
+deprecated: true
+deprecated_since: 1.3.0
 author: Lita R&D Team
 tags:
   - 知识库
@@ -9,6 +11,10 @@ tags:
   - 搜索
   - markdown
 ---
+
+> ⚠️ **本技能已废弃（deprecated，1.3.0 起）**：知识库检索与维护已整合到 MCP 服务 `lita-work`（`POST /api/mcp/work`），使用 `search_knowledge`、`list_knowledge_dir`、`read_knowledge`、`create_knowledge`、`update_knowledge`、`delete_knowledge` 工具。
+> MCP 接入文档：`http://work.cinta.team/work-mcp.md`（测试环境 `http://project.cinta.team/work-mcp.md`）。本文件对应的 `.md` 端点预计 3 个版本后移除。
+
 
 # 知识库技能
 

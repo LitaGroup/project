@@ -64,7 +64,7 @@ const featureCards: InfoCard[] = [
       '目录必须带结尾 /，文章不带；项目文档自动同步到 /project/{projectId}/document/{documentId}',
       '搜索支持 path 限定目录与 page/pageSize 分页，每页最大 100 条',
       '搜索结果提供 RAG 片段与原文链接，可继续读取完整 Markdown',
-      '独立技能 http://{host}/knowledge/SKILL.md 供 Agent 安装使用',
+      'MCP 工具 search_knowledge / read_knowledge 直接检索与读取，接入见 /work-mcp.md',
     ],
   },
   {
@@ -140,78 +140,78 @@ function CommandBlock({ command }: { command: string }) {
   )
 }
 
-function SkillInstallSection() {
+function McpInstallSection() {
   const origin = window.location.origin
-  const skillUrl = `${origin}/SKILL.md`
-  const installCmd = `mkdir -p ~/.opencode/skills/lita-work && curl -fsSL ${skillUrl} -o ~/.opencode/skills/lita-work/SKILL.md`
-  const knowledgeSkillUrl = `${origin}/knowledge/SKILL.md`
-  const knowledgeInstallCmd = `mkdir -p ~/.opencode/skills/knowledge-search && curl -fsSL ${knowledgeSkillUrl} -o ~/.opencode/skills/knowledge-search/SKILL.md`
+  const mcpUrl = `${origin}/api/mcp/work`
+  const docUrl = `${origin}/work-mcp.md`
+  const legacySkillUrl = `${origin}/SKILL.md`
+  const opencodeConfig = `{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "lita-work": {
+        "type": "remote",
+        "url": "${mcpUrl}",
+        "oauth": false,
+        "headers": { "Authorization": "Bearer {env:LITA_WORK_TOKEN}" }
+      }
+    }
+  }
+}`
+  const claudeCmd = `claude mcp add --transport http lita-work ${mcpUrl} --header "Authorization: Bearer $LITA_WORK_TOKEN"`
 
   return (
     <section>
-      <h2 className="mb-4 text-xl font-semibold">安装 SKILL（让 Agent 学会操作本平台）</h2>
+      <h2 className="mb-4 text-xl font-semibold">接入 MCP（让 Agent 直接调用平台工具）</h2>
       <Card>
         <CardHeader>
-          <CardTitle>lita-work 技能</CardTitle>
+          <CardTitle>lita-work MCP</CardTitle>
           <CardDescription>
-            技能说明随平台代码维护，涵盖：搜索项目、读取项目详情与文档正文、运行检查/用例/导出/任务并流式获取结果、查看设置与更新脚本仓库。安装后 Agent 会话可直接按技能说明操作本平台。
+            平台工具已开放为 MCP 服务：搜索项目、读取项目详情与文档、运行检查/用例/导出/定时任务并流式获取结果、知识库检索与维护、缺陷与提测、代码分支、文件上传等。配置一次后，Agent 会话可直接调用带 schema 的工具。
           </CardDescription>
         </CardHeader>
         <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">1. 在线地址（SKILL 文件本体）</p>
+            <p className="text-sm font-medium">1. 服务地址</p>
+            <CommandBlock command={mcpUrl} />
+            <p className="text-sm text-foreground-muted">
+              鉴权使用个人中心「Agent 访问令牌」（环境变量 LITA_WORK_TOKEN，过渡期旧名
+              LITA_PROJECT_TOKEN 同值可用）；机器人工位由平台自动注入配置。
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">2. opencode 配置（推荐）</p>
+            <CommandBlock command={opencodeConfig} />
+            <p className="text-sm text-foreground-muted">
+              写入 ~/.config/opencode/opencode.json 或项目 .opencode/opencode.json，保存后自动生效。
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">3. Claude Code</p>
+            <CommandBlock command={claudeCmd} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">4. 工具清单与示例</p>
             <a
-              href={skillUrl}
+              href={docUrl}
               target="_blank"
               rel="noreferrer"
               className="w-fit text-sm text-foreground-intense underline"
             >
-              {skillUrl}
+              {docUrl}
             </a>
-          </div>
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">2. 安装到 opencode（推荐）</p>
-            <CommandBlock command={installCmd} />
             <p className="text-sm text-foreground-muted">
-              安装后重启会话即可生效；SKILL 随平台迭代，需要更新时重新执行上面的命令覆盖即可。
+              旧 SKILL.md 技能（lita-work / knowledge-search / file-upload）已标记废弃，
+              过渡期仍可使用：
             </p>
-          </div>
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">3. 免安装直接使用</p>
-            <p className="text-sm text-foreground-muted">
-              也可以不安装，直接告诉 Agent：「读取 {skillUrl}，按说明操作项目管理平台」。
-            </p>
-          </div>
-        </div>
-      </Card>
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>knowledge-search 技能</CardTitle>
-          <CardDescription>
-            面向 RAG 的知识检索技能：站内全文 + PGVector 混合搜索、目录/文章读取与飞书文档转 Markdown。
-          </CardDescription>
-        </CardHeader>
-        <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">1. 在线地址（SKILL 文件本体）</p>
             <a
-              href={knowledgeSkillUrl}
+              href={legacySkillUrl}
               target="_blank"
               rel="noreferrer"
-              className="w-fit text-sm text-foreground-intense underline"
+              className="w-fit text-sm text-foreground-muted underline"
             >
-              {knowledgeSkillUrl}
+              {legacySkillUrl}
             </a>
-          </div>
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">2. 安装到 opencode（推荐）</p>
-            <CommandBlock command={knowledgeInstallCmd} />
-          </div>
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">3. 免安装直接使用</p>
-            <p className="text-sm text-foreground-muted">
-              也可以直接告诉 Agent：「读取 {knowledgeSkillUrl}，按说明搜索知识」。
-            </p>
           </div>
         </div>
       </Card>
@@ -229,7 +229,7 @@ export function OverviewPage() {
         </p>
       </section>
 
-      <SkillInstallSection />
+      <McpInstallSection />
 
       <section>
         <h2 className="mb-4 text-xl font-semibold">常用使用方法</h2>

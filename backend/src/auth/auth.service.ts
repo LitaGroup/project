@@ -264,13 +264,13 @@ export class AuthService {
     }
   }
 
-  /** 欢迎卡片：介绍 + SKILL 安装 + 核心任务流（口径与前端概览页一致） */
+  /** 欢迎卡片：介绍 + MCP 接入 + 核心任务流（口径与前端概览页一致） */
   private buildWelcomeCard(): Record<string, unknown> {
     const appUrl = (
       this.config.get<string>('APP_URL') ?? 'http://localhost:5273'
     ).replace(/\/$/, '');
-    const skillUrl = `${appUrl}/SKILL.md`;
-    const installCmd = `mkdir -p ~/.opencode/skills/lita-work && curl -fsSL ${skillUrl} -o ~/.opencode/skills/lita-work/SKILL.md`;
+    const mcpUrl = `${appUrl}/api/mcp/work`;
+    const mcpDocUrl = `${appUrl}/work-mcp.md`;
     const md = (content: string) => ({
       tag: 'div',
       text: { tag: 'lark_md', content },
@@ -283,16 +283,17 @@ export class AuthService {
       },
       elements: [
         md(
-          '**project** 是 Lita 的项目管理系统：以 AI 为中心，项目的文档、资料、脚本、缺陷、定时任务等研发要素统一管理。网页供人操作，同时所有能力以 HTTP 接口暴露，AI agent 可直接读写并流式获取运行结果。',
+          '**project** 是 Lita 的项目管理系统：以 AI 为中心，项目的文档、资料、脚本、缺陷、定时任务等研发要素统一管理。网页供人操作，同时所有能力以 HTTP 接口与 MCP 工具暴露，AI agent 可直接读写并流式获取运行结果。',
         ),
         { tag: 'hr' },
         md(
           [
-            '**安装 SKILL.md（让 AI 学会操作本平台）**',
-            `**1. 在线地址**：${skillUrl}`,
-            '**2. 安装到 opencode**（推荐，安装后重启会话生效；SKILL 随平台迭代，更新时重跑覆盖）：',
-            installCmd,
-            `**3. 免安装用法**：直接告诉 Agent「读取 ${skillUrl}，按说明操作项目管理平台」`,
+            '**接入 MCP（让 Agent 直接调用平台工具）**',
+            `**1. 服务地址**：${mcpUrl}（MCP Streamable HTTP）`,
+            '**2. opencode 配置**：在 ~/.config/opencode/opencode.json 或项目 .opencode/opencode.json 的 mcp.servers 下添加 lita-work（type=remote、oauth=false、Authorization: Bearer {env:LITA_WORK_TOKEN}）',
+            '**3. 令牌**：登录网页 → 个人中心 → 「Agent 访问令牌」复制并写入环境变量 LITA_WORK_TOKEN',
+            `**4. 接入文档与工具清单**：${mcpDocUrl}`,
+            '旧 SKILL.md 技能已标记废弃，过渡期仍可使用。',
           ].join('\n'),
         ),
         { tag: 'hr' },
@@ -320,9 +321,9 @@ export class AuthService {
             },
             {
               tag: 'button',
-              text: { tag: 'plain_text', content: '查看 SKILL.md' },
+              text: { tag: 'plain_text', content: '查看 MCP 接入指南' },
               type: 'default',
-              url: skillUrl,
+              url: mcpDocUrl,
             },
           ],
         },

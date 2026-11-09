@@ -23,7 +23,7 @@ function reqOf(options: {
   const headers: Record<string, string> = {};
   if (options.authorization) headers.authorization = options.authorization;
   if (options.agentToken) headers['x-agent-token'] = options.agentToken;
-  return { headers, originalUrl: options.url ?? '/api/mcp' } as never;
+  return { headers, originalUrl: options.url ?? '/api/mcp/bots' } as never;
 }
 
 describe('McpController.authenticate（经 handlePost 验证）', () => {
@@ -47,7 +47,7 @@ describe('McpController.authenticate（经 handlePost 验证）', () => {
       reqOf({
         authorization: 'Bearer valid-token',
         agentToken: 'other',
-        url: '/api/mcp?token=other2',
+        url: '/api/mcp/bots?token=other2',
       }),
     );
     expect(auth.getUserByAgentToken).toHaveBeenCalledWith('valid-token');
@@ -60,7 +60,7 @@ describe('McpController.authenticate（经 handlePost 验证）', () => {
       controller,
       reqOf({
         agentToken: 'valid-token',
-        url: '/api/mcp?token=other2',
+        url: '/api/mcp/bots?token=other2',
       }),
     );
     expect(auth.getUserByAgentToken).toHaveBeenCalledWith('valid-token');
@@ -69,7 +69,7 @@ describe('McpController.authenticate（经 handlePost 验证）', () => {
   it('?token= 参数兜底（与 .md 端点一致）', async () => {
     const { controller, auth } = buildController();
     mockAuthValid(auth);
-    await post(controller, reqOf({ url: '/api/mcp?token=valid-token' }));
+    await post(controller, reqOf({ url: '/api/mcp/bots?token=valid-token' }));
     expect(auth.getUserByAgentToken).toHaveBeenCalledWith('valid-token');
   });
 

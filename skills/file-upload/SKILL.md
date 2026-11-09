@@ -1,7 +1,9 @@
 ---
 name: file-upload
 description: "上传任意文件到项目管理平台并返回无需登录即可访问的公共 URL。Use when: 需要分享报告、图片、压缩包、日志、文档或其他生成的文件。"
-version: 1.0.2
+version: 1.1.0
+deprecated: true
+deprecated_since: 1.1.0
 author: Lita R&D Team
 tags:
   - 文件
@@ -9,6 +11,10 @@ tags:
   - 分享
   - URL
 ---
+
+> ⚠️ **本技能已废弃（deprecated，1.1.0 起）**：文件上传已整合到 MCP 服务 `lita-work`（`POST /api/mcp/work`），使用 `upload_file` 工具（filename + content_base64，单文件 ≤50MB）。
+> MCP 接入文档：`http://work.cinta.team/work-mcp.md`（测试环境 `http://project.cinta.team/work-mcp.md`）。本文件对应的 `.md` 端点预计 3 个版本后移除。
+
 
 # File Upload 文件上传技能
 

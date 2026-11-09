@@ -2,9 +2,11 @@
 
 平台机器人（BOT）已通过 MCP（Model Context Protocol）对外开放：外部机器上的 AI Agent（opencode / Claude Code / Cursor / Codex CLI 等）完成一次配置后，即可把任意平台机器人当作**子 Agent** 调用——BOT 在平台自己的执行器与工位上真实运行（带角色定义、技能、规范），执行过程的文本流与工具调用实时回传给主 Agent，结束后返回最终结果。
 
-- 服务地址：`POST /api/mcp`（MCP Streamable HTTP，响应为 SSE 流）
+- 服务地址：`POST /api/mcp/bots`（MCP Streamable HTTP，响应为 SSE 流）
 - 鉴权：平台 Agent 访问令牌，`Authorization: Bearer` / `X-Agent-Token` / `?token=` 三种方式均可；接入方环境变量 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 兜底），与 lita-work 技能约定一致
 - 会话执行复用平台机器人聊天引擎，不产生任务记录、不影响任务派发
+
+> 需要**直接操作平台数据**（项目、知识库、脚本运行、缺陷、提测等，即原 lita-work 技能能力）？请使用独立的 **lita-work MCP**：`POST /api/mcp/work`，接入指南见 [work-mcp.md](./work-mcp.md)。
 
 ---
 
@@ -30,27 +32,36 @@ LITA_WORK_TOKEN=<你的访问令牌>
 
 ## 二、接入配置
 
-### opencode（本地项目或全局配置）
+### opencode（推荐）
 
-在 `.opencode/config.yaml`（或 `~/.config/opencode/config.yaml`）追加：
+在 `~/.config/opencode/opencode.json`（或项目 `.opencode/opencode.json`）追加：
 
-```yaml
-mcp:
-  lita-bots:
-    type: streamable-http
-    url: http://your-host:3100/api/mcp
-    headers:
-      Authorization: Bearer ${LITA_WORK_TOKEN}
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "lita-bots": {
+        "type": "remote",
+        "url": "http://your-host:3100/api/mcp/bots",
+        "oauth": false,
+        "headers": {
+          "Authorization": "Bearer {env:LITA_WORK_TOKEN}"
+        }
+      }
+    }
+  }
+}
 ```
 
-> `${LITA_WORK_TOKEN}` 为占位写法：请替换为实际令牌，或用客户端支持的环境变量引用（如 `Bearer ${LITA_WORK_TOKEN}` 展开自本机环境变量 / `~/.env`）。过渡期旧名 `LITA_PROJECT_TOKEN` 同值可用。
+> `{env:LITA_WORK_TOKEN}` 由 opencode 从本机环境变量展开；也可直接写入实际令牌（注意文件权限）。过渡期旧名 `LITA_PROJECT_TOKEN` 同值可用。
 
-重启 opencode 后，`tools/list` 中会出现 `lita-bots` 的 6 个工具。
+保存后 opencode 自动加载配置，`tools/list` 中会出现 `lita-bots` 的 6 个工具。
 
 ### Claude Code
 
 ```bash
-claude mcp add --transport http lita-bots http://your-host:3100/api/mcp \
+claude mcp add --transport http lita-bots http://your-host:3100/api/mcp/bots \
   --header "Authorization: Bearer ${LITA_WORK_TOKEN}"
 ```
 
@@ -61,7 +72,7 @@ claude mcp add --transport http lita-bots http://your-host:3100/api/mcp \
   "mcpServers": {
     "lita-bots": {
       "type": "http",
-      "url": "http://your-host:3100/api/mcp",
+      "url": "http://your-host:3100/api/mcp/bots",
       "headers": { "Authorization": "Bearer ${LITA_WORK_TOKEN}" }
     }
   }
@@ -75,7 +86,7 @@ claude mcp add --transport http lita-bots http://your-host:3100/api/mcp \
 | 参数 | 值 |
 |---|---|
 | 传输类型 | Streamable HTTP（streamable-http / http） |
-| URL | `http://your-host:3100/api/mcp`（生产为平台域名） |
+| URL | `http://your-host:3100/api/mcp/bots`（生产为平台域名） |
 | 鉴权头 | `Authorization: Bearer ${LITA_WORK_TOKEN}`（也接受 `X-Agent-Token` 头） |
 | URL 参数兜底 | `?token=<令牌>`（与平台 `.md` 端点一致，三选一即可） |
 
@@ -91,7 +102,7 @@ curl 直连验证（可选，令牌自动取环境变量 `LITA_WORK_TOKEN`，旧
 
 ```bash
 TOKEN="${LITA_WORK_TOKEN:-$LITA_PROJECT_TOKEN}"
-curl -N -X POST http://your-host:3100/api/mcp \
+curl -N -X POST http://your-host:3100/api/mcp/bots \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \

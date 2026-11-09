@@ -1,11 +1,4 @@
-import {
-  BadRequestException,
-  Controller,
-  Get,
-  Header,
-  Query,
-} from '@nestjs/common';
-import { mdFrontmatter } from '../common/frontmatter';
+import { Controller, Get, Header, Query } from '@nestjs/common';
 import { FeishuReadResult, FeishuService } from './feishu.service';
 
 @Controller('feishu')
@@ -24,20 +17,7 @@ export class FeishuController {
    */
   @Get('read.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')
-  async readMarkdown(@Query('url') url: string): Promise<string> {
-    if (!url?.trim()) throw new BadRequestException('缺少飞书文档 url 参数');
-    const result = await this.feishuService.readByUrl(url.trim());
-    return [
-      mdFrontmatter({
-        update: new Date(),
-        title: result.title,
-        type: result.type,
-        feishuKey: result.feishuKey,
-      }),
-      `# ${result.title}`,
-      '',
-      result.content,
-      '',
-    ].join('\n');
+  readMarkdown(@Query('url') url: string): Promise<string> {
+    return this.feishuService.readMarkdown(url);
   }
 }

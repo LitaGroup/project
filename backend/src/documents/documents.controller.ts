@@ -12,7 +12,6 @@ import {
   Query,
 } from '@nestjs/common';
 import { DocumentType } from '../common/enums';
-import { mdFrontmatter } from '../common/frontmatter';
 import { Document } from './document.entity';
 import { DocumentsService } from './documents.service';
 
@@ -101,24 +100,8 @@ export class DocumentsController {
    */
   @Post('upsert.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')
-  async upsert(@Body() dto: UpsertDocumentDto): Promise<string> {
-    const { doc, created } = await this.documentsService.upsert(dto);
-    return [
-      mdFrontmatter({
-        update: doc.updatedAt,
-        title: doc.title,
-        filename: doc.fileName,
-      }),
-      `# 文档已${created ? '创建' : '更新'}`,
-      '',
-      `- ID：${doc.id}`,
-      `- 项目：${doc.projectId}`,
-      `- fileName：${doc.fileName}`,
-      `- 标题：${doc.title}`,
-      `- 类型：${doc.type}`,
-      `- 阅读地址：GET /api/documents/${doc.id}.md`,
-      '',
-    ].join('\n');
+  upsert(@Body() dto: UpsertDocumentDto): Promise<string> {
+    return this.documentsService.upsertMarkdown(dto);
   }
 
   @Patch(':id/content')

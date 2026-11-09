@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as path from 'path';
+import { mdFrontmatter } from '../common/frontmatter';
 import { AgentGateway } from '../agent/agent.gateway';
 import { DEFAULT_PROJECT_SOURCE_URL } from '../projects/project-sync.service';
 import { ScriptLibrarySyncService } from '../scripts/script-library-sync.service';
@@ -144,5 +145,37 @@ export class SettingsService {
     if (!status.lastSyncOk) {
       throw new Error(status.lastError ?? '脚本仓库更新失败');
     }
+  }
+
+  /** 平台设置的 Markdown 视图（`/api/settings.md` 与 lita-work MCP 工具共用） */
+  renderMarkdown(): string {
+    const s = this.getSettings();
+    return [
+      mdFrontmatter({ title: '平台设置' }),
+      '# 平台设置',
+      '',
+      '- 运行环境：' + s.environment,
+      '- 服务端口：' + s.port,
+      `- 脚本根目录：\`${s.scriptsDir}\``,
+      `- 图片根目录：\`${s.imageWebroot}\``,
+      `- 前端地址：${s.appUrl}`,
+      `- 接口地址：${s.apiUrl}`,
+      `- Lita API：${s.litaApiHost}`,
+      `- 飞书 token 来源：${s.feishuTokenSource}`,
+      `- 兜底通知 webhook：${s.feishuWebhookConfigured ? '已配置' : '未配置'}`,
+      `- GitHub：${s.github.tokenConfigured ? `已配置（组织 ${s.github.org}，每分钟监听项目登记分支的新提交）` : '未配置 GITHUB_TOKEN（代码监听停用）'}`,
+      `- 公共 Agent 令牌：${s.publicAgentTokenConfigured ? '已配置（管理员权限，X-Agent-Token 调用 .md 端点，操作人记「公共 Agent」）' : '未配置 PUBLIC_AGENT_TOKEN'}`,
+      `- appium-agent：${s.agent.online ? `在线（${s.agent.name ?? '未知'}）` : '离线'}`,
+      `- agent appium 地址：${s.agent.appiumUrl ? `\`${s.agent.appiumUrl}\`` : '-'}`,
+      '',
+      '## AI 操作',
+      '',
+      '更新脚本仓库（MCP 工具 `pull_scripts`，或流式接口）：',
+      '',
+      '```bash',
+      'curl -N -X POST /api/settings/scripts/pull.md',
+      '```',
+      '',
+    ].join('\n');
   }
 }

@@ -34,7 +34,11 @@ import {
 } from '../executors/opencode-event-hub.service';
 import { parseOpencodeToolEvent } from '../executors/opencode-tools';
 import { Worker } from '../workers/worker.entity';
-import { agentTokenShell, workerEnvShell } from '../workers/worker-env';
+import {
+  agentTokenShell,
+  workMcpConfigShell,
+  workerEnvShell,
+} from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
@@ -96,6 +100,8 @@ export class TaskDispatchService
 {
   private readonly logger = new Logger(TaskDispatchService.name);
   private readonly apiUrl: string;
+  /** 平台对外地址（工位 MCP 配置使用） */
+  private readonly appUrl: string;
 
   constructor(
     @InjectRepository(Task)
@@ -121,6 +127,9 @@ export class TaskDispatchService
   ) {
     this.apiUrl = (
       config.get<string>('API_URL') ?? 'http://localhost:3100/api'
+    ).replace(/\/+$/, '');
+    this.appUrl = (
+      config.get<string>('APP_URL') ?? 'http://localhost:5273'
     ).replace(/\/+$/, '');
   }
 
@@ -364,7 +373,9 @@ export class TaskDispatchService
           workerEnvShell(workdir, {
             LITA_WORK_TOKEN: workerToken,
             LITA_PROJECT_TOKEN: workerToken,
-          }),
+          }) +
+          ' && ' +
+          workMcpConfigShell(workdir, this.appUrl, workerToken),
       );
 
       // 2. 固定绑定：一个任务只对应一个 opencode 会话。

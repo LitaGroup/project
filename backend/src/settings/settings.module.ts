@@ -11,5 +11,6 @@ import { SettingsService } from './settings.service';
   imports: [AgentModule, ScriptsModule],
   controllers: [SettingsController, SettingsMarkdownController],
   providers: [SettingsService],
+  exports: [SettingsService],
 })
 export class SettingsModule {}

@@ -1,7 +1,9 @@
 ---
 name: lita-work
 description: 项目管理平台技能。根据名称模糊搜索项目、获取项目详情（文档/资源/节点/检查/用例/导出/定时任务/提测记录及运行信息）、运行检查/用例/导出/定时任务并流式获取结果、向项目导入 scripts 仓库的新脚本、修改项目配置（脚本目录/飞书通知群/描述/人员）、写入/更新项目文档、登记与验收节点、项目提测（状态流转「测试中」并通知提测群与项目人员）、登记项目代码分支（GitHub 仓库+分支）并查询监听到的提交/合并记录、查询缺陷清单与详情、创建/编辑/状态变更/删除缺陷、上传文件并获取公共访问 URL、查看系统设置与更新脚本仓库、搜索/创建/更新/移动/删除平台知识库、多机器人任务分发/接受/拒绝/提问/验收协同、工单调度澄清与任务定义转交、工单工作流上下文查询与节点拒绝、工单交付文档的链接/正文交付与更新删除、机器人/任务定义的 Agent 管理
-version: 1.25.0
+version: 1.26.0
+deprecated: true
+deprecated_since: 1.26.0
 author: Lita R&D Team
 tags:
   - 项目管理
@@ -11,6 +13,11 @@ tags:
   - 文件上传
   - markdown
 ---
+
+> ⚠️ **本技能已废弃（deprecated，1.26.0 起）**：平台已提供 MCP 服务 `lita-work`（`POST /api/mcp/work`），项目、文档、知识库、脚本运行、缺陷/提测、代码分支、文件上传等能力请优先使用 MCP 工具。
+> MCP 接入文档：`http://work.cinta.team/work-mcp.md`（测试环境 `http://project.cinta.team/work-mcp.md`）。
+> 任务协同、工单与机器人管理能力的 MCP 版本在二期提供，期间本文件对应的 `.md` 端点继续可用；预计 3 个版本后移除本技能。
+
 
 # Lita Work 技能
 
@@ -485,7 +492,7 @@ curl -X POST {BASE}/api/docs/nodes/delete.md -H 'Content-Type: application/json'
 
 ## 12. 多机器人任务协同（Markdown）
 
-任务创建后进入「等待中-待分配」，LOOP 按任务定义分配机器人并发送邀约。机器人必须在「等待中-待接受」明确接受或拒绝；接受后才进入「进行中-执行中」。一个机器人最多一个进行中任务，待接受、待反馈、待继续、待申请验收和待验收均可接受其他任务。一轮答复结束且当前任务没有排队消息时，平台释放机器人并把任务转为「等待中-待申请验收」，稍后按 2/10/30 分钟唤醒催办；收到补充消息或子任务事件时转待继续。
+任务创建后进入「等待中-待分配」，LOOP 按任务定义分配机器人并发送邀约。机器人必须在「等待中-待接受」明确接受或拒绝；接受后才进入「进行中-执行中」。AI 机器人按并行上限（`maxParallelTasks`，默认 3，1 表示串行）同时执行多个进行中任务，达到上限后新任务保持等待；待接受、待反馈、待继续、待申请验收和待验收均不占用执行容量。一轮答复结束且当前任务没有排队消息时，平台释放该任务的执行容量并把任务转为「等待中-待申请验收」，稍后按 2/10/30 分钟唤醒催办；收到补充消息或子任务事件时转待继续。
 
 ### 12.0 task-list / task-detail / task-create：我的任务、详情与创建
 
@@ -531,12 +538,12 @@ curl -X POST {BASE}/api/tasks/{parentTaskId}/subtasks/create.md \
 
 - 先根据父任务定义判断是否需要协同，不要无目的拆分
 - 只有父任务当前执行机器人可在执行中创建子任务；子任务初始为待分配
-- 子任务提问、执行方消息、待验收或被拒绝时，平台写入父机器人收件箱，并在父机器人空闲时唤醒父任务会话
+- 子任务提问、执行方消息、待验收或被拒绝时，平台写入父机器人收件箱，并在父机器人仍有执行容量时唤醒父任务会话
 
 ### 12.2 task-accept / task-refuse：接受或拒绝邀约
 
 ```bash
-# 接受：待接受 → 执行中；机器人忙碌时返回 409，不要开始执行
+# 接受：待接受 → 执行中；达到并行上限时返回 409，不要开始执行
 curl -X POST {BASE}/api/tasks/{taskId}/accept-task.md \
   -H "X-Worker-Token: $TOKEN"
 
@@ -561,7 +568,7 @@ curl -X POST {BASE}/api/tasks/{taskId}/questions/{questionId}/answer.md \
 ```
 
 - `options` 为 `{label, description?}` 对象数组（label 必填，不要传字符串）；`multiple:true` 表示多选，`custom:false` 表示仅限选项
-- 提问使用 project 生成的问题 ID，不再依赖 opencode 原生 question；答复后任务进入待继续，LOOP 空闲时恢复
+- 提问使用 project 生成的问题 ID，不再依赖 opencode 原生 question；答复后任务进入待继续，LOOP 在机器人仍有执行容量时恢复
 - 人类需求方使用 `X-Agent-Token`，机器人需求方使用 `X-Worker-Token`；跳过答复用 `{"reject":true}`
 
 ### 12.3.1 task-message-reply：需求方回复执行方消息
@@ -649,14 +656,14 @@ curl -X POST {BASE}/api/tasks/{taskId}/handoff/apply.md \
 curl -X POST {BASE}/api/tasks/{taskId}/handoff/accept.md \
   -H "X-Agent-Token: $LITA_WORK_TOKEN"
 
-# 返工：feedback 必填；机器人空闲直接执行，忙碌先进入待继续
+# 返工：feedback 必填；仍有执行容量时直接执行，达到并行上限先进入待继续
 curl -X POST {BASE}/api/tasks/{taskId}/handoff/refuse.md \
   -H "X-Agent-Token: $LITA_WORK_TOKEN" -H 'Content-Type: application/json' \
   -d '{"content":"缺少加载状态，请补充"}'
 ```
 
 - 机器人需求方改用 `X-Worker-Token`；只有显式需求方可操作，管理员不能绕过
-- 根任务需求方是 AI 机器人时，平台会用该机器人的工位自动创建一次性验收会话（读取交付文档后调用本接口），无需父任务唤醒；连续 3 次未推进会通知机器人负责人转人工
+- 根任务需求方是 AI 机器人时，平台会用该机器人的工位自动创建一次性验收会话（读取交付文档后调用本接口），无需父任务唤醒；未推进时会持续自动重试，不转移任务需求方或执行方
 - 累计第 1～3 次返工退回原机器人，第 4 次起转执行机器人负责人处理
 - 返工消息会明确携带退回原因，并提示：修改完成后如需继续验收，必须重新调用 `handoff/apply.md`；此前的验收申请已失效，不能视为新一轮交付已申请验收
 
@@ -790,7 +797,8 @@ curl -X POST {BASE}/api/workers/{id}/update.md \
 curl -X POST {BASE}/api/workers/{id}/delete.md -H "X-Agent-Token: $LITA_WORK_TOKEN"
 ```
 
-- 创建字段：`name`（必填、唯一）、`intro`、`avatarUrl`（仅 `/images/...`）、`executorId`、`providerId`、`modelId`、`variant`、`prompt`、`skills`、`standards`、`taskDefs`、`ownerUserId`、`enabled`、`githubPermission`、`resourcePermission`
+- 创建字段：`name`（必填、唯一）、`intro`、`avatarUrl`（仅 `/images/...`）、`executorId`、`providerId`、`modelId`、`variant`、`prompt`、`skills`、`standards`、`taskDefs`、`ownerUserId`、`enabled`、`githubPermission`、`resourcePermission`、`maxParallelTasks`
+- 并行上限 `maxParallelTasks`：1-20 的整数，默认 3，`1` 表示串行；仅 AI 机器人生效，真人机器人不受限。达到上限后新任务保持等待
 - 资源权限 `resourcePermission`：`write`（全部资源）/ `read`（仅只读资源）/ `none`（无权限，默认）；与 GitHub 权限相互独立。AI Gateway 的资源访问说明见独立技能 `resource-gateway/SKILL.md`
 - 本接口只创建自定义 AI 工作者：运行时固定 `opencode`、ID 从 1000 开始；不能创建调度机器人、真人机器人或个人 AGENT
 - 启用中的 AI 机器人必须配置执行器、供应商与模型；停用状态可暂缺这些配置

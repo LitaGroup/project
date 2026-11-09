@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
 import { FilesController } from './files.controller';
+import { FilesService } from './files.service';
 
 describe('FilesController', () => {
   let root: string;
@@ -15,7 +16,9 @@ describe('FilesController', () => {
     root = await fs.mkdtemp(path.join(tmpdir(), 'project-files-'));
     process.env.DIR_FILE_WEBROOT = root;
     controller = new FilesController(
-      new ConfigService({ APP_URL: 'https://project.example.com/' }),
+      new FilesService(
+        new ConfigService({ APP_URL: 'https://project.example.com/' }),
+      ),
     );
   });
 

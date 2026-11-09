@@ -7,9 +7,17 @@ import { AppModule } from './app.module';
 import { imageWebroot, exportWebroot, fileWebroot } from './common/paths';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // 关闭默认解析器：为 MCP 文件上传单独放大 JSON 上限，其余路由保持默认 100KB
+    bodyParser: false,
+  });
   app.setGlobalPrefix('api');
   app.enableCors({ origin: true, credentials: true }); // 开发期放开，前端 Vite dev server 直连；credentials 供登录 Cookie 跨端携带
+
+  // MCP 端点需要接收 base64 文件内容（50MB 文件约 67MB base64 + JSON 包装）
+  app.use('/api/mcp', express.json({ limit: '72mb' }));
+  app.use(express.json({ limit: '100kb' }));
+  app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
   // 图片静态资源：http://{host}/images/{image-path} → DIR_IMAGE_WEBROOT（不走 /api 前缀）
   const webroot = imageWebroot();

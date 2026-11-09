@@ -30,7 +30,12 @@ import {
   isDeprecatedPersonalAgentSkill,
   PERSONAL_AGENT_SKILL_PATHS,
 } from './personal-agent';
-import { agentTokenShell, shellQuote, workerEnvShell } from './worker-env';
+import {
+  agentTokenShell,
+  shellQuote,
+  workMcpConfigShell,
+  workerEnvShell,
+} from './worker-env';
 
 /** 工作台「我的 AGENT」可用信息（对外只暴露必要字段） */
 export interface PersonalAgentView {
@@ -94,6 +99,8 @@ export class PersonalAgentsService {
   private readonly templateUnavailableUntil = new Map<number, number>();
 
   private readonly apiUrl: string;
+  /** 平台对外地址（工位 MCP 配置使用） */
+  private readonly appUrl: string;
 
   constructor(
     @InjectRepository(Worker)
@@ -108,6 +115,9 @@ export class PersonalAgentsService {
   ) {
     this.apiUrl =
       config.get<string>('API_URL')?.trim() || 'http://localhost:3100/api';
+    this.appUrl = (
+      config.get<string>('APP_URL') ?? 'http://localhost:5273'
+    ).replace(/\/+$/, '');
   }
 
   /** 按归属用户查个人 AGENT */
@@ -521,7 +531,7 @@ export class PersonalAgentsService {
           `${workerEnvShell(workdir, {
             LITA_WORK_TOKEN: token,
             LITA_PROJECT_TOKEN: token,
-          })}`,
+          })} && ${workMcpConfigShell(workdir, this.appUrl, token)}`,
       ),
       PREPARE_TIMEOUT_MS,
       '准备个人 AGENT 工位超时',

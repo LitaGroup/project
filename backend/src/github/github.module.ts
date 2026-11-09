@@ -46,6 +46,12 @@ import {
     GithubWatchService,
     { provide: CODE_EVENT_BUS, useValue: new Subject<CodeEventPayload>() },
   ],
-  exports: [GithubService, CodeBranchesService, ReposService, CODE_EVENT_BUS],
+  exports: [
+    GithubService,
+    CodeBranchesService,
+    CodeEventsService,
+    ReposService,
+    CODE_EVENT_BUS,
+  ],
 })
 export class GithubModule {}

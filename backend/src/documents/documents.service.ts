@@ -374,6 +374,34 @@ export class DocumentsService implements OnApplicationBootstrap {
     };
   }
 
+  /** AI 文档 upsert 的 Markdown 结果（`.md` 端点与 lita-work MCP 工具共用） */
+  async upsertMarkdown(input: {
+    projectId: number;
+    fileName: string;
+    title?: string;
+    type?: DocumentType;
+    content: string;
+    description?: string;
+  }): Promise<string> {
+    const { doc, created } = await this.upsert(input);
+    return [
+      mdFrontmatter({
+        update: doc.updatedAt,
+        title: doc.title,
+        filename: doc.fileName,
+      }),
+      `# 文档已${created ? '创建' : '更新'}`,
+      '',
+      `- ID：${doc.id}`,
+      `- 项目：${doc.projectId}`,
+      `- fileName：${doc.fileName}`,
+      `- 标题：${doc.title}`,
+      `- 类型：${doc.type}`,
+      `- 阅读地址：GET /api/documents/${doc.id}.md`,
+      '',
+    ].join('\n');
+  }
+
   /** 本地修改正文：仅允许 Markdown 编写的文档；外部导入（飞书/apipost）的文档只允许源同步更新 */
   async updateContent(id: number, content: string): Promise<Document> {
     const doc = await this.getEntity(id);

@@ -3,7 +3,6 @@ import {
   Body,
   Controller,
   Delete,
-  ForbiddenException,
   Get,
   Header,
   HttpCode,
@@ -18,6 +17,7 @@ import type { Request, Response } from 'express';
 import type { AuthedRequest } from '../auth/auth.guard';
 import { KnowledgeService } from './knowledge.service';
 import type { KnowledgeSearchSource } from './knowledge.types';
+import { assertTaskDocumentWritable } from './task-document.guard';
 
 class CreateKnowledgeNodeDto {
   kind: 'directory' | 'article';
@@ -89,24 +89,6 @@ function optionalNumber(value: string | undefined): number | undefined {
 @Controller('docs')
 export class KnowledgeController {
   constructor(private readonly knowledge: KnowledgeService) {}
-
-  /**
-   * /task/** 是任务交付文档与复盘文档的保留路径，版本、通知与验收锁定
-   * 必须经过任务中心；禁止从通用知识库入口直接改写或删除。
-   */
-  private assertTaskDocumentWritable(
-    ...paths: Array<string | undefined>
-  ): void {
-    for (const raw of paths) {
-      if (!raw?.trim()) continue;
-      const path = raw.trim().replace(/^\/+/, '').replace(/\/+$/, '');
-      if (path === 'task' || path.startsWith('task/')) {
-        throw new ForbiddenException(
-          '任务交付/复盘文档由任务中心维护，请通过工作台或任务接口修改',
-        );
-      }
-    }
-  }
 
   private async handleDetail(req: Request, res: Response): Promise<unknown> {
     const suffix = detailSuffix(req);
@@ -211,7 +193,7 @@ export class KnowledgeController {
     if (dto.kind !== 'directory' && dto.kind !== 'article') {
       throw new BadRequestException('kind 只能是 directory 或 article');
     }
-    this.assertTaskDocumentWritable(dto.parentPath);
+    assertTaskDocumentWritable(dto.parentPath);
     const node = await this.knowledge.create({
       kind: dto.kind,
       parentPath: dto.parentPath ?? '/',
@@ -231,7 +213,7 @@ export class KnowledgeController {
   ): Promise<string> {
     if (!dto.path?.trim()) throw new BadRequestException('path 不能为空');
     const current = await this.knowledge.getNodeByPath(dto.path);
-    this.assertTaskDocumentWritable(current.path, dto.parentPath);
+    assertTaskDocumentWritable(current.path, dto.parentPath);
     const node = await this.knowledge.update(current.id, {
       title: dto.title,
       content: dto.content,
@@ -251,7 +233,7 @@ export class KnowledgeController {
     if (!dto.path?.trim()) throw new BadRequestException('path 不能为空');
     const recursive = dto.recursive === true;
     const node = await this.knowledge.getNodeByPath(dto.path);
-    this.assertTaskDocumentWritable(node.path);
+    assertTaskDocumentWritable(node.path);
     await this.knowledge.remove(node.id, recursive);
     return this.knowledge.renderNodeDeletedMarkdown(node, recursive);
   }
@@ -261,7 +243,7 @@ export class KnowledgeController {
     if (dto.kind !== 'directory' && dto.kind !== 'article') {
       throw new BadRequestException('kind 只能是 directory 或 article');
     }
-    this.assertTaskDocumentWritable(dto.parentPath);
+    assertTaskDocumentWritable(dto.parentPath);
     return this.knowledge.create({
       kind: dto.kind,
       parentPath: dto.parentPath ?? '/',
@@ -274,7 +256,7 @@ export class KnowledgeController {
   @Patch('nodes/:id')
   async update(@Param('id') id: string, @Body() dto: UpdateKnowledgeNodeDto) {
     const current = await this.knowledge.getNodeById(id);
-    this.assertTaskDocumentWritable(current.path, dto.parentPath);
+    assertTaskDocumentWritable(current.path, dto.parentPath);
     return this.knowledge.update(id, dto);
   }
 
@@ -285,7 +267,7 @@ export class KnowledgeController {
     @Query('recursive') recursive?: string,
   ): Promise<void> {
     const current = await this.knowledge.getNodeById(id);
-    this.assertTaskDocumentWritable(current.path);
+    assertTaskDocumentWritable(current.path);
     await this.knowledge.remove(id, recursive === 'true');
   }
 }

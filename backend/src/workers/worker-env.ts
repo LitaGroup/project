@@ -47,3 +47,39 @@ export function workerEnvShell(
     `chmod 600 ${shellQuote(tmp)} && mv ${shellQuote(tmp)} ${shellQuote(path)}`
   );
 }
+
+/**
+ * 写入工位 .opencode/opencode.json 的 lita-work MCP 配置（权限 600）：
+ * opencode V2 的 mcp.servers 远程 Streamable HTTP 服务，鉴权头使用机器人令牌。
+ * 令牌只经服务端拼进 shell 命令落盘，不进入初始化 Prompt、SSE 进度或日志。
+ */
+export function workMcpConfigShell(
+  workdir: string,
+  baseUrl: string,
+  token: string,
+): string {
+  const dir = `${workdir}/.opencode`;
+  const path = `${dir}/opencode.json`;
+  const config = JSON.stringify(
+    {
+      $schema: 'https://opencode.ai/config.json',
+      mcp: {
+        servers: {
+          'lita-work': {
+            type: 'remote',
+            url: `${baseUrl.replace(/\/+$/, '')}/api/mcp/work`,
+            oauth: false,
+            headers: { 'X-Worker-Token': token },
+          },
+        },
+      },
+    },
+    null,
+    2,
+  );
+  return (
+    `mkdir -p ${shellQuote(dir)} && ` +
+    `printf '%s' ${shellQuote(config)} > ${shellQuote(path)} && ` +
+    `chmod 600 ${shellQuote(path)}`
+  );
+}

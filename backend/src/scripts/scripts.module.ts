@@ -48,6 +48,6 @@ import { ScriptsService } from './scripts.service';
     ScriptLibrarySyncService,
     ScriptLibraryDescriptionService,
   ],
-  exports: [ScriptsService, ScriptLibrarySyncService],
+  exports: [ScriptsService, ScriptLibrarySyncService, ScriptsImportService],
 })
 export class ScriptsModule {}

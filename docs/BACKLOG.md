@@ -112,7 +112,7 @@ type: docs
 | 工单工作流 | 定义/版本/发布、节点/连线、审批/操作/验收、运行推进、交付文档 | `backend/src/{workflows,tickets}/`、`frontend/src/pages/{TicketDefinitionEditPage,TicketDetailPage}.tsx` |
 | 飞书 | OAuth、文档同步、私聊机器人、任务群、卡片、图片/文件 | `backend/src/{feishu,feishu-bot}/`、`frontend/src/pages/FeishuBotConfigPage.tsx` |
 | 知识库 | 目录/文章树、全文 + 向量 RRF、Embedding 队列、项目文档镜像 | `backend/src/knowledge/` |
-| MCP | 外部 Agent 列出/调用平台机器人，流式进度与提问 | `backend/src/mcp/`、[MCP 接入指南](./MCP.md) |
+| MCP | 外部 Agent 列出/调用平台机器人（lita-bots），以及项目/知识/运行等平台工具（lita-work） | `backend/src/mcp/`、[MCP 接入指南](./MCP.md)、[lita-work MCP](./work-mcp.md) |
 | GitHub | 仓库/分支/提交监听、项目分支登记、权限档位与凭证网关 | `backend/src/{github,github-gateway}/`、[OP Gateway](./OP_GATEWAY.md) |
 | 人机协作 | 真人机器人、工作台、我的 AI、任务协作面板、任务群 | `backend/src/tasks/workbench.*`、`frontend/src/pages/WorkbenchPage.tsx` |
 
@@ -140,7 +140,7 @@ type: docs
 | B2 | 任务状态机 | ✅ | 等待中/进行中/已结束 + 子状态；提问→待反馈，恢复→待继续，验收→待验收。 |
 | B3 | Agent 状态：空闲/下线/工作/等待 | 🟡 | 已有空闲中/工作中/等待中/验收中；没有「下线」；执行器在线状态单独展示。下一步：统一 Agent 生命周期状态。 |
 | B4 | 需要确认时等待用户 | ✅ | 提问、待反馈、待验收、验收返工。 |
-| B5 | 单 AI 机器人串行 | ✅ | 行锁 + 唯一索引，AI 机器人同一时刻最多一个执行中任务；真人可并行。 |
+| B5 | 单 AI 机器人串行 | ✅ | 已支持可配并行上限：`workers.maxParallelTasks`（默认 3，1 为串行），行锁保证容量计数；真人可并行。 |
 | B6 | 子任务拆包 / 收件箱唤醒 | ✅ | `subtasks`、`task_worker_inbox`、父机器人唤醒、超时恢复。 |
 | B7 | 角色化 Agent（前端/后端/测试） | 🟡 | 只有「工作者/调度器」两种 role；前端/后端靠任务定义、AGENTS.md、技能约定，没有能力标签/角色体系。下一步：能力标签 + 任务定义匹配。 |
 | B8 | 动态上下文加载（按服务/仓库） | 🟡 | 初始化同步技能/规范/AGENTS.md，任务带上下文，知识库可检索；没有按服务自动装配 context pack。 |
@@ -173,7 +173,7 @@ type: docs
 | D4 | 供应商 / API Key 管理 | 🟡 | 执行器同步 opencode 的 provider/model 缓存；平台没有供应商凭据中心、路由、配额、价格。 |
 | D5 | 工具/环境变量/端口治理 | 🟡 | 工位隔离、环境变量写入、技能安装；没有显式端口分配/冲突治理、软件清单。 |
 | D6 | 我的 BOT 实时状态/进度/日志 | 🟡 | `/tasks/live` 全员视图 + 调试页实时流；没有「我的 BOT」专属视图和任务上下文聚合。 |
-| D7 | MCP 对外开放 | ✅ | `POST /api/mcp`，外部 Agent 可列出/调用平台 BOT。 |
+| D7 | MCP 对外开放 | ✅ | `POST /api/mcp/bots` 列出/调用平台 BOT；`POST /api/mcp/work` 提供 lita-work 平台工具（替代原技能）。 |
 | D8 | BOT 市场 / 复用 / 售卖 | ❌ | 无。 |
 
 ### E. 飞书与人机协作

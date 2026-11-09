@@ -13,13 +13,13 @@ import { Public } from '../auth/public.decorator';
 import { McpService } from './mcp.service';
 
 /**
- * MCP 开放端点（MCP Streamable HTTP，stateless）：
- * POST /api/mcp —— 外部 AI Agent（opencode / Claude Code 等）经此调用平台机器人。
+ * MCP 机器人开放端点（MCP Streamable HTTP，stateless）：
+ * POST /api/mcp/bots —— 外部 AI Agent（opencode / Claude Code 等）经此调用平台机器人。
  * 鉴权：Authorization: Bearer <token> 或 X-Agent-Token 或 ?token= 参数（个人 agent
  * 访问令牌，公共 Agent 令牌同样可用），与 `.md` 端点 / lita-work 技能的令牌体系一致
  * （工位环境变量 LITA_WORK_TOKEN，过渡期旧名 LITA_PROJECT_TOKEN 同值兜底）。
  */
-@Controller('mcp')
+@Controller('mcp/bots')
 export class McpController {
   constructor(
     private readonly mcp: McpService,

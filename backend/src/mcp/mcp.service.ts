@@ -7,8 +7,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import { z } from 'zod';
 import { User } from '../auth/user.entity';
 import type { WorkerDebugOption } from '../workers/worker-debug.service';
@@ -39,6 +37,8 @@ import {
   type McpSessionPayload,
 } from './mcp.types';
 import { McpLogsService } from './mcp-logs.service';
+import { handleStatelessMcpRequest } from './mcp-http';
+import { createProgressEmitter, type ProgressFn } from './mcp-progress';
 
 /** MCP progress 文本增量的推送节流（毫秒）：避免逐字符刷屏 */
 const TEXT_FLUSH_MS = 300;
@@ -46,9 +46,6 @@ const TEXT_FLUSH_MS = 300;
 /** status=question 时附带的答复格式说明 */
 const ANSWERS_HINT =
   '调用 bot_answer 续跑：answers 为二维字符串数组且每个问题对应一项，每项为所选选项 label（可多项）或自由输入文本；也可只传 skip=true 跳过提问继续执行。';
-
-/** 进度推送函数（客户端提供 progressToken 时才存在） */
-type ProgressFn = (progress: number, message: string) => Promise<void>;
 
 /** 等待轮次终态的参数 */
 interface WaitOptions {
@@ -88,24 +85,12 @@ export class McpService {
     res: import('express').Response,
     body: unknown,
   ): Promise<void> {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
     const server = new McpServer(
       { name: 'lita-bots', version: '1.0.0' },
       { capabilities: { tools: {} } },
     );
     this.registerTools(server, user);
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      void server.close().catch(() => {});
-      void transport.close().catch(() => {});
-    };
-    res.on('close', cleanup);
-    await server.connect(transport);
-    await transport.handleRequest(req, res, body);
+    await handleStatelessMcpRequest(server, req, res, body);
   }
 
   // ---- 工具注册 ----
@@ -169,7 +154,7 @@ export class McpService {
           const payload = await this.callBot(
             user,
             args,
-            this.progressEmitterOf(extra),
+            createProgressEmitter(extra),
             extra.signal,
           );
           return textResult(payload);
@@ -209,7 +194,7 @@ export class McpService {
           const payload = await this.answerBot(
             user,
             args,
-            this.progressEmitterOf(extra),
+            createProgressEmitter(extra),
             extra.signal,
           );
           return textResult(payload);
@@ -718,23 +703,6 @@ export class McpService {
   private timeoutMsOf(seconds: number | undefined): number {
     if (!seconds || seconds <= 0) return MCP_DEFAULT_TIMEOUT_MS;
     return Math.min(Math.max(seconds, 10) * 1000, MCP_MAX_TIMEOUT_MS);
-  }
-
-  /** 客户端提供 progressToken 时构造进度推送函数，否则返回 null（仅等终态） */
-  private progressEmitterOf(
-    extra: RequestHandlerExtra<
-      import('@modelcontextprotocol/sdk/types.js').Request,
-      import('@modelcontextprotocol/sdk/types.js').Notification
-    >,
-  ): ProgressFn | null {
-    const progressToken = extra._meta?.progressToken;
-    if (progressToken === undefined || progressToken === null) return null;
-    return async (progress: number, message: string) => {
-      await extra.sendNotification({
-        method: 'notifications/progress',
-        params: { progressToken, progress, message },
-      });
-    };
   }
 }
 
