@@ -110,6 +110,32 @@ export interface PlatformUser {
   lastLoginAt: string | null
 }
 
+/** MCP 机器人调用审计条目（管理端「MCP 调用」页展示） */
+export interface McpCallLogItem {
+  id: number
+  userId: number
+  userName: string
+  workerId: number
+  workerName: string
+  /** 平台会话标识（mcp:{sessionId}） */
+  sessionId: string
+  tool: string
+  status: string
+  durationMs: number
+  messageLength: number
+  contentLength: number | null
+  error: string | null
+  createdAt: string
+}
+
+/** MCP 调用审计分页结果 */
+export interface McpLogPage {
+  items: McpCallLogItem[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 /** 节点：项目在某个时间点需要完成的事项（日期=北京时间当日 23:59:59 前）；状态由后端推导 */
 export interface Milestone {
   id: number
@@ -2574,6 +2600,15 @@ export const api = {
   /** 用户系统全量名单（项目人员/提测测试人员等场景选择用户，亦供管理端用户列表页展示） */
   listUsers: () =>
     request<{ users: PlatformUser[] }>('/auth/users').then((r) => r.users),
+  /** MCP 机器人调用审计（管理端，倒序分页） */
+  listMcpLogs: (params?: { q?: string; page?: number; pageSize?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.q) search.set('q', params.q)
+    if (params?.page) search.set('page', String(params.page))
+    if (params?.pageSize) search.set('pageSize', String(params.pageSize))
+    const qs = search.toString()
+    return request<McpLogPage>(`/mcp/logs${qs ? `?${qs}` : ''}`)
+  },
   /** 当前登录用户（未登录 401，调用方 catch 视为未登录态） */
   getMe: () => request<{ user: User }>('/auth/me').then((r) => r.user),
   /** 当前用户的 agent 访问令牌（调 .md 端点鉴权用；尚未发放则自动生成） */

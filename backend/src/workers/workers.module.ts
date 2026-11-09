@@ -67,6 +67,8 @@ import { WorkersService } from './workers.service';
     WorkersService,
     PersonalAgentsService,
     GithubPermissionCredentialService,
+    WorkerDebugService,
+    WorkerChatService,
   ],
 })
 export class WorkersModule {}

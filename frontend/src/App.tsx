@@ -19,6 +19,7 @@ import { MilestonesPage } from './pages/MilestonesPage'
 import { CommitsPage } from './pages/CommitsPage'
 import { ReposPage } from './pages/ReposPage'
 import { GithubAccessPage } from './pages/GithubAccessPage'
+import { McpLogsPage } from './pages/McpLogsPage'
 import { ScriptLibraryPage } from './pages/ScriptLibraryPage'
 import { ScriptLibraryDetailPage } from './pages/ScriptLibraryDetailPage'
 import { SchedulesPage } from './pages/SchedulesPage'
@@ -265,6 +266,7 @@ function App() {
             />
             <Route path="/admin/repos" element={<ReposPage />} />
             <Route path="/admin/github-access" element={<GithubAccessPage />} />
+            <Route path="/admin/mcp-logs" element={<McpLogsPage />} />
           </Route>
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
           <Route path="/tickets" element={<TicketHomePage />} />

@@ -36,6 +36,7 @@ import { ImagesModule } from './images/images.module';
 import { ReleasesModule } from './releases/releases.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { WorkflowsModule } from './workflows/workflows.module';
+import { McpModule } from './mcp/mcp.module';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
     TasksModule,
     TicketsModule,
     WorkflowsModule,
+    McpModule,
     ScriptsModule,
     FeishuModule,
     GithubModule,

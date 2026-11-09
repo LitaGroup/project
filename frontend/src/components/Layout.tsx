@@ -46,6 +46,7 @@ import {
   ListCheck,
   Book,
   Package,
+  PlugConnected,
   Plus,
   Robot,
   Search,
@@ -176,6 +177,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },
       { to: '/admin/workers', label: '机器人', icon: Robot, ready: true },
       { to: '/admin/executors', label: '执行器', icon: Cpu, ready: true },
+      { to: '/admin/mcp-logs', label: 'MCP 调用', icon: PlugConnected, ready: true },
     ],
   },
 ]
