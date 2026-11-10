@@ -53,6 +53,10 @@ import {
 } from '../../lib/api'
 import { matchesPinyinSearch } from '../../lib/pinyin-search'
 import { useAuth } from '../../context/AuthContext'
+import {
+  ApprovalActions,
+  type ApprovalActionKind,
+} from './ApprovalActions'
 
 /** 成功反馈停留时长 */
 const SUCCESS_STAY_MS = 2_000
@@ -81,6 +85,10 @@ export interface TaskActionsProps {
   handoffEditing?: boolean
   /** 操作成功后刷新任务、聊天、交付文档与角色 */
   onRefresh: () => Promise<unknown> | unknown
+  /** 审批任务默认打开的弹窗（飞书卡片链接 ?approval=） */
+  approvalAction?: ApprovalActionKind | null
+  /** 隐藏审批操作（工单页把审批按钮放在当前节点卡片内，避免重复） */
+  hideApproval?: boolean
   className?: string
 }
 
@@ -95,6 +103,8 @@ export function TaskActions({
   handoffDoc = null,
   handoffEditing = false,
   onRefresh,
+  approvalAction = null,
+  hideApproval = false,
   className,
 }: TaskActionsProps) {
   const { user } = useAuth()
@@ -115,6 +125,7 @@ export function TaskActions({
   const roles = task?.workbenchRoles ?? []
   const isAgent = roles.includes('agent')
   const isRequester = roles.includes('requester')
+  const isApprovalTask = task?.type === '审批'
   const activeChat = chat && task && chat.task.id === task.id ? chat : null
   const executing = task?.subStatus === '执行中'
   const awaitingAcceptance = task?.subStatus === '待接受'
@@ -133,25 +144,46 @@ export function TaskActions({
   const canStop = Boolean(
     task && !finished && (isRequester || user?.role === '管理员'),
   )
-  const canAcceptHandoff = Boolean(task && isRequester && awaitingReview)
+  /** 审批任务：发起人、当前审批处理人（执行方）与管理员可通过/驳回 */
+  const canApproveApproval = Boolean(
+    task &&
+      isApprovalTask &&
+      !hideApproval &&
+      !finished &&
+      (isAgent || isRequester || user?.role === '管理员'),
+  )
+  const canAcceptHandoff = Boolean(
+    task && isRequester && awaitingReview && !isApprovalTask,
+  )
   const canAcceptTask = Boolean(task && isAgent && awaitingAcceptance)
   const canRefuseTask = canAcceptTask
   const canApplyHandoff = Boolean(
     task &&
+      !isApprovalTask &&
       isAgent &&
       (executing || pendingApply) &&
       handoffReady &&
       !handoffEditing,
   )
-  const canRevokeHandoff = Boolean(task && isAgent && awaitingReview)
-  const canAssign = Boolean(task && !finished && (isRequester || isAgent))
+  const canRevokeHandoff = Boolean(
+    task && !isApprovalTask && isAgent && awaitingReview,
+  )
+  const canAssign = Boolean(
+    task && !finished && !isApprovalTask && (isRequester || isAgent),
+  )
   const requesterSubtaskAvailable = Boolean(task && isRequester && !finished)
   const responsibleSubtaskAvailable = Boolean(
-    task && isAgent && (executing || pendingApply) && !delivered,
+    task &&
+      !isApprovalTask &&
+      isAgent &&
+      (executing || pendingApply) &&
+      !delivered,
   )
   const canCreateSubtask =
-    requesterSubtaskAvailable || responsibleSubtaskAvailable
-  const canRegenerateReview = Boolean(task && isRequester && completed)
+    !isApprovalTask && (requesterSubtaskAvailable || responsibleSubtaskAvailable)
+  const canRegenerateReview = Boolean(
+    task && isRequester && completed && !isApprovalTask,
+  )
 
   const assignWorkers = useMemo(
     () => workers.filter((worker) => worker.id !== task?.agentId),
@@ -340,6 +372,7 @@ export function TaskActions({
   if (!task) return null
 
   const visibleActions = [
+    canApproveApproval,
     canStop,
     canAcceptHandoff,
     canAcceptTask,
@@ -360,6 +393,14 @@ export function TaskActions({
           className ?? ''
         }`}
       >
+        {canApproveApproval && (
+          <ApprovalActions
+            taskId={task.id}
+            initialAction={approvalAction}
+            onRefresh={onRefresh}
+            disabled={busy}
+          />
+        )}
         {canAcceptHandoff && (
           <DirectActionButton
             label="验收通过"

@@ -12,6 +12,10 @@ import type {
 } from '../../lib/api'
 import { MarkdownViewer } from '../MarkdownViewer'
 import { QuestionCard } from '../QuestionCard'
+import {
+  ApprovalActions,
+  type ApprovalActionKind,
+} from '../task-detail/ApprovalActions'
 
 const NODE_KIND_LABEL: Record<string, string> = {
   start: '起始',
@@ -40,12 +44,16 @@ interface TicketCurrentNodePanelProps {
   messages: TaskChatMessage[]
   /** 待回答的机器人提问 */
   pendingQuestions: TaskChatQuestion[]
-  /** 当前审批节点是否允许直接审批通过 */
+  /** 当前审批节点任务 id（无任务为空） */
+  approvalTaskId?: number | null
+  /** 当前审批节点是否允许通过/驳回 */
   canApprove?: boolean
-  /** 审批提交中 */
-  approving?: boolean
-  /** 当前审批节点直接通过 */
-  onApprove?: () => Promise<void>
+  /** 飞书卡片链接带入的默认审批动作 */
+  approvalAction?: ApprovalActionKind | null
+  /** 默认审批动作已打开弹窗后回调（清理链接参数） */
+  onApprovalInitialHandled?: () => void
+  /** 审批提交后刷新工单与任务 */
+  onApprovalRefresh?: () => Promise<unknown> | unknown
   replying: boolean
   onReplyQuestion: (
     questionId: string,
@@ -65,9 +73,11 @@ export function TicketCurrentNodePanel({
   agentName,
   messages,
   pendingQuestions,
+  approvalTaskId = null,
   canApprove = false,
-  approving = false,
-  onApprove,
+  approvalAction = null,
+  onApprovalInitialHandled,
+  onApprovalRefresh,
   replying,
   onReplyQuestion,
   onSend,
@@ -195,17 +205,19 @@ export function TicketCurrentNodePanel({
                     className="text-sm"
                   />
                 )}
-                {node.kind === 'approval' && canApprove && onApprove && (
-                  <div className="flex items-center justify-end">
-                    <Button
-                      size="sm"
-                      disabled={approving}
-                      onClick={() => void onApprove()}
-                    >
-                      {approving ? '审批中…' : '审批通过'}
-                    </Button>
-                  </div>
-                )}
+                {node.kind === 'approval' &&
+                  canApprove &&
+                  approvalTaskId &&
+                  onApprovalRefresh && (
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <ApprovalActions
+                        taskId={approvalTaskId}
+                        initialAction={approvalAction}
+                        onInitialActionHandled={onApprovalInitialHandled}
+                        onRefresh={onApprovalRefresh}
+                      />
+                    </div>
+                  )}
               </div>
             )}
           </section>

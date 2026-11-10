@@ -1,9 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../auth/user.entity';
 import { ExecutorsModule } from '../executors/executors.module';
 import { Executor } from '../executors/executor.entity';
 import { FeishuModule } from '../feishu/feishu.module';
+import { FeishuBotModule } from '../feishu-bot/feishu-bot.module';
+import { FeishuBotApprovalCard } from '../feishu-bot/feishu-bot-approval-card.entity';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { WorkersModule } from '../workers/workers.module';
 import { Worker } from '../workers/worker.entity';
@@ -58,10 +60,12 @@ import { WorkbenchService } from './workbench.service';
       Worker,
       User,
       Executor,
+      FeishuBotApprovalCard,
     ]),
     WorkersModule,
     ExecutorsModule,
     FeishuModule,
+    forwardRef(() => FeishuBotModule),
     KnowledgeModule,
     McpServersModule,
   ],

@@ -2,7 +2,9 @@ import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { Task } from './task.entity';
 import { TaskNotifyService } from './task-notify.service';
 
-describe('TaskNotifyService 飞书任务通知', () => {
+let botClient: { sendCard: jest.Mock };
+
+describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () => {
   const baseTask = (over: Partial<Task> = {}): Task =>
     ({
       id: 42,
@@ -19,8 +21,13 @@ describe('TaskNotifyService 飞书任务通知', () => {
   let workers: { findOne: jest.Mock };
   let tasks: { findOne: jest.Mock };
   let users: { findOne: jest.Mock };
+  let approvalCards: { save: jest.Mock; create: jest.Mock };
   let workersService: { ownerOpenId: jest.Mock };
-  let feishuService: { sendUserCard: jest.Mock };
+  let botConfig: {
+    loadEnabledOfficial: jest.Mock;
+    secretsOf: jest.Mock;
+  };
+  let botIdentities: { openIdFor: jest.Mock };
   let config: { get: jest.Mock };
   let service: TaskNotifyService;
 
@@ -34,8 +41,26 @@ describe('TaskNotifyService 飞书任务通知', () => {
         feishuOpenId: 'ou_requester',
       }),
     };
+    approvalCards = {
+      save: jest.fn().mockResolvedValue({ id: 1 }),
+      create: jest.fn().mockImplementation((row: unknown) => row),
+    };
     workersService = { ownerOpenId: jest.fn() };
-    feishuService = { sendUserCard: jest.fn().mockResolvedValue(undefined) };
+    botConfig = {
+      loadEnabledOfficial: jest
+        .fn()
+        .mockResolvedValue({ id: 9, kind: 'official', enabled: true }),
+      secretsOf: jest.fn().mockReturnValue({
+        appId: 'app',
+        appSecret: 'secret',
+        verificationToken: null,
+        encryptKey: null,
+      }),
+    };
+    botClient = {
+      sendCard: jest.fn().mockResolvedValue({ messageId: 'om_card_1' }),
+    };
+    botIdentities = { openIdFor: jest.fn().mockResolvedValue(null) };
     config = {
       get: jest
         .fn()
@@ -47,8 +72,11 @@ describe('TaskNotifyService 飞书任务通知', () => {
       workers as never,
       tasks as never,
       users as never,
+      approvalCards as never,
       workersService as never,
-      feishuService as never,
+      botConfig as never,
+      botClient as never,
+      botIdentities as never,
       config as never,
     );
   });
@@ -63,13 +91,14 @@ describe('TaskNotifyService 飞书任务通知', () => {
       ),
     ).resolves.toEqual({ sent: true, ownerName: '张三' });
 
-    expect(feishuService.sendUserCard).toHaveBeenCalledWith(
+    expect(botClient.sendCard).toHaveBeenCalledWith(
+      9,
+      expect.any(Object),
+      'open_id',
       'ou_requester',
       expect.any(Object),
     );
-    expect(sentCardUrl(feishuService.sendUserCard)).toBe(
-      'https://project.example/workbench/tasks/42',
-    );
+    expect(sentCardUrl()).toBe('https://project.example/workbench/tasks/42');
   });
 
   it('非待验收通知继续打开任务详情页', async () => {
@@ -83,9 +112,7 @@ describe('TaskNotifyService 飞书任务通知', () => {
       '请补充活动页素材。',
     );
 
-    expect(sentCardUrl(feishuService.sendUserCard)).toBe(
-      'https://project.example/tasks/42',
-    );
+    expect(sentCardUrl()).toBe('https://project.example/tasks/42');
   });
 
   it('真人执行机器人收到新任务通知并打开工作台任务', async () => {
@@ -110,14 +137,28 @@ describe('TaskNotifyService 飞书任务通知', () => {
       ),
     ).resolves.toEqual({ sent: true, ownerName: '李四' });
 
-    expect(feishuService.sendUserCard).toHaveBeenCalledWith(
-      'ou_executor',
+    expect(sentCardUrl()).toBe('https://project.example/workbench/tasks/42');
+    expect(sentCardActionText()).toBe('打开工作台');
+  });
+
+  it('优先使用官方机器人应用下的 open_id 发送', async () => {
+    botIdentities.openIdFor.mockResolvedValueOnce('ou_bot_mapped');
+
+    await service.notifyTaskRequester(
+      baseTask(),
+      'accept',
+      '任务待验收：TK-0042 活动页开发',
+      '请验收。',
+    );
+
+    expect(botIdentities.openIdFor).toHaveBeenCalledWith(9, 7);
+    expect(botClient.sendCard).toHaveBeenCalledWith(
+      9,
+      expect.any(Object),
+      'open_id',
+      'ou_bot_mapped',
       expect.any(Object),
     );
-    expect(sentCardUrl(feishuService.sendUserCard)).toBe(
-      'https://project.example/workbench/tasks/42',
-    );
-    expect(sentCardActionText(feishuService.sendUserCard)).toBe('打开工作台');
   });
 
   it('负责人通知正文包含任务状态', async () => {
@@ -135,9 +176,7 @@ describe('TaskNotifyService 飞书任务通知', () => {
       '平台已 3 次重新唤醒机器人。',
     );
 
-    expect(sentCardText(feishuService.sendUserCard)).toContain(
-      '**状态**：等待中-待继续',
-    );
+    expect(sentCardText()).toContain('**状态**：等待中-待继续');
   });
 
   it('任务字段不完整时不渲染 undefined 状态', async () => {
@@ -155,9 +194,23 @@ describe('TaskNotifyService 飞书任务通知', () => {
       '平台已 3 次重新唤醒机器人。',
     );
 
-    const text = sentCardText(feishuService.sendUserCard);
+    const text = sentCardText();
     expect(text).toContain('**状态**：未知');
     expect(text).not.toContain('undefined');
+  });
+
+  it('未配置平台官方机器人时不回退旧应用通道', async () => {
+    botConfig.loadEnabledOfficial.mockResolvedValueOnce(null);
+
+    await expect(
+      service.notifyTaskRequester(
+        baseTask(),
+        'accept',
+        '任务待验收：TK-0042 活动页开发',
+        '请验收。',
+      ),
+    ).resolves.toEqual({ sent: false, ownerName: '张三' });
+    expect(botClient.sendCard).not.toHaveBeenCalled();
   });
 
   it('AI 执行机器人不发送真人任务通知', async () => {
@@ -176,7 +229,7 @@ describe('TaskNotifyService 飞书任务通知', () => {
         '任务已分配给你，请前往工作台确认是否接受。',
       ),
     ).resolves.toEqual({ sent: false });
-    expect(feishuService.sendUserCard).not.toHaveBeenCalled();
+    expect(botClient.sendCard).not.toHaveBeenCalled();
   });
 
   it('普通 AI 机器人需求方不向负责人发送正常待验收通知', async () => {
@@ -204,7 +257,7 @@ describe('TaskNotifyService 飞书任务通知', () => {
     ).resolves.toEqual({ sent: false });
 
     expect(workersService.ownerOpenId).not.toHaveBeenCalled();
-    expect(feishuService.sendUserCard).not.toHaveBeenCalled();
+    expect(botClient.sendCard).not.toHaveBeenCalled();
   });
 
   it('AI 需求方人工兜底时通知负责人且不标记为需求方', async () => {
@@ -233,29 +286,94 @@ describe('TaskNotifyService 飞书任务通知', () => {
       ),
     ).resolves.toEqual({ sent: true, ownerName: '胡峰' });
 
-    expect(feishuService.sendUserCard).toHaveBeenCalledWith(
-      'ou_owner',
-      expect.any(Object),
-    );
-    const text = sentCardText(feishuService.sendUserCard);
+    const text = sentCardText();
     expect(text).toContain('**负责人**：胡峰');
     expect(text).not.toContain('**需求方**：胡峰');
   });
+
+  it('审批任务卡片包含工单链接、关键正文与通过/驳回/查看按钮', async () => {
+    workers.findOne.mockResolvedValueOnce({
+      id: 1001,
+      name: '李四',
+      runtime: WorkerRuntime.HUMAN,
+      humanUserId: 8,
+    });
+    users.findOne.mockResolvedValueOnce({
+      id: 8,
+      name: '李四',
+      feishuOpenId: 'ou_executor',
+    });
+
+    await expect(
+      service.notifyApprovalTask({
+        task: baseTask({
+          type: '审批' as Task['type'],
+          status: TaskStatus.RUNNING,
+          subStatus: TaskSubStatus.EXECUTING,
+        }),
+        ticket: { id: 11, code: 'WO-0011', title: '发布申请' },
+        nodeName: '主管审批',
+        summaryLines: ['- 版本：v1.2.0', '- 环境：生产'],
+        initiatorName: '王五',
+      }),
+    ).resolves.toEqual({ sent: true, ownerName: '李四' });
+
+    const text = sentCardText();
+    expect(text).toContain(
+      '**工单**：[WO-0011 发布申请](https://project.example/tickets/11)',
+    );
+    expect(text).toContain('**审批节点**：主管审批');
+    expect(text).toContain('- 版本：v1.2.0');
+    expect(text).toContain('**发起人**：王五');
+    const actions = cardActions();
+    expect(actions?.map((action) => action.text?.content)).toEqual([
+      '通过',
+      '驳回',
+      '查看',
+    ]);
+    expect(actions?.[0].value).toEqual({
+      k: 'approval',
+      a: 'approve',
+      t: 42,
+    });
+    expect(actions?.[1].url).toBe(
+      'https://project.example/tickets/11?approval=reject',
+    );
+    expect(actions?.[2].url).toBe('https://project.example/tickets/11');
+    expect(approvalCards.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configId: 9,
+        ticketId: 11,
+        taskId: 42,
+        messageId: 'om_card_1',
+        state: 'pending',
+      }),
+    );
+  });
 });
 
-function sentCardUrl(sendUserCard: jest.Mock): string | undefined {
-  return sentCardAction(sendUserCard)?.url;
+interface SentCardAction {
+  url?: string;
+  value?: Record<string, unknown>;
+  text?: { content?: string };
 }
 
-function sentCardActionText(sendUserCard: jest.Mock): string | undefined {
-  return sentCardAction(sendUserCard)?.text?.content;
+function sentCard(): Record<string, unknown> {
+  const call = botClient.sendCard.mock.calls.at(-1) as
+    [number, unknown, string, string, Record<string, unknown>] | undefined;
+  return call?.[4] ?? {};
 }
 
-function sentCardText(sendUserCard: jest.Mock): string {
-  const call = sendUserCard.mock.calls[0] as
-    [string, Record<string, unknown>] | undefined;
-  if (!call) return '';
-  const elements = call[1].elements as
+function sentCardUrl(): string | undefined {
+  return cardActions()?.[0]?.url;
+}
+
+function sentCardActionText(): string | undefined {
+  return cardActions()?.[0]?.text?.content;
+}
+
+function sentCardText(): string {
+  const elements = sentCard().elements as
     Array<{ tag?: string; text?: { content?: string } }> | undefined;
   return (
     elements
@@ -265,22 +383,8 @@ function sentCardText(sendUserCard: jest.Mock): string {
   );
 }
 
-function sentCardAction(
-  sendUserCard: jest.Mock,
-): { url?: string; text?: { content?: string } } | undefined {
-  const call = sendUserCard.mock.calls[0] as
-    [string, Record<string, unknown>] | undefined;
-  return call ? cardAction(call[1]) : undefined;
-}
-
-function cardAction(
-  card: Record<string, unknown>,
-): { url?: string; text?: { content?: string } } | undefined {
-  const elements = card.elements as
-    | Array<{
-        tag?: string;
-        actions?: Array<{ url?: string; text?: { content?: string } }>;
-      }>
-    | undefined;
-  return elements?.find((element) => element.tag === 'action')?.actions?.[0];
+function cardActions(): SentCardAction[] | undefined {
+  const elements = sentCard().elements as
+    Array<{ tag?: string; actions?: SentCardAction[] }> | undefined;
+  return elements?.find((element) => element.tag === 'action')?.actions;
 }

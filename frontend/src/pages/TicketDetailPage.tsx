@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
 import {
@@ -40,6 +40,7 @@ import { TaskTreePanel } from '../components/task-detail/TaskTreePanel'
 import { TaskDetailView } from './TaskPackageDetailPage'
 import { visibleEventSource } from '../lib/event-source'
 import { useAuth } from '../context/AuthContext'
+import type { ApprovalActionKind } from '../components/task-detail/ApprovalActions'
 
 type TicketContentTab =
   | 'current'
@@ -80,15 +81,21 @@ function latestTaskId(workflow: TicketWorkflowView | null | undefined) {
 /** 工单详情：新模型展示工作流进度与节点任务；历史工单继续复用任务详情 */
 export function TicketDetailPage() {
   const { ticketId } = useParams<{ ticketId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const { user: currentUser } = useAuth()
   const id = Number(ticketId)
+  /** 飞书审批卡片跳转：?approval=approve|reject 自动打开审批弹窗 */
+  const approvalAction: ApprovalActionKind | null =
+    searchParams.get('approval') === 'approve'
+      ? 'approve'
+      : searchParams.get('approval') === 'reject'
+        ? 'reject'
+        : null
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [acting, setActing] = useState<'accept' | 'reject' | 'approve' | null>(
-    null,
-  )
+  const [acting, setActing] = useState<'accept' | 'reject' | null>(null)
   const [contentTab, setContentTab] = useState<TicketContentTab>('current')
   const [collaborationOpen, setCollaborationOpen] = useState(false)
   const [collaborationUnread, setCollaborationUnread] = useState(0)
@@ -121,25 +128,23 @@ export function TicketDetailPage() {
     return () => window.clearInterval(timer)
   }, [load])
 
+  /** 审批弹窗按链接参数打开后清理查询参数，避免刷新或切换节点时重复弹出 */
+  const clearApprovalParam = useCallback(() => {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        next.delete('approval')
+        return next
+      },
+      { replace: true },
+    )
+  }, [setSearchParams])
+
   const act = async (action: 'accept' | 'reject') => {
     setActing(action)
     setActionError(null)
     try {
       await api.acceptTicketWorkflow(id, action)
-      await load()
-    } catch (e) {
-      setActionError((e as Error).message)
-    } finally {
-      setActing(null)
-    }
-  }
-
-  /** 当前审批节点直接通过：发起人、当前审批处理人或管理员可操作 */
-  const approveNode = async () => {
-    setActing('approve')
-    setActionError(null)
-    try {
-      await api.approveTicketWorkflow(id)
       await load()
     } catch (e) {
       setActionError((e as Error).message)
@@ -405,6 +410,7 @@ export function TicketDetailPage() {
     )
     const isTaskNode =
       currentNode?.kind === 'operation' || currentNode?.kind === 'approval'
+    /** 审批节点当前任务与操作权限（不依赖工作台数据，加载失败也可审批） */
     const canApprove =
       currentNode?.kind === 'approval' &&
       Boolean(currentNodeTaskId) &&
@@ -460,6 +466,7 @@ export function TicketDetailPage() {
                   ? handoffDoc
                   : null
               }
+              hideApproval
               onRefresh={refreshTicket}
               className="pt-0.5"
             />
@@ -575,9 +582,11 @@ export function TicketDetailPage() {
                 messages={currentMessages}
                 pendingQuestions={pendingQuestions}
                 replying={replying}
+                approvalTaskId={currentNodeTaskId}
                 canApprove={canApprove}
-                approving={acting === 'approve'}
-                onApprove={approveNode}
+                approvalAction={approvalAction}
+                onApprovalInitialHandled={clearApprovalParam}
+                onApprovalRefresh={refreshTicket}
                 onReplyQuestion={replyQuestion}
                 onSend={sendSupplement}
               />

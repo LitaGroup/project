@@ -335,11 +335,91 @@ export class TicketsService {
   }
 
   /**
-   * 当前审批节点直接通过（真人处理人）：完成任务并推进工单，
-   * 不生成交付文档与复盘文档。
+   * 当前审批节点通过/驳回（真人处理人）：完成任务并推进工单，
+   * 不生成交付文档与复盘文档；驳回意见必填。
    */
-  async approveWorkflow(id: number, user: User): Promise<TicketView> {
-    const ticket = await this.workflowRuntime.approveNodeByUser(id, user);
+  async approveWorkflow(
+    id: number,
+    user: User,
+    remark?: string,
+  ): Promise<TicketView> {
+    const ticket = await this.workflowRuntime.approveNodeByUser(
+      id,
+      user,
+      remark,
+    );
+    return this.toTicketView(ticket);
+  }
+
+  async rejectApprovalWorkflow(
+    id: number,
+    user: User,
+    remark: string,
+  ): Promise<TicketView> {
+    const ticket = await this.workflowRuntime.rejectNodeByUser(
+      id,
+      user,
+      remark,
+    );
+    return this.toTicketView(ticket);
+  }
+
+  /** 按节点任务定位工单后审批通过（任务详情/飞书卡片入口） */
+  async approveTaskApproval(
+    taskId: number,
+    user: User,
+    remark?: string,
+  ): Promise<TicketView> {
+    const ticket = await this.ticketDocuments.resolveTicketForTask(
+      await this.mustFindTask(taskId),
+    );
+    await this.assertCurrentApprovalTask(ticket, taskId);
+    const updated = await this.workflowRuntime.approveNodeByUser(
+      ticket.id,
+      user,
+      remark,
+    );
+    return this.toTicketView(updated);
+  }
+
+  /** 按节点任务定位工单后驳回审批（驳回意见必填） */
+  async rejectTaskApproval(
+    taskId: number,
+    user: User,
+    remark: string,
+  ): Promise<TicketView> {
+    const ticket = await this.ticketDocuments.resolveTicketForTask(
+      await this.mustFindTask(taskId),
+    );
+    await this.assertCurrentApprovalTask(ticket, taskId);
+    const updated = await this.workflowRuntime.rejectNodeByUser(
+      ticket.id,
+      user,
+      remark,
+    );
+    return this.toTicketView(updated);
+  }
+
+  /** 审批动作必须来自工单当前节点的任务，避免旧卡片/旧任务审批新节点 */
+  private async assertCurrentApprovalTask(
+    ticket: Ticket,
+    taskId: number,
+  ): Promise<void> {
+    if (!ticket.currentNodeKey) {
+      throw new BadRequestException('工单流程已结束，没有可审批的当前节点');
+    }
+    const run = await this.workflowRuns.findOne({
+      where: { ticketId: ticket.id, nodeKey: ticket.currentNodeKey },
+      order: { id: 'DESC' },
+    });
+    if (!run?.taskId || run.taskId !== taskId) {
+      throw new BadRequestException(
+        '该审批任务已处理或不是工单当前节点任务，请刷新工单',
+      );
+    }
+  }
+
+  private async toTicketView(ticket: Ticket): Promise<TicketView> {
     const workflow = await this.workflowRuntime.workflowView(ticket);
     return {
       ...ticket,

@@ -10,7 +10,7 @@ import { Observable } from 'rxjs';
 import { FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import type { User } from '../auth/user.entity';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
-import { WorkerRuntime } from '../common/enums';
+import { TaskType, WorkerRuntime } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
 import type {
   WorkerDebugAttachment,
@@ -740,6 +740,14 @@ export class WorkbenchService {
   }
 
   private actionOf(task: Task, roles: WorkbenchRole[]): string | null {
+    if (
+      task.type === TaskType.APPROVAL &&
+      task.status === TaskStatus.RUNNING &&
+      task.subStatus === TaskSubStatus.EXECUTING &&
+      (roles.includes('agent') || roles.includes('requester'))
+    ) {
+      return '审批处理';
+    }
     if (roles.includes('agent')) {
       if (
         task.status === TaskStatus.WAITING &&

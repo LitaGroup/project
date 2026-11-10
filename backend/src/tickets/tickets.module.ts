@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Task } from '../tasks/task.entity';
@@ -31,7 +31,7 @@ import { TicketsService } from './tickets.service';
       WorkflowDefinition,
       WorkflowDefinitionVersion,
     ]),
-    TasksModule,
+    forwardRef(() => TasksModule),
     WorkersModule,
   ],
   controllers: [TicketsController, TicketTaskController],

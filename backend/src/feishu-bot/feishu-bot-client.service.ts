@@ -130,6 +130,22 @@ export class FeishuBotClientService {
     );
   }
 
+  /** 更新已发送的互动卡片内容（审批卡片处理结果回写） */
+  async updateCard(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    messageId: string,
+    card: Record<string, unknown>,
+  ): Promise<void> {
+    await this.request(
+      configId,
+      secrets,
+      'PATCH',
+      `/im/v1/messages/${encodeURIComponent(messageId)}`,
+      { content: JSON.stringify(card) },
+    );
+  }
+
   /** 发送图片消息 */
   async sendImage(
     configId: number,
@@ -416,7 +432,7 @@ export class FeishuBotClientService {
   private async request(
     configId: number,
     secrets: FeishuBotSecrets,
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
     body?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
@@ -433,7 +449,7 @@ export class FeishuBotClientService {
   /** 原始请求（verify 场景尚未有 configId，直接用凭据取 token） */
   private async requestRaw(
     secrets: FeishuBotSecrets,
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
     body?: Record<string, unknown>,
     cacheKey?: number,

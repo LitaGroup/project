@@ -1071,6 +1071,10 @@ export interface McpServerTestResult {
 export const TASK_STATUSES = ['等待中', '进行中', '已结束'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
+/** 任务类型：普通 / 审批（工单审批节点任务，创建后自动接受） */
+export const TASK_TYPES = ['普通', '审批'] as const
+export type TaskType = (typeof TASK_TYPES)[number]
+
 /** 任务子状态：与主状态严格对应（等待中：待分配/待接受/待反馈/待继续/待申请验收/待验收；进行中：执行中；已结束：完成/已拒绝/失败/取消） */
 export const TASK_SUB_STATUSES = [
   '待分配',
@@ -1423,6 +1427,8 @@ export interface TaskPackage {
   id: number
   code: string
   title: string
+  /** 任务类型：普通（默认）/ 审批 */
+  type: TaskType
   /** 任务定义（task_templates.id，可空） */
   templateId: number | null
   /** 任务定义名称快照 */
@@ -3082,9 +3088,30 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ remark }),
     }),
-  /** 审批节点直接通过（仅当前审批节点的真人处理人） */
-  approveTicketWorkflow: (id: number) =>
-    request<Ticket>(`/tickets/${id}/workflow/approve`, { method: 'POST' }),
+  /** 审批节点通过（发起人/当前审批处理人/管理员），remark 为可选审批意见 */
+  approveTicketWorkflow: (id: number, remark?: string) =>
+    request<Ticket>(`/tickets/${id}/workflow/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
+  /** 审批节点驳回（驳回意见必填） */
+  rejectTicketApproval: (id: number, remark: string) =>
+    request<Ticket>(`/tickets/${id}/workflow/approval-reject`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
+  /** 审批类型任务：按任务通过（remark 可选） */
+  approveTaskApproval: (taskId: number, remark?: string) =>
+    request<Ticket>(`/tasks/${taskId}/approval/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
+  /** 审批类型任务：按任务驳回（remark 必填） */
+  rejectTaskApproval: (taskId: number, remark: string) =>
+    request<Ticket>(`/tasks/${taskId}/approval/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ remark }),
+    }),
 
   /** 管理端工单配置（工单工作流） */
   listTicketWorkflowDefinitions: () =>

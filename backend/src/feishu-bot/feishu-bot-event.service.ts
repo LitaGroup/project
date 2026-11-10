@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { FeishuBotApprovalService } from './feishu-bot-approval.service';
 import { FeishuBotEvent } from './feishu-bot-event.entity';
 import type {
   FeishuBotConfig,
@@ -46,6 +47,7 @@ export class FeishuBotEventService {
     private readonly identities: FeishuBotIdentityService,
     private readonly p2p: FeishuBotP2PService,
     private readonly taskChats: FeishuBotTaskChatService,
+    private readonly approvals: FeishuBotApprovalService,
     @InjectRepository(FeishuBotEvent)
     private readonly events: Repository<FeishuBotEvent>,
   ) {}
@@ -258,13 +260,22 @@ export class FeishuBotEventService {
     return this.answerCard(row, secrets, value, operatorId);
   }
 
-  /** 校验操作者与卡片归属后答复提问 */
+  /** 校验操作者与卡片归属后答复提问 / 处理审批卡片 */
   private async answerCard(
     row: FeishuBotConfig,
     secrets: FeishuBotSecrets,
     value: Record<string, unknown>,
     operator: FeishuSenderId,
   ): Promise<unknown> {
+    const approval = await this.approvals
+      .handleCardAction(row, secrets, value, operator)
+      .catch((error: Error) => {
+        this.logger.warn(`审批卡片动作处理失败：${error.message}`);
+        return {
+          toast: { type: 'error', content: '审批处理失败，请稍后重试' },
+        };
+      });
+    if (approval) return approval;
     if (value.k !== 'qa') return { code: 0 };
     const cardId = Number(value.c);
     const labels = Array.isArray(value.a)

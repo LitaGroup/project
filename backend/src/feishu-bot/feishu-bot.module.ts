@@ -1,11 +1,14 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../auth/user.entity';
 import { Project } from '../projects/project.entity';
 import { Task } from '../tasks/task.entity';
 import { TasksModule } from '../tasks/tasks.module';
+import { TicketsModule } from '../tickets/tickets.module';
 import { Worker } from '../workers/worker.entity';
 import { WorkersModule } from '../workers/workers.module';
+import { FeishuBotApprovalCard } from './feishu-bot-approval-card.entity';
+import { FeishuBotApprovalService } from './feishu-bot-approval.service';
 import { FeishuBotCard } from './feishu-bot-card.entity';
 import { FeishuBotChangeBus } from './feishu-bot-change.service';
 import { FeishuBotClientService } from './feishu-bot-client.service';
@@ -43,6 +46,7 @@ import { FeishuBotController } from './feishu-bot.controller';
       FeishuBotEvent,
       FeishuBotTaskChat,
       FeishuBotProjectChat,
+      FeishuBotApprovalCard,
       Worker,
       Project,
       Task,
@@ -51,7 +55,9 @@ import { FeishuBotController } from './feishu-bot.controller';
     // WorkerDebugService / PersonalAgentsService（私聊桥接）
     WorkersModule,
     // TaskDeliveryService（群消息走任务中心）
-    TasksModule,
+    forwardRef(() => TasksModule),
+    // 审批卡片回调：审批任务通过工单运行时推进
+    forwardRef(() => TicketsModule),
   ],
   controllers: [FeishuBotController, FeishuBotCallbackController],
   providers: [
@@ -64,9 +70,15 @@ import { FeishuBotController } from './feishu-bot.controller';
     FeishuBotP2PService,
     FeishuBotTaskChatService,
     FeishuBotProjectChatService,
+    FeishuBotApprovalService,
     FeishuBotEventService,
     FeishuBotLongConnectionService,
   ],
-  exports: [FeishuBotConfigService, FeishuBotProjectChatService],
+  exports: [
+    FeishuBotConfigService,
+    FeishuBotClientService,
+    FeishuBotIdentityService,
+    FeishuBotProjectChatService,
+  ],
 })
 export class FeishuBotModule {}

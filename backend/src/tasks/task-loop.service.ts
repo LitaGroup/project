@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
-import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { TaskStatus, TaskSubStatus, TaskType } from '../common/enums';
 import { Task, TaskMissingItem } from './task.entity';
 import {
   TaskAssignmentService,
@@ -241,6 +241,15 @@ export class TaskLoopService implements OnApplicationBootstrap {
       if (!task.agentId) continue;
       await this.warnOfferStalled(task);
       if (this.offering.has(task.id)) continue;
+      // 审批任务默认接受：不发邀约问答，容量可用时自动接受（AI 处理人直接派发执行）
+      if (task.type === TaskType.APPROVAL) {
+        if (task.offerAttemptAt) {
+          const attemptedAt = new Date(task.offerAttemptAt).getTime();
+          if (now - attemptedAt < OFFER_RETRY_MS) continue;
+        }
+        await this.autoAcceptApproval(task);
+        continue;
+      }
       // 必须在下面原子写入 offerAttemptAt 之前判断，避免把首次邀约误判为重试。
       const firstOffer = !task.offerAttemptAt;
       if (task.offerAttemptAt) {
@@ -303,6 +312,58 @@ export class TaskLoopService implements OnApplicationBootstrap {
           `任务 #${task.id} 真人执行人通知失败: ${(e as Error).message}`,
         );
       }
+    }
+  }
+
+  /**
+   * 审批任务自动接受：容量可用时直接占用执行容量进入执行中。
+   * AI 处理人接受后直接派发执行（跳过邀约问答）；失败退回待接受并按节流重试。
+   */
+  private async autoAcceptApproval(task: Task): Promise<void> {
+    if (!(await this.dispatchService.hasExecutionCapacity(task.agentId!)))
+      return;
+    this.offering.add(task.id);
+    try {
+      const claimed = await this.dispatchService.claimExecution(
+        task.id,
+        TaskSubStatus.PENDING_ACCEPTANCE,
+        { nullIfStateChanged: true },
+      );
+      if (!claimed) return;
+      await this.tasksService.addEvent(
+        task.id,
+        '状态变更',
+        '状态变更：等待中-待接受 → 进行中-执行中（审批任务默认接受）',
+        null,
+        { approval: true },
+      );
+      if (await this.dispatchService.isHumanWorker(task.agentId)) return;
+      await this.dispatchService.dispatch(task.id, null);
+    } catch (e) {
+      this.logger.warn(
+        `审批任务 #${task.id} 自动接受失败: ${(e as Error).message}`,
+      );
+      await this.tasks.update(
+        {
+          id: task.id,
+          status: TaskStatus.RUNNING,
+          subStatus: TaskSubStatus.EXECUTING,
+        },
+        {
+          status: TaskStatus.WAITING,
+          subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+          offerAttemptAt: new Date(),
+        },
+      );
+      await this.tasksService.addEvent(
+        task.id,
+        '系统',
+        `审批任务自动接受失败，将稍后重试：${(e as Error).message}`,
+        null,
+        { watchdog: true, reason: 'approval-auto-accept-retry' },
+      );
+    } finally {
+      this.offering.delete(task.id);
     }
   }
 

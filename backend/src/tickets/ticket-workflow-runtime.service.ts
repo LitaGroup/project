@@ -12,11 +12,15 @@ import type { User } from '../auth/user.entity';
 import {
   TaskStatus,
   TaskSubStatus,
+  TaskType,
   UserRole,
   WorkerRole,
+  WorkerRuntime,
 } from '../common/enums';
 import { TaskTemplate } from '../tasks/task-template.entity';
 import { Task } from '../tasks/task.entity';
+import { TaskDispatchService } from '../tasks/task-dispatch.service';
+import { TaskNotifyService } from '../tasks/task-notify.service';
 import { TasksService } from '../tasks/tasks.service';
 import { Worker } from '../workers/worker.entity';
 import {
@@ -138,6 +142,8 @@ export class TicketWorkflowRuntimeService {
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
     private readonly tasksService: TasksService,
+    private readonly dispatchService: TaskDispatchService,
+    private readonly taskNotify: TaskNotifyService,
   ) {}
 
   /** 轮询节点任务终态；解耦任务中心，避免反向依赖工单模块 */
@@ -381,8 +387,13 @@ export class TicketWorkflowRuntimeService {
   /**
    * 当前审批节点直接通过：工单发起人、当前审批节点的真人处理人或管理员可用。
    * 不发起交付申请，不生成 HANDOFF/REVIEW，直接完成任务并按 approved 推进。
+   * remark 为可选审批意见，记录到任务产出与事件。
    */
-  async approveNodeByUser(ticketId: number, user: User): Promise<Ticket> {
+  async approveNodeByUser(
+    ticketId: number,
+    user: User,
+    remark?: string,
+  ): Promise<Ticket> {
     const ticket = await this.mustFind(ticketId);
     if (!ticket.workflowDefinitionId) {
       throw new BadRequestException('历史工单不支持工作流节点审批');
@@ -433,6 +444,7 @@ export class TicketWorkflowRuntimeService {
     }
     const previousStatus = `${task.status}-${task.subStatus}`;
     const now = new Date();
+    const approvalRemark = remark?.trim() || null;
     const updated = await this.tasks.update(
       { id: task.id, status: Not(TaskStatus.FINISHED) },
       {
@@ -443,6 +455,7 @@ export class TicketWorkflowRuntimeService {
         deliveredAt: now,
         missingItems: null,
         resumePrompt: null,
+        ...(approvalRemark ? { result: approvalRemark } : {}),
       },
     );
     if (!updated.affected) {
@@ -452,7 +465,9 @@ export class TicketWorkflowRuntimeService {
     await this.tasksService.addEvent(
       task.id,
       '状态变更',
-      `状态变更：${previousStatus} → 已结束-完成（${user.name} 直接审批通过节点「${node.name}」）`,
+      `状态变更：${previousStatus} → 已结束-完成（${user.name} 审批通过节点「${node.name}」${
+        approvalRemark ? `，意见：${approvalRemark}` : ''
+      }）`,
       user.name,
       {
         ticketId: ticket.id,
@@ -460,9 +475,106 @@ export class TicketWorkflowRuntimeService {
         nodeKey: node.key,
         nodeKind: node.kind,
         approval: true,
+        ...(approvalRemark ? { remark: approvalRemark } : {}),
       },
     );
     await this.completeRunWithOutcome(run, completed ?? task, 'approved');
+    return this.mustFind(ticketId);
+  }
+
+  /**
+   * 当前审批节点驳回：工单发起人、当前审批节点的真人处理人或管理员可用。
+   * reason 为必填驳回意见；节点任务置为失败并按 rejected 推进工作流
+   * （与机器人职责内的节点拒绝保持一致）。
+   */
+  async rejectNodeByUser(
+    ticketId: number,
+    user: User,
+    reason: string,
+  ): Promise<Ticket> {
+    const ticket = await this.mustFind(ticketId);
+    if (!ticket.workflowDefinitionId) {
+      throw new BadRequestException('历史工单不支持工作流节点审批');
+    }
+    const workflow = await this.workflowOf(ticket);
+    const node = workflow.nodes.find(
+      (item) => item.key === ticket.currentNodeKey,
+    );
+    if (!node) {
+      throw new BadRequestException('工单流程已结束，没有可驳回的当前节点');
+    }
+    if (node.kind !== 'approval') {
+      throw new BadRequestException('当前节点不是审批节点');
+    }
+    const run = await this.currentRun(ticket.id, node.key);
+    if (!run || !run.taskId) {
+      throw new BadRequestException('当前审批节点没有节点任务');
+    }
+    if (
+      run.status !== RUN_STATUS_WAITING &&
+      run.status !== RUN_STATUS_EXECUTING
+    ) {
+      throw new BadRequestException(
+        `当前节点运行状态「${run.status}」不可驳回`,
+      );
+    }
+    const humanWorker = await this.workers.findOne({
+      where: { humanUserId: user.id },
+      select: { id: true },
+    });
+    const isAssignedHuman = Boolean(
+      humanWorker && run.agentId === humanWorker.id,
+    );
+    const isInitiator = ticket.createdById === user.id;
+    const isAdmin = user.role === UserRole.ADMIN;
+    if (!isAssignedHuman && !isInitiator && !isAdmin) {
+      throw new ForbiddenException(
+        '仅工单发起人、当前审批处理人或管理员可以驳回',
+      );
+    }
+    const text = String(reason ?? '').trim();
+    if (!text) throw new BadRequestException('驳回意见不能为空');
+    const task = await this.tasks.findOne({ where: { id: run.taskId } });
+    if (!task) {
+      await this.failTicket(ticket.id, `节点任务 #${run.taskId} 不存在`);
+      throw new BadRequestException('节点任务不存在，工单已失败');
+    }
+    if (task.status === TaskStatus.FINISHED) {
+      throw new BadRequestException('节点任务已结束，不能重复审批');
+    }
+    const previousStatus = `${task.status}-${task.subStatus}`;
+    const updated = await this.tasks.update(
+      { id: task.id, status: Not(TaskStatus.FINISHED) },
+      {
+        status: TaskStatus.FINISHED,
+        subStatus: TaskSubStatus.FAILED,
+        failedAt: new Date(),
+        failedBy: user.name,
+        failureReason: text,
+        missingItems: null,
+        resumePrompt: null,
+        result: text,
+      },
+    );
+    if (!updated.affected) {
+      throw new BadRequestException('节点任务已结束，不能重复审批');
+    }
+    const failedTask = await this.tasks.findOne({ where: { id: task.id } });
+    await this.tasksService.addEvent(
+      task.id,
+      '状态变更',
+      `状态变更：${previousStatus} → 已结束-失败（${user.name} 驳回节点「${node.name}」：${text}）`,
+      user.name,
+      {
+        ticketId: ticket.id,
+        ticketCode: ticket.code,
+        nodeKey: node.key,
+        nodeKind: node.kind,
+        rejected: true,
+        remark: text,
+      },
+    );
+    await this.completeRunWithOutcome(run, failedTask ?? task, 'rejected');
     return this.mustFind(ticketId);
   }
 
@@ -710,6 +822,7 @@ export class TicketWorkflowRuntimeService {
       title: `${ticket.code} ${node.name}`,
       description,
       outputSpec,
+      type: node.kind === 'approval' ? TaskType.APPROVAL : TaskType.NORMAL,
       templateId: template.id,
       agentId: agent.id,
       createdById: ticket.createdById,
@@ -717,7 +830,7 @@ export class TicketWorkflowRuntimeService {
       requesterId: ticket.initiatorWorkerId,
       operatorName: '工单工作流',
     });
-    // 直接进入待接受，由任务中心两阶段邀约执行
+    // 直接进入待接受：审批任务默认接受（不存在不接受），其余由任务中心两阶段邀约执行
     const advanced = await this.tasks.update(
       {
         id: task.id,
@@ -738,12 +851,113 @@ export class TicketWorkflowRuntimeService {
         null,
         { ticketId: ticket.id, ticketCode: ticket.code, nodeKey: node.key },
       );
+      if (task.type === TaskType.APPROVAL) {
+        await this.autoAcceptApprovalNodeTask(task, agent, node, ticket);
+      }
     }
     await this.runs.update(run.id, { taskId: task.id });
     await this.updateTicket(ticket.id, {
       currentNodeKey: node.key,
       currentNodeName: node.name,
       workflowStatus: TICKET_STATUS_PROCESSING,
+    });
+  }
+
+  /**
+   * 审批任务默认接受：不存在不接受的情况。
+   * - 真人处理人：自动接受后等待通过/驳回，并异步发送飞书审批卡片；
+   * - AI 处理人：自动接受后直接派发执行（跳过邀约问答）；
+   * - 执行容量不足时保持待接受，由 LOOP 按节流自动接受重试。
+   */
+  private async autoAcceptApprovalNodeTask(
+    task: Task,
+    agent: Worker,
+    node: WorkflowNodeDefinition,
+    ticket: Ticket,
+  ): Promise<void> {
+    const claimed = await this.dispatchService
+      .claimExecution(task.id, TaskSubStatus.PENDING_ACCEPTANCE, {
+        nullIfStateChanged: true,
+      })
+      .catch((error: Error) => {
+        this.logger.warn(
+          `审批任务 ${task.code} 自动接受失败: ${error.message}`,
+        );
+        return null;
+      });
+    if (!claimed) return;
+    await this.tasksService.addEvent(
+      task.id,
+      '状态变更',
+      '状态变更：等待中-待接受 → 进行中-执行中（审批任务默认接受）',
+      '工单工作流',
+      {
+        ticketId: ticket.id,
+        ticketCode: ticket.code,
+        nodeKey: node.key,
+        nodeKind: node.kind,
+        approval: true,
+      },
+    );
+    if (agent.runtime === WorkerRuntime.HUMAN) {
+      // 工单创建请求内不阻塞：通知失败只告警，审批仍可在页面完成
+      void this.notifyApprovalAssignee(task, node, ticket).catch(
+        (error: Error) => {
+          this.logger.warn(
+            `审批任务 ${task.code} 飞书通知失败: ${error.message}`,
+          );
+        },
+      );
+      return;
+    }
+    // AI 处理人：直接派发执行；失败退回待接受，由 LOOP 自动接受重试
+    try {
+      await this.dispatchService.dispatch(task.id, null);
+    } catch (error) {
+      const message = (error as Error).message;
+      await this.tasks.update(
+        {
+          id: task.id,
+          status: TaskStatus.RUNNING,
+          subStatus: TaskSubStatus.EXECUTING,
+        },
+        {
+          status: TaskStatus.WAITING,
+          subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+          offerAttemptAt: new Date(),
+        },
+      );
+      await this.tasksService.addEvent(
+        task.id,
+        '系统',
+        `审批任务派发失败，将自动重试：${message}`,
+        null,
+        { watchdog: true, reason: 'approval-dispatch-retry' },
+      );
+    }
+  }
+
+  /** 审批任务飞书卡片：工单链接、关键正文与通过/驳回/查看按钮 */
+  private async notifyApprovalAssignee(
+    task: Task,
+    node: WorkflowNodeDefinition,
+    ticket: Ticket,
+  ): Promise<void> {
+    const workflow = await this.workflowOf(ticket);
+    const startFields =
+      workflow.nodes.find((item) => item.kind === 'start')?.inputFields ?? [];
+    const summaryLines = startFields.map((field) => {
+      const value = inputValueText(ticket.inputValues?.[field.key]).trim();
+      return `- ${field.label}：${
+        value ? value.replace(/\s*\n\s*/g, ' ') : '-'
+      }`;
+    });
+    await this.taskNotify.notifyApprovalTask({
+      task,
+      ticket: { id: ticket.id, code: ticket.code, title: ticket.title },
+      nodeName: node.name,
+      summaryLines,
+      initiatorName: ticket.createdByName ?? null,
     });
   }
 

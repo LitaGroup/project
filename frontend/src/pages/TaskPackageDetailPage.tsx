@@ -510,6 +510,11 @@ export function TaskDetailView({
                 subStatus={currentTask.subStatus}
                 showMain
               />
+              {currentTask.type === '审批' && (
+                <Badge variant="warning" size="sm">
+                  审批任务
+                </Badge>
+              )}
               <Badge variant="soft" size="sm">
                 定义 · {currentTask.templateName ?? '未设置'}
               </Badge>

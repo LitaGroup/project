@@ -114,14 +114,26 @@ export class TicketsController {
     return this.tickets.acceptWorkflow(id, 'approved', req, dto?.remark);
   }
 
-  /** 当前审批节点直接通过：仅节点任务绑定的真人处理人可用 */
+  /** 当前审批节点通过：仅节点任务绑定的真人处理人可用；remark 为可选审批意见 */
   @Post(':id/workflow/approve')
   approveWorkflow(
     @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { remark?: string },
     @Req() req: AuthedRequest,
   ) {
     if (!req.user) throw new ForbiddenException('审批节点需要用户身份');
-    return this.tickets.approveWorkflow(id, req.user);
+    return this.tickets.approveWorkflow(id, req.user, dto?.remark);
+  }
+
+  /** 当前审批节点驳回：驳回意见必填 */
+  @Post(':id/workflow/approval-reject')
+  rejectApprovalWorkflow(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { remark?: string },
+    @Req() req: AuthedRequest,
+  ) {
+    if (!req.user) throw new ForbiddenException('审批节点需要用户身份');
+    return this.tickets.rejectApprovalWorkflow(id, req.user, dto?.remark ?? '');
   }
 
   @Post(':id/workflow/reject')
@@ -146,6 +158,28 @@ export class TicketTaskController {
   @Header('Content-Type', 'text/markdown; charset=utf-8')
   ticket(@Param('id', ParseIntPipe) id: number) {
     return this.tickets.taskTicketMarkdown(id);
+  }
+
+  /** 审批类型任务：通过（remark 可选审批意见） */
+  @Post(':id/approval/approve')
+  approveTaskApproval(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { remark?: string },
+    @Req() req: AuthedRequest,
+  ) {
+    if (!req.user) throw new ForbiddenException('审批任务需要用户身份');
+    return this.tickets.approveTaskApproval(id, req.user, dto?.remark);
+  }
+
+  /** 审批类型任务：驳回（remark 必填驳回意见） */
+  @Post(':id/approval/reject')
+  rejectTaskApproval(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { remark?: string },
+    @Req() req: AuthedRequest,
+  ) {
+    if (!req.user) throw new ForbiddenException('审批任务需要用户身份');
+    return this.tickets.rejectTaskApproval(id, req.user, dto?.remark ?? '');
   }
 
   /** 当前任务所属工单的交付文档清单与调用指引 */

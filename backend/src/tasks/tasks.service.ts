@@ -13,6 +13,7 @@ import { Brackets, In, IsNull, Repository } from 'typeorm';
 import {
   TaskStatus,
   TaskSubStatus,
+  TaskType,
   UserRole,
   WorkerRole,
 } from '../common/enums';
@@ -48,6 +49,8 @@ export interface CreateTaskInput {
   description?: string | null;
   input?: string | null;
   outputSpec?: string | null;
+  /** 任务类型（缺省「普通」；工单审批节点传「审批」） */
+  type?: TaskType;
   agentId?: number | null;
   schedulerId?: number | null;
   parentId?: number | null;
@@ -502,6 +505,7 @@ export class TasksService {
         code: `TMP-${randomBytes(8).toString('hex')}`,
         rootId: parent ? parent.rootId : 0,
         title,
+        type: input.type ?? TaskType.NORMAL,
         templateId: template?.id ?? null,
         templateName: template?.name ?? null,
         projectId: input.projectId ?? null,
@@ -633,6 +637,7 @@ export class TasksService {
       `- ID：${task.id}`,
       `- 编号：${task.code}`,
       `- 状态：${task.status}-${task.subStatus}`,
+      `- 类型：${task.type ?? '普通'}`,
       `- 执行机器人：${agentLabel}`,
       `- 创建时间：${beijingTime(task.createdAt)}`,
       `- 更新时间：${beijingTime(task.updatedAt)}`,

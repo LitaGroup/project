@@ -6,7 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { TaskStatus, TaskSubStatus, TaskType } from '../common/enums';
 
 /** 创建阶段缺失清单条目（调度机器人材料审查产出，补齐后清除） */
 export interface TaskMissingItem {
@@ -42,6 +42,10 @@ export class Task {
 
   @Column({ length: 200 })
   title: string;
+
+  /** 任务类型：普通（默认）/ 审批（工单审批节点任务，创建后自动接受） */
+  @Column({ type: 'varchar', length: 20, default: TaskType.NORMAL })
+  type: TaskType;
 
   /** 任务定义（task_templates.id，可空；无物理外键，历史任务保留快照） */
   @Column({ type: 'int', nullable: true })

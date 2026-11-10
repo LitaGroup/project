@@ -1,4 +1,9 @@
-import { TaskStatus, TaskSubStatus } from '../common/enums';
+import {
+  TaskStatus,
+  TaskSubStatus,
+  TaskType,
+  WorkerRuntime,
+} from '../common/enums';
 import type { User } from '../auth/user.entity';
 import { Task } from '../tasks/task.entity';
 import { Worker } from '../workers/worker.entity';
@@ -12,13 +17,26 @@ import { Ticket } from './ticket.entity';
 
 describe('TicketWorkflowRuntimeService', () => {
   let tickets: { findOne: jest.Mock; update: jest.Mock };
-  let runs: { find: jest.Mock; findOne: jest.Mock; update: jest.Mock };
+  let runs: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    update: jest.Mock;
+    save: jest.Mock;
+    create: jest.Mock;
+    count: jest.Mock;
+  };
   let definitions: { findOne: jest.Mock };
   let versions: { findOne: jest.Mock };
   let templates: { findOne: jest.Mock };
   let tasks: { findOne: jest.Mock; update: jest.Mock };
   let workers: { findOne: jest.Mock };
-  let tasksService: { addEvent: jest.Mock };
+  let tasksService: { addEvent: jest.Mock; create: jest.Mock };
+  let dispatchService: {
+    claimExecution: jest.Mock;
+    dispatch: jest.Mock;
+    isHumanWorker: jest.Mock;
+  };
+  let taskNotify: { notifyApprovalTask: jest.Mock };
   let service: TicketWorkflowRuntimeService;
 
   beforeEach(() => {
@@ -30,6 +48,9 @@ describe('TicketWorkflowRuntimeService', () => {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
+      save: jest.fn().mockResolvedValue({ id: 1 }),
+      create: jest.fn().mockImplementation((row: unknown) => row),
+      count: jest.fn().mockResolvedValue(0),
     };
     definitions = { findOne: jest.fn() };
     versions = { findOne: jest.fn() };
@@ -39,7 +60,18 @@ describe('TicketWorkflowRuntimeService', () => {
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     workers = { findOne: jest.fn() };
-    tasksService = { addEvent: jest.fn().mockResolvedValue(undefined) };
+    tasksService = {
+      addEvent: jest.fn().mockResolvedValue(undefined),
+      create: jest.fn(),
+    };
+    dispatchService = {
+      claimExecution: jest.fn().mockResolvedValue({ id: 1 }),
+      dispatch: jest.fn().mockResolvedValue({ id: 1 }),
+      isHumanWorker: jest.fn().mockResolvedValue(true),
+    };
+    taskNotify = {
+      notifyApprovalTask: jest.fn().mockResolvedValue({ sent: true }),
+    };
     service = new TicketWorkflowRuntimeService(
       tickets as never,
       runs as never,
@@ -49,6 +81,8 @@ describe('TicketWorkflowRuntimeService', () => {
       tasks as never,
       workers as never,
       tasksService as never,
+      dispatchService as never,
+      taskNotify as never,
     );
   });
 
@@ -312,5 +346,238 @@ describe('TicketWorkflowRuntimeService', () => {
       '仅工单发起人、当前审批处理人或管理员可以审批',
     );
     expect(tasks.update).not.toHaveBeenCalled();
+  });
+
+  it('审批通过时记录可选审批意见', async () => {
+    const user = { id: 7, name: '审批人' } as User;
+    const node = {
+      key: 'approval',
+      name: '发布审批',
+      kind: 'approval',
+    };
+    const ticket = {
+      id: 5,
+      code: 'WO-0005',
+      workflowDefinitionId: 1,
+      workflowVersionId: 2,
+      currentNodeKey: node.key,
+    } as Ticket;
+    const activeTask = {
+      id: 30,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+    } as Task;
+    const completedTask = {
+      ...activeTask,
+      status: TaskStatus.FINISHED,
+      subStatus: TaskSubStatus.COMPLETED,
+      result: '同意发布',
+    } as Task;
+    const run = {
+      id: 1,
+      ticketId: ticket.id,
+      nodeKey: node.key,
+      nodeKind: node.kind,
+      taskId: activeTask.id,
+      agentId: 1001,
+      status: '执行中',
+    } as TicketWorkflowRun;
+    tickets.findOne.mockResolvedValue(ticket);
+    versions.findOne.mockResolvedValue({
+      definition: { nodes: [node], edges: [] },
+    });
+    runs.findOne.mockResolvedValue(run);
+    workers.findOne.mockResolvedValue({ id: run.agentId });
+    tasks.findOne
+      .mockResolvedValueOnce(activeTask)
+      .mockResolvedValueOnce(completedTask);
+    const complete = jest
+      .spyOn(
+        service as unknown as {
+          completeRunWithOutcome: (
+            run: TicketWorkflowRun,
+            task: Task,
+            outcome: string,
+          ) => Promise<void>;
+        },
+        'completeRunWithOutcome',
+      )
+      .mockResolvedValue(undefined);
+
+    await service.approveNodeByUser(ticket.id, user, '同意发布');
+
+    expect(tasks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: activeTask.id }),
+      expect.objectContaining({
+        status: TaskStatus.FINISHED,
+        subStatus: TaskSubStatus.COMPLETED,
+        result: '同意发布',
+      }),
+    );
+    expect(tasksService.addEvent).toHaveBeenCalledWith(
+      activeTask.id,
+      '状态变更',
+      expect.stringContaining('意见：同意发布'),
+      user.name,
+      expect.objectContaining({ approval: true, remark: '同意发布' }),
+    );
+    expect(complete).toHaveBeenCalledWith(run, completedTask, 'approved');
+  });
+
+  it('审批驳回必须填写意见并按 rejected 推进', async () => {
+    const user = { id: 7, name: '审批人' } as User;
+    const node = {
+      key: 'approval',
+      name: '发布审批',
+      kind: 'approval',
+    };
+    const ticket = {
+      id: 5,
+      code: 'WO-0005',
+      workflowDefinitionId: 1,
+      workflowVersionId: 2,
+      currentNodeKey: node.key,
+    } as Ticket;
+    const activeTask = {
+      id: 30,
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+    } as Task;
+    const failedTask = {
+      ...activeTask,
+      status: TaskStatus.FINISHED,
+      subStatus: TaskSubStatus.FAILED,
+      failureReason: '材料不全',
+    } as Task;
+    const run = {
+      id: 1,
+      ticketId: ticket.id,
+      nodeKey: node.key,
+      nodeKind: node.kind,
+      taskId: activeTask.id,
+      agentId: 1001,
+      status: '执行中',
+    } as TicketWorkflowRun;
+    tickets.findOne.mockResolvedValue(ticket);
+    versions.findOne.mockResolvedValue({
+      definition: { nodes: [node], edges: [] },
+    });
+    runs.findOne.mockResolvedValue(run);
+    workers.findOne.mockResolvedValue({ id: run.agentId });
+    tasks.findOne
+      .mockResolvedValueOnce(activeTask)
+      .mockResolvedValueOnce(failedTask);
+    const complete = jest
+      .spyOn(
+        service as unknown as {
+          completeRunWithOutcome: (
+            run: TicketWorkflowRun,
+            task: Task,
+            outcome: string,
+          ) => Promise<void>;
+        },
+        'completeRunWithOutcome',
+      )
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.rejectNodeByUser(ticket.id, user, '  '),
+    ).rejects.toThrow('驳回意见不能为空');
+
+    await service.rejectNodeByUser(ticket.id, user, '材料不全');
+
+    expect(tasks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ id: activeTask.id }),
+      expect.objectContaining({
+        status: TaskStatus.FINISHED,
+        subStatus: TaskSubStatus.FAILED,
+        failureReason: '材料不全',
+      }),
+    );
+    expect(complete).toHaveBeenCalledWith(run, failedTask, 'rejected');
+  });
+
+  it('审批节点创建审批类型任务并自动接受（真人处理人）', async () => {
+    const ticket = {
+      id: 5,
+      code: 'WO-0005',
+      title: '发布申请',
+      description: null,
+      createdById: 2,
+      createdByName: '王五',
+      initiatorWorkerId: 1001,
+      inputValues: {},
+    } as unknown as Ticket;
+    const node = {
+      key: 'approval',
+      name: '主管审批',
+      kind: 'approval',
+      taskTemplateId: 1001,
+      responsibleWorkerId: 1002,
+      inputFields: null,
+      autoAccept: false,
+      description: null,
+    };
+    const workflow = {
+      startNode: 'start',
+      nodes: [node],
+      edges: [],
+    } as WorkflowDefinitionJson;
+    templates.findOne.mockResolvedValue({
+      id: 1001,
+      name: '审批定义',
+      agentIds: [],
+    });
+    workers.findOne.mockResolvedValue({
+      id: 1002,
+      name: '审批机器人',
+      enabled: true,
+      runtime: WorkerRuntime.HUMAN,
+      personalAgentUserId: null,
+    });
+    tasksService.create.mockResolvedValue({
+      id: 30,
+      code: 'TK-0030',
+      title: 'WO-0005 主管审批',
+      type: TaskType.APPROVAL,
+      subStatus: TaskSubStatus.PENDING_ASSIGNMENT,
+    });
+    const notify = jest
+      .spyOn(
+        service as unknown as {
+          notifyApprovalAssignee: (
+            task: Task,
+            node: unknown,
+            ticket: Ticket,
+          ) => Promise<void>;
+        },
+        'notifyApprovalAssignee',
+      )
+      .mockResolvedValue(undefined);
+
+    await (
+      service as unknown as {
+        createNodeTask: (
+          ticket: Ticket,
+          workflow: WorkflowDefinitionJson,
+          node: unknown,
+        ) => Promise<void>;
+      }
+    ).createNodeTask(ticket, workflow, node);
+
+    expect(tasksService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: TaskType.APPROVAL }),
+    );
+    expect(dispatchService.claimExecution).toHaveBeenCalledWith(
+      30,
+      TaskSubStatus.PENDING_ACCEPTANCE,
+      { nullIfStateChanged: true },
+    );
+    expect(dispatchService.dispatch).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 30 }),
+      node,
+      ticket,
+    );
   });
 });
