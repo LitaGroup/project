@@ -8,7 +8,7 @@ type: docs
 
 > 基线：当前仓库代码（`1557707`）。本文只维护跨模块的产品判断、Feature 状态与迭代顺序；具体接口、字段和页面以实现为准。
 >
-> 相关文档：[任务处理中心方案](./FEATURE-02-TASKS-PLAN.md)、[MCP 接入指南](./MCP.md)、[OP Gateway](./OP_GATEWAY.md)、[前端 UI 规范](./UI_STANDARD.md)。
+> 相关文档：[任务处理中心方案](./FEATURE-02-TASKS-PLAN.md)、[MCP 接入指南](./MCP_BOTS.md)、[OP Gateway](./OP_GATEWAY.md)、[前端 UI 规范](./UI_STANDARD.md)。
 
 ---
 
@@ -112,7 +112,7 @@ type: docs
 | 工单工作流 | 定义/版本/发布、节点/连线、审批/操作/验收、运行推进、交付文档 | `backend/src/{workflows,tickets}/`、`frontend/src/pages/{TicketDefinitionEditPage,TicketDetailPage}.tsx` |
 | 飞书 | OAuth、文档同步、私聊机器人、任务群、卡片、图片/文件 | `backend/src/{feishu,feishu-bot}/`、`frontend/src/pages/FeishuBotConfigPage.tsx` |
 | 知识库 | 目录/文章树、全文 + 向量 RRF、Embedding 队列、项目文档镜像 | `backend/src/knowledge/` |
-| MCP | 外部 Agent 列出/调用平台机器人（lita-bots），以及项目/知识/运行等平台工具（lita-work） | `backend/src/mcp/`、[MCP 接入指南](./MCP.md)、[lita-work MCP](./work-mcp.md) |
+| MCP | 外部 Agent 列出/调用平台机器人（lita-bots），以及项目/知识/运行等平台工具（lita-work） | `backend/src/mcp/`、[MCP 接入指南](./MCP_BOTS.md)、[lita-work MCP](./work-mcp.md) |
 | GitHub | 仓库/分支/提交监听、项目分支登记、权限档位与凭证网关 | `backend/src/{github,github-gateway}/`、[OP Gateway](./OP_GATEWAY.md) |
 | 人机协作 | 真人机器人、工作台、我的 AI、任务协作面板、任务群 | `backend/src/tasks/workbench.*`、`frontend/src/pages/WorkbenchPage.tsx` |
 

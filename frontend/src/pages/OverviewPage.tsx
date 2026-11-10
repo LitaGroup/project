@@ -142,63 +142,100 @@ function CommandBlock({ command }: { command: string }) {
 
 function McpInstallSection() {
   const origin = window.location.origin
-  const mcpUrl = `${origin}/api/mcp/work`
-  const docUrl = `${origin}/work-mcp.md`
+  const mcpWorkUrl = `${origin}/api/mcp/work`
+  const mcpBotsUrl = `${origin}/api/mcp/bots`
+  const mcpProxyUrl = 'http://proxy.cinta.team/mcp'
+  const docUrl = `${origin}/MCP.md`
+  const workDocUrl = `${origin}/work-mcp.md`
   const opencodeConfig = `{
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "servers": {
       "lita-work": {
         "type": "remote",
-        "url": "${mcpUrl}",
+        "url": "${mcpWorkUrl}",
         "oauth": false,
         "headers": { "Authorization": "Bearer {env:LITA_WORK_TOKEN}" }
+      },
+      "lita-bots": {
+        "type": "remote",
+        "url": "${mcpBotsUrl}",
+        "oauth": false,
+        "headers": { "Authorization": "Bearer {env:LITA_WORK_TOKEN}" }
+      },
+      "lita-proxy": {
+        "type": "remote",
+        "url": "${mcpProxyUrl}",
+        "oauth": false,
+        "headers": { "X-Worker-Token": "{env:LITA_WORK_TOKEN}" }
       }
     }
   }
 }`
-  const claudeCmd = `claude mcp add --transport http lita-work ${mcpUrl} --header "Authorization: Bearer $LITA_WORK_TOKEN"`
+  const claudeCmd = `claude mcp add --transport http lita-work ${mcpWorkUrl} --header "Authorization: Bearer $LITA_WORK_TOKEN"`
 
   return (
     <section>
-      <h2 className="mb-4 text-xl font-semibold">接入 MCP（让 Agent 直接调用平台工具）</h2>
+      <h2 className="mb-4 text-xl font-semibold">接入 MCP（让 Agent 直接调用平台能力）</h2>
       <Card>
         <CardHeader>
-          <CardTitle>lita-work MCP</CardTitle>
+          <CardTitle>lita-work / lita-bots / lita-proxy MCP</CardTitle>
           <CardDescription>
-            平台工具已开放为 MCP 服务：搜索项目、读取项目详情与文档、运行检查/用例/导出/定时任务并流式获取结果、知识库检索与维护、缺陷与提测、代码分支、文件上传、任务协同、工单与机器人/任务定义管理等。配置一次后，Agent 会话可直接调用带 schema 的工具。
+            三个 MCP 服务共用个人中心「机器人令牌」，可单独或同时接入。lita-work：
+            直接操作平台数据（项目、知识库、运行、缺陷、任务、工单、机器人管理）；
+            lita-bots：把平台机器人当子 Agent 调用；lita-proxy：运维内部资源（MySQL / Nacos / XXL-JOB）。
+            配置一次后，Agent 会话可直接调用带 schema 的工具。
           </CardDescription>
         </CardHeader>
         <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">1. 服务地址</p>
-            <CommandBlock command={mcpUrl} />
+            <p className="text-sm font-medium">1. 服务地址（MCP Streamable HTTP）</p>
+            <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+              <span className="text-sm font-medium">lita-work</span>
+              <CommandBlock command={mcpWorkUrl} />
+              <span className="text-sm font-medium">lita-bots</span>
+              <CommandBlock command={mcpBotsUrl} />
+              <span className="text-sm font-medium">lita-proxy</span>
+              <CommandBlock command={mcpProxyUrl} />
+            </div>
             <p className="text-sm text-foreground-muted">
               鉴权使用个人中心「机器人令牌」（你的真人机器人令牌，个人 AGENT 共用；
               环境变量 LITA_WORK_TOKEN，过渡期旧名 LITA_PROJECT_TOKEN 同值可用）；机器人工位由平台自动注入配置。
+              lita-proxy 为独立服务，本地开发环境不可用。
             </p>
           </div>
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">2. opencode 配置（推荐）</p>
+            <p className="text-sm font-medium">2. opencode 配置（推荐，可同时接入三个服务）</p>
             <CommandBlock command={opencodeConfig} />
             <p className="text-sm text-foreground-muted">
-              写入 ~/.config/opencode/opencode.json 或项目 .opencode/opencode.json，保存后自动生效。
+              写入 ~/.config/opencode/opencode.json 或项目 .opencode/opencode.json，保存后自动生效；
+              也可用 {'{file:secrets/lita-work-token}'} 引用本机令牌文件。
             </p>
           </div>
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">3. Claude Code</p>
+            <p className="text-sm font-medium">3. Claude Code（lita-bots / lita-proxy 同理）</p>
             <CommandBlock command={claudeCmd} />
           </div>
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">4. 工具清单与示例</p>
-            <a
-              href={docUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="w-fit text-sm text-foreground-intense underline"
-            >
-              {docUrl}
-            </a>
+            <p className="text-sm font-medium">4. 接入文档与工具清单</p>
+            <div className="flex flex-col gap-1">
+              <a
+                href={docUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="w-fit text-sm text-foreground-intense underline"
+              >
+                {docUrl}（三个服务的接入总览，含 Codex CLI 与 lita-proxy 工具）
+              </a>
+              <a
+                href={workDocUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="w-fit text-sm text-foreground-intense underline"
+              >
+                {workDocUrl}（lita-work 全部工具清单与入参）
+              </a>
+            </div>
             <p className="text-sm text-foreground-muted">
               旧 SKILL.md 技能（lita-work / knowledge-search / file-upload）已下线，
               平台能力请直接使用 lita-work MCP 工具。

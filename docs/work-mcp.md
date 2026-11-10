@@ -217,7 +217,7 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 
 ## 六、与 lita-bots 的区别
 
-| | `lita-work`（本文档） | `lita-bots`（[MCP.md](./MCP.md)） |
+| | `lita-work`（本文档） | `lita-bots`（[MCP_BOTS.md](./MCP_BOTS.md)） |
 |---|---|---|
 | 地址 | `POST /api/mcp/work` | `POST /api/mcp/bots` |
 | 用途 | 直接操作平台数据与脚本 | 把平台机器人当子 Agent 调用 |

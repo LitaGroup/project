@@ -75,7 +75,9 @@
 - `docs/FEATURE-02-TASKS-PLAN.md`：任务处理中心设计背景。
 - `docs/APPIUM-AGENT.md`：Appium Agent 协议。
 - `docs/OP_GATEWAY.md`、`docs/OP_GATEWAY_API.md`：凭证网关。
+- `MCP.md`：lita-work / lita-bots / lita-proxy 三个 MCP 服务接入总览（令牌、客户端配置与工具入口）。
 - `docs/work-mcp.md`：lita-work MCP（`POST /api/mcp/work`）接入指南与工具清单。
+- `docs/MCP_BOTS.md`：lita-bots MCP（`POST /api/mcp/bots`）会话、提问与工具说明。
 - `skills/`：已随 MCP 二期下线（lita-work / knowledge-search / file-upload 等平台能力技能不再随仓库发布）。
 
 ## 后端通用约定

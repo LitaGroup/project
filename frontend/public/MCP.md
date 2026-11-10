@@ -1,1 +1,1 @@
-../../docs/MCP.md
+../../MCP.md

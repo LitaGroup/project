@@ -1,0 +1,1 @@
+../../docs/MCP_BOTS.md
