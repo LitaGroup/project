@@ -5,7 +5,9 @@ import { localPathOf } from './feishu-bot-client.service';
 import {
   chunkMarkdown,
   mapTextAnswer,
+  markdownCard,
   splitAnswerLabels,
+  splitMarkdownBlocks,
 } from './feishu-bot-message.service';
 
 function cryptoService(masterKey?: string): FeishuBotCryptoService {
@@ -90,6 +92,82 @@ describe('飞书消息 Markdown 分片', () => {
     const chunks = chunkMarkdown(line);
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.join('')).toBe(line);
+  });
+
+  it('表格整块保留，不被分片从中间切断', () => {
+    const table = [
+      '| 业务 | 能解答的典型问题 |',
+      '| --- | --- |',
+      ...Array.from({ length: 20 }, (_, i) => `| 行${i} | 说明${i} |`),
+    ].join('\n');
+    // 前置长文本超过单卡上限，表格应整体留在同一张卡
+    const text = Array.from({ length: 600 }, (_, i) => `第 ${i} 行`).join('\n');
+    const chunks = chunkMarkdown(`${text}\n\n${table}`);
+    const tableChunks = chunks.filter((chunk) => chunk.includes('| 业务 |'));
+    expect(tableChunks).toHaveLength(1);
+    expect(tableChunks[0]).toContain('| --- | --- |');
+    expect(tableChunks[0]).toContain('| 行19 | 说明19 |');
+  });
+
+  it('表格与相邻段落之间补空行', () => {
+    const content = '说明如下\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n后续说明';
+    expect(chunkMarkdown(content)).toEqual([
+      '说明如下\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n后续说明',
+    ]);
+  });
+
+  it('代码块内的管道符不识别为表格', () => {
+    const fence = '```md\n| a | b |\n| --- | --- |\n| 1 | 2 |\n```';
+    const blocks = splitMarkdownBlocks(fence);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].table).toBe(false);
+    // 6 个代码块不会被「单卡最多 4 张表」拆开
+    const content = Array.from({ length: 6 }, () => fence).join('\n\n');
+    expect(chunkMarkdown(content)).toHaveLength(1);
+  });
+
+  it('单卡超过 4 张表时拆到下一张卡', () => {
+    const table = '| k | v |\n| --- | --- |\n| a | b |';
+    const content = Array.from({ length: 5 }, () => table).join('\n\n');
+    const chunks = chunkMarkdown(content);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0].split('| --- | --- |')).toHaveLength(5); // 4 张表
+    expect(chunks[1].split('| --- | --- |')).toHaveLength(2); // 1 张表
+  });
+});
+
+describe('飞书回复卡片（Card JSON 2.0）', () => {
+  const elementsOf = (
+    card: Record<string, unknown>,
+  ): { tag: string; content: string }[] =>
+    (card.body as { elements: { tag: string; content: string }[] }).elements;
+
+  it('使用 2.0 结构，表格保留在 markdown 组件内由飞书原生渲染', () => {
+    const card = markdownCard(
+      '## 小结\n\n| 字段 | 说明 |\n| --- | --- |\n| id | 玩家 ID |',
+    );
+    expect(card.schema).toBe('2.0');
+    expect(card.config).toMatchObject({ width_mode: 'fill' });
+    const elements = elementsOf(card);
+    expect(elements).toHaveLength(1);
+    expect(elements[0].tag).toBe('markdown');
+    expect(elements[0].content).toContain('| id | 玩家 ID |');
+  });
+
+  it('超过 4 张表时拆成多个 markdown 组件', () => {
+    const table = '| k | v |\n| --- | --- |\n| a | b |';
+    const card = markdownCard(
+      Array.from({ length: 5 }, () => table).join('\n\n'),
+    );
+    const elements = elementsOf(card);
+    expect(elements).toHaveLength(2);
+    expect(elements[0].content.split('| --- | --- |')).toHaveLength(5); // 4 张表
+    expect(elements[1].content.split('| --- | --- |')).toHaveLength(2); // 1 张表
+  });
+
+  it('空内容仍返回一个 markdown 组件，避免空卡片', () => {
+    const elements = elementsOf(markdownCard('   '));
+    expect(elements).toEqual([{ tag: 'markdown', content: '' }]);
   });
 });
 
