@@ -260,6 +260,22 @@ export class WorkersService implements OnApplicationBootstrap {
   }
 
   /**
+   * 资源网关验权用令牌解析：机器人独立令牌与真人用户 agent 访问令牌等价。
+   * 未命中机器人令牌时，真人令牌按 users.agentToken（enabled=false 视为无效）
+   * 解析到其绑定的真人机器人；公共 Agent 令牌不绑定真人机器人，不在此支持。
+   * 返回 null 表示令牌无效或对应身份已停用。
+   */
+  async findGatewayWorkerByToken(token: string): Promise<Worker | null> {
+    const worker = await this.findByAgentToken(token);
+    if (worker) return worker;
+    if (!token) return null;
+    const user = await this.users.findOne({ where: { agentToken: token } });
+    if (!user || !user.enabled) return null;
+    const human = await this.findByHumanUserId(user.id);
+    return human && human.enabled ? human : null;
+  }
+
+  /**
    * 确保机器人用于访问平台的工作令牌并返回明文。
    * 普通机器人使用自身独立令牌；个人 AGENT 使用其主人真人机器人的令牌，
    * 保证「我的 AI」以该用户真人机器人的身份访问平台。

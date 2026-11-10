@@ -10,8 +10,10 @@ export interface GatewayResourcePermission {
 }
 
 /**
- * 资源网关内部验权：只校验机器人 Token 与资源权限，不发放任何凭证。
- * 每次请求实时查询，不缓存，机器人停用后立即失效。
+ * 资源网关内部验权：校验令牌与资源权限，不发放任何凭证。
+ * 机器人独立令牌与真人用户 agent 访问令牌（解析到绑定真人机器人）均可通过，
+ * 真人身份按其真人机器人的 resourcePermission 判定。
+ * 每次请求实时查询，不缓存，身份停用后立即失效。
  */
 @Injectable()
 export class GatewayResourcePermissionService {
@@ -21,13 +23,14 @@ export class GatewayResourcePermissionService {
     workerToken: string | undefined,
   ): Promise<GatewayResourcePermission> {
     if (!workerToken) {
-      throw new GatewayCredentialError('WORKER_UNAUTHORIZED', '机器人令牌缺失');
+      throw new GatewayCredentialError('WORKER_UNAUTHORIZED', '令牌缺失');
     }
-    const worker = await this.workersService.findByAgentToken(workerToken);
+    const worker =
+      await this.workersService.findGatewayWorkerByToken(workerToken);
     if (!worker) {
       throw new GatewayCredentialError(
         'WORKER_UNAUTHORIZED',
-        '机器人令牌无效或机器人已停用',
+        '令牌无效或对应身份已停用',
       );
     }
     return {
