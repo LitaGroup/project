@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FeishuBotApprovalService } from './feishu-bot-approval.service';
+import { FeishuBotCard } from './feishu-bot-card.entity';
 import { FeishuBotEvent } from './feishu-bot-event.entity';
 import type {
   FeishuBotConfig,
@@ -15,6 +16,10 @@ import type {
 } from './feishu-bot-config.entity';
 import { FeishuBotConfigService } from './feishu-bot-config.service';
 import { FeishuBotCryptoService } from './feishu-bot-crypto.service';
+import {
+  FeishuBotGroupChatService,
+  isFeishuGroupScope,
+} from './feishu-bot-group-chat.service';
 import {
   FeishuBotIdentityService,
   type FeishuSenderId,
@@ -47,9 +52,12 @@ export class FeishuBotEventService {
     private readonly identities: FeishuBotIdentityService,
     private readonly p2p: FeishuBotP2PService,
     private readonly taskChats: FeishuBotTaskChatService,
+    private readonly groupChats: FeishuBotGroupChatService,
     private readonly approvals: FeishuBotApprovalService,
     @InjectRepository(FeishuBotEvent)
     private readonly events: Repository<FeishuBotEvent>,
+    @InjectRepository(FeishuBotCard)
+    private readonly cards: Repository<FeishuBotCard>,
   ) {}
 
   /** 回调入口：返回值直接作为 HTTP 响应（challenge / code / toast） */
@@ -118,6 +126,22 @@ export class FeishuBotEventService {
         );
         return { code: 0 };
       }
+      if (
+        eventType === 'im.chat.member.bot.added_v1' ||
+        eventType === 'im.chat.member.bot.deleted_v1'
+      ) {
+        void this.handleBotMembershipEvent(
+          row,
+          secrets,
+          eventType,
+          payload.event,
+        ).catch((error: Error) =>
+          this.logger.warn(
+            `飞书机器人进出群事件处理失败（config#${row.id}）: ${error.message}`,
+          ),
+        );
+        return { code: 0 };
+      }
       if (eventType === 'card.action.trigger') {
         return this.handleCardAction(
           row,
@@ -181,6 +205,50 @@ export class FeishuBotEventService {
     });
   }
 
+  /**
+   * 长连接机器人进出群事件：
+   * 长连接回调不携带 header.event_id，用 chatId + 分钟级时间片做去重，
+   * 避免同一条事件在重连补发时重复写入记录。
+   */
+  async dispatchLongConnectionBotMembership(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    eventType: 'im.chat.member.bot.added_v1' | 'im.chat.member.bot.deleted_v1',
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    const chatId = asString(data.chat_id);
+    if (!chatId) return;
+    const slice = Math.floor(Date.now() / 60_000);
+    if (
+      await this.isDuplicate(
+        `ws:${eventType}:${chatId}:${slice}`,
+        configId,
+        eventType,
+      )
+    ) {
+      return;
+    }
+    const row = await this.configs.loadEnabledWithSecrets(configId);
+    if (!row) return;
+    await this.handleBotMembershipEvent(row, secrets, eventType, data);
+  }
+
+  // ==== 机器人进出群 ====
+
+  private async handleBotMembershipEvent(
+    row: FeishuBotConfig,
+    secrets: FeishuBotSecrets,
+    eventType: 'im.chat.member.bot.added_v1' | 'im.chat.member.bot.deleted_v1',
+    event: unknown,
+  ): Promise<void> {
+    const data = (event ?? {}) as Record<string, unknown>;
+    if (eventType === 'im.chat.member.bot.added_v1') {
+      await this.groupChats.handleBotAdded(row, secrets, data);
+      return;
+    }
+    await this.groupChats.handleBotRemoved(row, data);
+  }
+
   // ==== 消息事件 ====
 
   private async handleMessageEvent(
@@ -199,12 +267,26 @@ export class FeishuBotEventService {
     };
     const messageRaw = (data.message ?? {}) as Record<string, unknown>;
     const chatType = messageRaw.chat_type === 'group' ? 'group' : 'p2p';
+    const mentions = Array.isArray(messageRaw.mentions)
+      ? (messageRaw.mentions as unknown[])
+          .map((item) => {
+            const mention = (item ?? {}) as Record<string, unknown>;
+            const id = (mention.id ?? {}) as Record<string, unknown>;
+            return {
+              key: asString(mention.key),
+              openId: asString(id.open_id),
+              name: asString(mention.name),
+            };
+          })
+          .filter((mention) => Boolean(mention.openId))
+      : [];
     const message: FeishuInboundMessage = {
       messageId: asString(messageRaw.message_id),
       chatId: asString(messageRaw.chat_id),
       chatType,
       messageType: asString(messageRaw.message_type),
       content: asString(messageRaw.content) || '{}',
+      mentions,
     };
     if (!message.messageId || !message.chatId) return;
 
@@ -223,8 +305,12 @@ export class FeishuBotEventService {
       return;
     }
 
-    // 群消息：仅官方机器人处理任务群
-    await this.taskChats.handleGroupMessage(row, secrets, source, message);
+    // 群消息：官方机器人处理任务群；机器人绑定的应用按外部群策略处理
+    if (row.kind === 'official') {
+      await this.taskChats.handleGroupMessage(row, secrets, source, message);
+      return;
+    }
+    await this.groupChats.handleGroupMessage(row, secrets, source, message);
   }
 
   // ==== 卡片动作 ====
@@ -289,6 +375,11 @@ export class FeishuBotEventService {
       : null;
     if (!user) {
       return { toast: { type: 'error', content: '未识别平台账号，无法提交' } };
+    }
+    // 私聊卡片校验卡片属主；群聊卡片允许任意已识别平台账号的群成员作答
+    const card = await this.cards.findOne({ where: { id: cardId } });
+    if (card && isFeishuGroupScope(card.scope)) {
+      return this.groupChats.answerByCardButton(row, cardId, labels, user.id);
     }
     return this.p2p.answerByCardButton(row, secrets, cardId, labels, user.id);
   }

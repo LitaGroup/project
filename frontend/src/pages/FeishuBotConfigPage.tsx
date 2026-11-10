@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Card,
   CardHeader,
@@ -83,6 +84,7 @@ function configBadge(config: FeishuBotConfigView) {
  * 绑定后的机器人在列表头像上带「已连接飞书」角标。
  */
 export function FeishuBotConfigPage() {
+  const navigate = useNavigate()
   const [official, setOfficial] = useState<FeishuBotConfigView | null>(null)
   const [configs, setConfigs] = useState<FeishuBotConfigView[]>([])
   const [workers, setWorkers] = useState<Worker[]>([])
@@ -434,6 +436,17 @@ export function FeishuBotConfigPage() {
                     </Button>
                     {config && (
                       <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            navigate(
+                              `/admin/feishu-config/policy/${config.id}`,
+                            )
+                          }
+                        >
+                          策略
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"

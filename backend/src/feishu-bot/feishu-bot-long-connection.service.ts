@@ -159,6 +159,24 @@ export class FeishuBotLongConnectionService
       'im.message.receive_v1': async (data: Record<string, unknown>) => {
         await this.events.dispatchLongConnectionMessage(row.id, secrets, data);
       },
+      'im.chat.member.bot.added_v1': async (data: Record<string, unknown>) => {
+        await this.events.dispatchLongConnectionBotMembership(
+          row.id,
+          secrets,
+          'im.chat.member.bot.added_v1',
+          data,
+        );
+      },
+      'im.chat.member.bot.deleted_v1': async (
+        data: Record<string, unknown>,
+      ) => {
+        await this.events.dispatchLongConnectionBotMembership(
+          row.id,
+          secrets,
+          'im.chat.member.bot.deleted_v1',
+          data,
+        );
+      },
       'card.action.trigger': async (data: Record<string, unknown>) =>
         this.events.dispatchLongConnectionCardAction(row.id, secrets, data),
     });

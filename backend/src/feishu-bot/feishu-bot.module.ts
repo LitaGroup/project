@@ -20,6 +20,9 @@ import { FeishuBotEventService } from './feishu-bot-event.service';
 import { FeishuBotIdentity } from './feishu-bot-identity.entity';
 import { FeishuBotIdentityService } from './feishu-bot-identity.service';
 import { FeishuBotEvent } from './feishu-bot-event.entity';
+import { FeishuBotGroup } from './feishu-bot-group.entity';
+import { FeishuBotGroupChatService } from './feishu-bot-group-chat.service';
+import { FeishuBotGroupRecord } from './feishu-bot-group-record.entity';
 import { FeishuBotLongConnectionService } from './feishu-bot-long-connection.service';
 import { FeishuBotMessageService } from './feishu-bot-message.service';
 import { FeishuBotP2PService } from './feishu-bot-p2p.service';
@@ -47,6 +50,8 @@ import { FeishuBotController } from './feishu-bot.controller';
       FeishuBotTaskChat,
       FeishuBotProjectChat,
       FeishuBotApprovalCard,
+      FeishuBotGroup,
+      FeishuBotGroupRecord,
       Worker,
       Project,
       Task,
@@ -70,6 +75,7 @@ import { FeishuBotController } from './feishu-bot.controller';
     FeishuBotP2PService,
     FeishuBotTaskChatService,
     FeishuBotProjectChatService,
+    FeishuBotGroupChatService,
     FeishuBotApprovalService,
     FeishuBotEventService,
     FeishuBotLongConnectionService,

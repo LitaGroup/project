@@ -34,6 +34,14 @@ interface TokenCache {
   expiresAt: number;
 }
 
+/** 机器人基本信息（验证连接时读取） */
+export interface FeishuBotInfo {
+  /** 机器人名称 */
+  name: string | null;
+  /** 机器人自身 open_id（识别群内 @机器人） */
+  openId: string | null;
+}
+
 /**
  * 飞书自建应用客户端：按配置缓存 tenant_access_token，
  * 提供 消息/卡片/表情回应/图片素材/群管理 等聊天所需 API。
@@ -72,8 +80,8 @@ export class FeishuBotClientService {
     });
   }
 
-  /** 连接验证：获取 token + 读取机器人信息 */
-  async verify(secrets: FeishuBotSecrets): Promise<string | null> {
+  /** 连接验证：获取 token + 读取机器人信息（名称与自身 open_id） */
+  async verify(secrets: FeishuBotSecrets): Promise<FeishuBotInfo | null> {
     const token = (await this.fetchTenantToken(secrets)).token;
     try {
       const response = await fetch(`${FEISHU_BASE}/bot/v3/info`, {
@@ -82,11 +90,15 @@ export class FeishuBotClientService {
       });
       const payload = (await response.json().catch(() => ({}))) as {
         code?: number;
-        bot?: { app_name?: unknown };
+        bot?: { app_name?: unknown; open_id?: unknown };
       };
       if (!response.ok || payload.code !== 0) return null;
       const appName = payload.bot?.app_name;
-      return typeof appName === 'string' && appName ? appName : null;
+      const openId = payload.bot?.open_id;
+      return {
+        name: typeof appName === 'string' && appName ? appName : null,
+        openId: typeof openId === 'string' && openId ? openId : null,
+      };
     } catch {
       return null;
     }
@@ -360,6 +372,21 @@ export class FeishuBotClientService {
   }
 
   // ---- 群管理（任务群） ----
+
+  /** 读取群基本信息（群名等）；机器人须在群内且有 im:chat:readonly 权限 */
+  async getChatInfo(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    chatId: string,
+  ): Promise<{ name: string | null }> {
+    const data = await this.request(
+      configId,
+      secrets,
+      'GET',
+      `/im/v1/chats/${encodeURIComponent(chatId)}`,
+    );
+    return { name: readString(data, 'name') };
+  }
 
   /**
    * 创建群（操作者为机器人本身，默认群主）；userIds 为 open_id 列表。

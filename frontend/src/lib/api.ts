@@ -2087,6 +2087,57 @@ export interface FeishuBotSaveInput {
   enabled?: boolean
 }
 
+/** 机器人外部群答复策略：smart=智能反馈 / at=仅被@ / record=仅记录 */
+export const FEISHU_BOT_GROUP_POLICIES = ['smart', 'at', 'record'] as const
+export type FeishuBotGroupPolicy = (typeof FEISHU_BOT_GROUP_POLICIES)[number]
+
+/** 外部群策略标签 */
+export const FEISHU_BOT_GROUP_POLICY_LABELS: Record<
+  FeishuBotGroupPolicy,
+  string
+> = {
+  smart: '智能反馈',
+  at: '仅被@反馈',
+  record: '仅记录',
+}
+
+/** 机器人被拉入的外部群（不含平台任务群/项目群） */
+export interface FeishuBotGroupView {
+  id: number
+  chatId: string
+  name: string | null
+  /** 单群策略；null = 跟随默认 */
+  policy: FeishuBotGroupPolicy | null
+  /** 实际生效策略 */
+  effectivePolicy: FeishuBotGroupPolicy
+  joinedAt: string
+  leftAt: string | null
+  lastMessageAt: string | null
+  messageCount: number
+}
+
+/** 群时间线记录（消息/回复/进群/出群） */
+export interface FeishuBotGroupRecordView {
+  id: number
+  kind: 'message' | 'reply' | 'bot_added' | 'bot_removed'
+  messageId: string | null
+  senderOpenId: string | null
+  senderName: string | null
+  senderUserId: number | null
+  messageType: string | null
+  content: string | null
+  decision:
+    | 'replied'
+    | 'silent'
+    | 'not_mentioned'
+    | 'record_only'
+    | 'busy'
+    | 'error'
+    | null
+  error: string | null
+  createdAt: string
+}
+
 /** OP Gateway 可获取的凭证类型（第一期仅 GitHub PAT） */
 export const GATEWAY_CREDENTIAL_TYPES = ['github.pat'] as const
 export type GatewayCredentialType = (typeof GATEWAY_CREDENTIAL_TYPES)[number]
@@ -2909,6 +2960,51 @@ export const api = {
     request<FeishuBotConfigView>(`/feishu-bot/${id}/test`, { method: 'POST' }),
   deleteFeishuBot: (id: number) =>
     request<{ ok: true }>(`/feishu-bot/${id}`, { method: 'DELETE' }),
+
+  /** 机器人外部群策略：群列表 + 默认策略 */
+  listFeishuBotGroups: (configId: number) =>
+    request<{
+      defaultPolicy: FeishuBotGroupPolicy
+      groups: FeishuBotGroupView[]
+    }>(`/feishu-bot/${configId}/groups`),
+  saveFeishuBotGroupDefaultPolicy: (
+    configId: number,
+    policy: FeishuBotGroupPolicy,
+  ) =>
+    request<{ defaultPolicy: FeishuBotGroupPolicy }>(
+      `/feishu-bot/${configId}/groups/default-policy`,
+      { method: 'PUT', body: JSON.stringify({ policy }) },
+    ),
+  /** 单群策略：null = 跟随默认 */
+  saveFeishuBotGroupPolicy: (
+    configId: number,
+    groupId: number,
+    policy: FeishuBotGroupPolicy | null,
+  ) =>
+    request<{ ok: true }>(`/feishu-bot/${configId}/groups/${groupId}/policy`, {
+      method: 'PUT',
+      body: JSON.stringify({ policy }),
+    }),
+  /** 群时间线记录（分页） */
+  listFeishuBotGroupRecords: (
+    configId: number,
+    groupId: number,
+    params: { page?: number; pageSize?: number; kind?: string } = {},
+  ) => {
+    const query = new URLSearchParams()
+    if (params.page) query.set('page', String(params.page))
+    if (params.pageSize) query.set('pageSize', String(params.pageSize))
+    if (params.kind) query.set('kind', params.kind)
+    const suffix = query.toString()
+    return request<{
+      items: FeishuBotGroupRecordView[]
+      total: number
+      page: number
+      pageSize: number
+    }>(
+      `/feishu-bot/${configId}/groups/${groupId}/records${suffix ? `?${suffix}` : ''}`,
+    )
+  },
 
   /** MCP 配置列表（管理区；固定令牌只返回是否已配置） */
   listMcpServers: () => request<McpServerConfig[]>('/mcp/servers'),

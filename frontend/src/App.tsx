@@ -20,6 +20,7 @@ import { CommitsPage } from './pages/CommitsPage'
 import { ReposPage } from './pages/ReposPage'
 import { GithubAccessPage } from './pages/GithubAccessPage'
 import { FeishuBotConfigPage } from './pages/FeishuBotConfigPage'
+import { FeishuBotGroupPolicyPage } from './pages/FeishuBotGroupPolicyPage'
 import { McpLogsPage } from './pages/McpLogsPage'
 import { McpServersPage } from './pages/McpServersPage'
 import { ModelConfigPage } from './pages/ModelConfigPage'
@@ -268,6 +269,10 @@ function App() {
             <Route path="/admin/repos" element={<ReposPage />} />
             <Route path="/admin/github-access" element={<GithubAccessPage />} />
             <Route path="/admin/feishu-config" element={<FeishuBotConfigPage />} />
+            <Route
+              path="/admin/feishu-config/policy/:configId"
+              element={<FeishuBotGroupPolicyPage />}
+            />
             <Route path="/admin/mcp-servers" element={<McpServersPage />} />
             <Route path="/admin/mcp-logs" element={<McpLogsPage />} />
             <Route path="/admin/model-config" element={<ModelConfigPage />} />

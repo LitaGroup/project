@@ -38,6 +38,10 @@ export class FeishuBotConfig {
   @Column({ type: 'varchar', length: 100 })
   appId: string;
 
+  /** 机器人自身 open_id（验证连接时从 /bot/v3/info 读取，用于识别群内 @机器人） */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  botOpenId: string | null;
+
   /** APP Secret AES-256-GCM 密文（base64） */
   @Column({ type: 'text', select: false })
   secretCiphertext: string;
@@ -78,7 +82,11 @@ export class FeishuBotConfig {
   @Column({ type: 'text', select: false, nullable: true })
   encryptKeyAuthTag: string | null;
 
-  /** 消息处理策略覆盖（typingEmoji 等；三级策略的最上层暂只预留结构） */
+  /**
+   * 消息处理策略（JSON）：
+   * - typingEmoji：处理中表情；
+   * - groupDefault：外部群默认答复策略（smart/at/record，缺省 at），单群策略在其之上覆盖。
+   */
   @Column({ type: 'simple-json', default: '{}' })
   policy: Record<string, unknown>;
 

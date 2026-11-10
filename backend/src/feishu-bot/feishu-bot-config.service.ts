@@ -18,6 +18,13 @@ import { FeishuBotConfig } from './feishu-bot-config.entity';
 import { FeishuBotClientService } from './feishu-bot-client.service';
 import { FeishuBotChangeBus } from './feishu-bot-change.service';
 import { FeishuBotCryptoService } from './feishu-bot-crypto.service';
+import { FeishuBotGroup } from './feishu-bot-group.entity';
+import {
+  FEISHU_BOT_DEFAULT_GROUP_POLICY,
+  isFeishuBotGroupPolicy,
+  type FeishuBotGroupPolicy,
+} from './feishu-bot-group.entity';
+import { FeishuBotGroupRecord } from './feishu-bot-group-record.entity';
 import { FeishuBotIdentity } from './feishu-bot-identity.entity';
 
 /** 官方机器人展示名 */
@@ -39,6 +46,10 @@ export class FeishuBotConfigService {
     private readonly identities: Repository<FeishuBotIdentity>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
+    @InjectRepository(FeishuBotGroup)
+    private readonly groups: Repository<FeishuBotGroup>,
+    @InjectRepository(FeishuBotGroupRecord)
+    private readonly groupRecords: Repository<FeishuBotGroupRecord>,
     private readonly crypto: FeishuBotCryptoService,
     private readonly client: FeishuBotClientService,
     private readonly changes: FeishuBotChangeBus,
@@ -104,12 +115,14 @@ export class FeishuBotConfigService {
     return this.toView(row);
   }
 
-  /** 删除配置（同时清除该应用的用户身份映射） */
+  /** 删除配置（同时清除该应用的用户身份映射与群策略/记录） */
   async remove(configId: number): Promise<void> {
     const row = await this.configs.findOne({ where: { id: configId } });
     if (!row) throw new NotFoundException('飞书配置不存在');
     await this.configs.delete({ id: configId });
     await this.identities.delete({ configId });
+    await this.groupRecords.delete({ configId });
+    await this.groups.delete({ configId });
     this.client.invalidate(configId);
     this.changes.configChanged(configId);
   }
@@ -119,6 +132,12 @@ export class FeishuBotConfigService {
     await this.configs
       .update({ id: configId }, { lastVerifiedAt: new Date(), lastError: null })
       .catch(() => {});
+  }
+
+  /** 记录机器人自身 open_id（群内 @机器人识别用；仅在成功读取后调用） */
+  async saveBotOpenId(configId: number, botOpenId: string): Promise<void> {
+    if (!botOpenId) return;
+    await this.configs.update({ id: configId }, { botOpenId });
   }
 
   /** 长连接错误：写入 lastError 供管理页展示 */
@@ -133,10 +152,14 @@ export class FeishuBotConfigService {
     const row = await this.loadWithSecrets(configId);
     const secrets = this.secretsOf(row);
     try {
-      await this.client.verify(secrets);
+      const bot = await this.client.verify(secrets);
       await this.configs.update(
         { id: row.id },
-        { lastVerifiedAt: new Date(), lastError: null },
+        {
+          lastVerifiedAt: new Date(),
+          lastError: null,
+          ...(bot?.openId ? { botOpenId: bot.openId } : {}),
+        },
       );
     } catch (error) {
       const message = (error as Error).message;
@@ -146,6 +169,29 @@ export class FeishuBotConfigService {
     // 重新按含密文列加载：toView 需要密文字段判断「已配置」状态
     const fresh = await this.loadWithSecrets(configId);
     return this.toView(fresh);
+  }
+
+  /** 外部群默认答复策略（单群策略在其之上覆盖；缺省仅被 @ 后回复） */
+  async groupDefaultPolicy(configId: number): Promise<FeishuBotGroupPolicy> {
+    const row = await this.loadWithSecrets(configId);
+    const value = row.policy?.groupDefault;
+    return isFeishuBotGroupPolicy(value)
+      ? value
+      : FEISHU_BOT_DEFAULT_GROUP_POLICY;
+  }
+
+  /** 保存外部群默认答复策略（写入 config.policy.groupDefault） */
+  async saveGroupDefaultPolicy(
+    configId: number,
+    policy: FeishuBotGroupPolicy,
+  ): Promise<FeishuBotGroupPolicy> {
+    if (!isFeishuBotGroupPolicy(policy)) {
+      throw new BadRequestException('未知的群聊答复策略');
+    }
+    const row = await this.loadWithSecrets(configId);
+    const next = { ...(row.policy ?? {}), groupDefault: policy };
+    await this.configs.update({ id: row.id }, { policy: next });
+    return policy;
   }
 
   // ==== 内部读取（服务端专用） ====
@@ -348,11 +394,21 @@ export class FeishuBotConfigService {
         `APP ID 或 APP Secret 无效：${(error as Error).message}`,
       );
     }
+    // 尽力读取机器人自身 open_id（群内 @机器人识别用）；读取失败不阻断保存
+    const bot = await this.client
+      .verify({
+        appId: effectiveAppId,
+        appSecret: effectiveSecret,
+        verificationToken: null,
+        encryptKey: null,
+      })
+      .catch(() => null);
 
     const patch: Partial<FeishuBotConfig> = {
       name,
       lastVerifiedAt: new Date(),
       lastError: null,
+      ...(bot?.openId ? { botOpenId: bot.openId } : {}),
       ...(workerId !== null ? { workerId } : {}),
       ...(appId ? { appId } : {}),
       ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),

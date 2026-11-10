@@ -50,6 +50,8 @@ export interface FeishuInboundMessage {
   chatType: 'p2p' | 'group';
   messageType: string;
   content: string;
+  /** 消息中的 @ 列表（群内识别是否 @机器人） */
+  mentions?: { key: string; openId: string; name: string }[];
 }
 
 /** 进行中的一轮飞书会话 */
