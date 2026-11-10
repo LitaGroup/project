@@ -37,6 +37,7 @@ describe('TicketsService', () => {
     findOne: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
+  let workflowRuns: { find: jest.Mock };
   let configs: { findOne: jest.Mock };
   let tasks: {
     findOne: jest.Mock;
@@ -79,6 +80,7 @@ describe('TicketsService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       createQueryBuilder: jest.fn(),
     };
+    workflowRuns = { find: jest.fn().mockResolvedValue([]) };
     configs = {
       findOne: jest.fn().mockResolvedValue(config),
     };
@@ -121,6 +123,7 @@ describe('TicketsService', () => {
     };
     service = new TicketsService(
       tickets as never,
+      workflowRuns as never,
       configs as never,
       tasks as never,
       {} as never,
@@ -237,7 +240,38 @@ describe('TicketsService', () => {
     expect(dispatchService.assign).not.toHaveBeenCalled();
   });
 
-  it('查询我的工单时按 createdById 过滤', async () => {
+  it('查询我的工单时按参与身份过滤', async () => {
+    const query = {
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+    tickets.createQueryBuilder.mockReturnValue(query);
+    workers.find.mockResolvedValue([{ id: 51 }, { id: 52 }]);
+    workflowRuns.find.mockResolvedValue([{ ticketId: 11 }, { ticketId: 12 }]);
+    tasks.find.mockResolvedValue([{ id: 101 }]);
+
+    await service.findAll({ participantUserId: 7 });
+
+    expect(query.andWhere).toHaveBeenCalledWith(
+      `(${[
+        't.createdById = :participantUserId',
+        "(t.assigneeType = 'user' AND t.assigneeId = :participantUserId)",
+        't.initiatorWorkerId IN (:...participantWorkerIds)',
+        't.id IN (:...runTicketIds)',
+        't.taskId IN (:...joinedTaskIds)',
+      ].join(' OR ')})`,
+      {
+        participantUserId: 7,
+        participantWorkerIds: [51, 52],
+        runTicketIds: [11, 12],
+        joinedTaskIds: [101],
+      },
+    );
+  });
+
+  it('用户没有绑定机器人时仍按创建人和历史处理人过滤', async () => {
     const query = {
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -246,11 +280,14 @@ describe('TicketsService', () => {
     };
     tickets.createQueryBuilder.mockReturnValue(query);
 
-    await service.findAll({ createdById: 7 });
+    await service.findAll({ participantUserId: 7 });
 
     expect(query.andWhere).toHaveBeenCalledWith(
-      't.createdById = :createdById',
-      { createdById: 7 },
+      `(${[
+        't.createdById = :participantUserId',
+        "(t.assigneeType = 'user' AND t.assigneeId = :participantUserId)",
+      ].join(' OR ')})`,
+      { participantUserId: 7 },
     );
   });
 

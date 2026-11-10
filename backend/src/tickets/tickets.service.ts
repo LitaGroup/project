@@ -24,6 +24,7 @@ import { findTicketCategory } from './ticket-categories';
 import { TicketConfig } from './ticket-config.entity';
 import { TicketDocumentsService } from './ticket-documents.service';
 import { Ticket } from './ticket.entity';
+import { TicketWorkflowRun } from './ticket-workflow-run.entity';
 import {
   renderInputValues,
   TicketWorkflowRuntimeService,
@@ -100,6 +101,8 @@ export class TicketsService {
   constructor(
     @InjectRepository(Ticket)
     private readonly tickets: Repository<Ticket>,
+    @InjectRepository(TicketWorkflowRun)
+    private readonly workflowRuns: Repository<TicketWorkflowRun>,
     @InjectRepository(TicketConfig)
     private readonly configs: Repository<TicketConfig>,
     @InjectRepository(Task)
@@ -122,19 +125,70 @@ export class TicketsService {
     ).replace(/\/+$/, '');
   }
 
+  /** 「我的工单」参与身份：用户的真人机器人与个人 AGENT */
+  private async participantWorkerIds(userId: number): Promise<number[]> {
+    const rows = await this.workers.find({
+      where: [{ humanUserId: userId }, { personalAgentUserId: userId }],
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
+  }
+
   async findAll(params: {
     category?: string;
     status?: string;
     q?: string;
     workflowDefinitionId?: number;
-    /** 需求方用户 ID：仅返回该用户创建的工单（「我的工单」） */
-    createdById?: number;
+    /** 用户 ID：仅返回该用户参与的工单（「我的工单」） */
+    participantUserId?: number;
   }): Promise<TicketView[]> {
     const qb = this.tickets.createQueryBuilder('t');
-    if (params.createdById !== undefined) {
-      qb.andWhere('t.createdById = :createdById', {
-        createdById: params.createdById,
-      });
+    if (params.participantUserId !== undefined) {
+      const workerIds = await this.participantWorkerIds(
+        params.participantUserId,
+      );
+      let runTicketIds: number[] = [];
+      let joinedTaskIds: number[] = [];
+      if (workerIds.length) {
+        const [runs, joinedTasks] = await Promise.all([
+          this.workflowRuns.find({
+            where: { agentId: In(workerIds) },
+            select: { ticketId: true },
+          }),
+          this.tasks.find({
+            where: [
+              { agentId: In(workerIds) },
+              { requesterType: 'worker', requesterId: In(workerIds) },
+              { requesterType: 'user', requesterId: params.participantUserId },
+              { ownerTakeoverUserId: params.participantUserId },
+            ],
+            select: { id: true },
+          }),
+        ]);
+        runTicketIds = [...new Set(runs.map((run) => run.ticketId))];
+        joinedTaskIds = joinedTasks.map((task) => task.id);
+      }
+      // 参与身份：创建人 / 历史工单直接处理人 / 经我的机器人发起、处理节点或承接关联任务
+      const conditions = [
+        't.createdById = :participantUserId',
+        "(t.assigneeType = 'user' AND t.assigneeId = :participantUserId)",
+      ];
+      const bindings: Record<string, unknown> = {
+        participantUserId: params.participantUserId,
+      };
+      if (workerIds.length) {
+        conditions.push('t.initiatorWorkerId IN (:...participantWorkerIds)');
+        bindings.participantWorkerIds = workerIds;
+      }
+      if (runTicketIds.length) {
+        conditions.push('t.id IN (:...runTicketIds)');
+        bindings.runTicketIds = runTicketIds;
+      }
+      if (joinedTaskIds.length) {
+        conditions.push('t.taskId IN (:...joinedTaskIds)');
+        bindings.joinedTaskIds = joinedTaskIds;
+      }
+      qb.andWhere(`(${conditions.join(' OR ')})`, bindings);
     }
     if (params.workflowDefinitionId) {
       qb.andWhere('t.workflowDefinitionId = :workflowDefinitionId', {

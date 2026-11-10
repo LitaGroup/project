@@ -68,7 +68,7 @@ export class TicketsController {
         Number.isInteger(definitionId) && definitionId > 0
           ? definitionId
           : undefined,
-      createdById: mine ? req.user?.id : undefined,
+      participantUserId: mine ? req.user?.id : undefined,
     });
   }
 

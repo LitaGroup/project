@@ -47,9 +47,9 @@ const STATUS_ITEMS = {
 }
 
 interface TicketsPageProps {
-  /** 指定工单配置时展示该配置下的工单（保留按配置进入的链接） */
+  /** 指定工单配置时仍展示平台全部工单，配置仅用于标题与新建入口（保留按配置进入的链接） */
   definitionId?: number
-  /** 全部工单 / 当前用户提出的工单 */
+  /** 全部工单 / 当前用户参与的工单 */
   scope?: 'all' | 'mine'
 }
 
@@ -81,17 +81,13 @@ export function TicketsPage({ definitionId, scope = 'all' }: TicketsPageProps) {
   const reload = useCallback(() => {
     const statusFilter = status === 'all' ? undefined : status
     const query = keyword.trim() || undefined
-    const request = definitionId
-      ? api.listTickets({
-          workflowDefinitionId: definitionId,
-          status: statusFilter,
-          q: query,
-        })
-      : api.listTickets({
-          scope: scope === 'mine' ? 'mine' : undefined,
-          status: statusFilter,
-          q: query,
-        })
+    // 工单配置页面的列表按约定展示平台全部工单，不再按配置过滤；
+    // 配置信息仅用于页面标题与「新建工单」入口
+    const request = api.listTickets({
+      scope: !definitionId && scope === 'mine' ? 'mine' : undefined,
+      status: statusFilter,
+      q: query,
+    })
     request
       .then((rows) => {
         setTickets(rows)
@@ -115,14 +111,14 @@ export function TicketsPage({ definitionId, scope = 'all' }: TicketsPageProps) {
   const description = definitionId
     ? (definition?.description || '按已发布工作流受理和推进的工单')
     : scope === 'mine'
-      ? '我提出的全部工单'
+      ? '我参与的全部工单'
       : '全部工单'
   const emptyText = definitionId
     ? available
       ? '暂无工单，点右上角「新建工单」创建'
       : '该工单配置还没有发布版本'
     : scope === 'mine'
-      ? '你还没有提出过工单，可从右上角「+」新建工单'
+      ? '你还没有参与过工单，可从右上角「+」新建工单'
       : '暂无工单'
 
   return (
