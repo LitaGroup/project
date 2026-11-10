@@ -47,7 +47,7 @@ const STATUS_ITEMS = {
 }
 
 interface TicketsPageProps {
-  /** 指定工单配置时仍展示平台全部工单，配置仅用于标题与新建入口（保留按配置进入的链接） */
+  /** 指定工单配置时仅展示该配置下的工单（保留按配置进入的链接） */
   definitionId?: number
   /** 全部工单 / 当前用户参与的工单 */
   scope?: 'all' | 'mine'
@@ -81,13 +81,20 @@ export function TicketsPage({ definitionId, scope = 'all' }: TicketsPageProps) {
   const reload = useCallback(() => {
     const statusFilter = status === 'all' ? undefined : status
     const query = keyword.trim() || undefined
-    // 工单配置页面的列表按约定展示平台全部工单，不再按配置过滤；
-    // 配置信息仅用于页面标题与「新建工单」入口
-    const request = api.listTickets({
-      scope: !definitionId && scope === 'mine' ? 'mine' : undefined,
-      status: statusFilter,
-      q: query,
-    })
+    // 工单配置页面只展示该配置下的工单，配置信息同时用于页面标题与「新建工单」入口
+    const request = api.listTickets(
+      definitionId
+        ? {
+            workflowDefinitionId: definitionId,
+            status: statusFilter,
+            q: query,
+          }
+        : {
+            scope: scope === 'mine' ? 'mine' : undefined,
+            status: statusFilter,
+            q: query,
+          },
+    )
     request
       .then((rows) => {
         setTickets(rows)
