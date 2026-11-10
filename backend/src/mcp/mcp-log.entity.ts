@@ -19,7 +19,7 @@ export class McpCallLog {
   @PrimaryGeneratedColumn()
   id: number;
 
-  /** 调用方用户 ID（公共 Agent 为 0） */
+  /** 调用方用户 ID（公共 Agent 为 0；未绑定真人的机器人调用为 -workerId） */
   @Column({ type: 'int' })
   userId: number;
 

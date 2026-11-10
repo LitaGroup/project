@@ -3,7 +3,7 @@
 平台机器人（BOT）已通过 MCP（Model Context Protocol）对外开放：外部机器上的 AI Agent（opencode / Claude Code / Cursor / Codex CLI 等）完成一次配置后，即可把任意平台机器人当作**子 Agent** 调用——BOT 在平台自己的执行器与工位上真实运行（带角色定义、技能、规范），执行过程的文本流与工具调用实时回传给主 Agent，结束后返回最终结果。
 
 - 服务地址：`POST /api/mcp/bots`（MCP Streamable HTTP，响应为 SSE 流）
-- 鉴权：平台 Agent 访问令牌，`Authorization: Bearer` / `X-Agent-Token` / `?token=` 三种方式均可；接入方环境变量 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 兜底），与 lita-work MCP 约定一致
+- 鉴权：平台 Agent 访问令牌（`Authorization: Bearer` / `X-Agent-Token` / `?token=`）或机器人独立令牌（`X-Worker-Token`，也可作为 Bearer / `X-Agent-Token` 传入），与 lita-work MCP、`.md` 端点同一令牌体系；接入方环境变量 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 兜底）
 - 会话执行复用平台机器人聊天引擎，不产生任务记录、不影响任务派发
 
 > 需要**直接操作平台数据**（项目、知识库、脚本运行、缺陷、提测等，即原 lita-work 技能能力）？请使用独立的 **lita-work MCP**：`POST /api/mcp/work`，接入指南见 [work-mcp.md](./work-mcp.md)。
@@ -27,6 +27,10 @@ LITA_WORK_TOKEN=<你的访问令牌>
 **方式二：公共 Agent 令牌（管理员下发）**
 
 平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**；未配置时不可用。使用方式与个人令牌相同。
+
+**方式三：机器人独立令牌**
+
+平台机器人可用工位 `.opencode/agent-token`（或 `.opencode/.env` 的 `LITA_WORK_TOKEN`）作为 `X-Worker-Token` 调用，也可把同一令牌放在 `Authorization: Bearer` / `X-Agent-Token` / `?token=` 中。绑定真人的机器人按真人身份记录会话与审计；未绑定真人的 AI 机器人使用独立的机器人身份，调用会话与他人隔离。
 
 > 令牌环境变量新名为 `LITA_WORK_TOKEN`；过渡期旧名 `LITA_PROJECT_TOKEN` 仍可用，**新名优先**（取值顺序：进程环境 → `~/.env` → 用户单独提供，详见 [work-mcp.md](./work-mcp.md)）。
 
@@ -87,7 +91,7 @@ claude mcp add --transport http lita-bots http://your-host:3100/api/mcp/bots \
 |---|---|
 | 传输类型 | Streamable HTTP（streamable-http / http） |
 | URL | `http://your-host:3100/api/mcp/bots`（生产为平台域名） |
-| 鉴权头 | `Authorization: Bearer ${LITA_WORK_TOKEN}`（也接受 `X-Agent-Token` 头） |
+| 鉴权头 | `Authorization: Bearer ${LITA_WORK_TOKEN}`（也接受 `X-Agent-Token` / `X-Worker-Token` 头） |
 | URL 参数兜底 | `?token=<令牌>`（与平台 `.md` 端点一致，三选一即可） |
 
 ## 三、接入验证
@@ -171,7 +175,7 @@ BOT 执行中发起提问时本轮返回：
 
 | 现象 | 原因与处理 |
 |---|---|
-| 401 缺少鉴权 / 无效令牌 | 检查 `Authorization: Bearer`（或 `X-Agent-Token` / `?token=`）；令牌可能已被重置，去个人中心重新复制并更新 `LITA_WORK_TOKEN`（旧名 `LITA_PROJECT_TOKEN` 兜底） |
+| 401 缺少鉴权 / 无效令牌 | 检查 `Authorization: Bearer`（或 `X-Agent-Token` / `X-Worker-Token` / `?token=`）；令牌可能已被重置，去个人中心重新复制并更新 `LITA_WORK_TOKEN`（旧名 `LITA_PROJECT_TOKEN` 兜底） |
 | `list_bots` 为空 | 平台侧没有满足条件的机器人：需启用、执行器在线且模型配置完整；联系管理员检查执行器 |
 | 找不到机器人「xxx」 | 名称不匹配，先 `list_bots` 获取准确名称或直接用数字 ID |
 | 「机器人正在回复」冲突 | 同一会话上一轮未结束：调 `bot_interrupt` 或改用新 `session_id` |
@@ -181,7 +185,7 @@ BOT 执行中发起提问时本轮返回：
 
 ## 七、审计与管理
 
-每次 `bot_call` / `bot_answer` 终态后落审计（调用方、机器人、会话、状态、耗时、消息长度、错误），管理员可在平台 **管理区 → MCP 调用**（`/admin/mcp-logs`）查看，接口 `GET /api/mcp/logs`。
+每次 `bot_call` / `bot_answer` 终态后落审计（调用方、机器人、会话、状态、耗时、消息长度、错误），管理员可在平台 **管理区 → MCP 调用**（`/admin/mcp-logs`）查看，接口 `GET /api/mcp/logs`。机器人令牌调用按绑定的真人记录；未绑定真人的 AI 机器人显示为「机器人：名称」。
 
 ## 八、限制
 

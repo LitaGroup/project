@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { User } from '../auth/user.entity';
 import type { WorkerDebugOption } from '../workers/worker-debug.service';
 import { WorkerChatService } from '../workers/worker-chat.service';
 import {
@@ -31,6 +30,7 @@ import {
   MCP_MAX_TIMEOUT_MS,
   MCP_SCOPE_PREFIX,
   MCP_SESSION_ID_PATTERN,
+  type McpBotCaller,
   type McpBotItem,
   type McpBotQuestionGroup,
   type McpRunPayload,
@@ -80,7 +80,7 @@ export class McpService {
    * 响应为 SSE 流，tools/call 期间可持续发送 progress notification）。
    */
   async handleRequest(
-    user: User,
+    caller: McpBotCaller,
     req: import('express').Request,
     res: import('express').Response,
     body: unknown,
@@ -89,13 +89,13 @@ export class McpService {
       { name: 'lita-bots', version: '1.0.0' },
       { capabilities: { tools: {} } },
     );
-    this.registerTools(server, user);
+    this.registerTools(server, caller);
     await handleStatelessMcpRequest(server, req, res, body);
   }
 
   // ---- 工具注册 ----
 
-  private registerTools(server: McpServer, user: User): void {
+  private registerTools(server: McpServer, caller: McpBotCaller): void {
     const BotArg = z
       .string()
       .min(1)
@@ -113,7 +113,7 @@ export class McpService {
           '列出当前可调用的平台机器人（启用、执行器在线、模型配置完整）。',
         inputSchema: {},
       },
-      async () => textResult(await this.listBots(user.id)),
+      async () => textResult(await this.listBots(caller.id)),
     );
 
     server.registerTool(
@@ -152,7 +152,7 @@ export class McpService {
       async (args, extra) => {
         try {
           const payload = await this.callBot(
-            user,
+            caller,
             args,
             createProgressEmitter(extra),
             extra.signal,
@@ -192,7 +192,7 @@ export class McpService {
       async (args, extra) => {
         try {
           const payload = await this.answerBot(
-            user,
+            caller,
             args,
             createProgressEmitter(extra),
             extra.signal,
@@ -213,7 +213,7 @@ export class McpService {
       },
       async (args) => {
         try {
-          return textResult(await this.interruptBot(user, args));
+          return textResult(await this.interruptBot(caller, args));
         } catch (error) {
           return toolError(error);
         }
@@ -229,7 +229,7 @@ export class McpService {
       },
       async (args) => {
         try {
-          return textResult(await this.resetBot(user, args));
+          return textResult(await this.resetBot(caller, args));
         } catch (error) {
           return toolError(error);
         }
@@ -245,7 +245,7 @@ export class McpService {
       },
       async (args) => {
         try {
-          return textResult(await this.getSession(user, args));
+          return textResult(await this.getSession(caller, args));
         } catch (error) {
           return toolError(error);
         }
@@ -275,7 +275,7 @@ export class McpService {
   }
 
   private async callBot(
-    user: User,
+    caller: McpBotCaller,
     input: {
       bot: string;
       message: string;
@@ -286,20 +286,20 @@ export class McpService {
     notify: ProgressFn | null,
     signal: AbortSignal | undefined,
   ): Promise<McpRunPayload> {
-    const worker = await this.resolveWorker(user.id, input.bot);
+    const worker = await this.resolveWorker(caller.id, input.bot);
     const sessionId = this.assertSessionId(input.session_id);
     const scope = `${MCP_SCOPE_PREFIX}${sessionId}`;
     const startedAt = Date.now();
     const timeoutMs = this.timeoutMsOf(input.timeout_seconds);
     try {
-      await this.debug.send(user.id, worker.id, input.message, {
+      await this.debug.send(caller.id, worker.id, input.message, {
         scope,
         firstPrompt: MCP_FIRST_PROMPT,
       });
     } catch (error) {
       await this.logs.record({
-        userId: user.id,
-        userName: user.name,
+        userId: caller.id,
+        userName: caller.name,
         workerId: worker.id,
         workerName: worker.name,
         sessionId,
@@ -312,7 +312,7 @@ export class McpService {
       throw error;
     }
     const result = await this.waitForRun({
-      userId: user.id,
+      userId: caller.id,
       workerId: worker.id,
       sessionId,
       scope,
@@ -322,8 +322,8 @@ export class McpService {
       autoSkip: input.auto_skip_questions === true,
     });
     await this.logs.record({
-      userId: user.id,
-      userName: user.name,
+      userId: caller.id,
+      userName: caller.name,
       workerId: worker.id,
       workerName: worker.name,
       sessionId,
@@ -338,7 +338,7 @@ export class McpService {
   }
 
   private async answerBot(
-    user: User,
+    caller: McpBotCaller,
     input: {
       bot: string;
       session_id: string;
@@ -349,11 +349,11 @@ export class McpService {
     notify: ProgressFn | null,
     signal: AbortSignal | undefined,
   ): Promise<McpRunPayload> {
-    const worker = await this.resolveWorker(user.id, input.bot);
+    const worker = await this.resolveWorker(caller.id, input.bot);
     const sessionId = this.assertSessionId(input.session_id);
     const scope = `${MCP_SCOPE_PREFIX}${sessionId}`;
     const startedAt = Date.now();
-    const snapshot = await this.debug.snapshot(user.id, worker.id, scope);
+    const snapshot = await this.debug.snapshot(caller.id, worker.id, scope);
     const questions = pendingQuestionsOf(snapshot.messages);
     if (questions.length === 0) {
       throw new BadRequestException('当前会话没有待回答的提问');
@@ -375,7 +375,7 @@ export class McpService {
       : { answers: input.answers };
     try {
       await this.debug.replyQuestion(
-        user.id,
+        caller.id,
         worker.id,
         questionId,
         input_,
@@ -383,8 +383,8 @@ export class McpService {
       );
     } catch (error) {
       await this.logs.record({
-        userId: user.id,
-        userName: user.name,
+        userId: caller.id,
+        userName: caller.name,
         workerId: worker.id,
         workerName: worker.name,
         sessionId,
@@ -397,7 +397,7 @@ export class McpService {
       throw error;
     }
     const result = await this.waitForRun({
-      userId: user.id,
+      userId: caller.id,
       workerId: worker.id,
       sessionId,
       scope,
@@ -407,8 +407,8 @@ export class McpService {
       autoSkip: false,
     });
     await this.logs.record({
-      userId: user.id,
-      userName: user.name,
+      userId: caller.id,
+      userName: caller.name,
       workerId: worker.id,
       workerName: worker.name,
       sessionId,
@@ -423,13 +423,13 @@ export class McpService {
   }
 
   private async interruptBot(
-    user: User,
+    caller: McpBotCaller,
     input: { bot: string; session_id: string },
   ): Promise<McpRunPayload> {
-    const worker = await this.resolveWorker(user.id, input.bot);
+    const worker = await this.resolveWorker(caller.id, input.bot);
     const sessionId = this.assertSessionId(input.session_id);
     const scope = `${MCP_SCOPE_PREFIX}${sessionId}`;
-    const snapshot = await this.debug.interrupt(user.id, worker.id, scope);
+    const snapshot = await this.debug.interrupt(caller.id, worker.id, scope);
     const artifacts = interruptedResultFrom(snapshot);
     return {
       session_id: sessionId,
@@ -445,24 +445,24 @@ export class McpService {
   }
 
   private async resetBot(
-    user: User,
+    caller: McpBotCaller,
     input: { bot: string; session_id: string },
   ): Promise<McpSessionPayload> {
-    const worker = await this.resolveWorker(user.id, input.bot);
+    const worker = await this.resolveWorker(caller.id, input.bot);
     const sessionId = this.assertSessionId(input.session_id);
     const scope = `${MCP_SCOPE_PREFIX}${sessionId}`;
-    await this.debug.reset(user.id, worker.id, scope);
+    await this.debug.reset(caller.id, worker.id, scope);
     return { session_id: sessionId, idle: true, messages: [] };
   }
 
   private async getSession(
-    user: User,
+    caller: McpBotCaller,
     input: { bot: string; session_id: string },
   ): Promise<McpSessionPayload> {
-    const worker = await this.resolveWorker(user.id, input.bot);
+    const worker = await this.resolveWorker(caller.id, input.bot);
     const sessionId = this.assertSessionId(input.session_id);
     const scope = `${MCP_SCOPE_PREFIX}${sessionId}`;
-    const snapshot = await this.debug.snapshot(user.id, worker.id, scope);
+    const snapshot = await this.debug.snapshot(caller.id, worker.id, scope);
     return {
       session_id: sessionId,
       idle: snapshot.status === 'idle',

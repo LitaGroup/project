@@ -27,6 +27,19 @@ export const MCP_FIRST_PROMPT = [
   '任务无法推进时优先使用提问工具向调用方澄清，而不要自行假设。',
 ].join('\n');
 
+/**
+ * lita-bots 调用方身份：
+ * - 用户 agent 访问令牌：id 为真实用户；
+ * - 机器人独立令牌：优先落到机器人绑定的真人（humanUserId / personalAgentUserId），
+ *   未绑定真人的 AI 机器人使用负的机器人 ID，隔离会话与审计身份。
+ */
+export interface McpBotCaller {
+  /** 会话归属与可见性过滤使用的 ID（AI 机器人为 -workerId） */
+  id: number;
+  /** 审计展示名称 */
+  name: string;
+}
+
 /** list_bots 返回的机器人条目 */
 export interface McpBotItem {
   id: number;

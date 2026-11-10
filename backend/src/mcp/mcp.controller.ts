@@ -8,22 +8,28 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from '../auth/auth.service';
-import { User } from '../auth/user.entity';
 import { Public } from '../auth/public.decorator';
+import type { Worker } from '../workers/worker.entity';
+import { WorkersService } from '../workers/workers.service';
 import { McpService } from './mcp.service';
+import type { McpBotCaller } from './mcp.types';
 
 /**
  * MCP 机器人开放端点（MCP Streamable HTTP，stateless）：
  * POST /api/mcp/bots —— 外部 AI Agent（opencode / Claude Code 等）经此调用平台机器人。
- * 鉴权：Authorization: Bearer <token> 或 X-Agent-Token 或 ?token= 参数（个人 agent
- * 访问令牌，公共 Agent 令牌同样可用），与 `.md` 端点 / lita-work 技能的令牌体系一致
- * （工位环境变量 LITA_WORK_TOKEN，过渡期旧名 LITA_PROJECT_TOKEN 同值兜底）。
+ * 鉴权（与 lita-work MCP / `.md` 端点同一令牌体系，双身份）：
+ * - X-Worker-Token：机器人独立令牌 → 机器人身份；
+ * - Authorization: Bearer / X-Agent-Token / ?token=：用户 agent 访问令牌（个人或公共 Agent）；
+ *   若命中机器人令牌同样识别为机器人身份（工位 LITA_WORK_TOKEN 约定）。
+ * 机器人身份优先落到其绑定真人（humanUserId / personalAgentUserId），未绑定真人的
+ * AI 机器人使用负的机器人 ID 隔离 MCP 会话与审计身份。
  */
 @Controller('mcp/bots')
 export class McpController {
   constructor(
     private readonly mcp: McpService,
     private readonly auth: AuthService,
+    private readonly workers: WorkersService,
   ) {}
 
   @Post()
@@ -33,12 +39,26 @@ export class McpController {
     @Res() res: Response,
     @Body() body: unknown,
   ): Promise<void> {
-    const user = await this.authenticate(req);
-    await this.mcp.handleRequest(user, req, res, body);
+    const caller = await this.authenticate(req);
+    await this.mcp.handleRequest(caller, req, res, body);
   }
 
-  /** 令牌提取：Bearer 优先，其次 X-Agent-Token，最后 ?token= 参数（与 .md 端点一致） */
-  private async authenticate(req: Request): Promise<User> {
+  /** 令牌提取：X-Worker-Token 优先，其次 Bearer / X-Agent-Token / ?token= 参数 */
+  private async authenticate(req: Request): Promise<McpBotCaller> {
+    const workerHeader = req.headers['x-worker-token'];
+    const workerToken = (
+      Array.isArray(workerHeader) ? workerHeader[0] : workerHeader
+    )?.trim();
+    if (workerToken) {
+      const worker = await this.workers.findByAgentToken(workerToken);
+      if (!worker) {
+        throw new UnauthorizedException(
+          '无效的机器人访问令牌（由平台在初始化或首次派发时生成到工位 .opencode/agent-token）',
+        );
+      }
+      return this.callerOf(worker);
+    }
+
     const header = req.headers['authorization'];
     const bearer =
       typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
@@ -55,15 +75,26 @@ export class McpController {
     const token = bearer || agentToken?.trim() || queryToken?.trim() || '';
     if (!token) {
       throw new UnauthorizedException(
-        '缺少鉴权：请在 Authorization: Bearer 或 X-Agent-Token 头（或 ?token= 参数）携带 agent 访问令牌（个人中心获取；工位环境变量 LITA_WORK_TOKEN，旧名 LITA_PROJECT_TOKEN 兜底）',
+        '缺少鉴权：请在 Authorization: Bearer / X-Agent-Token（或 ?token= 参数）携带 agent 访问令牌，或使用 X-Worker-Token 携带机器人令牌（工位环境变量 LITA_WORK_TOKEN）',
       );
     }
     const user = await this.auth.getUserByAgentToken(token);
-    if (!user) {
-      throw new UnauthorizedException(
-        '无效的 agent 访问令牌（可在平台个人中心重置后更新 MCP 配置）',
-      );
+    if (user) return { id: user.id, name: user.name };
+    // 工位 .opencode/.env 的 LITA_WORK_TOKEN 是机器人独立令牌：
+    // 统一按 Bearer / X-Agent-Token 传入时同样识别为机器人身份
+    const worker = await this.workers.findByAgentToken(token);
+    if (worker) return this.callerOf(worker);
+    throw new UnauthorizedException(
+      '无效的访问令牌（可在平台个人中心重置后更新 MCP 配置）',
+    );
+  }
+
+  /** 机器人令牌映射调用方：绑定真人时记真人身份，否则用负 ID 隔离 AI 机器人会话 */
+  private callerOf(worker: Worker): McpBotCaller {
+    const userId = worker.humanUserId ?? worker.personalAgentUserId;
+    if (userId != null) {
+      return { id: userId, name: worker.humanUserName?.trim() || worker.name };
     }
-    return user;
+    return { id: -worker.id, name: `机器人：${worker.name}` };
   }
 }

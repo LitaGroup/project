@@ -94,6 +94,7 @@
 - `.md` 端点支持网页会话，也支持 `X-Agent-Token` 或 `?token=` 的用户 Agent 令牌；显式提供错误令牌时直接 401，不回退 Cookie。
 - `PUBLIC_AGENT_TOKEN` 可映射为虚拟管理员「公共 Agent」，未配置则禁用；设置页只能展示是否配置，不能泄露明文。
 - `X-Worker-Token` 用于识别机器人，挂载 `req.worker`，**不等同于用户身份**。机器人令牌不得出现在响应、日志或 `workers.md` 详情中。
+- `lita-work` / `lita-bots` MCP 端点同样接受 `X-Worker-Token`（或把机器人令牌放在 Bearer / `X-Agent-Token` / `?token=`）识别机器人身份；`lita-bots` 的机器人调用会话优先落到机器人绑定的真人，未绑定真人的 AI 机器人使用负 ID 隔离，不与他人会话混用。
 - 工位 `.opencode/.env` 中的 `LITA_WORK_TOKEN` 是机器人平台令牌，兼容旧名 `LITA_PROJECT_TOKEN`；`LITA_USER_TOKEN` 是用户令牌。工位配置优先级高于进程环境和执行器宿主 `~/.env`。
 - 个人 AGENT 使用其主人真人机器人的平台令牌，任务操作统一记为真人身份，个人 AGENT 本身不写入任务参与身份。
 - 管理接口必须校验管理员；机器人执行动作必须校验当前执行机器人；需求方动作必须校验需求方身份。不要只依赖前端隐藏按钮。

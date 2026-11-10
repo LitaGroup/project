@@ -1,92 +1,154 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { McpController } from './mcp.controller';
 
-/** 构造被测 controller（mcp / auth 全部 mock） */
+/** 构造被测 controller（mcp / auth / workers 全部 mock） */
 function buildController(): {
   controller: McpController;
+  mcp: { handleRequest: jest.Mock };
   auth: { getUserByAgentToken: jest.Mock };
+  workers: { findByAgentToken: jest.Mock };
 } {
+  const mcp = { handleRequest: jest.fn() };
   const auth = { getUserByAgentToken: jest.fn() };
+  const workers = { findByAgentToken: jest.fn() };
   const controller = new McpController(
-    { handleRequest: jest.fn() } as never,
+    mcp as never,
     auth as never,
+    workers as never,
   );
-  return { controller, auth };
+  return { controller, mcp, auth, workers };
 }
 
 /** 构造 express 风格请求（authenticate 只读 headers 与 originalUrl） */
 function reqOf(options: {
   authorization?: string;
   agentToken?: string;
+  workerToken?: string;
   url?: string;
 }): never {
   const headers: Record<string, string> = {};
   if (options.authorization) headers.authorization = options.authorization;
   if (options.agentToken) headers['x-agent-token'] = options.agentToken;
+  if (options.workerToken) headers['x-worker-token'] = options.workerToken;
   return { headers, originalUrl: options.url ?? '/api/mcp/bots' } as never;
 }
 
 describe('McpController.authenticate（经 handlePost 验证）', () => {
   const user = { id: 3, name: '张三' };
+  const humanWorker = {
+    id: 7,
+    name: '前端工程师',
+    humanUserId: 3,
+    humanUserName: '张三',
+    personalAgentUserId: null,
+  };
+  const aiWorker = {
+    id: 8,
+    name: '测试机器人',
+    humanUserId: null,
+    humanUserName: null,
+    personalAgentUserId: null,
+  };
 
-  function mockAuthValid(auth: { getUserByAgentToken: jest.Mock }): void {
+  function mockValid(
+    auth: { getUserByAgentToken: jest.Mock },
+    workers: { findByAgentToken: jest.Mock },
+  ): void {
     auth.getUserByAgentToken.mockImplementation((token: string) =>
-      token === 'valid-token' ? user : null,
+      token === 'user-token' ? user : null,
     );
+    workers.findByAgentToken.mockImplementation((token: string) => {
+      if (token === 'human-worker-token') return humanWorker;
+      if (token === 'ai-worker-token') return aiWorker;
+      return null;
+    });
   }
 
   async function post(controller: McpController, req: never): Promise<void> {
     await controller.handlePost(req, { on: jest.fn() } as never, {});
   }
 
-  it('Authorization: Bearer 优先', async () => {
-    const { controller, auth } = buildController();
-    mockAuthValid(auth);
+  function callerOf(mcp: { handleRequest: jest.Mock }): unknown {
+    const calls = mcp.handleRequest.mock.calls as unknown[][];
+    return calls[0]?.[0];
+  }
+
+  it('X-Worker-Token 优先识别为机器人身份（绑定真人时记真人）', async () => {
+    const { controller, mcp, auth, workers } = buildController();
+    mockValid(auth, workers);
     await post(
       controller,
       reqOf({
-        authorization: 'Bearer valid-token',
-        agentToken: 'other',
-        url: '/api/mcp/bots?token=other2',
+        workerToken: 'human-worker-token',
+        authorization: 'Bearer user-token',
       }),
     );
-    expect(auth.getUserByAgentToken).toHaveBeenCalledWith('valid-token');
+    expect(workers.findByAgentToken).toHaveBeenCalledWith('human-worker-token');
+    expect(auth.getUserByAgentToken).not.toHaveBeenCalled();
+    expect(callerOf(mcp)).toEqual({ id: 3, name: '张三' });
   });
 
-  it('X-Agent-Token 头其次（工位环境变量 LITA_WORK_TOKEN 场景）', async () => {
-    const { controller, auth } = buildController();
-    mockAuthValid(auth);
-    await post(
-      controller,
-      reqOf({
-        agentToken: 'valid-token',
-        url: '/api/mcp/bots?token=other2',
-      }),
-    );
-    expect(auth.getUserByAgentToken).toHaveBeenCalledWith('valid-token');
+  it('未绑定真人的 AI 机器人令牌用负 ID 隔离会话', async () => {
+    const { controller, mcp, auth, workers } = buildController();
+    mockValid(auth, workers);
+    await post(controller, reqOf({ workerToken: 'ai-worker-token' }));
+    expect(callerOf(mcp)).toEqual({ id: -8, name: '机器人：测试机器人' });
+  });
+
+  it('Authorization: Bearer 用户令牌', async () => {
+    const { controller, mcp, auth, workers } = buildController();
+    mockValid(auth, workers);
+    await post(controller, reqOf({ authorization: 'Bearer user-token' }));
+    expect(auth.getUserByAgentToken).toHaveBeenCalledWith('user-token');
+    expect(callerOf(mcp)).toEqual({ id: 3, name: '张三' });
+  });
+
+  it('X-Agent-Token 命中机器人令牌时识别为机器人身份（工位 LITA_WORK_TOKEN 场景）', async () => {
+    const { controller, mcp, auth, workers } = buildController();
+    mockValid(auth, workers);
+    await post(controller, reqOf({ agentToken: 'ai-worker-token' }));
+    expect(auth.getUserByAgentToken).toHaveBeenCalledWith('ai-worker-token');
+    expect(workers.findByAgentToken).toHaveBeenCalledWith('ai-worker-token');
+    expect(callerOf(mcp)).toEqual({ id: -8, name: '机器人：测试机器人' });
   });
 
   it('?token= 参数兜底（与 .md 端点一致）', async () => {
-    const { controller, auth } = buildController();
-    mockAuthValid(auth);
-    await post(controller, reqOf({ url: '/api/mcp/bots?token=valid-token' }));
-    expect(auth.getUserByAgentToken).toHaveBeenCalledWith('valid-token');
+    const { controller, mcp, auth, workers } = buildController();
+    mockValid(auth, workers);
+    await post(controller, reqOf({ url: '/api/mcp/bots?token=user-token' }));
+    expect(auth.getUserByAgentToken).toHaveBeenCalledWith('user-token');
+    expect(callerOf(mcp)).toEqual({ id: 3, name: '张三' });
   });
 
-  it('无任何令牌时 401 且提示包含环境变量名', async () => {
-    const { controller, auth } = buildController();
-    await expect(post(controller, reqOf({}))).rejects.toThrow(
-      /LITA_WORK_TOKEN/,
-    );
+  it('无任何令牌时 401 且提示包含机器人令牌用法', async () => {
+    const { controller, auth, workers } = buildController();
+    await expect(post(controller, reqOf({}))).rejects.toThrow(/X-Worker-Token/);
+    expect(auth.getUserByAgentToken).not.toHaveBeenCalled();
+    expect(workers.findByAgentToken).not.toHaveBeenCalled();
+  });
+
+  it('X-Worker-Token 无效时直接 401，不回退用户令牌', async () => {
+    const { controller, auth, workers } = buildController();
+    mockValid(auth, workers);
+    await expect(
+      post(
+        controller,
+        reqOf({
+          workerToken: 'bad-worker',
+          authorization: 'Bearer user-token',
+        }),
+      ),
+    ).rejects.toThrow(UnauthorizedException);
     expect(auth.getUserByAgentToken).not.toHaveBeenCalled();
   });
 
-  it('令牌无效时 401（公共令牌/个人令牌统一走 getUserByAgentToken）', async () => {
-    const { controller, auth } = buildController();
-    mockAuthValid(auth);
+  it('令牌无效时 401（用户令牌与机器人令牌均未命中）', async () => {
+    const { controller, auth, workers } = buildController();
+    mockValid(auth, workers);
     await expect(
       post(controller, reqOf({ authorization: 'Bearer bad-token' })),
     ).rejects.toThrow(UnauthorizedException);
     expect(auth.getUserByAgentToken).toHaveBeenCalledWith('bad-token');
+    expect(workers.findByAgentToken).toHaveBeenCalledWith('bad-token');
   });
 });
