@@ -169,6 +169,56 @@ describe('WorkersService 工作令牌', () => {
     await expect(service.ensureWorkToken(1000)).resolves.toBe('worker-token');
     expect(ensureAgentToken).toHaveBeenCalledWith(1000);
   });
+
+  it('真人用户的平台令牌就是其真人机器人令牌', async () => {
+    const { service } = createHarness([{ id: 1000, humanUserId: 1 }]);
+    jest
+      .spyOn(service, 'ensureHumanWorker')
+      .mockResolvedValue({ id: 1000 } as Worker);
+    const ensureAgentToken = jest
+      .spyOn(service, 'ensureAgentToken')
+      .mockResolvedValue('human-token');
+
+    await expect(
+      service.ensureHumanWorkerToken({ id: 1, name: '张三', enabled: true }),
+    ).resolves.toBe('human-token');
+    expect(ensureAgentToken).toHaveBeenCalledWith(1000);
+  });
+
+  it('重置真人令牌轮换真人机器人的 workers.agentToken', async () => {
+    const { service, workers } = createHarness([
+      { id: 1000, humanUserId: 1, agentToken: 'old-token' },
+    ]);
+    jest
+      .spyOn(service, 'ensureHumanWorker')
+      .mockResolvedValue({ id: 1000 } as Worker);
+
+    const token = await service.resetHumanWorkerToken({
+      id: 1,
+      name: '张三',
+      enabled: true,
+    });
+
+    expect(token).toHaveLength(48);
+    expect(token).not.toBe('old-token');
+    expect(workers.update).toHaveBeenCalledWith(
+      { id: 1000 },
+      { agentToken: token },
+    );
+  });
+
+  it('资源网关验权只接受机器人令牌', async () => {
+    const { service } = createHarness();
+    const worker = { id: 1000 } as Worker;
+    const findByAgentToken = jest
+      .spyOn(service, 'findByAgentToken')
+      .mockResolvedValue(worker);
+
+    await expect(service.findGatewayWorkerByToken('token')).resolves.toBe(
+      worker,
+    );
+    expect(findByAgentToken).toHaveBeenCalledWith('token');
+  });
 });
 
 describe('WorkersService 工位目录', () => {

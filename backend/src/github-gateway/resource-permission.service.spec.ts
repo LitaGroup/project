@@ -57,21 +57,21 @@ describe('GatewayResourcePermissionService', () => {
     });
   });
 
-  it('真人用户令牌解析到绑定真人机器人并按其权限判定', async () => {
+  it('真人机器人令牌按其 resourcePermission 判定', async () => {
     const { service, workers } = buildService((token) =>
-      token === 'user-agent-token'
+      token === 'human-worker-token'
         ? Promise.resolve({
             id: 3,
             resourcePermission: WorkerResourcePermission.READ,
           })
         : Promise.resolve(null),
     );
-    await expect(service.verify('user-agent-token')).resolves.toEqual({
+    await expect(service.verify('human-worker-token')).resolves.toEqual({
       workerId: 3,
       permission: WorkerResourcePermission.READ,
     });
     expect(workers.findGatewayWorkerByToken).toHaveBeenCalledWith(
-      'user-agent-token',
+      'human-worker-token',
     );
   });
 });

@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
+import { PersonalAgentsService } from '../workers/personal-agents.service';
+import { WorkersService } from '../workers/workers.service';
 import { AUTH_COOKIE, AuthService, OAUTH_STATE_COOKIE } from './auth.service';
 import { readCookie } from './cookies';
 import { Public } from './public.decorator';
@@ -36,6 +38,8 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly config: ConfigService,
+    private readonly workersService: WorkersService,
+    private readonly personalAgents: PersonalAgentsService,
   ) {}
 
   /** 登录入口：302 到飞书授权页（state 写短效 Cookie，回调时比对防 CSRF） */
@@ -104,20 +108,27 @@ export class AuthController {
   }
 
   /**
-   * 当前用户的 agent 访问令牌：agent 调 .md 端点的鉴权凭据。
-   * 尚未发放则自动生成（首次查看个人中心时发放）。
+   * 当前用户的机器人令牌：即其真人机器人的 workers.agentToken，个人 AGENT 共用。
+   * 尚未发放则自动生成（首次在个人中心查看时发放）。
+   * 路径沿用 agent-token，避免已部署前端/脚本失效。
    */
   @Get('agent-token')
   async getAgentToken(@Req() req: Request) {
     const user = await this.requireUser(req);
-    return { token: await this.authService.ensureAgentToken(user.id) };
+    return { token: await this.workersService.ensureHumanWorkerToken(user) };
   }
 
-  /** 重置 agent 访问令牌（旧令牌立即失效，需同步更新 agent 侧配置） */
+  /**
+   * 重置当前用户的机器人令牌：轮换真人机器人令牌，旧令牌立即失效。
+   * 个人 AGENT 与其共用同一令牌，重置后尽力同步其工位令牌文件。
+   */
   @Post('agent-token/reset')
   async resetAgentToken(@Req() req: Request) {
     const user = await this.requireUser(req);
-    return { token: await this.authService.resetAgentToken(user.id) };
+    const token = await this.workersService.resetHumanWorkerToken(user);
+    // 工位文件同步可能涉及执行器远程调用，后台尽力而为，不阻塞令牌重置响应
+    void this.personalAgents.refreshTokenFile(user.id);
+    return { token };
   }
 
   /** 会话校验（本控制器整体 @Public，登录后接口在此手动校验 Cookie，与 me 同口径） */

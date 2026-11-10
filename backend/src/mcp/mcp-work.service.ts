@@ -19,7 +19,7 @@ import type {
  * lita-work MCP 开放：把原 lita-work / knowledge-search / file-upload 技能
  * （`.md` HTTP 端点）改造成带 schema 的 MCP 工具，内部直接复用平台 service 层，
  * 返回沿用面向 Agent 的 Markdown 正文。
- * - 鉴权与 `.md` 端点一致：用户 agent 访问令牌或机器人独立令牌；
+ * - 鉴权与 `.md` 端点一致：机器人令牌（真人机器人 / AI 机器人）或公共 Agent 令牌；
  * - 运行类工具经 progress notification 实时推送脚本输出；
  * - 与 lita-bots（把机器人当子 Agent 调用）共用 stateless Streamable HTTP 传输。
  */

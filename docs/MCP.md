@@ -3,32 +3,32 @@
 平台机器人（BOT）已通过 MCP（Model Context Protocol）对外开放：外部机器上的 AI Agent（opencode / Claude Code / Cursor / Codex CLI 等）完成一次配置后，即可把任意平台机器人当作**子 Agent** 调用——BOT 在平台自己的执行器与工位上真实运行（带角色定义、技能、规范），执行过程的文本流与工具调用实时回传给主 Agent，结束后返回最终结果。
 
 - 服务地址：`POST /api/mcp/bots`（MCP Streamable HTTP，响应为 SSE 流）
-- 鉴权：平台 Agent 访问令牌（`Authorization: Bearer` / `X-Agent-Token` / `?token=`）或机器人独立令牌（`X-Worker-Token`，也可作为 Bearer / `X-Agent-Token` 传入），与 lita-work MCP、`.md` 端点同一令牌体系；接入方环境变量 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 兜底）
+- 鉴权：机器人令牌（`X-Worker-Token`，也可放在 `Authorization: Bearer` / `X-Agent-Token` / `?token=`），或管理员下发的公共 Agent 令牌；与 lita-work MCP、`.md` 端点同一令牌体系。真人用户没有独立令牌，其令牌就是绑定真人机器人的 `workers.agentToken`；接入方环境变量 `LITA_WORK_TOKEN`（过渡期旧名 `LITA_PROJECT_TOKEN` 兜底）
 - 会话执行复用平台机器人聊天引擎，不产生任务记录、不影响任务派发
 
 > 需要**直接操作平台数据**（项目、知识库、脚本运行、缺陷、提测等，即原 lita-work 技能能力）？请使用独立的 **lita-work MCP**：`POST /api/mcp/work`，接入指南见 [work-mcp.md](./work-mcp.md)。
 
 ---
 
-## 一、准备工作：获取访问令牌
+## 一、准备工作：获取机器人令牌
 
-**方式一：个人令牌（推荐）**
+**方式一：个人机器人令牌（推荐）**
 
 1. 登录平台网页，进入 **个人中心**（右上角头像菜单）；
-2. 在「Agent 访问令牌」卡片复制令牌（48 位随机字符串，尚未生成会自动发放）；
+2. 在「机器人令牌」卡片复制令牌（48 位随机字符串，尚未生成会自动发放）；这就是你绑定的真人机器人令牌，个人 AGENT 共用同一令牌；
 3. 令牌泄露可在该卡片 **重置**，旧令牌立即失效（重置后需同步更新外部 Agent 配置）；
 4. 按平台约定写入调用方机器的环境变量或本机 `~/.env`（与 lita-work MCP 同一变量）：
 
 ```bash
 # ~/.env
-LITA_WORK_TOKEN=<你的访问令牌>
+LITA_WORK_TOKEN=<你的机器人令牌>
 ```
 
 **方式二：公共 Agent 令牌（管理员下发）**
 
-平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**；未配置时不可用。使用方式与个人令牌相同。
+平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**；未配置时不可用。使用方式与个人机器人令牌相同。
 
-**方式三：机器人独立令牌**
+**方式三：平台机器人令牌**
 
 平台机器人可用工位 `.opencode/agent-token`（或 `.opencode/.env` 的 `LITA_WORK_TOKEN`）作为 `X-Worker-Token` 调用，也可把同一令牌放在 `Authorization: Bearer` / `X-Agent-Token` / `?token=` 中。绑定真人的机器人按真人身份记录会话与审计；未绑定真人的 AI 机器人使用独立的机器人身份，调用会话与他人隔离。
 

@@ -103,7 +103,7 @@ describe('TasksAgentService 可见任务读取', () => {
     expect(markdown).not.toContain('## 只读访问');
   });
 
-  it('仅用户与真人/个人 AGENT 令牌可读取全部可见任务', async () => {
+  it('仅用户本人与真人/个人 AGENT 可读取全部可见任务', async () => {
     const { service } = buildService(buildTask());
 
     await expect(

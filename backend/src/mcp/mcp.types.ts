@@ -29,9 +29,10 @@ export const MCP_FIRST_PROMPT = [
 
 /**
  * lita-bots 调用方身份：
- * - 用户 agent 访问令牌：id 为真实用户；
- * - 机器人独立令牌：优先落到机器人绑定的真人（humanUserId / personalAgentUserId），
+ * - 公共 Agent 令牌：id 为公共 Agent 虚拟用户（0）；
+ * - 机器人令牌：优先落到机器人绑定的真人（humanUserId / personalAgentUserId），
  *   未绑定真人的 AI 机器人使用负的机器人 ID，隔离会话与审计身份。
+ * 真人用户没有独立令牌，个人 AGENT 使用其主人真人机器人的令牌。
  */
 export interface McpBotCaller {
   /** 会话归属与可见性过滤使用的 ID（AI 机器人为 -workerId） */

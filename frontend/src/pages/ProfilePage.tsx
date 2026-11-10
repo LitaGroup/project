@@ -80,7 +80,7 @@ export function ProfilePage() {
 
   const apiUrl = settings?.apiUrl ?? '{接口地址}'
   const tokenValue = token ?? '<令牌>'
-  const setupScript = `# 一键设置 Agent 访问令牌（写入 ~/.env，Agent 按此读取）
+  const setupScript = `# 一键设置机器人令牌（写入 ~/.env，Agent 按此读取）
 { grep -v '^LITA_WORK_TOKEN=' ~/.env 2>/dev/null | grep -v '^LITA_PROJECT_TOKEN=' ~/.env 2>/dev/null; echo 'LITA_WORK_TOKEN=${tokenValue}'; echo 'LITA_PROJECT_TOKEN=${tokenValue}'; } > ~/.env.tmp && mv ~/.env.tmp ~/.env
 # 当前 shell 立即生效（可选）
 export LITA_WORK_TOKEN=${tokenValue}
@@ -134,13 +134,14 @@ export LITA_PROJECT_TOKEN=${tokenValue}`
           </div>
         </Card>
 
-        {/* Agent 访问令牌（桌面左侧，宽度自适应） */}
+        {/* 机器人令牌（桌面左侧，宽度自适应） */}
         <Card className="min-w-0 lg:col-start-1 lg:row-start-1">
           <CardHeader>
-            <CardTitle>Agent 访问令牌</CardTitle>
+            <CardTitle>机器人令牌</CardTitle>
             <CardDescription>
-              AI agent 访问平台 <code>.md</code> 接口与 MCP 服务的鉴权令牌：请求头携带
-              X-Agent-Token 或 URL 加 ?token= 参数均可；重置后旧令牌立即失效，需同步更新
+              你绑定的真人机器人令牌，个人 AGENT 共用同一令牌。用于访问平台{' '}
+              <code>.md</code> 接口与 MCP 服务：请求头携带 X-Worker-Token 或
+              X-Agent-Token（URL 加 ?token= 参数亦可）；重置后旧令牌立即失效，需同步更新
               agent 侧配置
             </CardDescription>
           </CardHeader>
@@ -160,10 +161,11 @@ export LITA_PROJECT_TOKEN=${tokenValue}`
                 <AlertDialogTrigger render={<Button variant="outline" size="sm" disabled={!token} />}>重置</AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>重置 Agent 访问令牌</AlertDialogTitle>
+                    <AlertDialogTitle>重置机器人令牌</AlertDialogTitle>
                     <AlertDialogDescription>
-                      确定重置吗？当前令牌会立即失效，所有使用该令牌的 agent
-                      需更新为新令牌后才能继续访问。
+                      确定重置吗？真人机器人与个人 AGENT 共用该令牌，重置后旧令牌会立即失效；
+                      个人 AGENT 工位文件会尽力同步，正在进行的个人 AGENT 会话需重新开始后才能使用新令牌；
+                      其它使用该令牌的 agent 需手动更新后才能继续访问。
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

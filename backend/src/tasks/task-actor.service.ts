@@ -20,7 +20,8 @@ export interface TaskActorPrincipal {
 /**
  * 任务动作身份解析（网页控制器与 MCP 工具共用）：
  * - 机器人令牌优先；个人 AGENT 统一映射为其主人的真人机器人；
- * - 用户令牌按「真人机器人需求方 → 个人 AGENT 历史需求方 → 用户本人」回退。
+ * - 真人机器人令牌同时携带绑定用户；公共 Agent / 网页会话按「真人机器人需求方 →
+ *   个人 AGENT 历史需求方 → 用户本人」回退。
  */
 @Injectable()
 export class TaskActorService {
@@ -82,7 +83,7 @@ export class TaskActorService {
 
   /**
    * 任务文档写入者：机器人令牌只能维护自己执行或自己作为需求方的任务文档；
-   * 用户令牌按平台既有权限处理（与任务文档接口一致）。
+   * 公共 Agent / 网页会话按平台既有用户权限处理（与任务文档接口一致）。
    */
   async resolveDocumentAuthor(
     task: Task,

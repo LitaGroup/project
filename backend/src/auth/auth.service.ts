@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios, { AxiosInstance } from 'axios';
@@ -291,7 +286,7 @@ export class AuthService {
             '**接入 MCP（让 Agent 直接调用平台工具）**',
             `**1. 服务地址**：${mcpUrl}（MCP Streamable HTTP）`,
             '**2. opencode 配置**：在 ~/.config/opencode/opencode.json 或项目 .opencode/opencode.json 的 mcp.servers 下添加 lita-work（type=remote、oauth=false、Authorization: Bearer {env:LITA_WORK_TOKEN}）',
-            '**3. 令牌**：登录网页 → 个人中心 → 「Agent 访问令牌」复制并写入环境变量 LITA_WORK_TOKEN',
+            '**3. 令牌**：登录网页 → 个人中心 → 「机器人令牌」复制并写入环境变量 LITA_WORK_TOKEN（真人机器人与个人 AGENT 共用）',
             `**4. 接入文档与工具清单**：${mcpDocUrl}`,
             '旧 SKILL.md 技能已下线，平台能力请使用 lita-work MCP 工具。',
           ].join('\n'),
@@ -374,39 +369,21 @@ export class AuthService {
     }
   }
 
-  /** 取用户的 agent 访问令牌，尚未发放则生成（首次在个人中心查看时发放） */
-  async ensureAgentToken(userId: number): Promise<string> {
+  /** 按用户 ID 取启用中的用户（.md 端点按真人机器人令牌解析真人身份用） */
+  async getUserById(userId: number): Promise<User | null> {
+    if (!Number.isInteger(userId) || userId <= 0) return null;
     const user = await this.usersRepo.findOne({ where: { id: userId } });
-    if (!user) throw new UnauthorizedException('用户不存在');
-    if (user.agentToken) return user.agentToken;
-    user.agentToken = this.generateAgentToken();
-    await this.usersRepo.save(user);
-    return user.agentToken;
-  }
-
-  /** 重置 agent 访问令牌（旧令牌立即失效，需同步更新 agent 侧配置） */
-  async resetAgentToken(userId: number): Promise<string> {
-    const user = await this.usersRepo.findOne({ where: { id: userId } });
-    if (!user) throw new UnauthorizedException('用户不存在');
-    user.agentToken = this.generateAgentToken();
-    await this.usersRepo.save(user);
-    this.logger.log(`agent 访问令牌已重置: ${user.name}（id=${user.id}）`);
-    return user.agentToken;
+    return user && user.enabled ? user : null;
   }
 
   /**
-   * 按 agent 访问令牌查用户（`.md` 端点鉴权用）：
-   * - 公共 Agent 令牌（PUBLIC_AGENT_TOKEN）：返回不落库的虚拟管理员「公共 Agent」，
-   *   多个公共 Agent 共用一个令牌，权限与管理员等同，操作记录统一记在该身份下
-   * - 个人 agent 访问令牌：按 users.agentToken 查（enabled=false 视为无效）
+   * 按公共 Agent 令牌查虚拟用户（`.md` 端点鉴权用）：
+   * 未配置 PUBLIC_AGENT_TOKEN 或令牌不匹配时返回 null。
+   * 个人用户不再有独立令牌，个人调用统一使用其真人机器人的 workers.agentToken。
    */
-  async getUserByAgentToken(token: string): Promise<User | null> {
-    if (!token) return null;
-    if (this.isPublicAgentToken(token)) return this.buildPublicAgentUser();
-    const user = await this.usersRepo.findOne({
-      where: { agentToken: token },
-    });
-    return user && user.enabled ? user : null;
+  getPublicAgentByToken(token: string): User | null {
+    if (!token || !this.isPublicAgentToken(token)) return null;
+    return this.buildPublicAgentUser();
   }
 
   /** 是否已配置公共 Agent 访问令牌（设置页仅展示配置状态，不回显明文） */
@@ -496,11 +473,6 @@ export class AuthService {
 
   // ---- 内部 ----
 
-  /** 生成 agent 访问令牌（48 位随机 hex） */
-  private generateAgentToken(): string {
-    return randomBytes(24).toString('hex');
-  }
-
   /**
    * 常量时间比对公共 Agent 令牌：先做 SHA-256 再比较，避免长度差异与提前返回泄露信息。
    */
@@ -526,7 +498,6 @@ export class AuthService {
     user.role = UserRole.ADMIN;
     user.enabled = true;
     user.lastLoginAt = null;
-    user.agentToken = null;
     user.feishuAccessToken = null;
     user.feishuRefreshToken = null;
     user.feishuTokenExpiresAt = null;

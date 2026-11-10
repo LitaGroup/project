@@ -3,32 +3,32 @@
 平台把原 **lita-work / knowledge-search / file-upload** 三个 Agent 技能（`.md` HTTP 端点）改造成 MCP 服务 **`lita-work`**：外部 Agent（opencode / Claude Code / Cursor 等）完成一次配置后，即可直接调用带 schema 的平台工具——项目、文档、知识库、脚本运行、缺陷/提测、代码分支、文件上传、任务协同、工单和机器人/任务定义管理等。
 
 - 服务地址：`POST /api/mcp/work`（MCP Streamable HTTP，响应为 SSE 流）
-- 鉴权：平台 Agent 访问令牌（`Authorization: Bearer` / `X-Agent-Token` / `?token=`）或机器人独立令牌（`X-Worker-Token`），与 `.md` 端点同一令牌体系
+- 鉴权：机器人令牌（`Authorization: Bearer` / `X-Worker-Token` / `X-Agent-Token` / `?token=`），或管理员下发的公共 Agent 令牌；与 `.md` 端点同一令牌体系。真人用户没有独立令牌，其令牌就是绑定真人机器人的 `workers.agentToken`
 - 与 `lita-bots`（`POST /api/mcp/bots`，把平台机器人当子 Agent 调用）相互独立，可同时接入
 
 > 原 SKILL.md 技能（`/SKILL.md`、`/knowledge/SKILL.md`、`/file-upload/SKILL.md`）已下线，前端不再提供这些技能文档；全部能力已由 MCP 工具覆盖，历史 `.md` 业务接口仍保留兼容。
 
 ---
 
-## 一、准备工作：获取访问令牌
+## 一、准备工作：获取机器人令牌
 
-**方式一：个人令牌（推荐）**
+**方式一：个人机器人令牌（推荐）**
 
 1. 登录平台网页 → 右上角头像 → **个人中心**；
-2. 在「Agent 访问令牌」卡片复制令牌（48 位随机字符串，尚未生成会自动发放）；
+2. 在「机器人令牌」卡片复制令牌（48 位随机字符串，尚未生成会自动发放）；这就是你绑定的真人机器人令牌，个人 AGENT 共用同一令牌；
 3. 令牌泄露可在该卡片 **重置**，旧令牌立即失效（重置后需同步更新外部 Agent 配置）。
 
 **方式二：公共 Agent 令牌（管理员下发）**
 
 平台管理员通过后端环境变量 `PUBLIC_AGENT_TOKEN` 下发，供多个公共 Agent 共用，**权限与管理员等同**；未配置时不可用。
 
-**方式三：机器人独立令牌**
+**方式三：平台机器人令牌**
 
-机器人可在自己的工位使用 `.opencode/agent-token`（或 `.opencode/.env` 的 `LITA_WORK_TOKEN`）作为 `X-Worker-Token` 调用；平台按机器人身份记录操作人并校验执行方/需求方权限。
+机器人可在自己的工位使用 `.opencode/agent-token`（或 `.opencode/.env` 的 `LITA_WORK_TOKEN`）作为 `X-Worker-Token` 调用；平台按机器人身份记录操作人并校验执行方/需求方权限。真人机器人令牌同时具备真人身份，个人 AGENT 与其共用。
 
 ```bash
 # ~/.env（与技能同一变量）
-LITA_WORK_TOKEN=<你的访问令牌>
+LITA_WORK_TOKEN=<你的机器人令牌>
 ```
 
 > 过渡期旧名 `LITA_PROJECT_TOKEN` 仍可用，**新名优先**。
@@ -211,8 +211,8 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 
 ## 五、身份与操作人
 
-- 用户令牌：写操作记录个人中心令牌对应用户为操作人；公共 Agent 令牌方式记「公共 Agent」；
-- 机器人令牌（`X-Worker-Token`）：平台识别为机器人身份，任务协同、提测来源任务等按机器人规则处理；
+- 机器人令牌：平台识别为机器人身份；绑定真人时同时按真人身份处理，写操作记录该真人；未绑定真人的 AI 机器人记录机器人自身；
+- 公共 Agent 令牌：写操作记「公共 Agent」；
 - 任务协同、工单、机器人/任务定义管理的 MCP 工具与 `.md` 端点使用同一套身份与权限校验；`.md` 端点保留兼容。
 
 ## 六、与 lita-bots 的区别

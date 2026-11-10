@@ -30,20 +30,23 @@ function createContext(
 describe('AuthGuard（网页接口强制登录）', () => {
   const reflector = new Reflector();
   const getUserByToken = jest.fn();
-  const getUserByAgentToken = jest.fn();
+  const getUserById = jest.fn();
+  const getPublicAgentByToken = jest.fn();
   const findByAgentToken = jest.fn();
   const guard = new AuthGuard(
     reflector,
     {
       getUserByToken,
-      getUserByAgentToken,
+      getUserById,
+      getPublicAgentByToken,
     } as never,
     { findByAgentToken } as never,
   );
 
   beforeEach(() => {
     getUserByToken.mockReset();
-    getUserByAgentToken.mockReset();
+    getUserById.mockReset();
+    getPublicAgentByToken.mockReset();
     findByAgentToken.mockReset();
   });
 
@@ -55,31 +58,57 @@ describe('AuthGuard（网页接口强制登录）', () => {
     expect(getUserByToken).not.toHaveBeenCalled();
   });
 
-  it('.md 端点凭有效 agent token（请求头）放行并挂载 req.user', async () => {
+  it('.md 端点凭真人机器人令牌放行并同时挂载 req.worker 与 req.user', async () => {
     const user = { id: 2, name: '李四', enabled: true };
-    getUserByAgentToken.mockResolvedValue(user);
+    const worker = {
+      id: 1000,
+      name: '李四',
+      humanUserId: 2,
+      enabled: true,
+    };
+    findByAgentToken.mockResolvedValue(worker);
+    getUserById.mockResolvedValue(user);
     const { context, req } = createContext('/api/settings.md', undefined, {
-      'x-agent-token': 'valid-agent-token',
+      'x-agent-token': 'human-worker-token',
     });
     await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect((req as AuthedRequest).worker).toBe(worker);
     expect((req as AuthedRequest).user).toBe(user);
-    expect(getUserByAgentToken).toHaveBeenCalledWith('valid-agent-token');
+    expect(findByAgentToken).toHaveBeenCalledWith('human-worker-token');
+    expect(getUserById).toHaveBeenCalledWith(2);
   });
 
-  it('任意 .md 端点均可凭有效机器人 token 放行并挂载 req.worker', async () => {
-    const worker = { id: 1001, name: '前端工程师', enabled: true };
+  it('.md 端点凭 X-Worker-Token 的真人机器人令牌同样挂载 req.user', async () => {
+    const user = { id: 2, name: '李四', enabled: true };
+    const worker = {
+      id: 1000,
+      name: '李四',
+      humanUserId: 2,
+      enabled: true,
+    };
+    findByAgentToken.mockResolvedValue(worker);
+    getUserById.mockResolvedValue(user);
+    const { context, req } = createContext('/api/tasks.md', undefined, {
+      'x-worker-token': 'human-worker-token',
+    });
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect((req as AuthedRequest).worker).toBe(worker);
+    expect((req as AuthedRequest).user).toBe(user);
+  });
+
+  it('AI 机器人令牌只挂载 req.worker', async () => {
+    const worker = { id: 1001, name: '前端工程师', humanUserId: null };
     findByAgentToken.mockResolvedValue(worker);
     const { context, req } = createContext('/api/projects/1.md', undefined, {
-      'x-worker-token': 'valid-worker-token',
+      'x-worker-token': 'ai-worker-token',
     });
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect((req as AuthedRequest).worker).toBe(worker);
     expect((req as AuthedRequest).user).toBeUndefined();
-    expect(findByAgentToken).toHaveBeenCalledWith('valid-worker-token');
-    expect(getUserByAgentToken).not.toHaveBeenCalled();
+    expect(getUserById).not.toHaveBeenCalled();
   });
 
-  it('任意 .md 端点机器人 token 无效 401（不回退用户令牌/会话）', async () => {
+  it('任意 .md 端点机器人 token 无效 401（不回退会话）', async () => {
     findByAgentToken.mockResolvedValue(null);
     const { context } = createContext('/api/projects/1.md', undefined, {
       'x-worker-token': 'stale-worker-token',
@@ -90,9 +119,9 @@ describe('AuthGuard（网页接口强制登录）', () => {
     expect(getUserByToken).not.toHaveBeenCalled();
   });
 
-  it('工位 LITA_PROJECT_TOKEN 放在 X-Agent-Token 时识别为机器人身份', async () => {
-    const worker = { id: 1001, name: '前端工程师', enabled: true };
-    getUserByAgentToken.mockResolvedValue(null);
+  it('工位 LITA_WORK_TOKEN 放在 X-Agent-Token 时识别为机器人身份', async () => {
+    const worker = { id: 1001, name: '前端工程师', humanUserId: null };
+    getPublicAgentByToken.mockReturnValue(null);
     findByAgentToken.mockResolvedValue(worker);
     const { context, req } = createContext('/api/projects/1.md', undefined, {
       'x-agent-token': 'worker-token-in-env',
@@ -104,18 +133,31 @@ describe('AuthGuard（网页接口强制登录）', () => {
   });
 
   it('.md 端点凭 ?token= 参数放行（query 不影响 .md 判定）', async () => {
-    const user = { id: 2, name: '李四', enabled: true };
-    getUserByAgentToken.mockResolvedValue(user);
+    const worker = { id: 1001, name: '前端工程师', humanUserId: null };
+    getPublicAgentByToken.mockReturnValue(null);
+    findByAgentToken.mockResolvedValue(worker);
     const { context, req } = createContext(
       '/api/defects.md?status=%E5%BC%80%E6%94%BE&token=query-token',
     );
     await expect(guard.canActivate(context)).resolves.toBe(true);
-    expect((req as AuthedRequest).user).toBe(user);
-    expect(getUserByAgentToken).toHaveBeenCalledWith('query-token');
+    expect((req as AuthedRequest).worker).toBe(worker);
+    expect(findByAgentToken).toHaveBeenCalledWith('query-token');
   });
 
-  it('.md 端点 agent token 无效 401（不回退会话）', async () => {
-    getUserByAgentToken.mockResolvedValue(null);
+  it('.md 端点凭公共 Agent 令牌放行并挂载虚拟用户', async () => {
+    const publicAgent = { id: 0, name: '公共 Agent', enabled: true };
+    getPublicAgentByToken.mockReturnValue(publicAgent);
+    const { context, req } = createContext('/api/settings.md', undefined, {
+      'x-agent-token': 'pmpub_token',
+    });
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect((req as AuthedRequest).user).toBe(publicAgent);
+    expect(findByAgentToken).not.toHaveBeenCalled();
+  });
+
+  it('.md 端点机器人令牌无效 401（不回退会话）', async () => {
+    getPublicAgentByToken.mockReturnValue(null);
+    findByAgentToken.mockResolvedValue(null);
     const { context } = createContext('/api/settings.md', undefined, {
       'x-agent-token': 'stale-token',
     });
@@ -133,7 +175,7 @@ describe('AuthGuard（网页接口强制登录）', () => {
     );
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect((req as AuthedRequest).user).toBe(user);
-    expect(getUserByAgentToken).not.toHaveBeenCalled();
+    expect(findByAgentToken).not.toHaveBeenCalled();
   });
 
   it('.md 端点无令牌无会话 401', async () => {

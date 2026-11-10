@@ -110,7 +110,7 @@ describe('WorkTaskTools', () => {
     );
   });
 
-  it('用户令牌执行机器人动作时返回 isError', async () => {
+  it('公共 Agent 用户身份执行机器人动作时返回 isError', async () => {
     const { tools } = buildTools('user');
     const result = (await tools.get('accept_task')!({
       taskId: 7,

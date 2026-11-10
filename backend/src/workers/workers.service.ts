@@ -260,19 +260,39 @@ export class WorkersService implements OnApplicationBootstrap {
   }
 
   /**
-   * 资源网关验权用令牌解析：机器人独立令牌与真人用户 agent 访问令牌等价。
-   * 未命中机器人令牌时，真人令牌按 users.agentToken（enabled=false 视为无效）
-   * 解析到其绑定的真人机器人；公共 Agent 令牌不绑定真人机器人，不在此支持。
-   * 返回 null 表示令牌无效或对应身份已停用。
+   * 资源网关验权用令牌解析：只接受机器人独立令牌。
+   * 真人用户没有独立令牌，个人操作统一使用其真人机器人的令牌。
+   * 返回 null 表示令牌无效或对应机器人已停用。
    */
   async findGatewayWorkerByToken(token: string): Promise<Worker | null> {
-    const worker = await this.findByAgentToken(token);
-    if (worker) return worker;
-    if (!token) return null;
-    const user = await this.users.findOne({ where: { agentToken: token } });
-    if (!user || !user.enabled) return null;
-    const human = await this.findByHumanUserId(user.id);
-    return human && human.enabled ? human : null;
+    return this.findByAgentToken(token);
+  }
+
+  /**
+   * 确保真人用户的平台令牌并返回明文。
+   * 真人用户不再有独立令牌：该令牌就是其真人机器人的 workers.agentToken，
+   * 个人 AGENT 也复用同一令牌。
+   */
+  async ensureHumanWorkerToken(
+    user: Pick<User, 'id' | 'name' | 'enabled'> & {
+      avatarUrl?: string | null;
+    },
+  ): Promise<string> {
+    const human = await this.ensureHumanWorker(user);
+    return this.ensureAgentToken(human.id);
+  }
+
+  /** 重置真人机器人令牌（个人 AGENT 共用；旧令牌立即失效） */
+  async resetHumanWorkerToken(
+    user: Pick<User, 'id' | 'name' | 'enabled'> & {
+      avatarUrl?: string | null;
+    },
+  ): Promise<string> {
+    const human = await this.ensureHumanWorker(user);
+    const token = randomBytes(24).toString('hex');
+    await this.workers.update({ id: human.id }, { agentToken: token });
+    this.logger.log(`真人机器人令牌已重置: ${user.name}（worker=${human.id}）`);
+    return token;
   }
 
   /**

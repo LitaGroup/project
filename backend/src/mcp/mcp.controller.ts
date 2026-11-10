@@ -17,10 +17,10 @@ import type { McpBotCaller } from './mcp.types';
 /**
  * MCP 机器人开放端点（MCP Streamable HTTP，stateless）：
  * POST /api/mcp/bots —— 外部 AI Agent（opencode / Claude Code 等）经此调用平台机器人。
- * 鉴权（与 lita-work MCP / `.md` 端点同一令牌体系，双身份）：
- * - X-Worker-Token：机器人独立令牌 → 机器人身份；
- * - Authorization: Bearer / X-Agent-Token / ?token=：用户 agent 访问令牌（个人或公共 Agent）；
- *   若命中机器人令牌同样识别为机器人身份（工位 LITA_WORK_TOKEN 约定）。
+ * 鉴权（与 lita-work MCP / `.md` 端点同一令牌体系）：
+ * - X-Worker-Token：机器人令牌 → 机器人身份；
+ * - Authorization: Bearer / X-Agent-Token / ?token=：机器人令牌（真人机器人 / AI 机器人）
+ *   或公共 Agent 令牌。真人用户没有独立令牌，个人 AGENT 使用其主人真人机器人的令牌。
  * 机器人身份优先落到其绑定真人（humanUserId / personalAgentUserId），未绑定真人的
  * AI 机器人使用负的机器人 ID 隔离 MCP 会话与审计身份。
  */
@@ -75,17 +75,19 @@ export class McpController {
     const token = bearer || agentToken?.trim() || queryToken?.trim() || '';
     if (!token) {
       throw new UnauthorizedException(
-        '缺少鉴权：请在 Authorization: Bearer / X-Agent-Token（或 ?token= 参数）携带 agent 访问令牌，或使用 X-Worker-Token 携带机器人令牌（工位环境变量 LITA_WORK_TOKEN）',
+        '缺少鉴权：请在 Authorization: Bearer / X-Agent-Token（或 ?token= 参数）携带机器人令牌，或使用 X-Worker-Token 携带机器人令牌（工位环境变量 LITA_WORK_TOKEN）',
       );
     }
-    const user = await this.auth.getUserByAgentToken(token);
-    if (user) return { id: user.id, name: user.name };
-    // 工位 .opencode/.env 的 LITA_WORK_TOKEN 是机器人独立令牌：
+    const publicAgent = this.auth.getPublicAgentByToken(token);
+    if (publicAgent) {
+      return { id: publicAgent.id, name: publicAgent.name };
+    }
+    // 工位 .opencode/.env 的 LITA_WORK_TOKEN 是机器人令牌：
     // 统一按 Bearer / X-Agent-Token 传入时同样识别为机器人身份
     const worker = await this.workers.findByAgentToken(token);
     if (worker) return this.callerOf(worker);
     throw new UnauthorizedException(
-      '无效的访问令牌（可在平台个人中心重置后更新 MCP 配置）',
+      '无效的机器人访问令牌（可在平台个人中心重置后更新 MCP 配置）',
     );
   }
 

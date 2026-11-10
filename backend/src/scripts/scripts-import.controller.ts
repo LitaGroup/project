@@ -9,7 +9,7 @@ class ImportScriptsDto {
 /**
  * AI 用统一脚本导入（text/markdown）：扫描项目脚本目录下未登记的
  * .check.ts / .test.ts / .export.ts，一次导入为 检查 / 用例 / 导出。
- * 路径以 .md 结尾，由全局 AuthGuard 按个人 agent 访问令牌鉴权（勿加 @Public）。
+ * 路径以 .md 结尾，由全局 AuthGuard 按机器人令牌鉴权（勿加 @Public）。
  */
 @Controller('scripts/import.md')
 export class ScriptsImportController {

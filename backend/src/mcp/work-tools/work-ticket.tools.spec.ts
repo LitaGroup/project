@@ -70,7 +70,7 @@ describe('WorkTicketTools', () => {
     expect(result.content[0].text).toBe('# 已交付');
   });
 
-  it('用户令牌交付工单文档时返回 isError', async () => {
+  it('公共 Agent 用户身份交付工单文档时返回 isError', async () => {
     const { tools, ticketDocuments } = buildTools('user');
     const result = (await tools.get('deliver_ticket_document')!({
       taskId: 7,

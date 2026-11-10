@@ -2740,10 +2740,10 @@ export const api = {
   },
   /** 当前登录用户（未登录 401，调用方 catch 视为未登录态） */
   getMe: () => request<{ user: User }>('/auth/me').then((r) => r.user),
-  /** 当前用户的 agent 访问令牌（调 .md 端点鉴权用；尚未发放则自动生成） */
+  /** 当前用户的机器人令牌（真人机器人令牌，个人 AGENT 共用；调 .md 端点与 MCP 鉴权用） */
   getAgentToken: () =>
     request<{ token: string }>('/auth/agent-token').then((r) => r.token),
-  /** 重置 agent 访问令牌（旧令牌立即失效，需同步更新 agent 侧配置） */
+  /** 重置机器人令牌（真人机器人与个人 AGENT 共用；旧令牌立即失效） */
   resetAgentToken: () =>
     request<{ token: string }>('/auth/agent-token/reset', {
       method: 'POST',

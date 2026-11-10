@@ -75,7 +75,7 @@ export class TasksAgentService {
   /**
    * 解析当前请求的任务身份。
    * - 机器人令牌：机器人自身 + 其绑定用户（真人机器人）/ 其个人 AGENT 的主人的真人机器人；
-   * - 用户令牌：用户本人 + 真人机器人 + 个人 AGENT。
+   * - 公共 Agent / 网页会话：用户本人 + 真人机器人 + 个人 AGENT。
    */
   async resolveScope(req: AuthedRequest): Promise<AgentTaskScope> {
     const userIds = new Set<number>();
@@ -137,7 +137,7 @@ export class TasksAgentService {
       workerIds: [...workerIds],
       responsibleWorkerIds: [...responsibleWorkerIds],
       canReadVisibleTasks,
-      label: labels.filter(Boolean).join(' / ') || '当前 Agent',
+      label: [...new Set(labels.filter(Boolean))].join(' / ') || '当前 Agent',
     };
   }
 

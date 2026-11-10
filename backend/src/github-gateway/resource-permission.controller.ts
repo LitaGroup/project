@@ -19,7 +19,7 @@ import {
 } from './resource-permission.service';
 
 /**
- * 资源网关专用内部接口：Gateway Token + 令牌（机器人独立令牌或真人用户令牌）换资源权限。
+ * 资源网关专用内部接口：Gateway Token + 机器人令牌换资源权限。
  * 仅可信 Gateway 可调用，不返回任何资源凭证；AI 直接调用缺少 Gateway Token 必然 401。
  */
 @Controller('internal/gateway/v1/resource-permissions')

@@ -174,8 +174,8 @@ function McpInstallSection() {
             <p className="text-sm font-medium">1. 服务地址</p>
             <CommandBlock command={mcpUrl} />
             <p className="text-sm text-foreground-muted">
-              鉴权使用个人中心「Agent 访问令牌」（环境变量 LITA_WORK_TOKEN，过渡期旧名
-              LITA_PROJECT_TOKEN 同值可用）；机器人工位由平台自动注入配置。
+              鉴权使用个人中心「机器人令牌」（你的真人机器人令牌，个人 AGENT 共用；
+              环境变量 LITA_WORK_TOKEN，过渡期旧名 LITA_PROJECT_TOKEN 同值可用）；机器人工位由平台自动注入配置。
             </p>
           </div>
           <div className="flex flex-col gap-2">

@@ -60,7 +60,7 @@ export class ProjectRelease {
   @Column({ type: 'simple-json' })
   testers: string[];
 
-  /** 提测人姓名（网页登录用户 / agent 令牌对应用户 / 机器人名称） */
+  /** 提测人姓名（网页登录用户 / 绑定真人机器人的令牌 / 机器人名称） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   operator: string | null;
 

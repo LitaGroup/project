@@ -54,11 +54,6 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true })
   lastLoginAt: Date | null;
 
-  /** agent 访问令牌：agent 调 .md 端点时经 X-Agent-Token 头或 ?token= 提供（个人中心可重置，空=尚未发放） */
-  @Index({ unique: true })
-  @Column({ type: 'varchar', length: 64, nullable: true })
-  agentToken: string | null;
-
   /** 飞书 user_access_token：登录时落库，当前无消费方（原云文档搜索已下线），禁止出参（select:false） */
   @Column({ type: 'text', nullable: true, select: false })
   feishuAccessToken: string | null;

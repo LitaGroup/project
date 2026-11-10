@@ -8,7 +8,7 @@ import {
 
 /**
  * MCP 机器人调用审计：外部 AI Agent 每次 bot_call / bot_answer 终态后落一条。
- * 按用户维度记录（复用个人 agent 访问令牌鉴权，userId=0 为公共 Agent），
+ * 按用户维度记录（绑定真人的机器人令牌落到真人 userId，userId=0 为公共 Agent），
  * 管理区「MCP 调用」列表页展示。
  */
 @Entity('mcp_call_logs')

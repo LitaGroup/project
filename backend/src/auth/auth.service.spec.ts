@@ -325,35 +325,29 @@ describe('AuthService（飞书登录 + 会话）', () => {
   describe('公共 Agent 访问令牌（PUBLIC_AGENT_TOKEN）', () => {
     const TOKEN = 'pmpub_test_token_1234567890';
 
-    it('命中时返回虚拟管理员「公共 Agent」，不查个人令牌', async () => {
-      const { service, repo } = createService({
+    it('命中时返回虚拟管理员「公共 Agent」', () => {
+      const { service } = createService({
         PUBLIC_AGENT_TOKEN: TOKEN,
       });
-      const user = await service.getUserByAgentToken(TOKEN);
+      const user = service.getPublicAgentByToken(TOKEN);
       expect(user).toMatchObject({
         id: PUBLIC_AGENT_USER_ID,
         name: PUBLIC_AGENT_NAME,
         role: UserRole.ADMIN,
         enabled: true,
       });
-      expect(repo.findOne).not.toHaveBeenCalled();
       expect(service.hasPublicAgentToken()).toBe(true);
     });
 
-    it('错误令牌返回 null', async () => {
+    it('错误令牌返回 null', () => {
       const { service } = createService({ PUBLIC_AGENT_TOKEN: TOKEN });
-      await expect(
-        service.getUserByAgentToken('pmpub_wrong_token'),
-      ).resolves.toBeNull();
-      await expect(
-        service.getUserByAgentToken(TOKEN + 'x'),
-      ).resolves.toBeNull();
+      expect(service.getPublicAgentByToken('pmpub_wrong_token')).toBeNull();
+      expect(service.getPublicAgentByToken(TOKEN + 'x')).toBeNull();
     });
 
-    it('未配置时公共令牌不可用，仍回退个人令牌查询', async () => {
-      const { service, repo } = createService();
-      await expect(service.getUserByAgentToken(TOKEN)).resolves.toBeNull();
-      expect(repo.findOne).toHaveBeenCalled();
+    it('未配置时公共令牌不可用', () => {
+      const { service } = createService();
+      expect(service.getPublicAgentByToken(TOKEN)).toBeNull();
       expect(service.hasPublicAgentToken()).toBe(false);
     });
   });

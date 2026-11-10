@@ -91,11 +91,12 @@
 ### 鉴权与身份
 
 - 全局 `AuthGuard` 保护 JSON API；网页使用飞书 OAuth + HttpOnly JWT Cookie。登录流程和 `@Public()` 端点是例外。
-- `.md` 端点支持网页会话，也支持 `X-Agent-Token` 或 `?token=` 的用户 Agent 令牌；显式提供错误令牌时直接 401，不回退 Cookie。
+- `.md` 端点支持网页会话，也支持 `X-Worker-Token`，或把机器人令牌放在 `X-Agent-Token` / `?token=`；显式提供错误令牌时直接 401，不回退 Cookie。
+- **系统只有机器人令牌，没有用户级 agent 令牌**：个人中心「机器人令牌」就是该用户绑定真人机器人的 `workers.agentToken`，个人 AGENT 共用同一令牌；真人机器人令牌命中时同时挂载 `req.worker` 与 `req.user`。
 - `PUBLIC_AGENT_TOKEN` 可映射为虚拟管理员「公共 Agent」，未配置则禁用；设置页只能展示是否配置，不能泄露明文。
-- `X-Worker-Token` 用于识别机器人，挂载 `req.worker`，**不等同于用户身份**。机器人令牌不得出现在响应、日志或 `workers.md` 详情中。
+- `X-Worker-Token` 用于识别机器人，挂载 `req.worker`；真人机器人额外挂载 `req.user`，这是真人身份的唯一来源，**不再有独立用户令牌**。机器人令牌不得出现在响应、日志或 `workers.md` 详情中。
 - `lita-work` / `lita-bots` MCP 端点同样接受 `X-Worker-Token`（或把机器人令牌放在 Bearer / `X-Agent-Token` / `?token=`）识别机器人身份；`lita-bots` 的机器人调用会话优先落到机器人绑定的真人，未绑定真人的 AI 机器人使用负 ID 隔离，不与他人会话混用。
-- 工位 `.opencode/.env` 中的 `LITA_WORK_TOKEN` 是机器人平台令牌，兼容旧名 `LITA_PROJECT_TOKEN`；`LITA_USER_TOKEN` 是用户令牌。工位配置优先级高于进程环境和执行器宿主 `~/.env`。
+- 工位 `.opencode/.env` 中的 `LITA_WORK_TOKEN` 是机器人平台令牌，兼容旧名 `LITA_PROJECT_TOKEN`；`LITA_USER_TOKEN` 是 Lita 平台（`api.cinta.team`）用户令牌，供 lita-api 等技能使用。工位配置优先级高于进程环境和执行器宿主 `~/.env`。
 - 个人 AGENT 使用其主人真人机器人的平台令牌，任务操作统一记为真人身份，个人 AGENT 本身不写入任务参与身份。
 - 管理接口必须校验管理员；机器人执行动作必须校验当前执行机器人；需求方动作必须校验需求方身份。不要只依赖前端隐藏按钮。
 - 飞书/GitHub 密钥、PAT、会话令牌等敏感列使用 `select:false`，只写不回显；审计不得记录原始 Token/PAT。
@@ -227,7 +228,7 @@
 - 项目分支按 `(projectId, repo, branch)` 唯一；代码事件按 `(repo, branch, sha)` 唯一且 append-only，与项目无外键。
 - 新提交先入库再发 `CODE_EVENT_BUS`；首次基线事件可被后续动作跳过。单目标失败不阻断其他目标。
 - OP Gateway 凭证申请必须同时校验共享网关令牌和机器人令牌，按权限档位发放短租期凭证。响应与错误均 `no-store`，敏感响应不透传给 AI，审计不保存 Token/PAT。
-- 资源网关权限存 `workers.resourcePermission`，与 `githubPermission` 独立：`write` 可访问全部资源、`read` 仅可访问 `readOnly` 资源、`none` 无权限且默认。内部验权接口只返回权限，不发放凭证；实时校验，不缓存结果。验权令牌同时接受机器人独立令牌与真人用户 agent 访问令牌，后者解析到其绑定的真人机器人并按该机器人的权限判定。
+- 资源网关权限存 `workers.resourcePermission`，与 `githubPermission` 独立：`write` 可访问全部资源、`read` 仅可访问 `readOnly` 资源、`none` 无权限且默认。内部验权接口只返回权限，不发放凭证；实时校验，不缓存结果。验权只接受机器人令牌，真人身份使用其真人机器人令牌并按该机器人的权限判定。
 
 ### 飞书与 Appium
 

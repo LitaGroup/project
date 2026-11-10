@@ -508,6 +508,28 @@ export class PersonalAgentsService {
     return `${base.slice(0, 100 - String(user.id).length - 1)}#${user.id}`;
   }
 
+  /**
+   * 机器人令牌重置后同步个人 AGENT 工位令牌文件（agent-token / .env / opencode.json）。
+   * 尽力而为：执行器离线或工位不可用时只告警，不阻断重置。
+   */
+  async refreshTokenFile(userId: number): Promise<void> {
+    try {
+      const worker = await this.findForUser(userId);
+      if (!worker?.executorId) return;
+      const executor = await this.executors.findOne({
+        where: { id: worker.executorId },
+      });
+      const workdir = this.workersService.workdirOf(worker.id);
+      if (!executor || !workdir) return;
+      this.prepared.delete(worker.id);
+      await this.prepareWorkdir(worker, executor, workdir);
+    } catch (error) {
+      this.logger.warn(
+        `个人 AGENT 令牌文件更新失败（user=${userId}）：${(error as Error).message}`,
+      );
+    }
+  }
+
   /** 首次对话前写入工位令牌文件（agent-token / .env） */
   private async prepareWorkdir(
     worker: Worker,
