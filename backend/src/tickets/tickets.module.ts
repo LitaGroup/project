@@ -6,6 +6,7 @@ import { TaskMessage } from '../tasks/task-message.entity';
 import { TasksModule } from '../tasks/tasks.module';
 import { Worker } from '../workers/worker.entity';
 import { WorkersModule } from '../workers/workers.module';
+import { ModelConfigModule } from '../model-config/model-config.module';
 import { WorkflowDefinition } from '../workflows/workflow-definition.entity';
 import { WorkflowDefinitionVersion } from '../workflows/workflow-definition-version.entity';
 import { TicketConfig } from './ticket-config.entity';
@@ -33,6 +34,7 @@ import { TicketsService } from './tickets.service';
     ]),
     forwardRef(() => TasksModule),
     WorkersModule,
+    ModelConfigModule,
   ],
   controllers: [TicketsController, TicketTaskController],
   providers: [

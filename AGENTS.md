@@ -65,6 +65,7 @@
 - `backend/src/knowledge/`：知识树、全文/向量混合检索与 Embedding 队列。
 - `backend/src/defects/`、`releases/`：缺陷与项目提测。
 - `backend/src/feishu/`、`feishu-bot/`：飞书只读导入、机器人长连接与任务群。
+- `backend/src/model-config/`：管理区「模型配置」（固定场景的 OpenAI 兼容连接：baseUrl/apiKey/model/思考等级）与通用单次大模型调用（`LlmService`，工单/任务标题命名等后台任务）。
 - `backend/src/github/`、`github-gateway/`：仓库/分支/提交集成与凭证网关。
 - `backend/src/agent/`、`remote-run/`、`app-versions/`：Appium Agent、远程运行与 APP 包。
 - `backend/src/files/`、`images/`、`settings/`、`notify/`、`mcp/`：上传、设置、通知与 MCP 开放（`lita-bots` 调用机器人、`lita-work` 平台工具：项目/知识/运行/缺陷/任务协同/工单/机器人）；`backend/src/mcp-servers/` 为管理区「MCP 配置」（机器人连接的外部 MCP 服务）。
@@ -214,6 +215,13 @@
 - 工单交付文档独立存 `ticket_documents`，链接与正文两种形态互斥。只有来源任务当前执行机器人可写；交付文档不自动改变任务状态。
 - 历史工单的 `tickets.taskId` 和工作流节点任务都需兼容；旧 `ticket-route` 仅服务存量调度工单。
 - 节点拒绝/失败必须按当前节点和流转规则推进，不得仅修改展示状态。
+
+### 模型配置与 AI 标题
+
+- 管理区「模型配置」（`model_scenarios`）按固定场景维护 OpenAI 兼容连接：`baseUrl` / `apiKey` / `model` / 思考等级（`off/low/medium/high`）。场景来自 `backend/src/model-config/model-scenarios.ts` 代码注册表，新增场景无需迁移；`apiKey` 明文落库但 `select:false`，只写不回显，列表仅返回 `hasApiKey`。
+- `LlmService` 提供通用单次调用 `ask`（非流式、20s 超时、全局并发 3）与标题生成 `generateTitle`；场景未配置返回 null，由调用方降级，失败不得影响主流程。
+- 工单与根任务创建后异步生成标题 `「T-{id}」+ 模型生成内容`（`title-naming` 场景，`T-` 后为数字 ID，与 code `WO-/TK-` 并存），不阻塞创建、派发与节点流转，失败只告警。更新使用乐观条件（标题仍为创建时值），不覆盖人工修改。
+- 仅工单与根任务入口（`create.md` / MCP `create_task` / 项目交付任务）触发生成；子任务、工单节点任务、缺陷自动派单任务保留原结构化标题。
 
 ### 提测与缺陷
 

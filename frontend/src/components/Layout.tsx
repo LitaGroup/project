@@ -50,6 +50,7 @@ import {
   Robot,
   Search,
   Settings,
+  Sparkles,
   TimelineEvent,
   Users,
 } from '@appica/icons-react'
@@ -182,6 +183,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/admin/executors', label: '执行器', icon: Cpu, ready: true },
       { to: '/admin/mcp-servers', label: 'MCP 配置', icon: PlugConnected, ready: true },
       { to: '/admin/mcp-logs', label: 'MCP 调用', icon: PlugConnected, ready: true },
+      { to: '/admin/model-config', label: '模型配置', icon: Sparkles, ready: true },
     ],
   },
 ]

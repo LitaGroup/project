@@ -10,6 +10,7 @@ import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { WorkersModule } from '../workers/workers.module';
 import { Worker } from '../workers/worker.entity';
 import { McpServersModule } from '../mcp-servers/mcp-servers.module';
+import { ModelConfigModule } from '../model-config/model-config.module';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
 import { TaskMessage } from './task-message.entity';
@@ -68,6 +69,7 @@ import { WorkbenchService } from './workbench.service';
     forwardRef(() => FeishuBotModule),
     KnowledgeModule,
     McpServersModule,
+    ModelConfigModule,
   ],
   controllers: [
     TasksController,

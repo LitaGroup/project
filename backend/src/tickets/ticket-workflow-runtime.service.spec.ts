@@ -19,7 +19,11 @@ import { TicketWorkflowRun } from './ticket-workflow-run.entity';
 import { Ticket } from './ticket.entity';
 
 describe('TicketWorkflowRuntimeService', () => {
-  let tickets: { findOne: jest.Mock; update: jest.Mock };
+  let tickets: {
+    findOne: jest.Mock;
+    update: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
   let runs: {
     find: jest.Mock;
     findOne: jest.Mock;
@@ -41,12 +45,14 @@ describe('TicketWorkflowRuntimeService', () => {
     isHumanWorker: jest.Mock;
   };
   let taskNotify: { notifyApprovalTask: jest.Mock };
+  let llm: { generateTitle: jest.Mock };
   let service: TicketWorkflowRuntimeService;
 
   beforeEach(() => {
     tickets = {
       findOne: jest.fn(),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
+      createQueryBuilder: jest.fn(),
     };
     runs = {
       find: jest.fn().mockResolvedValue([]),
@@ -77,6 +83,7 @@ describe('TicketWorkflowRuntimeService', () => {
     taskNotify = {
       notifyApprovalTask: jest.fn().mockResolvedValue({ sent: true }),
     };
+    llm = { generateTitle: jest.fn().mockResolvedValue(null) };
     service = new TicketWorkflowRuntimeService(
       tickets as never,
       runs as never,
@@ -88,6 +95,7 @@ describe('TicketWorkflowRuntimeService', () => {
       tasksService as never,
       dispatchService as never,
       taskNotify as never,
+      llm as never,
     );
   });
 
@@ -864,6 +872,70 @@ describe('TicketWorkflowRuntimeService', () => {
         5,
         expect.objectContaining({ workflowStatus: '已失败' }),
       );
+    });
+  });
+
+  describe('工单标题命名（异步）', () => {
+    type TitleNaming = {
+      generateTitle(ticket: Ticket): Promise<void>;
+      scheduleTitleNaming(ticket: Ticket): void;
+    };
+
+    it('按「T-{id}」格式乐观更新，期间标题被改则不覆盖', async () => {
+      const execute = jest.fn().mockResolvedValue({ affected: 1 });
+      const qb = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        execute,
+      };
+      tickets.createQueryBuilder = jest.fn(() => qb);
+      llm.generateTitle.mockResolvedValue('修复登录页崩溃');
+      const ticket = {
+        id: 42,
+        code: 'WO-0042',
+        title: '新工单',
+        category: '技术工单',
+        description: '登录页点击即崩溃',
+        inputValues: {},
+      } as unknown as Ticket;
+
+      await (service as unknown as TitleNaming).generateTitle(ticket);
+
+      expect(qb.set).toHaveBeenCalledWith({
+        title: '「T-42」修复登录页崩溃',
+      });
+      expect(qb.where).toHaveBeenCalledWith('id = :id AND title = :original', {
+        id: 42,
+        original: '新工单',
+      });
+
+      // 乐观条件不命中（期间被人工改过标题）时放弃更新
+      execute.mockResolvedValue({ affected: 0 });
+      await (service as unknown as TitleNaming).generateTitle(ticket);
+      expect(qb.set).toHaveBeenCalledTimes(2);
+    });
+
+    it('模型未配置时跳过更新', async () => {
+      const qb = { update: jest.fn() };
+      tickets.createQueryBuilder = jest.fn(() => qb);
+      llm.generateTitle.mockResolvedValue(null);
+      const ticket = { id: 1, code: 'WO-0001', title: 't' } as Ticket;
+
+      await (service as unknown as TitleNaming).generateTitle(ticket);
+
+      expect(qb.update).not.toHaveBeenCalled();
+    });
+
+    it('生成失败只告警，不影响调用方', async () => {
+      llm.generateTitle.mockRejectedValue(new Error('timeout'));
+      const ticket = { id: 2, code: 'WO-0002', title: 't' } as Ticket;
+
+      expect(() =>
+        (service as unknown as TitleNaming).scheduleTitleNaming(ticket),
+      ).not.toThrow();
+      // 等待异步 catch 完成，避免未处理拒绝
+      await new Promise((resolve) => setImmediate(resolve));
     });
   });
 });

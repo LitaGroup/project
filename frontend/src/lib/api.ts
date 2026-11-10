@@ -1067,6 +1067,44 @@ export interface McpServerTestResult {
   durationMs: number
 }
 
+// ===== 模型配置（管理区） =====
+
+/** 模型思考等级：off 关闭思考（最低档），其余逐级提高 */
+export const MODEL_THINKING_LEVELS = ['off', 'low', 'medium', 'high'] as const
+export type ModelThinkingLevel = (typeof MODEL_THINKING_LEVELS)[number]
+
+export const MODEL_THINKING_LEVEL_LABELS: Record<
+  ModelThinkingLevel,
+  string
+> = {
+  off: '关闭（最低）',
+  low: '低',
+  medium: '中',
+  high: '高',
+}
+
+/** 固定模型场景 + 已保存配置（apiKey 只返回是否已配置，不回显原文） */
+export interface ModelScenarioConfig {
+  scenario: string
+  name: string
+  description: string
+  /** baseUrl 与 model 均已配置，可供调用 */
+  configured: boolean
+  baseUrl: string | null
+  model: string | null
+  thinking: ModelThinkingLevel
+  hasApiKey: boolean
+  updatedAt: string | null
+}
+
+/** 保存场景配置入参：apiKey 未传保持原值，空串清除 */
+export interface ModelScenarioSaveInput {
+  baseUrl?: string | null
+  apiKey?: string | null
+  model?: string | null
+  thinking?: ModelThinkingLevel
+}
+
 /** 任务主状态：等待中 / 进行中 / 已结束 */
 export const TASK_STATUSES = ['等待中', '进行中', '已结束'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
@@ -2895,6 +2933,25 @@ export const api = {
     }),
   deleteMcpServer: (id: number) =>
     request<{ ok: true }>(`/mcp/servers/${id}`, { method: 'DELETE' }),
+
+  /** 模型配置：固定场景列表（apiKey 只返回是否已配置） */
+  listModelConfigs: () =>
+    request<ModelScenarioConfig[]>('/admin/model-config'),
+  /** 保存场景配置：apiKey 未传保持原值，空串清除 */
+  saveModelConfig: (scenario: string, input: ModelScenarioSaveInput) =>
+    request<ModelScenarioConfig>(`/admin/model-config/${scenario}`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
+  /** 后端代理拉取模型列表；可传未保存的 baseUrl/apiKey 供保存前测试 */
+  fetchModelOptions: (
+    scenario: string,
+    input?: { baseUrl?: string | null; apiKey?: string | null },
+  ) =>
+    request<string[]>(`/admin/model-config/${scenario}/fetch-models`, {
+      method: 'POST',
+      body: JSON.stringify(input ?? {}),
+    }),
 
   /** 机器人列表（role 筛选；includePersonal=true 仅管理员，含个人 AGENT） */
   listWorkers: (params?: {

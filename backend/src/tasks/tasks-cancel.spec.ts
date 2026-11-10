@@ -88,6 +88,7 @@ describe('TasksService 停止任务', () => {
       dispatchService as never,
       workerInbox as never,
       { taskChanged: jest.fn() } as never,
+      { generateTitle: jest.fn().mockResolvedValue(null) } as never,
     );
   });
 

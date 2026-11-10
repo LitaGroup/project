@@ -90,6 +90,7 @@ describe('TasksService 任务详情与对话', () => {
         enqueue: jest.fn(),
       } as never,
       { taskChanged: jest.fn() } as never,
+      { generateTitle: jest.fn().mockResolvedValue(null) } as never,
     );
   });
 

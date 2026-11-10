@@ -22,6 +22,7 @@ import { GithubAccessPage } from './pages/GithubAccessPage'
 import { FeishuBotConfigPage } from './pages/FeishuBotConfigPage'
 import { McpLogsPage } from './pages/McpLogsPage'
 import { McpServersPage } from './pages/McpServersPage'
+import { ModelConfigPage } from './pages/ModelConfigPage'
 import { ScriptLibraryPage } from './pages/ScriptLibraryPage'
 import { ScriptLibraryDetailPage } from './pages/ScriptLibraryDetailPage'
 import { SchedulesPage } from './pages/SchedulesPage'
@@ -269,6 +270,7 @@ function App() {
             <Route path="/admin/feishu-config" element={<FeishuBotConfigPage />} />
             <Route path="/admin/mcp-servers" element={<McpServersPage />} />
             <Route path="/admin/mcp-logs" element={<McpLogsPage />} />
+            <Route path="/admin/model-config" element={<ModelConfigPage />} />
           </Route>
           <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
           <Route path="/tickets" element={<TicketHomePage />} />

@@ -384,6 +384,8 @@ export class TasksAgentService {
       input: input.input?.trim() || null,
       outputSpec: input.outputSpec?.trim() || null,
       templateId: input.templateId ?? null,
+      // 根任务入口：异步生成「T-{id}」标题，不阻塞创建与派发
+      titleNaming: true,
       ...identity,
     } satisfies CreateTaskInput);
     const requesterLabel =

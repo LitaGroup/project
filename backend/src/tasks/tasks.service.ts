@@ -25,6 +25,7 @@ import {
 import { WorkerView, WorkersService } from '../workers/workers.service';
 import { User } from '../auth/user.entity';
 import { Worker } from '../workers/worker.entity';
+import { LlmService } from '../model-config/llm.service';
 import { Task, TaskMissingItem } from './task.entity';
 import type { TaskChatPerspective } from './task-chat.types';
 import { TaskEvent } from './task-event.entity';
@@ -64,6 +65,11 @@ export interface CreateTaskInput {
   templateId?: number | null;
   /** 关联项目（projects.id，可空；项目交付任务使用） */
   projectId?: number | null;
+  /**
+   * 是否异步生成「T-{id}」标题（仅根任务入口显式开启）：
+   * 根任务创建 / MCP create_task / 项目交付任务；子任务与工单节点任务保持原有标题。
+   */
+  titleNaming?: boolean;
   /** 兼容旧客户端字段：新流程创建后始终进入「等待中-待分配」 */
   submitForScheduling?: boolean;
 }
@@ -125,6 +131,8 @@ function escapeCell(value: string): string {
 @Injectable()
 export class TasksService {
   private readonly logger = new Logger(TasksService.name);
+  /** 标题命名进行中的任务（进程内防重；失败不影响任务创建与状态流转） */
+  private readonly titleNaming = new Set<number>();
 
   constructor(
     @InjectRepository(Task)
@@ -143,6 +151,7 @@ export class TasksService {
     private readonly dispatchService: TaskDispatchService,
     private readonly workerInbox: TaskWorkerInboxService,
     private readonly taskRealtime: TaskRealtimeService,
+    private readonly llm: LlmService,
   ) {}
 
   /**
@@ -550,7 +559,59 @@ export class TasksService {
           : {}),
       },
     );
+    // 根任务入口显式开启：标题命名异步执行，不阻塞创建与派发
+    if (input.titleNaming) this.scheduleTitleNaming(saved);
     return saved;
+  }
+
+  /**
+   * 后台生成任务标题：「T-{id}」+ 模型生成的简洁标题。
+   * 未配置模型场景时直接跳过；期间标题被人工修改则不覆盖（乐观条件）。
+   */
+  private scheduleTitleNaming(task: Task): void {
+    if (!task.id || this.titleNaming.has(task.id)) return;
+    this.titleNaming.add(task.id);
+    void this.generateTitle(task)
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`任务 ${task.code} 标题生成失败：${message}`);
+      })
+      .finally(() => this.titleNaming.delete(task.id));
+  }
+
+  private async generateTitle(task: Task): Promise<void> {
+    const material = [
+      task.templateName ? `任务类型：${task.templateName}` : '',
+      `当前标题：${task.title}`,
+      task.description ? `任务描述：${task.description}` : '',
+      task.input ? `原始输入：${task.input}` : '',
+      task.outputSpec ? `交付要求：${task.outputSpec}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const generated = await this.llm.generateTitle(material.slice(0, 4000));
+    if (!generated) return;
+    const title = `「T-${task.id}」${generated}`.slice(0, 200);
+    const result = await this.tasks
+      .createQueryBuilder()
+      .update(Task)
+      .set({ title })
+      .where('id = :id AND title = :original', {
+        id: task.id,
+        original: task.title,
+      })
+      .execute();
+    if (!result.affected) return;
+    this.logger.log(`任务 ${task.code} 标题已生成：${title}`);
+    // 记录操作事件，任务 SSE 刷新列表时自然看到新标题
+    await this.addEvent(
+      task.id,
+      '操作',
+      `AI 命名标题：${task.title} → ${title}`,
+      null,
+    ).catch((error: Error) => {
+      this.logger.warn(`任务 ${task.code} 标题事件写入失败：${error.message}`);
+    });
   }
 
   async update(
@@ -1325,6 +1386,8 @@ export class TasksService {
       operatorName: creator?.userName ?? undefined,
       requesterType: creator ? (humanWorker ? 'worker' : 'user') : null,
       requesterId: creator ? (humanWorker?.id ?? creator.userId) : null,
+      // 项目交付任务属于根任务入口：异步生成「T-{id}」标题
+      titleNaming: true,
     });
     const created = await this.findProjectDeliveryTask(projectId);
     if (!created) {

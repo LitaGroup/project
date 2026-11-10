@@ -287,6 +287,8 @@ export class TasksController {
       createdById: req.user?.id ?? null,
       requesterType: humanWorker ? 'worker' : req.user ? 'user' : null,
       requesterId: humanWorker?.id ?? req.user?.id ?? null,
+      // 根任务入口：异步生成「T-{id}」标题，不阻塞创建与派发
+      titleNaming: true,
     });
   }
 

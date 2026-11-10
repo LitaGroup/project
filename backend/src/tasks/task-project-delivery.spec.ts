@@ -74,6 +74,7 @@ describe('TasksService 项目交付任务', () => {
         enqueue: jest.fn(),
       } as never,
       { taskChanged: jest.fn() } as never,
+      { generateTitle: jest.fn().mockResolvedValue(null) } as never,
     );
   });
 

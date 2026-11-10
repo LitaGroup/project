@@ -318,3 +318,15 @@ export enum DispatchPlanStatus {
   CONFIRMED = '已确认',
   REJECTED = '已驳回',
 }
+
+/**
+ * 模型思考等级（管理区「模型配置」按场景设置）。
+ * off 关闭思考（最低档，reasoning_effort=minimal）；low/medium/high 逐级提高。
+ * 兼容 OpenAI（reasoning_effort）与智谱等（thinking.type）两套参数，见 LlmService。
+ */
+export enum ModelThinkingLevel {
+  OFF = 'off',
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+}

@@ -23,6 +23,7 @@ import { TaskDispatchService } from '../tasks/task-dispatch.service';
 import { TaskNotifyService } from '../tasks/task-notify.service';
 import { TasksService } from '../tasks/tasks.service';
 import { Worker } from '../workers/worker.entity';
+import { LlmService } from '../model-config/llm.service';
 import {
   WORKFLOW_END_NODE,
   type WorkflowConditionRule,
@@ -190,6 +191,8 @@ export function renderInputValues(
 export class TicketWorkflowRuntimeService {
   private readonly logger = new Logger(TicketWorkflowRuntimeService.name);
   private readonly advancing = new Set<number>();
+  /** 标题命名进行中的工单（进程内防重，异步任务失败不影响主流程） */
+  private readonly titleNaming = new Set<number>();
 
   constructor(
     @InjectRepository(Ticket)
@@ -209,6 +212,7 @@ export class TicketWorkflowRuntimeService {
     private readonly tasksService: TasksService,
     private readonly dispatchService: TaskDispatchService,
     private readonly taskNotify: TaskNotifyService,
+    private readonly llm: LlmService,
   ) {}
 
   /** 轮询节点任务终态；解耦任务中心，避免反向依赖工单模块 */
@@ -346,7 +350,52 @@ export class TicketWorkflowRuntimeService {
       await this.tickets.delete(saved.id);
       throw error;
     }
+    // 标题命名异步执行：不阻塞创建返回与节点派发，失败只告警
+    this.scheduleTitleNaming(saved);
     return this.mustFind(saved.id);
+  }
+
+  /**
+   * 后台生成工单标题：「T-{id}」+ 模型生成的简洁标题。
+   * 未配置模型场景时直接跳过；期间标题被人工修改（乐观条件不命中）则不覆盖。
+   */
+  private scheduleTitleNaming(ticket: Ticket): void {
+    if (!ticket.id || this.titleNaming.has(ticket.id)) return;
+    this.titleNaming.add(ticket.id);
+    void this.generateTitle(ticket)
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`工单 ${ticket.code} 标题生成失败：${message}`);
+      })
+      .finally(() => this.titleNaming.delete(ticket.id));
+  }
+
+  private async generateTitle(ticket: Ticket): Promise<void> {
+    const material = [
+      ticket.category ? `工单类型：${ticket.category}` : '',
+      `当前标题：${ticket.title}`,
+      ticket.description ? `工单描述：${ticket.description}` : '',
+      ticket.inputValues
+        ? `结构化输入：${inputValueText(ticket.inputValues)}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const generated = await this.llm.generateTitle(material.slice(0, 4000));
+    if (!generated) return;
+    const title = `「T-${ticket.id}」${generated}`.slice(0, 200);
+    const result = await this.tickets
+      .createQueryBuilder()
+      .update(Ticket)
+      .set({ title })
+      .where('id = :id AND title = :original', {
+        id: ticket.id,
+        original: ticket.title,
+      })
+      .execute();
+    if (result.affected) {
+      this.logger.log(`工单 ${ticket.code} 标题已生成：${title}`);
+    }
   }
 
   /**
