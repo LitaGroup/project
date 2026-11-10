@@ -1033,6 +1033,15 @@ export interface McpServerConfig {
   updatedAt: string
 }
 
+/** 机器人可选 MCP 服务（非管理入口读取；不含地址、命令与鉴权信息） */
+export interface McpServerOption {
+  id: number
+  name: string
+  type: McpServerType
+  enabled: boolean
+  remark: string | null
+}
+
 /** 保存 MCP 配置入参（编辑时未传字段保持原值；固定令牌留空保持不变） */
 export interface McpServerSaveInput {
   name: string
@@ -2834,6 +2843,9 @@ export const api = {
 
   /** MCP 配置列表（管理区；固定令牌只返回是否已配置） */
   listMcpServers: () => request<McpServerConfig[]>('/mcp/servers'),
+  /** 登录用户可读的启用中候选清单（个人中心「助理配置」勾选用） */
+  listMcpServerOptions: () =>
+    request<McpServerOption[]>('/mcp/servers/options'),
   createMcpServer: (input: McpServerSaveInput) =>
     request<McpServerConfig>('/mcp/servers', {
       method: 'POST',

@@ -348,7 +348,7 @@ export function WorkersPage() {
                     to={`/admin/workers/${w.id}`}
                     className={buttonVariants({ variant: 'outline', size: 'sm' })}
                   >
-                    {w.humanUserId ? '查看' : '编辑'}
+                    编辑
                   </Link>
                   {w.system || w.humanUserId ? (
                     <span className="self-center text-xs text-foreground-muted">

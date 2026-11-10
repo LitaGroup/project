@@ -32,6 +32,18 @@ export interface McpServerView {
   updatedAt: Date;
 }
 
+/**
+ * 机器人可选 MCP 服务（个人助理等非管理入口读取）。
+ * 只暴露服务标识与展示字段，不含地址、命令与鉴权信息。
+ */
+export interface McpServerOption {
+  id: number;
+  name: string;
+  type: McpServerType;
+  enabled: boolean;
+  remark: string | null;
+}
+
 /** 保存 MCP 服务入参（创建与编辑共用；未传字段在编辑时保持原值） */
 export interface SaveMcpServerInput {
   name?: string;

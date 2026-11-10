@@ -17,7 +17,11 @@ import type { AuthedRequest } from '../auth/auth.guard';
 import type { User } from '../auth/user.entity';
 import { UserRole } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
-import type { McpServerView, SaveMcpServerInput } from './mcp-server.entity';
+import type {
+  McpServerOption,
+  McpServerView,
+  SaveMcpServerInput,
+} from './mcp-server.entity';
 import {
   McpServersService,
   type McpServerTestResult,
@@ -50,6 +54,15 @@ export class McpServersController {
   list(@Req() req: AuthedRequest): Promise<McpServerView[]> {
     assertAdmin(req.user);
     return this.servers.list();
+  }
+
+  /**
+   * GET /api/mcp/servers/options：登录用户可读的机器人可选服务清单。
+   * 个人中心「助理配置」为机器人勾选 MCP 用，只含标识与展示字段。
+   */
+  @Get('options')
+  listOptions(): Promise<McpServerOption[]> {
+    return this.servers.listOptions();
   }
 
   @Post()

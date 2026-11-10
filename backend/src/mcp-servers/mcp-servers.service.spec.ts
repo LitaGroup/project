@@ -177,6 +177,39 @@ describe('buildOpencodeServerConfig', () => {
 });
 
 describe('McpServersService', () => {
+  it('listOptions 只返回公开字段并保留停用项', async () => {
+    const { repo } = makeServerRepo([
+      server({
+        id: 2,
+        name: 'proxy',
+        remark: '资源网关',
+        authMode: McpAuthMode.FIXED,
+        authSecret: 'secret-1',
+      }),
+      server({ id: 3, name: 'off', enabled: false }),
+    ]);
+    const { repo: workers } = makeWorkerRepo();
+    const service = new McpServersService(repo as never, workers as never);
+    const options = await service.listOptions();
+    expect(options).toEqual([
+      {
+        id: 2,
+        name: 'proxy',
+        type: McpServerType.REMOTE,
+        enabled: true,
+        remark: '资源网关',
+      },
+      {
+        id: 3,
+        name: 'off',
+        type: McpServerType.REMOTE,
+        enabled: false,
+        remark: null,
+      },
+    ]);
+    expect(JSON.stringify(options)).not.toContain('secret-1');
+  });
+
   it('normalizeWorkerIds 去重并拒绝不存在的 id', async () => {
     const { repo } = makeServerRepo([server({ id: 3 })]);
     const { repo: workers } = makeWorkerRepo();

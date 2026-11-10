@@ -14,6 +14,7 @@ import { OpencodeMcpServerConfig } from '../workers/worker-env';
 import { Worker } from '../workers/worker.entity';
 import {
   McpServer,
+  McpServerOption,
   McpServerView,
   SaveMcpServerInput,
 } from './mcp-server.entity';
@@ -170,6 +171,21 @@ export class McpServersService {
 
   async findOneView(id: number): Promise<McpServerView> {
     return this.toView(await this.findOneWithSecret(id));
+  }
+
+  /**
+   * 机器人可选的 MCP 服务清单（登录用户可用）。
+   * 个人中心「助理配置」等非管理入口按此清单勾选，不返回地址、命令与凭据。
+   */
+  async listOptions(): Promise<McpServerOption[]> {
+    const rows = await this.servers.find({ order: { id: 'ASC' } });
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      enabled: row.enabled,
+      remark: row.remark,
+    }));
   }
 
   async create(input: SaveMcpServerInput): Promise<McpServerView> {

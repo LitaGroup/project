@@ -31,6 +31,13 @@ import {
   DialogTitle,
 } from '@appica/ui-react/dialog'
 import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverTitle,
+  PopoverDescription,
+} from '@appica/ui-react/popover'
+import {
   api,
   MCP_SERVER_TYPE_LABELS,
   WORKER_GITHUB_PERMISSIONS,
@@ -65,7 +72,25 @@ import {
 
 type OptimizePhase = 'idle' | 'loading' | 'review'
 
+/** 成功反馈停留时长 */
+const SUCCESS_STAY_MS = 2_000
+/** 失败反馈停留时长 */
+const FAILURE_STAY_MS = 5_000
 
+type ActionFeedback =
+  | { kind: 'success'; message: string }
+  | { kind: 'failure'; message: string }
+  | null
+
+/**
+ * MCP 选择项：管理区读到完整配置，个人中心只拿得到公开选项（无地址与命令），
+ * 因此连接信息按可选字段渲染。
+ */
+type McpServerChoice = Pick<
+  McpServerConfig,
+  'id' | 'name' | 'type' | 'enabled' | 'remark'
+> &
+  Partial<Pick<McpServerConfig, 'url' | 'command'>>
 
 /** 新建机器人（含系统调度机器人编辑）时的默认 AGENTS.md 模板（与 AI 优化的结构保持一致） */
 const NEW_PROMPT_TEMPLATE = `## 角色定义
@@ -119,7 +144,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const [standards, setStandards] = useState<WorkerStandard[]>([])
   const [standardPickerOpen, setStandardPickerOpen] = useState(false)
   /** 可选的 MCP 配置（管理区维护）与机器人勾选的 id */
-  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([])
+  const [mcpServers, setMcpServers] = useState<McpServerChoice[]>([])
   const [mcps, setMcps] = useState<number[]>([])
   const [mcpPickerOpen, setMcpPickerOpen] = useState(false)
   const [ownerUserId, setOwnerUserId] = useState('')
@@ -182,10 +207,12 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
     api.listUsers().then(setUsers).catch(() => undefined)
   }, [])
 
-  // MCP 配置仅管理区可维护；个人助理页不展示入口（无管理员权限无法读取清单）
+  // MCP 清单：管理区读取完整配置；个人助理页只能读取公开选项（无地址与凭据）
   useEffect(() => {
-    if (personal) return
-    api.listMcpServers().then(setMcpServers).catch(() => undefined)
+    const load = personal
+      ? api.listMcpServerOptions()
+      : api.listMcpServers()
+    load.then(setMcpServers).catch(() => undefined)
   }, [personal])
 
   /**
@@ -446,7 +473,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       prompt: promptText.trim() || null,
       skills,
       standards,
-      ...(personal ? {} : { mcps }),
+      mcps,
       ownerUserId: ownerUserId ? Number(ownerUserId) : null,
       enabled,
       // 真人机器人与个人 AGENT 不提交权限字段；后端按默认值 / 原值维护
@@ -625,32 +652,17 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
     )
   }
 
-  // 真人机器人由用户系统自动绑定，不提供 AI 执行器配置；可在操作台执行任务。
+  // 真人机器人由用户系统自动绑定，不提供 AI 执行器与模型；
+  // 允许管理员调整 GitHub 与资源网关权限，实际执行仍在操作台完成。
   if (worker?.humanUserId) {
     return (
       <div className="flex flex-col gap-4">
         <PageBreadcrumb items={breadcrumbItems} />
-        <Card>
-          <CardHeader>
-            <CardTitle>真人机器人</CardTitle>
-            <CardDescription>
-              「{worker.humanUserName ?? worker.name}」绑定该机器人；实际执行人是用户，不需要 opencode 工位、执行器与模型。
-            </CardDescription>
-          </CardHeader>
-          <div className="flex flex-wrap items-center gap-2 px-4 pb-4">
-            <Badge variant="secondary">用户 #{worker.humanUserId}</Badge>
-            <Badge variant="soft">runtime · human</Badge>
-            <Link
-              to="/workbench"
-              className={buttonVariants({ variant: 'primary', size: 'sm' })}
-            >
-              打开操作台
-            </Link>
-            <Button variant="outline" size="sm" onClick={() => navigate(listPath)}>
-              返回列表
-            </Button>
-          </div>
-        </Card>
+        <HumanWorkerPermissionCard
+          worker={worker}
+          onSaved={setWorker}
+          onBack={() => navigate(listPath)}
+        />
       </div>
     )
   }
@@ -967,16 +979,14 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
               onPickerOpenChange={setStandardPickerOpen}
               disabled={busy}
             />
-            {!personal && (
-              <WorkerMcpSection
-                mcps={mcps}
-                servers={mcpServers}
-                onChange={setMcps}
-                pickerOpen={mcpPickerOpen}
-                onPickerOpenChange={setMcpPickerOpen}
-                disabled={busy}
-              />
-            )}
+            <WorkerMcpSection
+              mcps={mcps}
+              servers={mcpServers}
+              onChange={setMcps}
+              pickerOpen={mcpPickerOpen}
+              onPickerOpenChange={setMcpPickerOpen}
+              disabled={busy}
+            />
             <div className="border-t border-border-strong" />
             <label className="flex flex-col gap-1 text-sm">
                 执行器
@@ -1658,6 +1668,196 @@ function WorkerAvatarField({
   )
 }
 
+/**
+ * 真人机器人权限编辑：机器人由用户系统自动绑定，执行人是用户本人；
+ * 此处只允许调整 GitHub 与资源网关权限，避免误配执行器与模型。
+ */
+function HumanWorkerPermissionCard({
+  worker,
+  onSaved,
+  onBack,
+}: {
+  worker: Worker
+  onSaved: (worker: Worker) => void
+  onBack: () => void
+}) {
+  const [githubPermission, setGithubPermission] =
+    useState<WorkerGithubPermission>(worker.githubPermission ?? 'develop')
+  const [resourcePermission, setResourcePermission] =
+    useState<WorkerResourcePermission>(worker.resourcePermission ?? 'none')
+  const [saving, setSaving] = useState(false)
+  const [feedback, setFeedback] = useState<ActionFeedback>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearTimer = () => {
+    if (!timerRef.current) return
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+  }
+
+  // 组件卸载时清理计时器
+  useEffect(() => clearTimer, [])
+
+  /** 展示反馈气泡，stayMs 后自动关闭；成功可携带「下一步」回调 */
+  const showFeedback = (
+    next: NonNullable<ActionFeedback>,
+    stayMs: number,
+    after?: () => void,
+  ) => {
+    clearTimer()
+    setFeedback(next)
+    timerRef.current = setTimeout(() => {
+      setFeedback(null)
+      after?.()
+    }, stayMs)
+  }
+
+  const handleSave = async () => {
+    if (saving) return
+    setSaving(true)
+    try {
+      const saved = await api.updateWorker(worker.id, {
+        githubPermission,
+        resourcePermission,
+      })
+      onSaved(saved)
+      showFeedback(
+        { kind: 'success', message: '已保存权限配置' },
+        SUCCESS_STAY_MS,
+        onBack,
+      )
+    } catch (error) {
+      showFeedback(
+        {
+          kind: 'failure',
+          message:
+            error instanceof Error ? error.message : '保存失败，请稍后重试',
+        },
+        FAILURE_STAY_MS,
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>真人机器人</CardTitle>
+        <CardDescription>
+          「{worker.humanUserName ?? worker.name}」绑定该机器人；实际执行人是用户，
+          不需要 opencode 工位、执行器与模型。此处只维护权限，保存后立即生效。
+        </CardDescription>
+      </CardHeader>
+      <div className="flex flex-col gap-4 px-6 pb-6 group-data-inset/card:px-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">用户 #{worker.humanUserId}</Badge>
+          <Badge variant="soft">runtime · human</Badge>
+          <Link
+            to="/workbench"
+            className={buttonVariants({ variant: 'primary', size: 'sm' })}
+          >
+            打开操作台
+          </Link>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-sm">
+            GitHub 权限
+            <Select
+              value={githubPermission}
+              onValueChange={(v) =>
+                setGithubPermission(v as WorkerGithubPermission)
+              }
+              items={WORKER_GITHUB_PERMISSION_LABELS}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {WORKER_GITHUB_PERMISSIONS.map((permission) => (
+                  <SelectItem key={permission} value={permission}>
+                    {WORKER_GITHUB_PERMISSION_LABELS[permission]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-foreground-muted">
+              开发权限可拉代码、push 普通分支和提 PR；发布权限额外允许写
+              main/stable、审批与合并 PR。
+            </span>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            资源权限
+            <Select
+              value={resourcePermission}
+              onValueChange={(v) =>
+                setResourcePermission(v as WorkerResourcePermission)
+              }
+              items={WORKER_RESOURCE_PERMISSION_LABELS}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {WORKER_RESOURCE_PERMISSIONS.map((permission) => (
+                  <SelectItem key={permission} value={permission}>
+                    {WORKER_RESOURCE_PERMISSION_LABELS[permission]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-xs text-foreground-muted">
+              全部资源可访问所有 MySQL 资源；只读资源仅能访问标记为只读的资源。
+              默认无权限，GitHub 与资源权限相互独立。
+            </span>
+          </label>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onBack}>
+            返回列表
+          </Button>
+          <Popover
+            open={feedback !== null}
+            onOpenChange={(open) => {
+              // 失败气泡允许用户提前关闭；成功气泡由计时器控制
+              if (!open && feedback?.kind === 'failure') {
+                clearTimer()
+                setFeedback(null)
+              }
+            }}
+          >
+            <PopoverTrigger
+              render={
+                <Button
+                  size="sm"
+                  onClick={handleSave}
+                  disabled={saving || feedback?.kind === 'success'}
+                >
+                  {saving ? '保存中…' : '保存'}
+                </Button>
+              }
+            />
+            <PopoverContent side="top" align="center">
+              {feedback?.kind === 'success' && (
+                <>
+                  <PopoverTitle>成功</PopoverTitle>
+                  <PopoverDescription>{feedback.message}</PopoverDescription>
+                </>
+              )}
+              {feedback?.kind === 'failure' && (
+                <>
+                  <PopoverTitle>失败</PopoverTitle>
+                  <PopoverDescription>{feedback.message}</PopoverDescription>
+                </>
+              )}
+            </PopoverContent>
+          </Popover>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
 /** 悬浮「优化」按钮的 Sparkles 图标（随 Button 的 currentColor 着色） */
 function OptimizeIcon() {
   return (
@@ -1688,7 +1888,7 @@ function WorkerMcpSection({
   disabled,
 }: {
   mcps: number[]
-  servers: McpServerConfig[]
+  servers: McpServerChoice[]
   onChange: (ids: number[]) => void
   pickerOpen: boolean
   onPickerOpenChange: (open: boolean) => void
@@ -1734,8 +1934,10 @@ function WorkerMcpSection({
                 </div>
                 <p className="mt-0.5 truncate font-mono text-xs text-foreground-muted">
                   {server.type === 'remote'
-                    ? (server.url ?? '—')
-                    : (server.command ?? []).join(' ')}
+                    ? (server.url ?? server.remark ?? '—')
+                    : server.command?.length
+                      ? server.command.join(' ')
+                      : (server.remark ?? '—')}
                 </p>
               </div>
               <Button
@@ -1778,7 +1980,7 @@ function WorkerMcpPickerDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  servers: McpServerConfig[]
+  servers: McpServerChoice[]
   selectedIds: number[]
   onToggle: (id: number, checked: boolean) => void
 }) {
@@ -1816,7 +2018,7 @@ function WorkerMcpPickerDialog({
               {filtered.length === 0 ? (
                 <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-foreground-muted">
                   {servers.length === 0
-                    ? '暂无 MCP 配置，请先到管理区「MCP 配置」新建'
+                    ? '暂无可用 MCP 配置，请联系管理员在管理区「MCP 配置」新建'
                     : '没有匹配的 MCP 配置'}
                 </div>
               ) : (
@@ -1845,11 +2047,13 @@ function WorkerMcpPickerDialog({
                           </Badge>
                         )}
                       </span>
-                      <span className="mt-1 block truncate font-mono text-xs text-foreground-muted">
-                        {server.type === 'remote'
-                          ? (server.url ?? '—')
-                          : (server.command ?? []).join(' ')}
-                      </span>
+                      {(server.url || server.command?.length) && (
+                        <span className="mt-1 block truncate font-mono text-xs text-foreground-muted">
+                          {server.type === 'remote'
+                            ? (server.url ?? '—')
+                            : (server.command ?? []).join(' ')}
+                        </span>
+                      )}
                       {server.remark && (
                         <span className="mt-1 block line-clamp-2 text-xs text-foreground-muted">
                           {server.remark}
