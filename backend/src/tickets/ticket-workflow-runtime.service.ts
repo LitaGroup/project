@@ -25,9 +25,11 @@ import { TasksService } from '../tasks/tasks.service';
 import { Worker } from '../workers/worker.entity';
 import {
   WORKFLOW_END_NODE,
+  type WorkflowConditionRule,
   type WorkflowDefinitionJson,
   type WorkflowEdgeDefinition,
   type WorkflowInputField,
+  type WorkflowInputFieldType,
   type WorkflowNodeDefinition,
 } from '../workflows/workflow.types';
 import { WorkflowDefinitionVersion } from '../workflows/workflow-definition-version.entity';
@@ -73,6 +75,9 @@ const TICKET_STATUS_COMPLETED = '已完成';
 const TICKET_STATUS_FAILED = '已失败';
 const TICKET_STATUS_CANCELED = '已取消';
 
+/** 单次流转链允许连续经过的判断节点上限，防止判断环导致死循环 */
+const CONDITION_CHAIN_LIMIT = 50;
+
 function outcomeForNode(kind: string, finished: Task): string {
   // 节点任务「失败」或「已拒绝」均视为当前节点失败：
   // 审批节点按驳回流转，操作节点按执行失败流转。
@@ -83,6 +88,65 @@ function outcomeForNode(kind: string, finished: Task): string {
     return kind === 'approval' ? 'rejected' : 'failed';
   }
   return kind === 'approval' ? 'approved' : 'succeeded';
+}
+
+/** 数字字段相等比较：按数值而非字符串，兼容 1200 与 1200.0 */
+function numericEquals(left: string, right: string): boolean {
+  if (!left || !right) return false;
+  const a = Number(left);
+  const b = Number(right);
+  return Number.isFinite(a) && Number.isFinite(b) && a === b;
+}
+
+/** 判断节点条件求值：inputValues 统一存字符串，按字段类型选择比较方式 */
+function matchConditionRule(
+  rule: WorkflowConditionRule,
+  fieldType: WorkflowInputFieldType | null,
+  values: Record<string, unknown>,
+): boolean {
+  const text = inputValueText(values[rule.field]).trim();
+  const expected = (rule.value ?? '').trim();
+  switch (rule.operator) {
+    case 'empty':
+      return !text;
+    case 'notEmpty':
+      return Boolean(text);
+    case 'eq':
+      if (fieldType === 'number') {
+        return numericEquals(text, expected);
+      }
+      return text === expected;
+    case 'ne':
+      if (fieldType === 'number') {
+        return !numericEquals(text, expected);
+      }
+      return text !== expected;
+    case 'contains':
+      return text.includes(expected);
+    case 'gt':
+    case 'gte':
+    case 'lt':
+    case 'lte': {
+      // 空值不参与大小比较，避免可选字段被当成 0 或空串
+      if (!text) return false;
+      let compared: number;
+      if (fieldType === 'number') {
+        const left = Number(text);
+        const right = Number(expected);
+        if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+        compared = left - right;
+      } else {
+        // 日期按 YYYY-MM-DD 字典序等价于时间顺序
+        compared = text.localeCompare(expected);
+      }
+      if (rule.operator === 'gt') return compared > 0;
+      if (rule.operator === 'gte') return compared >= 0;
+      if (rule.operator === 'lt') return compared < 0;
+      return compared <= 0;
+    }
+    default:
+      return false;
+  }
 }
 
 function inputValueText(value: unknown): string {
@@ -118,7 +182,8 @@ export function renderInputValues(
 /**
  * 工单工作流运行时：
  * 创建工单固定发布版本，起始节点按字段校验输入；审批/操作节点创建任务中心任务，
- * 审批节点由负责机器人执行，操作节点按任务定义自动分配；节点任务通过后推进下一节点，
+ * 审批节点由负责机器人执行，操作节点按任务定义自动分配；判断节点不创建任务，
+ * 进入后按起始输入字段的条件自动分发；节点任务通过后推进下一节点，
  * 验收节点仅工单发起机器人可操作（autoAccept 时直接通过）。
  */
 @Injectable()
@@ -692,6 +757,7 @@ export class TicketWorkflowRuntimeService {
     ticket: Ticket,
     workflow: WorkflowDefinitionJson,
     nodeKey: string | null,
+    depth = 0,
   ): Promise<void> {
     const node = workflow.nodes.find((item) => item.key === nodeKey);
     if (!node) {
@@ -713,6 +779,11 @@ export class TicketWorkflowRuntimeService {
       await this.advance(ticket.id, workflow, node.key, null);
       return;
     }
+    if (node.kind === 'condition') {
+      await this.recordSimpleRun(ticket.id, node, RUN_STATUS_COMPLETED);
+      await this.advanceConditionNode(ticket, workflow, node, depth);
+      return;
+    }
     if (node.kind === 'acceptance') {
       if (node.autoAccept) {
         await this.recordSimpleRun(
@@ -732,6 +803,65 @@ export class TicketWorkflowRuntimeService {
       return;
     }
     await this.createNodeTask(ticket, workflow, node);
+  }
+
+  /**
+   * 判断节点：按出边顺序评估条件，命中第一条即流转；全部不命中走默认（无条件）分支。
+   * depth 限制单次流转链上连续判断节点的数量，避免判断环造成死循环。
+   */
+  private async advanceConditionNode(
+    ticket: Ticket,
+    workflow: WorkflowDefinitionJson,
+    node: WorkflowNodeDefinition,
+    depth: number,
+  ): Promise<void> {
+    if (depth >= CONDITION_CHAIN_LIMIT) {
+      await this.failTicket(
+        ticket.id,
+        `判断节点连续流转超过 ${CONDITION_CHAIN_LIMIT} 次，请检查流转条件是否存在循环`,
+      );
+      return;
+    }
+    const outgoing = workflow.edges.filter((edge) => edge.from === node.key);
+    const fieldTypes = new Map<string, WorkflowInputFieldType>(
+      (
+        workflow.nodes.find((item) => item.kind === 'start')?.inputFields ?? []
+      ).map((field) => [field.key, field.type]),
+    );
+    const values = ticket.inputValues ?? {};
+    const matched =
+      outgoing.find(
+        (edge) =>
+          Boolean(edge.conditions?.length) &&
+          (edge.conditions ?? []).every((rule) =>
+            matchConditionRule(
+              rule,
+              fieldTypes.get(rule.field) ?? null,
+              values,
+            ),
+          ),
+      ) ?? outgoing.find((edge) => !edge.conditions?.length);
+    if (!matched) {
+      await this.failTicket(
+        ticket.id,
+        `判断节点「${node.name}」没有命中任何分支，且未配置默认流转`,
+      );
+      return;
+    }
+    this.logger.log(
+      `工单 #${ticket.id} 判断节点「${node.name}」命中分支「${
+        matched.label ?? matched.to
+      }」`,
+    );
+    if (matched.to === WORKFLOW_END_NODE) {
+      await this.updateTicket(ticket.id, {
+        workflowStatus: TICKET_STATUS_COMPLETED,
+        currentNodeKey: null,
+        currentNodeName: null,
+      });
+      return;
+    }
+    await this.enterNode(ticket, workflow, matched.to, depth + 1);
   }
 
   private async createNodeTask(

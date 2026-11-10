@@ -62,6 +62,7 @@ const NODE_KIND_LABEL: Record<string, string> = {
   operation: '操作',
   approval: '审批',
   acceptance: '验收',
+  condition: '判断',
 };
 
 const OUTCOME_LABEL: Record<string, string> = {

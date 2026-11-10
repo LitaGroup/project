@@ -27,6 +27,8 @@ import {
   type TicketWorkflowDefinitionDetail,
   type TicketWorkflowInputField,
   type Worker,
+  type WorkflowConditionOperator,
+  type WorkflowConditionRule,
   type WorkflowEdgeDefinition,
   type WorkflowNodeDefinition,
   type WorkflowNodeKind,
@@ -40,6 +42,7 @@ const NODE_KIND_LABEL: Record<WorkflowNodeKind, string> = {
   operation: '操作节点',
   approval: '审批节点',
   acceptance: '验收节点',
+  condition: '判断节点',
 }
 
 const OUTCOME_LABEL: Record<WorkflowOutcome, string> = {
@@ -47,6 +50,53 @@ const OUTCOME_LABEL: Record<WorkflowOutcome, string> = {
   failed: '执行失败',
   approved: '通过',
   rejected: '驳回',
+}
+
+const CONDITION_OPERATOR_LABEL: Record<WorkflowConditionOperator, string> = {
+  eq: '等于',
+  ne: '不等于',
+  gt: '大于',
+  gte: '大于等于',
+  lt: '小于',
+  lte: '小于等于',
+  contains: '包含',
+  empty: '为空',
+  notEmpty: '不为空',
+}
+
+function conditionNeedsValue(operator: WorkflowConditionOperator): boolean {
+  return operator !== 'empty' && operator !== 'notEmpty'
+}
+
+function conditionOperatorsForType(
+  type: TicketWorkflowInputField['type'],
+): WorkflowConditionOperator[] {
+  if (type === 'number' || type === 'date') {
+    return ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'empty', 'notEmpty']
+  }
+  if (type === 'text' || type === 'textarea') {
+    return ['eq', 'ne', 'contains', 'empty', 'notEmpty']
+  }
+  if (type === 'select') return ['eq', 'ne', 'empty', 'notEmpty']
+  return []
+}
+
+function conditionSummary(
+  edge: WorkflowEdgeDefinition,
+  startFields: TicketWorkflowInputField[],
+): string {
+  const rules = edge.conditions ?? []
+  if (rules.length === 0) return '默认分支'
+  const labelByKey = new Map(startFields.map((field) => [field.key, field.label]))
+  return rules
+    .map((rule) => {
+      const field = labelByKey.get(rule.field) ?? rule.field
+      const operator = CONDITION_OPERATOR_LABEL[rule.operator] ?? rule.operator
+      return conditionNeedsValue(rule.operator)
+        ? `${field}${operator}${rule.value ?? ''}`
+        : `${field}${operator}`
+    })
+    .join(' 且 ')
 }
 
 const FIELD_TYPE_LABEL: Record<TicketWorkflowInputField['type'], string> = {
@@ -92,7 +142,7 @@ function edgeLabel(outcome: WorkflowOutcome | null): string {
 
 function mermaidSafe(value: string): string {
   return value
-    .replace(/["\r\n]/g, ' ')
+    .replace(/["|\r\n]/g, ' ')
     .replace(/[{}[\]()<>]/g, ' ')
     .trim()
 }
@@ -102,9 +152,13 @@ function buildFlowchart(
   edges: WorkflowEdgeDefinition[],
 ): string {
   if (nodes.length === 0) return 'flowchart TD\n  empty[暂无节点]'
+  const startFields =
+    nodes.find((node) => node.kind === 'start')?.inputFields ?? []
+  const kindByKey = new Map(nodes.map((node) => [node.key, node.kind]))
   const shape = (node: WorkflowNodeDefinition): string => {
     const label = mermaidSafe(node.name)
     if (node.kind === 'start') return `${node.key}(["${label}"])`
+    if (node.kind === 'condition') return `${node.key}[/"${label}"/]`
     if (node.kind === 'approval') return `${node.key}{"${label}"}`
     if (node.kind === 'acceptance') return `${node.key}{{"${label}"}}`
     return `${node.key}["${label}"]`
@@ -113,7 +167,11 @@ function buildFlowchart(
   for (const node of nodes) lines.push(`  ${shape(node)}`)
   lines.push(`  ${WORKFLOW_END_NODE}(["流程结束"])`)
   for (const edge of edges) {
-    const label = edge.label?.trim() || edgeLabel(edge.outcome)
+    const label =
+      edge.label?.trim() ||
+      (kindByKey.get(edge.from) === 'condition'
+        ? conditionSummary(edge, startFields)
+        : edgeLabel(edge.outcome))
     lines.push(
       `  ${edge.from} -->|"${mermaidSafe(label)}"| ${
         edge.to === WORKFLOW_END_NODE ? WORKFLOW_END_NODE : edge.to
@@ -216,6 +274,9 @@ export function TicketDefinitionEditPage() {
     [nodes],
   )
   const startNode = nodes.find((node) => node.kind === 'start')
+  const conditionFields = (startNode?.inputFields ?? []).filter(
+    (field) => conditionOperatorsForType(field.type).length > 0,
+  )
   const acceptanceNodes = nodes.filter((node) => node.kind === 'acceptance')
   const acceptanceNode = acceptanceNodes[0]
 
@@ -291,16 +352,75 @@ export function TicketDefinitionEditPage() {
     if (!from) return
     const source = nodes.find((node) => node.key === from)
     const options = source ? outcomeOptions(source.kind) : []
-    const outcome = options[0] ?? null
+    const outcome = source?.kind === 'condition' ? null : (options[0] ?? null)
     setEdges((current) => [
       ...current,
       {
         from,
         to: acceptanceNode?.key ?? WORKFLOW_END_NODE,
         outcome,
-        label: edgeLabel(outcome),
+        conditions: null,
+        label: source?.kind === 'condition' ? '默认分支' : edgeLabel(outcome),
       },
     ])
+  }
+
+  const updateConditionRule = (
+    edgeIndex: number,
+    ruleIndex: number,
+    patch: Partial<WorkflowConditionRule>,
+  ) => {
+    setEdges((current) =>
+      current.map((edge, i) => {
+        if (i !== edgeIndex) return edge
+        return {
+          ...edge,
+          conditions: (edge.conditions ?? []).map((rule, j) =>
+            j === ruleIndex ? { ...rule, ...patch } : rule,
+          ),
+        }
+      }),
+    )
+  }
+
+  const addConditionRule = (edgeIndex: number) => {
+    const field = conditionFields[0]
+    if (!field) return
+    const operators = conditionOperatorsForType(field.type)
+    const operator = operators[0] ?? 'eq'
+    setEdges((current) =>
+      current.map((edge, i) => {
+        if (i !== edgeIndex) return edge
+        return {
+          ...edge,
+          conditions: [
+            ...(edge.conditions ?? []),
+            {
+              field: field.key,
+              operator,
+              value:
+                field.type === 'select'
+                  ? (field.options?.[0] ?? '')
+                  : conditionNeedsValue(operator)
+                    ? ''
+                    : null,
+            },
+          ],
+        }
+      }),
+    )
+  }
+
+  const removeConditionRule = (edgeIndex: number, ruleIndex: number) => {
+    setEdges((current) =>
+      current.map((edge, i) => {
+        if (i !== edgeIndex) return edge
+        const conditions = (edge.conditions ?? []).filter(
+          (_, j) => j !== ruleIndex,
+        )
+        return { ...edge, conditions: conditions.length ? conditions : null }
+      }),
+    )
   }
 
   const updateInputField = (
@@ -364,10 +484,17 @@ export function TicketDefinitionEditPage() {
     definition: {
       startNode: startNode?.key ?? '',
       nodes,
-      edges: edges.map((edge) => ({
-        ...edge,
-        label: edge.label?.trim() || edgeLabel(edge.outcome),
-      })),
+      edges: edges.map((edge) => {
+        const source = nodes.find((node) => node.key === edge.from)
+        return {
+          ...edge,
+          label:
+            edge.label?.trim() ||
+            (source?.kind === 'condition'
+              ? conditionSummary(edge, startNode?.inputFields ?? [])
+              : edgeLabel(edge.outcome)),
+        }
+      }),
     },
   })
 
@@ -460,7 +587,7 @@ export function TicketDefinitionEditPage() {
             )}
           </div>
           <p className="mt-1 text-sm text-foreground-muted">
-            审批节点由负责机器人处理；操作节点按任务定义自动分配；验收只能由工单发起机器人操作
+            审批节点由负责机器人处理；操作节点按任务定义自动分配；判断节点按起始输入条件自动分发；验收只能由工单发起机器人操作
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -571,7 +698,7 @@ export function TicketDefinitionEditPage() {
               <div>
                 <CardTitle>流程节点</CardTitle>
                 <CardDescription>
-                  起始节点固定存在；至少保留一个验收节点，可添加审批、操作或更多验收节点
+                  起始节点固定存在；至少保留一个验收节点，可添加审批、操作、判断或更多验收节点
                 </CardDescription>
               </div>
               <Button variant="outline" size="sm" onClick={addNode}>
@@ -650,11 +777,34 @@ export function TicketDefinitionEditPage() {
                                   kind === 'start' ? node.inputFields : null,
                                 autoAccept: kind === 'acceptance' ? node.autoAccept : false,
                               })
+                              const nextOptions = outcomeOptions(kind)
+                              setEdges((current) =>
+                                current.map((edge) =>
+                                  edge.from === node.key
+                                    ? {
+                                        ...edge,
+                                        outcome:
+                                          kind === 'condition'
+                                            ? null
+                                            : (nextOptions[0] ?? null),
+                                        conditions:
+                                          kind === 'condition'
+                                            ? (edge.conditions ?? null)
+                                            : null,
+                                        label:
+                                          kind === 'condition'
+                                            ? '默认分支'
+                                            : edgeLabel(nextOptions[0] ?? null),
+                                      }
+                                    : edge,
+                                ),
+                              )
                             }}
                             items={{
                               operation: NODE_KIND_LABEL.operation,
                               approval: NODE_KIND_LABEL.approval,
                               acceptance: NODE_KIND_LABEL.acceptance,
+                              condition: NODE_KIND_LABEL.condition,
                             }}
                           >
                             <SelectTrigger>
@@ -669,6 +819,9 @@ export function TicketDefinitionEditPage() {
                               </SelectItem>
                               <SelectItem value="acceptance">
                                 {NODE_KIND_LABEL.acceptance}
+                              </SelectItem>
+                              <SelectItem value="condition">
+                                {NODE_KIND_LABEL.condition}
                               </SelectItem>
                             </SelectContent>
                           </Select>
@@ -749,6 +902,12 @@ export function TicketDefinitionEditPage() {
                         </div>
                       )}
                     </div>
+
+                    {node.kind === 'condition' && (
+                      <div className="mt-4 rounded-[var(--radius-md)] bg-background-muted px-3 py-2 text-sm text-foreground-muted">
+                        判断节点不创建任务；进入后按「流转规则」中的条件自动分发，字段取自起始节点输入
+                      </div>
+                    )}
 
                     {node.kind === 'start' && (
                       <div className="mt-4 rounded-[var(--radius-md)] bg-background-muted p-3">
@@ -930,7 +1089,7 @@ export function TicketDefinitionEditPage() {
               <div>
                 <CardTitle>流转规则</CardTitle>
                 <CardDescription>
-                  起始节点只能无条件流出；审批/操作/验收按结果流转，审批通过/驳回、操作成功/失败可直接结束流程
+                  起始节点只能无条件流出；审批/操作/验收按结果流转；判断节点按条件分流，并保留一条默认分支
                 </CardDescription>
               </div>
               <Button variant="outline" size="sm" onClick={addEdge}>
@@ -944,7 +1103,11 @@ export function TicketDefinitionEditPage() {
                 return (
                   <div
                     key={`${edge.from}-${edge.outcome ?? 'none'}-${index}`}
-                    className="grid items-end gap-2 rounded-[var(--radius-md)] border border-border-strong p-3 md:grid-cols-[10rem_10rem_10rem_minmax(0,1fr)_auto]"
+                    className={`grid items-end gap-2 rounded-[var(--radius-md)] border border-border-strong p-3 ${
+                      source?.kind === 'condition'
+                        ? 'md:grid-cols-[9rem_9rem_minmax(0,1fr)_10rem_auto]'
+                        : 'md:grid-cols-[10rem_10rem_10rem_minmax(0,1fr)_auto]'
+                    }`}
                   >
                     <label className="flex flex-col gap-1 text-xs">
                       来源
@@ -954,17 +1117,24 @@ export function TicketDefinitionEditPage() {
                           const nextSource = nodes.find(
                             (node) => node.key === value,
                           )
+                          const nextIsCondition =
+                            nextSource?.kind === 'condition'
                           const nextOptions = nextSource
                             ? outcomeOptions(nextSource.kind)
                             : []
                           const nextOutcome =
-                            nextSource?.kind === 'start'
+                            nextSource?.kind === 'start' || nextIsCondition
                               ? null
                               : (nextOptions[0] ?? null)
                           updateEdge(index, {
                             from: String(value),
                             outcome: nextOutcome,
-                            label: edgeLabel(nextOutcome),
+                            conditions: nextIsCondition
+                              ? (edge.conditions ?? null)
+                              : null,
+                            label: nextIsCondition
+                              ? '默认分支'
+                              : edgeLabel(nextOutcome),
                           })
                         }}
                         items={nodeItems}
@@ -1005,13 +1175,198 @@ export function TicketDefinitionEditPage() {
                         </SelectContent>
                       </Select>
                     </label>
-                    <label className="flex flex-col gap-1 text-xs">
-                      结果
-                      {source?.kind === 'start' ? (
+                    {source?.kind === 'condition' ? (
+                      <div className="flex flex-col gap-2 rounded-[var(--radius-md)] bg-background-muted p-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="font-medium">
+                            条件（全部满足时命中该分支）
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => addConditionRule(index)}
+                              disabled={conditionFields.length === 0}
+                            >
+                              添加条件
+                            </Button>
+                            {(edge.conditions ?? []).length > 0 && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() =>
+                                  updateEdge(index, { conditions: null })
+                                }
+                              >
+                                设为默认
+                              </Button>
+                            )}
+                          </span>
+                        </div>
+                        {conditionFields.length === 0 ? (
+                          <p className="text-xs text-foreground-muted">
+                            请先在起始节点配置可用于判断的输入字段（文件字段不支持判断）
+                          </p>
+                        ) : (edge.conditions ?? []).length === 0 ? (
+                          <p className="text-xs text-foreground-muted">
+                            默认分支：所有条件都不满足时走这里
+                          </p>
+                        ) : (
+                          (edge.conditions ?? []).map((rule, ruleIndex) => {
+                            const field = conditionFields.find(
+                              (item) => item.key === rule.field,
+                            )
+                            const operators = field
+                              ? conditionOperatorsForType(field.type)
+                              : []
+                            return (
+                              <div
+                                key={ruleIndex}
+                                className="grid items-end gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_minmax(0,1fr)_auto]"
+                              >
+                                <Select
+                                  value={rule.field}
+                                  onValueChange={(value) => {
+                                    const nextField = conditionFields.find(
+                                      (item) => item.key === value,
+                                    )
+                                    const nextOperators = nextField
+                                      ? conditionOperatorsForType(nextField.type)
+                                      : []
+                                    updateConditionRule(index, ruleIndex, {
+                                      field: String(value),
+                                      operator: nextOperators[0] ?? 'eq',
+                                      value:
+                                        nextField?.type === 'select'
+                                          ? (nextField.options?.[0] ?? '')
+                                          : '',
+                                    })
+                                  }}
+                                  items={Object.fromEntries(
+                                    conditionFields.map((item) => [
+                                      item.key,
+                                      item.label,
+                                    ]),
+                                  )}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="选择字段" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {conditionFields.map((item) => (
+                                      <SelectItem key={item.key} value={item.key}>
+                                        {item.label}（{item.key}）
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <Select
+                                  value={rule.operator}
+                                  onValueChange={(value) => {
+                                    const operator =
+                                      value as WorkflowConditionOperator
+                                    updateConditionRule(index, ruleIndex, {
+                                      operator,
+                                      value: conditionNeedsValue(operator)
+                                        ? (rule.value ?? '')
+                                        : null,
+                                    })
+                                  }}
+                                  items={Object.fromEntries(
+                                    operators.map((operator) => [
+                                      operator,
+                                      CONDITION_OPERATOR_LABEL[operator],
+                                    ]),
+                                  )}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {operators.map((operator) => (
+                                      <SelectItem
+                                        key={operator}
+                                        value={operator}
+                                      >
+                                        {CONDITION_OPERATOR_LABEL[operator]}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {conditionNeedsValue(rule.operator) ? (
+                                  field?.type === 'select' ? (
+                                    <Select
+                                      value={rule.value ?? ''}
+                                      onValueChange={(value) =>
+                                        updateConditionRule(index, ruleIndex, {
+                                          value: String(value),
+                                        })
+                                      }
+                                      items={Object.fromEntries(
+                                        (field.options ?? []).map((option) => [
+                                          option,
+                                          option,
+                                        ]),
+                                      )}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="选择比较值" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {(field.options ?? []).map((option) => (
+                                          <SelectItem key={option} value={option}>
+                                            {option}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  ) : (
+                                    <Input
+                                      type={
+                                        field?.type === 'number'
+                                          ? 'number'
+                                          : field?.type === 'date'
+                                            ? 'date'
+                                            : 'text'
+                                      }
+                                      value={rule.value ?? ''}
+                                      placeholder="比较值"
+                                      onChange={(event) =>
+                                        updateConditionRule(index, ruleIndex, {
+                                          value: event.target.value,
+                                        })
+                                      }
+                                    />
+                                  )
+                                ) : (
+                                  <div className="flex h-9 items-center text-xs text-foreground-muted">
+                                    无需比较值
+                                  </div>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    removeConditionRule(index, ruleIndex)
+                                  }
+                                >
+                                  删除
+                                </Button>
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+                    ) : source?.kind === 'start' ? (
+                      <label className="flex flex-col gap-1 text-xs">
+                        结果
                         <div className="flex h-9 items-center rounded-[var(--radius-md)] border border-border-strong bg-background-muted px-3">
                           无条件
                         </div>
-                      ) : (
+                      </label>
+                    ) : (
+                      <label className="flex flex-col gap-1 text-xs">
+                        结果
                         <Select
                           value={edge.outcome ?? NO_SELECTION}
                           onValueChange={(value) => {
@@ -1045,8 +1400,8 @@ export function TicketDefinitionEditPage() {
                             ))}
                           </SelectContent>
                         </Select>
-                      )}
-                    </label>
+                      </label>
+                    )}
                     <label className="flex flex-col gap-1 text-xs">
                       展示文案
                       <Input

@@ -1577,7 +1577,7 @@ export interface TicketWorkflowRun {
   ticketId: number
   nodeKey: string
   nodeName: string
-  nodeKind: 'start' | 'operation' | 'approval' | 'acceptance'
+  nodeKind: 'start' | 'operation' | 'approval' | 'acceptance' | 'condition'
   attempt: number
   taskTemplateId: number | null
   taskTemplateName: string | null
@@ -1635,12 +1635,13 @@ export interface Ticket {
   updatedAt: string
 }
 
-/** 工单工作流节点类型：起始 / 审批 / 操作 / 验收 */
+/** 工单工作流节点类型：起始 / 操作 / 审批 / 验收 / 判断 */
 export const WORKFLOW_NODE_KINDS = [
   'start',
   'operation',
   'approval',
   'acceptance',
+  'condition',
 ] as const
 export type WorkflowNodeKind = (typeof WORKFLOW_NODE_KINDS)[number]
 
@@ -1652,6 +1653,28 @@ export const WORKFLOW_OUTCOMES = [
   'rejected',
 ] as const
 export type WorkflowOutcome = (typeof WORKFLOW_OUTCOMES)[number]
+
+/** 判断节点支持的比较运算符 */
+export const WORKFLOW_CONDITION_OPERATORS = [
+  'eq',
+  'ne',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'contains',
+  'empty',
+  'notEmpty',
+] as const
+export type WorkflowConditionOperator =
+  (typeof WORKFLOW_CONDITION_OPERATORS)[number]
+
+/** 判断节点出边的单条条件；同一出边的多条条件之间为「且」关系 */
+export interface WorkflowConditionRule {
+  field: string
+  operator: WorkflowConditionOperator
+  value?: string | null
+}
 
 /** 流程结束的虚拟节点；验收通过或操作节点的成功/失败流转可以指向它 */
 export const WORKFLOW_END_NODE = '$end'
@@ -1674,6 +1697,8 @@ export interface WorkflowEdgeDefinition {
   from: string
   to: string
   outcome: WorkflowOutcome | null
+  /** 仅判断节点：出边条件，多条之间为「且」；为空表示默认兜底分支 */
+  conditions?: WorkflowConditionRule[] | null
   label: string | null
 }
 

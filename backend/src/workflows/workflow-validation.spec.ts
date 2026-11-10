@@ -51,6 +51,30 @@ const validDefinition = (): WorkflowDefinitionJson => ({
   ],
 });
 
+const conditionDefinition = (): WorkflowDefinitionJson => ({
+  startNode: 'start',
+  nodes: [
+    node('start', 'start'),
+    node('condition', 'condition'),
+    node('submit', 'operation'),
+    node('acceptance', 'acceptance'),
+  ],
+  edges: [
+    { from: 'start', to: 'condition', outcome: null, label: null },
+    {
+      from: 'condition',
+      to: 'submit',
+      outcome: null,
+      conditions: [{ field: 'title', operator: 'contains', value: '紧急' }],
+      label: null,
+    },
+    { from: 'condition', to: 'acceptance', outcome: null, label: null },
+    { from: 'submit', to: 'acceptance', outcome: 'succeeded', label: null },
+    { from: 'acceptance', to: '$end', outcome: 'approved', label: null },
+    { from: 'acceptance', to: 'submit', outcome: 'rejected', label: null },
+  ],
+});
+
 describe('normalizeWorkflowDefinition', () => {
   it('接受完整的四类节点流程', () => {
     expect(normalizeWorkflowDefinition(validDefinition(), true)).toEqual(
@@ -124,7 +148,7 @@ describe('normalizeWorkflowDefinition', () => {
         : edge,
     );
     expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
-      '只有验收通过、审批通过/驳回或操作节点',
+      '只有验收通过、审批通过/驳回、操作节点的成功/失败结果或判断节点的流转',
     );
   });
 
@@ -281,6 +305,238 @@ describe('normalizeWorkflowDefinition', () => {
     });
     expect(() => normalizeWorkflowDefinition(definition, false)).toThrow(
       '存在重复流转',
+    );
+  });
+
+  it('接受带判断节点的流程', () => {
+    expect(normalizeWorkflowDefinition(conditionDefinition(), true)).toEqual(
+      conditionDefinition(),
+    );
+  });
+
+  it('判断节点必须恰好一条默认分支', () => {
+    const definition = conditionDefinition();
+    definition.edges = definition.edges.filter(
+      (edge) => !(edge.from === 'condition' && !edge.conditions?.length),
+    );
+    definition.edges.push({
+      from: 'condition',
+      to: 'acceptance',
+      outcome: null,
+      conditions: [{ field: 'title', operator: 'contains', value: '普通' }],
+      label: null,
+    });
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '必须且只能配置一条默认（无条件）流转',
+    );
+  });
+
+  it('判断节点默认分支不能重复', () => {
+    const definition = conditionDefinition();
+    definition.nodes.push(node('submit-2'));
+    definition.edges = definition.edges.filter(
+      (edge) => edge.from !== 'condition',
+    );
+    definition.edges.push(
+      {
+        from: 'condition',
+        to: 'submit',
+        outcome: null,
+        label: null,
+      },
+      {
+        from: 'condition',
+        to: 'submit-2',
+        outcome: null,
+        conditions: [{ field: 'title', operator: 'eq', value: 'x' }],
+        label: null,
+      },
+      {
+        from: 'condition',
+        to: 'acceptance',
+        outcome: null,
+        label: null,
+      },
+      { from: 'submit-2', to: 'acceptance', outcome: 'succeeded', label: null },
+    );
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '必须且只能配置一条默认（无条件）流转',
+    );
+  });
+
+  it('判断节点的流转不能指定结果', () => {
+    const definition = conditionDefinition();
+    const edge = definition.edges.find(
+      (item) => item.from === 'condition' && item.conditions?.length,
+    );
+    if (!edge) throw new Error('判断流转不存在');
+    edge.outcome = 'succeeded';
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '判断节点的流转不能指定结果',
+    );
+  });
+
+  it('非判断节点不能配置流转条件', () => {
+    const definition = conditionDefinition();
+    const edge = definition.edges.find((item) => item.from === 'submit');
+    if (!edge) throw new Error('操作流转不存在');
+    edge.conditions = [{ field: 'title', operator: 'eq', value: 'x' }];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '不是判断节点，不能配置流转条件',
+    );
+  });
+
+  it('判断条件字段必须存在于起始节点输入', () => {
+    const definition = conditionDefinition();
+    const edge = definition.edges.find(
+      (item) => item.from === 'condition' && item.conditions?.length,
+    );
+    if (!edge) throw new Error('判断流转不存在');
+    edge.conditions = [{ field: 'missing', operator: 'eq', value: 'x' }];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '不在起始节点输入字段中',
+    );
+  });
+
+  it('判断条件运算符必须匹配字段类型', () => {
+    const definition = conditionDefinition();
+    const start = definition.nodes.find((item) => item.kind === 'start');
+    if (!start) throw new Error('起始节点不存在');
+    start.inputFields = [
+      {
+        key: 'priority',
+        label: '优先级',
+        type: 'select',
+        required: false,
+        options: ['高', '低'],
+        placeholder: null,
+        defaultValue: null,
+      },
+    ];
+    const edge = definition.edges.find(
+      (item) => item.from === 'condition' && item.conditions?.length,
+    );
+    if (!edge) throw new Error('判断流转不存在');
+    edge.conditions = [
+      { field: 'priority', operator: 'contains', value: '高' },
+    ];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '不支持运算符',
+    );
+  });
+
+  it('数字条件的比较值必须是数字', () => {
+    const definition = conditionDefinition();
+    const start = definition.nodes.find((item) => item.kind === 'start');
+    if (!start) throw new Error('起始节点不存在');
+    start.inputFields = [
+      {
+        key: 'amount',
+        label: '金额',
+        type: 'number',
+        required: false,
+        placeholder: null,
+        defaultValue: null,
+      },
+    ];
+    const edge = definition.edges.find(
+      (item) => item.from === 'condition' && item.conditions?.length,
+    );
+    if (!edge) throw new Error('判断流转不存在');
+    edge.conditions = [{ field: 'amount', operator: 'gt', value: '很多' }];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '比较值必须是数字',
+    );
+  });
+
+  it('单选条件的比较值必须在选项内', () => {
+    const definition = conditionDefinition();
+    const start = definition.nodes.find((item) => item.kind === 'start');
+    if (!start) throw new Error('起始节点不存在');
+    start.inputFields = [
+      {
+        key: 'priority',
+        label: '优先级',
+        type: 'select',
+        required: false,
+        options: ['高', '低'],
+        placeholder: null,
+        defaultValue: null,
+      },
+    ];
+    const edge = definition.edges.find(
+      (item) => item.from === 'condition' && item.conditions?.length,
+    );
+    if (!edge) throw new Error('判断流转不存在');
+    edge.conditions = [{ field: 'priority', operator: 'eq', value: '中' }];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '比较值必须是可选选项之一',
+    );
+  });
+
+  it('判断节点可以流转到流程结束', () => {
+    const definition: WorkflowDefinitionJson = {
+      startNode: 'start',
+      nodes: [
+        node('start', 'start'),
+        node('condition', 'condition'),
+        node('acceptance', 'acceptance'),
+      ],
+      edges: [
+        { from: 'start', to: 'condition', outcome: null, label: null },
+        {
+          from: 'condition',
+          to: 'acceptance',
+          outcome: null,
+          conditions: [{ field: 'title', operator: 'contains', value: '验收' }],
+          label: null,
+        },
+        { from: 'condition', to: '$end', outcome: null, label: null },
+        { from: 'acceptance', to: '$end', outcome: 'approved', label: null },
+      ],
+    };
+    expect(
+      normalizeWorkflowDefinition(definition, true).edges.filter(
+        (edge) => edge.from === 'condition' && edge.to === '$end',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('判断节点不能配置任务定义或机器人', () => {
+    const definition = conditionDefinition();
+    const condition = definition.nodes.find(
+      (item) => item.kind === 'condition',
+    );
+    if (!condition) throw new Error('判断节点不存在');
+    condition.taskTemplateId = 1001;
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '判断节点不能配置任务定义或机器人',
+    );
+  });
+
+  it('判断节点允许不同条件流转到同一目标', () => {
+    const definition = conditionDefinition();
+    definition.edges.push({
+      from: 'condition',
+      to: 'submit',
+      outcome: null,
+      conditions: [{ field: 'title', operator: 'eq', value: '重要' }],
+      label: null,
+    });
+    expect(() => normalizeWorkflowDefinition(definition, true)).not.toThrow();
+  });
+
+  it('判断节点相同条件不能重复流转', () => {
+    const definition = conditionDefinition();
+    definition.edges.push({
+      from: 'condition',
+      to: 'submit',
+      outcome: null,
+      conditions: [{ field: 'title', operator: 'contains', value: '紧急' }],
+      label: null,
+    });
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '存在重复的流转条件',
     );
   });
 });

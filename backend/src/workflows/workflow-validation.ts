@@ -1,9 +1,12 @@
 import { BadRequestException } from '@nestjs/common';
 import {
+  WORKFLOW_CONDITION_OPERATORS,
   WORKFLOW_END_NODE,
   WORKFLOW_INPUT_FIELD_TYPES,
   WORKFLOW_NODE_KINDS,
   WORKFLOW_OUTCOMES,
+  type WorkflowConditionOperator,
+  type WorkflowConditionRule,
   type WorkflowDefinitionJson,
   type WorkflowEdgeDefinition,
   type WorkflowInputField,
@@ -163,6 +166,63 @@ function normalizeNode(value: unknown, index: number): WorkflowNodeDefinition {
   };
 }
 
+function normalizeConditions(
+  value: unknown,
+  edgeIndex: number,
+): WorkflowConditionRule[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value)) {
+    bad(`第 ${edgeIndex + 1} 条流转规则的条件格式不正确`);
+  }
+  const rules: WorkflowConditionRule[] = [];
+  value.forEach((raw, index) => {
+    if (!raw || typeof raw !== 'object') {
+      bad(`第 ${edgeIndex + 1} 条流转规则的第 ${index + 1} 个条件格式不正确`);
+    }
+    const item = raw as Record<string, unknown>;
+    const field = text(
+      item.field,
+      `第 ${edgeIndex + 1} 条流转规则第 ${index + 1} 个条件的字段`,
+      64,
+    );
+    if (!FIELD_KEY_PATTERN.test(field)) {
+      bad(
+        `条件字段「${field}」格式不正确：需以英文字母开头，仅包含字母、数字或下划线`,
+      );
+    }
+    const operator =
+      typeof item.operator === 'string' ? item.operator.trim() : '';
+    if (
+      !(WORKFLOW_CONDITION_OPERATORS as readonly string[]).includes(operator)
+    ) {
+      bad(`条件字段「${field}」的运算符「${operator}」不正确`);
+    }
+    const conditionOperator = operator as WorkflowConditionOperator;
+    const needsValue =
+      conditionOperator !== 'empty' && conditionOperator !== 'notEmpty';
+    const rawValue = item.value;
+    const conditionValue =
+      !needsValue || rawValue === null || rawValue === undefined
+        ? null
+        : typeof rawValue === 'string'
+          ? rawValue
+          : typeof rawValue === 'number' ||
+              typeof rawValue === 'boolean' ||
+              typeof rawValue === 'bigint'
+            ? rawValue.toString()
+            : JSON.stringify(rawValue);
+    if (needsValue && !conditionValue?.trim()) {
+      bad(`条件字段「${field}」的比较值不能为空`);
+    }
+    rules.push({
+      field,
+      operator: conditionOperator,
+      value: conditionValue,
+    });
+  });
+  return rules.length ? rules : null;
+}
+
 function normalizeEdge(value: unknown, index: number): WorkflowEdgeDefinition {
   if (!value || typeof value !== 'object') {
     bad(`第 ${index + 1} 条流转规则格式不正确`);
@@ -185,10 +245,12 @@ function normalizeEdge(value: unknown, index: number): WorkflowEdgeDefinition {
     }
     outcome = valueText as WorkflowOutcome;
   }
+  const conditions = normalizeConditions(item.conditions, index);
   return {
     from,
     to,
     outcome,
+    ...(conditions ? { conditions } : {}),
     label:
       optionalText(item.label, `第 ${index + 1} 条流转规则的展示文案`, 100) ??
       null,
@@ -203,6 +265,26 @@ function outgoingOutcomes(node: WorkflowNodeDefinition): WorkflowOutcome[] {
   }
   if (node.kind === 'operation') return ['succeeded', 'failed'];
   return [];
+}
+
+const DATE_VALUE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 判断节点条件允许的运算符；文件类型不参与判断 */
+function conditionOperatorsForType(
+  type: WorkflowInputFieldType,
+): WorkflowConditionOperator[] {
+  switch (type) {
+    case 'number':
+    case 'date':
+      return ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'empty', 'notEmpty'];
+    case 'text':
+    case 'textarea':
+      return ['eq', 'ne', 'contains', 'empty', 'notEmpty'];
+    case 'select':
+      return ['eq', 'ne', 'empty', 'notEmpty'];
+    default:
+      return [];
+  }
 }
 
 /**
@@ -252,6 +334,10 @@ export function normalizeWorkflowDefinition(
     bad(`起始节点「${startNode}」不存在`);
   }
 
+  const inputFieldByKey = new Map<string, WorkflowInputField>(
+    (startNodes[0]?.inputFields ?? []).map((field) => [field.key, field]),
+  );
+
   const edgeKeys = new Set<string>();
   for (const edge of edges) {
     if (!nodeByKey.has(edge.from)) {
@@ -262,12 +348,42 @@ export function normalizeWorkflowDefinition(
     }
     if (edge.to === edge.from) bad(`节点「${edge.from}」不能流转到自身`);
     const source = nodeByKey.get(edge.from)!;
-    if (source.kind === 'start') {
-      if (edge.outcome) bad('起始节点的流转不能指定结果');
-    } else if (edge.outcome) {
-      const allowed = outgoingOutcomes(source);
-      if (!allowed.includes(edge.outcome)) {
-        bad(`节点「${source.name}」不支持流转结果「${edge.outcome}」`);
+    if (source.kind === 'condition') {
+      if (edge.outcome) bad('判断节点的流转不能指定结果');
+    } else {
+      if (edge.conditions?.length) {
+        bad(`节点「${source.name}」不是判断节点，不能配置流转条件`);
+      }
+      if (source.kind === 'start') {
+        if (edge.outcome) bad('起始节点的流转不能指定结果');
+      } else if (edge.outcome) {
+        const allowed = outgoingOutcomes(source);
+        if (!allowed.includes(edge.outcome)) {
+          bad(`节点「${source.name}」不支持流转结果「${edge.outcome}」`);
+        }
+      }
+    }
+    for (const rule of edge.conditions ?? []) {
+      const field = inputFieldByKey.get(rule.field);
+      if (!field) {
+        bad(
+          `节点「${source.name}」的条件字段「${rule.field}」不在起始节点输入字段中`,
+        );
+      }
+      if (!conditionOperatorsForType(field.type).includes(rule.operator)) {
+        bad(`条件字段「${field.label}」不支持运算符「${rule.operator}」`);
+      }
+      if (rule.operator !== 'empty' && rule.operator !== 'notEmpty') {
+        const value = rule.value ?? '';
+        if (field.type === 'number' && !Number.isFinite(Number(value))) {
+          bad(`条件字段「${field.label}」的比较值必须是数字`);
+        }
+        if (field.type === 'date' && !DATE_VALUE_PATTERN.test(value)) {
+          bad(`条件字段「${field.label}」的比较值必须是日期（YYYY-MM-DD）`);
+        }
+        if (field.type === 'select' && !(field.options ?? []).includes(value)) {
+          bad(`条件字段「${field.label}」的比较值必须是可选选项之一`);
+        }
       }
     }
     if (edge.to === WORKFLOW_END_NODE) {
@@ -276,19 +392,29 @@ export function normalizeWorkflowDefinition(
         (source.kind === 'approval' &&
           (edge.outcome === 'approved' || edge.outcome === 'rejected')) ||
         (source.kind === 'operation' &&
-          (edge.outcome === 'succeeded' || edge.outcome === 'failed'));
+          (edge.outcome === 'succeeded' || edge.outcome === 'failed')) ||
+        (source.kind === 'condition' && !edge.outcome);
       if (!canEnd) {
         bad(
-          '只有验收通过、审批通过/驳回或操作节点的成功/失败结果可以流转到流程结束',
+          '只有验收通过、审批通过/驳回、操作节点的成功/失败结果或判断节点的流转可以流转到流程结束',
         );
       }
     }
-    const edgeKey = `${edge.from}\u0000${edge.outcome ?? '__unconditional__'}`;
+    const edgeKey =
+      source.kind === 'condition'
+        ? `${edge.from}\u0000${
+            edge.conditions?.length
+              ? JSON.stringify(edge.conditions)
+              : `__default__:${edge.to}`
+          }`
+        : `${edge.from}\u0000${edge.outcome ?? '__unconditional__'}`;
     if (edgeKeys.has(edgeKey)) {
       bad(
-        edge.outcome
-          ? `节点「${edge.from}」的结果「${edge.outcome}」存在重复流转`
-          : `节点「${edge.from}」存在重复的无条件流转`,
+        source.kind === 'condition'
+          ? `判断节点「${source.name}」存在重复的流转条件`
+          : edge.outcome
+            ? `节点「${edge.from}」的结果「${edge.outcome}」存在重复流转`
+            : `节点「${edge.from}」存在重复的无条件流转`,
       );
     }
     edgeKeys.add(edgeKey);
@@ -307,7 +433,11 @@ export function normalizeWorkflowDefinition(
     if (strict && node.kind !== 'start' && outgoing.length === 0) {
       bad(`节点「${node.name}」没有配置后续流转`);
     }
-    if (outgoing.length > 1 && outgoing.some((edge) => !edge.outcome)) {
+    if (
+      node.kind !== 'condition' &&
+      outgoing.length > 1 &&
+      outgoing.some((edge) => !edge.outcome)
+    ) {
       bad(`节点「${node.name}」存在多条流转时，每条流转都必须指定结果`);
     }
     if (
@@ -316,6 +446,18 @@ export function normalizeWorkflowDefinition(
       outgoing.some((edge) => !edge.outcome)
     ) {
       bad(`节点「${node.name}」的每条流转都必须指定结果`);
+    }
+    if (strict && node.kind === 'condition') {
+      if (outgoing.length < 2) {
+        bad(`判断节点「${node.name}」至少需要两条后续流转`);
+      }
+      const defaultEdges = outgoing.filter((edge) => !edge.conditions?.length);
+      if (defaultEdges.length !== 1) {
+        bad(`判断节点「${node.name}」必须且只能配置一条默认（无条件）流转`);
+      }
+      if (defaultEdges.length === outgoing.length) {
+        bad(`判断节点「${node.name}」至少需要一条带条件的流转`);
+      }
     }
     if (strict) {
       if (node.kind === 'approval' || node.kind === 'operation') {
@@ -329,12 +471,18 @@ export function normalizeWorkflowDefinition(
         bad(`审批节点「${node.name}」未选择负责机器人`);
       }
       if (
-        (node.kind === 'start' || node.kind === 'acceptance') &&
+        (node.kind === 'start' ||
+          node.kind === 'acceptance' ||
+          node.kind === 'condition') &&
         (node.taskTemplateId || node.responsibleWorkerId)
       ) {
-        bad(
-          `${node.kind === 'start' ? '起始' : '验收'}节点不能配置任务定义或机器人`,
-        );
+        const kindLabel =
+          node.kind === 'start'
+            ? '起始'
+            : node.kind === 'acceptance'
+              ? '验收'
+              : '判断';
+        bad(`${kindLabel}节点不能配置任务定义或机器人`);
       }
     }
   }

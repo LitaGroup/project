@@ -22,6 +22,7 @@ const NODE_KIND_LABEL: Record<string, string> = {
   operation: '操作',
   approval: '审批',
   acceptance: '验收',
+  condition: '判断',
 }
 
 const NODE_KIND_VARIANT: Record<
@@ -32,6 +33,7 @@ const NODE_KIND_VARIANT: Record<
   operation: 'primary',
   approval: 'warning',
   acceptance: 'info',
+  condition: 'soft',
 }
 
 interface TicketCurrentNodePanelProps {

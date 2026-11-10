@@ -9,7 +9,10 @@ import { Task } from '../tasks/task.entity';
 import { Worker } from '../workers/worker.entity';
 import {
   WORKFLOW_END_NODE,
+  type WorkflowConditionRule,
   type WorkflowDefinitionJson,
+  type WorkflowInputField,
+  type WorkflowNodeDefinition,
 } from '../workflows/workflow.types';
 import { TicketWorkflowRuntimeService } from './ticket-workflow-runtime.service';
 import { TicketWorkflowRun } from './ticket-workflow-run.entity';
@@ -23,6 +26,7 @@ describe('TicketWorkflowRuntimeService', () => {
     update: jest.Mock;
     save: jest.Mock;
     create: jest.Mock;
+    insert: jest.Mock;
     count: jest.Mock;
   };
   let definitions: { findOne: jest.Mock };
@@ -50,6 +54,7 @@ describe('TicketWorkflowRuntimeService', () => {
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       save: jest.fn().mockResolvedValue({ id: 1 }),
       create: jest.fn().mockImplementation((row: unknown) => row),
+      insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
       count: jest.fn().mockResolvedValue(0),
     };
     definitions = { findOne: jest.fn() };
@@ -579,5 +584,286 @@ describe('TicketWorkflowRuntimeService', () => {
       node,
       ticket,
     );
+  });
+
+  describe('判断节点', () => {
+    const conditionNode = {
+      key: 'judge',
+      name: '判断',
+      kind: 'condition',
+      taskTemplateId: null,
+      responsibleWorkerId: null,
+      inputFields: null,
+      autoAccept: false,
+      description: null,
+    } as WorkflowNodeDefinition;
+
+    const inputField = (
+      key: string,
+      type: WorkflowInputField['type'],
+      options?: string[],
+    ): WorkflowInputField => ({
+      key,
+      label: key,
+      type,
+      required: false,
+      ...(options ? { options } : {}),
+      placeholder: null,
+      defaultValue: null,
+    });
+
+    const startNode = (
+      fields: WorkflowInputField[],
+    ): WorkflowNodeDefinition => ({
+      key: 'start',
+      name: 'start',
+      kind: 'start',
+      taskTemplateId: null,
+      responsibleWorkerId: null,
+      inputFields: fields,
+      autoAccept: false,
+      description: null,
+    });
+
+    const judgeWorkflow = (
+      rules: WorkflowConditionRule[],
+      fields: WorkflowInputField[],
+    ): WorkflowDefinitionJson => ({
+      startNode: 'start',
+      nodes: [startNode(fields), conditionNode],
+      edges: [
+        {
+          from: 'judge',
+          to: 'hit',
+          outcome: null,
+          conditions: rules,
+          label: null,
+        },
+        { from: 'judge', to: 'miss', outcome: null, label: null },
+      ],
+    });
+
+    const advanceCondition = (
+      ticket: Ticket,
+      workflow: WorkflowDefinitionJson,
+      depth = 0,
+    ) =>
+      (
+        service as unknown as {
+          advanceConditionNode: (
+            ticket: Ticket,
+            workflow: WorkflowDefinitionJson,
+            node: WorkflowNodeDefinition,
+            depth: number,
+          ) => Promise<void>;
+        }
+      ).advanceConditionNode(ticket, workflow, conditionNode, depth);
+
+    const spyEnterNode = () =>
+      jest
+        .spyOn(
+          service as unknown as {
+            enterNode: (
+              ticket: Ticket,
+              workflow: WorkflowDefinitionJson,
+              nodeKey: string,
+              depth?: number,
+            ) => Promise<void>;
+          },
+          'enterNode',
+        )
+        .mockResolvedValue(undefined);
+
+    it('进入判断节点时记录运行并执行条件分发', async () => {
+      const ticket = {
+        id: 5,
+        inputValues: { title: '紧急发布' },
+      } as unknown as Ticket;
+      const workflow = judgeWorkflow(
+        [{ field: 'title', operator: 'contains', value: '紧急' }],
+        [inputField('title', 'text')],
+      );
+      const advance = jest
+        .spyOn(
+          service as unknown as {
+            advanceConditionNode: (
+              ticket: Ticket,
+              workflow: WorkflowDefinitionJson,
+              node: WorkflowNodeDefinition,
+              depth: number,
+            ) => Promise<void>;
+          },
+          'advanceConditionNode',
+        )
+        .mockResolvedValue(undefined);
+
+      await (
+        service as unknown as {
+          enterNode: (
+            ticket: Ticket,
+            workflow: WorkflowDefinitionJson,
+            nodeKey: string,
+          ) => Promise<void>;
+        }
+      ).enterNode(ticket, workflow, 'judge');
+
+      expect(runs.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nodeKind: 'condition',
+          status: '已完成',
+        }),
+      );
+      expect(advance).toHaveBeenCalledWith(ticket, workflow, conditionNode, 0);
+    });
+
+    it.each([
+      [
+        '文本包含',
+        { title: '紧急发布' },
+        [{ field: 'title', operator: 'contains', value: '紧急' }],
+        [inputField('title', 'text')],
+        'hit',
+      ],
+      [
+        '文本不包含走默认分支',
+        { title: '普通发布' },
+        [{ field: 'title', operator: 'contains', value: '紧急' }],
+        [inputField('title', 'text')],
+        'miss',
+      ],
+      [
+        '数字大于',
+        { amount: '1200' },
+        [{ field: 'amount', operator: 'gt', value: '1000' }],
+        [inputField('amount', 'number')],
+        'hit',
+      ],
+      [
+        '数字大于不满足',
+        { amount: '800' },
+        [{ field: 'amount', operator: 'gt', value: '1000' }],
+        [inputField('amount', 'number')],
+        'miss',
+      ],
+      [
+        '数字相等按数值比较',
+        { amount: '1200.0' },
+        [{ field: 'amount', operator: 'eq', value: '1200' }],
+        [inputField('amount', 'number')],
+        'hit',
+      ],
+      [
+        '日期大于等于',
+        { day: '2026-06-01' },
+        [{ field: 'day', operator: 'gte', value: '2026-06-01' }],
+        [inputField('day', 'date')],
+        'hit',
+      ],
+      [
+        '日期小于',
+        { day: '2026-06-01' },
+        [{ field: 'day', operator: 'lt', value: '2026-01-01' }],
+        [inputField('day', 'date')],
+        'miss',
+      ],
+      [
+        '单选等于',
+        { priority: '高' },
+        [{ field: 'priority', operator: 'eq', value: '高' }],
+        [inputField('priority', 'select', ['高', '低'])],
+        'hit',
+      ],
+      [
+        '为空',
+        { remark: '' },
+        [{ field: 'remark', operator: 'empty' }],
+        [inputField('remark', 'text')],
+        'hit',
+      ],
+      [
+        '不为空不满足',
+        { remark: '' },
+        [{ field: 'remark', operator: 'notEmpty' }],
+        [inputField('remark', 'text')],
+        'miss',
+      ],
+      [
+        '多个条件全部满足',
+        { title: '紧急发布', priority: '高' },
+        [
+          { field: 'title', operator: 'contains', value: '紧急' },
+          { field: 'priority', operator: 'ne', value: '低' },
+        ],
+        [
+          inputField('title', 'text'),
+          inputField('priority', 'select', ['高', '低']),
+        ],
+        'hit',
+      ],
+    ] as Array<
+      [
+        string,
+        Record<string, unknown>,
+        WorkflowConditionRule[],
+        WorkflowInputField[],
+        string,
+      ]
+    >)('条件求值：%s', async (_name, inputValues, rules, fields, target) => {
+      const ticket = { id: 5, inputValues } as unknown as Ticket;
+      const workflow = judgeWorkflow(rules, fields);
+      const enter = spyEnterNode();
+
+      await advanceCondition(ticket, workflow);
+
+      expect(enter).toHaveBeenCalledWith(ticket, workflow, target, 1);
+    });
+
+    it('判断分支可以直接结束流程', async () => {
+      const ticket = {
+        id: 5,
+        inputValues: { title: '紧急发布' },
+      } as unknown as Ticket;
+      const workflow: WorkflowDefinitionJson = {
+        startNode: 'start',
+        nodes: [startNode([inputField('title', 'text')]), conditionNode],
+        edges: [
+          {
+            from: 'judge',
+            to: WORKFLOW_END_NODE,
+            outcome: null,
+            conditions: [
+              { field: 'title', operator: 'contains', value: '紧急' },
+            ],
+            label: null,
+          },
+          { from: 'judge', to: 'miss', outcome: null, label: null },
+        ],
+      };
+      const enter = spyEnterNode();
+
+      await advanceCondition(ticket, workflow);
+
+      expect(tickets.update).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({
+          workflowStatus: '已完成',
+          currentNodeKey: null,
+          currentNodeName: null,
+        }),
+      );
+      expect(enter).not.toHaveBeenCalled();
+    });
+
+    it('判断节点连续流转超过上限时工单失败', async () => {
+      const ticket = { id: 5, inputValues: {} } as unknown as Ticket;
+      const workflow = judgeWorkflow([], [inputField('title', 'text')]);
+
+      await advanceCondition(ticket, workflow, 50);
+
+      expect(tickets.update).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({ workflowStatus: '已失败' }),
+      );
+    });
   });
 });

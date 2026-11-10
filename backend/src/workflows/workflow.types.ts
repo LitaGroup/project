@@ -1,9 +1,10 @@
-/** 工单工作流节点类型：起始 / 审批 / 操作 / 验收 */
+/** 工单工作流节点类型：起始 / 操作 / 审批 / 验收 / 判断 */
 export const WORKFLOW_NODE_KINDS = [
   'start',
   'operation',
   'approval',
   'acceptance',
+  'condition',
 ] as const;
 
 export type WorkflowNodeKind = (typeof WORKFLOW_NODE_KINDS)[number];
@@ -34,6 +35,35 @@ export const WORKFLOW_INPUT_FIELD_TYPES = [
 export type WorkflowInputFieldType =
   (typeof WORKFLOW_INPUT_FIELD_TYPES)[number];
 
+/** 判断节点支持的比较运算符 */
+export const WORKFLOW_CONDITION_OPERATORS = [
+  'eq',
+  'ne',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'contains',
+  'empty',
+  'notEmpty',
+] as const;
+
+export type WorkflowConditionOperator =
+  (typeof WORKFLOW_CONDITION_OPERATORS)[number];
+
+/**
+ * 判断节点出边的单条条件；同一出边的多条条件之间为「且」关系。
+ * field 引用起始节点 inputFields 的 key，运行时读取 ticket.inputValues。
+ */
+export interface WorkflowConditionRule {
+  /** 起始节点输入字段标识 */
+  field: string;
+  /** 比较运算符 */
+  operator: WorkflowConditionOperator;
+  /** 比较值；empty / notEmpty 不需要 */
+  value?: string | null;
+}
+
 /** 起始节点的结构化输入字段 */
 export interface WorkflowInputField {
   /** 字段标识，同一节点内唯一，提交后写入 ticket.inputValues */
@@ -57,7 +87,7 @@ export interface WorkflowNodeDefinition {
   key: string;
   /** 节点名称 */
   name: string;
-  /** 起始 / 审批 / 操作 / 验收 */
+  /** 起始 / 操作 / 审批 / 验收 / 判断 */
   kind: WorkflowNodeKind;
   /** 节点使用的任务定义（task_templates.id）；审批/操作节点发布时必填 */
   taskTemplateId: number | null;
@@ -78,6 +108,8 @@ export interface WorkflowEdgeDefinition {
   to: string;
   /** 为空表示无条件流转；审批/验收使用 approved/rejected，操作使用 succeeded/failed */
   outcome: WorkflowOutcome | null;
+  /** 判断节点出边的条件（多条之间为「且」）；为空表示默认兜底分支 */
+  conditions?: WorkflowConditionRule[] | null;
   /** 展示文案 */
   label: string | null;
 }
