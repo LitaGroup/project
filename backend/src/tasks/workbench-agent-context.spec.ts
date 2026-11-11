@@ -1,4 +1,9 @@
-import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
+import {
+  TaskStatus,
+  TaskSubStatus,
+  UserRole,
+  WorkerRuntime,
+} from '../common/enums';
 import type { Task } from './task.entity';
 import {
   normalizeAgentPageContext,
@@ -129,5 +134,64 @@ describe('WorkbenchService 个人 AGENT 任务上下文', () => {
     expect(options.taskContext).toContain(
       '只能查看和解释任务信息，不要调用会修改任务状态或文档的接口',
     );
+  });
+});
+
+describe('WorkbenchService 答复提问权限', () => {
+  const task = {
+    id: 42,
+    status: TaskStatus.WAITING,
+    subStatus: TaskSubStatus.PENDING_FEEDBACK,
+    agentId: 2001,
+    requesterType: 'worker',
+    requesterId: 2002,
+    createdById: 8,
+  } as Task;
+
+  function serviceFor(answer: jest.Mock): WorkbenchService {
+    return new WorkbenchService(
+      { findOne: jest.fn().mockResolvedValue(task) } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      {
+        mustHumanWorker: jest.fn().mockResolvedValue({
+          id: 1001,
+          runtime: WorkerRuntime.HUMAN,
+        }),
+      } as never,
+      { findForUser: jest.fn().mockResolvedValue(null) } as never,
+      { answer } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+  }
+
+  it('管理员不是需求方也可答复提问', async () => {
+    const answer = jest.fn().mockResolvedValue(task);
+    const admin = { id: 1, name: '管理员', role: UserRole.ADMIN };
+
+    await serviceFor(answer).replyQuestion(admin as never, 42, 'q1', {
+      answers: [['继续']],
+    });
+
+    expect(answer).toHaveBeenCalledWith(
+      42,
+      'q1',
+      { type: 'user', user: admin },
+      { answers: [['继续']] },
+    );
+  });
+
+  it('普通成员不是需求方仍被拒绝', async () => {
+    const answer = jest.fn();
+    const member = { id: 9, name: '李四', role: UserRole.MEMBER };
+
+    await expect(
+      serviceFor(answer).replyQuestion(member as never, 42, 'q1', {
+        answers: [['继续']],
+      }),
+    ).rejects.toThrow('仅任务需求方可以操作');
+    expect(answer).not.toHaveBeenCalled();
   });
 });

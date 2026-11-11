@@ -300,7 +300,7 @@ export class WorkTaskTools implements WorkToolRegistrar {
       {
         title: '答复任务提问',
         description:
-          '需求方（用户或父任务机器人）答复执行方提问；answers 按问题顺序，reject=true 表示跳过。',
+          '需求方（用户或父任务机器人）或管理员答复执行方提问；answers 按问题顺序，reject=true 表示跳过。',
         inputSchema: {
           taskId: z.number().int().positive().describe('任务 ID'),
           questionId: z.string().min(1).describe('提问 ID'),

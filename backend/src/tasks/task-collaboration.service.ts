@@ -24,6 +24,8 @@ import { TasksService } from './tasks.service';
 import {
   actorName,
   assertTaskRequester,
+  assertTaskRequesterOrAdmin,
+  isTaskRequester,
   type TaskActor,
 } from './task-requester';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
@@ -350,7 +352,7 @@ export class TaskCollaborationService {
     return { task: saved, questionId };
   }
 
-  /** task-question-answer：人或机器人需求方答复，统一进入待继续由 LOOP 恢复。 */
+  /** task-question-answer：人或机器人需求方、管理员答复，统一进入待继续由 LOOP 恢复。 */
   async answer(
     taskId: number,
     questionId: string,
@@ -358,7 +360,9 @@ export class TaskCollaborationService {
     input: AnswerQuestionInput,
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
-    assertTaskRequester(task, actor);
+    assertTaskRequesterOrAdmin(task, actor);
+    const requesterActing = isTaskRequester(task, actor);
+    const replierLabel = requesterActing ? '需求方' : '管理员';
     if (
       task.status !== TaskStatus.WAITING ||
       task.subStatus !== TaskSubStatus.PENDING_FEEDBACK
@@ -396,7 +400,7 @@ export class TaskCollaborationService {
       answers,
     );
     const answerText = rejected
-      ? '需求方跳过本次提问。'
+      ? `${replierLabel}跳过本次提问。`
       : row.question.questions
           .map(
             (question, index) =>
@@ -437,7 +441,7 @@ export class TaskCollaborationService {
     await this.tasksService.addEvent(
       taskId,
       '状态变更',
-      '状态变更：等待中-待反馈 → 等待中-待继续（需求方已答复）',
+      `状态变更：等待中-待反馈 → 等待中-待继续（${replierLabel}已答复）`,
       actorName(actor),
       { questionId },
     );

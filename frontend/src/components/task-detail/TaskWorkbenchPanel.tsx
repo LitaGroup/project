@@ -78,15 +78,19 @@ export function TaskWorkbenchPanel({
   const roles = task?.workbenchRoles ?? []
   const isAgent = roles.includes('agent')
   const isRequester = roles.includes('requester')
+  const isAdmin = user?.role === '管理员'
 
   const rightTabs = useMemo<Array<[RightTab, string]>>(() => {
     const tabs: Array<[RightTab, string]> = []
-    if (isRequester) tabs.push(['requester', '任务-需求方'])
+    // 管理员可查看任务对话并代需求方答复提问，但不能以需求方身份发送消息
+    if (isRequester || isAdmin) {
+      tabs.push(['requester', isRequester ? '任务-需求方' : '任务-管理员'])
+    }
     // 任务沟通仅限需求方与当前真人执行机器人；机器人负责人/接管人不参与。
     if (isAgent) tabs.push(['responsible', '任务-执行方'])
     tabs.push(['agent', '我的助理'])
     return tabs
-  }, [isRequester, isAgent])
+  }, [isRequester, isAgent, isAdmin])
 
   const currentRightTab: RightTab = rightTabs.some(
     ([key]) => key === rightTab,
@@ -209,6 +213,8 @@ export function TaskWorkbenchPanel({
       const text = raw.trim()
       if (!text || !task || busy || !activeTaskRole) return false
       if (activeTaskRole === 'requester') {
+        // 管理员可答复提问，但不能以需求方身份发送消息或验收
+        if (!isRequester) return false
         if (task.subStatus === '待验收') {
           // 需求方身份下，待验收时发送消息等同于验收不通过
           return (
@@ -228,7 +234,7 @@ export function TaskWorkbenchPanel({
         )) === null
       )
     },
-    [task, busy, activeTaskRole, isAgent, executing, run],
+    [task, busy, activeTaskRole, isAgent, isRequester, executing, run],
   )
 
   const sendMessage = useCallback(async () => {
@@ -326,7 +332,7 @@ export function TaskWorkbenchPanel({
                       flatOppositeMessages
                       canReplyQuestion={(custom) =>
                         currentRightTab === 'requester' &&
-                        isRequester &&
+                        (isRequester || isAdmin) &&
                         awaitingAnswer &&
                         (custom.taskId === undefined ||
                           custom.taskId === task?.id)
@@ -349,6 +355,7 @@ export function TaskWorkbenchPanel({
                     busy ||
                     finished ||
                     !draft.trim() ||
+                    (currentRightTab === 'requester' && !isRequester) ||
                     (currentRightTab === 'responsible' && awaitingReview)
                   }
                 />
@@ -361,6 +368,7 @@ export function TaskWorkbenchPanel({
                   !task ||
                   busy ||
                   finished ||
+                  (currentRightTab === 'requester' && !isRequester) ||
                   (currentRightTab === 'responsible' && awaitingReview)
                 }
                 onChange={(event) => setDraft(event.target.value)}
@@ -378,9 +386,11 @@ export function TaskWorkbenchPanel({
                     : finished
                       ? '任务已结束，不能继续对话'
                       : currentRightTab === 'requester'
-                        ? awaitingReview
-                          ? '输入验收不通过意见，发送后退回机器人…'
-                          : '以需求方身份补充需求…'
+                        ? !isRequester
+                          ? '管理员可直接答复提问，不能以需求方身份发送消息'
+                          : awaitingReview
+                            ? '输入验收不通过意见，发送后退回机器人…'
+                            : '以需求方身份补充需求…'
                         : awaitingReview
                           ? '待需求方验收，如需继续修改请先撤销交付'
                           : isAgent && executing

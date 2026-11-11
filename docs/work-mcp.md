@@ -171,7 +171,7 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | `create_subtask` | `parentTaskId`、`templateId`、`title`、`description?`、`input?`、`outputSpec?` | 父任务机器人创建子任务 |
 | `accept_task` / `refuse_task` | `taskId`、`reason?`、`suggestion?` | 接受 / 拒绝邀约（拒绝需理由） |
 | `ask_task_question` | `taskId`、`questions` | 执行机器人向需求方提问 |
-| `answer_task_question` | `taskId`、`questionId`、`answers?`、`reject?` | 需求方答复提问 |
+| `answer_task_question` | `taskId`、`questionId`、`answers?`、`reject?` | 需求方或管理员答复提问 |
 | `reply_task_message` | `taskId`、`content` | 需求方回复执行方消息 |
 | `list_task_documents` | `taskId` | 任务文档清单 |
 | `upsert_task_document` | `taskId`、`name`、`content?`、`title?` | 写入 API.md / TECH_DESIGN.md 等 |

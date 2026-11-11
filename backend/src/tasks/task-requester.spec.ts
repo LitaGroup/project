@@ -1,9 +1,11 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { User } from '../auth/user.entity';
+import { UserRole } from '../common/enums';
 import type { Worker } from '../workers/worker.entity';
 import type { Task } from './task.entity';
 import {
   assertTaskRequester,
+  assertTaskRequesterOrAdmin,
   isTaskRequester,
   isTaskRequesterUser,
   workerRequesterActor,
@@ -101,6 +103,36 @@ describe('TaskActor 需求方身份校验', () => {
         workerRequesterActor(worker()),
       ),
     ).toBe(false);
+  });
+});
+
+describe('管理员答复提问身份校验', () => {
+  it('管理员可答复非本人需求方的任务提问', () => {
+    const actor = {
+      type: 'user' as const,
+      user: user({ id: 1, name: '管理员', role: UserRole.ADMIN }),
+    };
+
+    expect(() => assertTaskRequesterOrAdmin(task(), actor)).not.toThrow();
+  });
+
+  it('真人机器人令牌映射的管理员可答复', () => {
+    const actor = { ...workerRequesterActor(worker()), isAdmin: true };
+
+    expect(() =>
+      assertTaskRequesterOrAdmin(task({ requesterId: OTHER_WORKER_ID }), actor),
+    ).not.toThrow();
+  });
+
+  it('非管理员且非需求方仍被拒绝', () => {
+    const actor = {
+      type: 'user' as const,
+      user: user({ id: 9, name: '李四', role: UserRole.MEMBER }),
+    };
+
+    expect(() => assertTaskRequesterOrAdmin(task(), actor)).toThrow(
+      ForbiddenException,
+    );
   });
 });
 

@@ -1,5 +1,5 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
-import { TaskStatus, TaskSubStatus } from '../common/enums';
+import { TaskStatus, TaskSubStatus, UserRole } from '../common/enums';
 import type { User } from '../auth/user.entity';
 import type { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
@@ -348,6 +348,44 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
         { answers: [['继续']] },
       ),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('管理员可答复非本人需求方的 project 提问并记录操作人', async () => {
+    task.subStatus = TaskSubStatus.PENDING_FEEDBACK;
+    messagesRepo.findOne.mockResolvedValue({
+      taskId: 1,
+      messageKey: 'chat:1:question:project-q1',
+      question: {
+        id: 'project-q1',
+        sessionId: 'session-1',
+        state: 'pending',
+        askedAt: new Date().toISOString(),
+        questions: [{ header: '确认', question: '继续吗？', custom: true }],
+      },
+      status: 'running',
+    });
+    const admin = {
+      id: 1,
+      name: '管理员',
+      role: UserRole.ADMIN,
+    } as User;
+
+    const saved = await service.answer(
+      1,
+      'project-q1',
+      { type: 'user', user: admin },
+      { answers: [['继续']] },
+    );
+
+    expect(saved.subStatus).toBe(TaskSubStatus.PENDING_RESUME);
+    expect(saved.resumePrompt).toContain('答：继续');
+    expect(tasksService.addEvent).toHaveBeenCalledWith(
+      1,
+      '状态变更',
+      expect.stringContaining('管理员已答复'),
+      '管理员',
+      { questionId: 'project-q1' },
+    );
   });
 
   it('需求方回复执行方消息时写入对话并结算已投递的收件箱事件', async () => {

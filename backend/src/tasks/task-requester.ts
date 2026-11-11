@@ -1,5 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { User } from '../auth/user.entity';
+import { UserRole } from '../common/enums';
 import type { Worker } from '../workers/worker.entity';
 import type { Task } from './task.entity';
 
@@ -15,6 +16,8 @@ export type TaskActor =
        * 但后续操作统一由主人的真人机器人执行。
        */
       historicalRequesterWorkerId?: number | null;
+      /** 真人机器人令牌映射的登录用户是管理员时标记，用于放行答复提问。 */
+      isAdmin?: boolean;
     };
 
 export function actorName(actor: TaskActor): string {
@@ -86,6 +89,19 @@ export function assertTaskRequester(task: Task, actor: TaskActor): void {
   if (!isTaskRequester(task, actor)) {
     throw new ForbiddenException('仅任务需求方可以执行该操作');
   }
+}
+
+/** 管理员身份：网页会话自带 role，真人机器人令牌由身份解析补标记。 */
+export function isTaskAdminActor(actor: TaskActor): boolean {
+  return actor.type === 'user'
+    ? actor.user.role === UserRole.ADMIN
+    : actor.isAdmin === true;
+}
+
+/** 答复机器人提问：任务需求方或管理员可操作，其余需求方动作不受影响。 */
+export function assertTaskRequesterOrAdmin(task: Task, actor: TaskActor): void {
+  if (isTaskRequester(task, actor) || isTaskAdminActor(actor)) return;
+  throw new ForbiddenException('仅任务需求方或管理员可以答复提问');
 }
 
 export function isWorkerRequester(task: Task): boolean {

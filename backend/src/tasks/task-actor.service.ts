@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import type { User } from '../auth/user.entity';
+import { UserRole } from '../common/enums';
 import { PersonalAgentsService } from '../workers/personal-agents.service';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
@@ -41,6 +42,18 @@ export class TaskActorService {
 
   /** 需求方动作身份（答复提问、回复消息、验收、返工、判失败） */
   async resolveRequesterActor(
+    principal: TaskActorPrincipal,
+    taskId: number,
+  ): Promise<TaskActor> {
+    const actor = await this.resolveRequester(principal, taskId);
+    // 真人机器人令牌通过 MCP/.md 调用时 actor 不带 role，补管理员标记供答复提问放行
+    if (actor.type === 'worker' && principal.user?.role === UserRole.ADMIN) {
+      actor.isAdmin = true;
+    }
+    return actor;
+  }
+
+  private async resolveRequester(
     principal: TaskActorPrincipal,
     taskId: number,
   ): Promise<TaskActor> {

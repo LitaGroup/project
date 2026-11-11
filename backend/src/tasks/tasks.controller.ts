@@ -398,7 +398,7 @@ export class TasksController {
     ]);
   }
 
-  /** task-question-answer：人或机器人需求方答复 project 提问。 */
+  /** task-question-answer：需求方（人或机器人）或管理员答复 project 提问。 */
   @Post(':id/questions/:questionId/answer.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')
   async answerTaskQuestion(

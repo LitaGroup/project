@@ -10,7 +10,7 @@ import { Observable } from 'rxjs';
 import { FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import type { User } from '../auth/user.entity';
 import { TaskStatus, TaskSubStatus } from '../common/enums';
-import { TaskType, WorkerRuntime } from '../common/enums';
+import { TaskType, UserRole, WorkerRuntime } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
 import type {
   WorkerDebugAttachment,
@@ -483,10 +483,14 @@ export class WorkbenchService {
     return { type: 'user', user };
   }
 
-  /** 确认当前用户/其机器人/其个人 AGENT 是任务需求方 */
+  /**
+   * 确认当前用户/其机器人/其个人 AGENT 是任务需求方。
+   * allowAdmin 仅供答复提问：管理员可越过需求方身份，其它需求方动作不放开。
+   */
   private async requesterTask(
     user: User,
     taskId: number,
+    allowAdmin = false,
   ): Promise<{ worker: Worker; task: Task; actor: TaskActor }> {
     const worker = await this.workersService.mustHumanWorker(user.id);
     const personalAgent = await this.personalAgents.findForUser(user.id);
@@ -499,7 +503,13 @@ export class WorkbenchService {
     const isLegacyUserRequester =
       task.requesterType === 'user' && task.requesterId === user.id;
     const isLegacyCreator = !task.requesterType && task.createdById === user.id;
-    if (!isWorkerRequester && !isLegacyUserRequester && !isLegacyCreator) {
+    const isAdmin = allowAdmin && user.role === UserRole.ADMIN;
+    if (
+      !isWorkerRequester &&
+      !isLegacyUserRequester &&
+      !isLegacyCreator &&
+      !isAdmin
+    ) {
       throw new ForbiddenException('仅任务需求方可以操作');
     }
     return {
@@ -530,15 +540,19 @@ export class WorkbenchService {
     );
   }
 
-  /** 答复或跳过真人/AI 机器人的提问 */
+  /** 答复或跳过真人/AI 机器人的提问；管理员可代需求方答复 */
   replyQuestion(
     user: User,
     taskId: number,
     questionId: string,
     input: { answers?: string[][]; reject?: boolean },
   ): Promise<Task> {
-    return this.withRequesterTask(user, taskId, ({ actor }) =>
-      this.collaboration.answer(taskId, questionId, actor, input),
+    return this.withRequesterTask(
+      user,
+      taskId,
+      ({ actor }) =>
+        this.collaboration.answer(taskId, questionId, actor, input),
+      true,
     );
   }
 
@@ -715,8 +729,9 @@ export class WorkbenchService {
       task: Task;
       actor: TaskActor;
     }) => Promise<T>,
+    allowAdmin = false,
   ): Promise<T> {
-    const context = await this.requesterTask(user, taskId);
+    const context = await this.requesterTask(user, taskId, allowAdmin);
     return fn(context);
   }
 
