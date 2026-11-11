@@ -278,7 +278,7 @@ describe('AuthService（飞书登录 + 会话）', () => {
   });
 
   describe('登录欢迎消息', () => {
-    it('登录成功后经应用机器人发送欢迎卡片（介绍 + MCP 接入 + 任务流）', async () => {
+    it('登录成功后经应用机器人发送英文欢迎卡片（MCP 三服务接入）', async () => {
       const { service, feishu } = createService();
       await service.upsertFeishuUser(FEISHU_INFO);
       expect(feishu.sendUserCard).toHaveBeenCalledTimes(1);
@@ -288,13 +288,14 @@ describe('AuthService（飞书登录 + 会话）', () => {
       ];
       expect(openId).toBe('ou_123');
       const json = JSON.stringify(card);
-      expect(json).toContain('你好，欢迎登录 project');
-      expect(json).toContain('Lita 的项目管理系统');
+      expect(json).toContain('Hello, this is Lita Work!!!');
+      expect(json).toContain('AI-centric project management platform');
       expect(json).toContain('http://localhost:5173/api/mcp/work');
-      expect(json).toContain('http://localhost:5173/work-mcp.md');
-      expect(json).toContain('mcp.servers');
-      expect(json).toContain('核心任务流');
-      expect(json).toContain('定时任务');
+      expect(json).toContain('http://localhost:5173/api/mcp/bots');
+      expect(json).toContain('http://proxy.cinta.team/mcp');
+      expect(json).toContain('LITA_WORK_TOKEN');
+      expect(json).toContain('http://localhost:5173/MCP.md');
+      expect(json).toContain('MCP Setup Guide');
     });
 
     it('重复登录同样发送', async () => {

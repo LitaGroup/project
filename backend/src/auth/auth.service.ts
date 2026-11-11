@@ -13,7 +13,7 @@ import { User } from './user.entity';
 import { FeishuBotConfigService } from '../feishu-bot/feishu-bot-config.service';
 
 /** 登录成功后发送的飞书欢迎消息标题 */
-const WELCOME_TITLE = '你好，欢迎登录 project';
+const WELCOME_TITLE = 'Hello, this is Lita Work!!!';
 
 /** 公共 Agent 虚拟用户 ID（不落库；多个公共 Agent 共用一个令牌，操作统一记在该身份下） */
 export const PUBLIC_AGENT_USER_ID = 0;
@@ -259,7 +259,7 @@ export class AuthService {
   }
 
   /**
-   * 登录成功后发飞书欢迎卡片（应用机器人单聊）：平台介绍 + SKILL 安装指引 + 核心任务流。
+   * 登录成功后发飞书欢迎卡片（应用机器人单聊）：英文 MCP 接入介绍（lita-work / lita-bots / lita-proxy）。
    * 失败仅告警不阻断登录——应用未开发送权限/用户不在可用范围时发送会失败，属预期降级。
    */
   private async sendWelcome(user: User): Promise<void> {
@@ -275,13 +275,16 @@ export class AuthService {
     }
   }
 
-  /** 欢迎卡片：介绍 + MCP 接入 + 核心任务流（口径与前端概览页一致） */
+  /** 欢迎卡片：英文 MCP 接入介绍（三个服务，口径与仓库根目录 MCP.md、前端概览页一致） */
   private buildWelcomeCard(): Record<string, unknown> {
     const appUrl = (
       this.config.get<string>('APP_URL') ?? 'http://localhost:5273'
     ).replace(/\/$/, '');
-    const mcpUrl = `${appUrl}/api/mcp/work`;
-    const mcpDocUrl = `${appUrl}/work-mcp.md`;
+    const workMcpUrl = `${appUrl}/api/mcp/work`;
+    const botsMcpUrl = `${appUrl}/api/mcp/bots`;
+    /** lita-proxy 是独立服务，没有本地实例，地址固定 */
+    const proxyMcpUrl = 'http://proxy.cinta.team/mcp';
+    const mcpDocUrl = `${appUrl}/MCP.md`;
     const md = (content: string) => ({
       tag: 'div',
       text: { tag: 'lark_md', content },
@@ -294,30 +297,31 @@ export class AuthService {
       },
       elements: [
         md(
-          '**project** 是 Lita 的项目管理系统：以 AI 为中心，项目的文档、资料、脚本、缺陷、定时任务等研发要素统一管理。网页供人操作，同时所有能力以 HTTP 接口与 MCP 工具暴露，AI agent 可直接读写并流式获取运行结果。',
+          '**Lita Work** is an AI-centric project management platform: documents, resources, scripts, defects and scheduled jobs live in one place, and every capability is exposed as MCP tools so your AI agent can work with them directly.',
         ),
         { tag: 'hr' },
         md(
           [
-            '**接入 MCP（让 Agent 直接调用平台工具）**',
-            `**1. 服务地址**：${mcpUrl}（MCP Streamable HTTP）`,
-            '**2. opencode 配置**：在 ~/.config/opencode/opencode.json 或项目 .opencode/opencode.json 的 mcp.servers 下添加 lita-work（type=remote、oauth=false、Authorization: Bearer {env:LITA_WORK_TOKEN}）',
-            '**3. 令牌**：登录网页 → 个人中心 → 「机器人令牌」复制并写入环境变量 LITA_WORK_TOKEN（真人机器人与个人 AGENT 共用）',
-            `**4. 接入文档与工具清单**：${mcpDocUrl}`,
-            '旧 SKILL.md 技能已下线，平台能力请使用 lita-work MCP 工具。',
+            '**MCP Services** (MCP Streamable HTTP; all three share one robot token)',
+            `**1. lita-work** — ${workMcpUrl}`,
+            'Operate platform data directly: projects, documents, knowledge base, script runs, defects, releases, feedbacks, ideas, tasks, tickets, workers and Feishu chat history.',
+            `**2. lita-bots** — ${botsMcpUrl}`,
+            'Call platform bots as sub-agents: multi-turn sessions, questions, interrupt and resume.',
+            `**3. lita-proxy** — ${proxyMcpUrl}`,
+            'Internal resource operations: MySQL SQL, Nacos configs and XXL-JOB jobs.',
           ].join('\n'),
         ),
         { tag: 'hr' },
         md(
           [
-            '**核心任务流**',
-            '**文档**：飞书 / APIPOST 一键导入为统一 Markdown，也可平台内手写，人与 AI 共读',
-            '**资料**：需求方提供的配置 / 多语言 / UI / 文件资源，按状态跟踪（缺失 → 草稿 → 确认）',
-            '**脚本**：.check.ts 检查 / .test.ts 测试用例 / .export.ts 导出，登记后一键运行、实时流式看过程与结果',
-            '**缺陷**：预期 / 实际 / 截图 / 用例脚本登记，状态流转 开放 → 修复 → 关闭，脚本回归通过自动关闭',
-            '**定时任务**：crontab 定时运行检查脚本，开始与结果自动推送项目飞书群',
-            '**导出脚本**：本地直跑产出数据文件（csv / json 等），产物文件在线下载',
-            '**测试用例**：覆盖 H5 / 后端 / APP（android / ios）三端，APP 用例经 appium-agent 远程执行',
+            '**Get your token**',
+            'Web → your avatar → Personal Center → "Robot Token": copy it into the environment variable LITA_WORK_TOKEN (shared by your human worker and personal AGENT; reset it there if it leaks).',
+            '',
+            '**Connect opencode**',
+            'Add the three servers under mcp.servers in ~/.config/opencode/opencode.json (type=remote, oauth=false, header Authorization: Bearer {env:LITA_WORK_TOKEN}; lita-proxy also accepts X-Worker-Token).',
+            '',
+            '**Other clients** (Claude Code / Codex CLI / Cursor): see the full guide.',
+            `**Full guide** — ${mcpDocUrl}`,
           ].join('\n'),
         ),
         { tag: 'hr' },
@@ -326,13 +330,13 @@ export class AuthService {
           actions: [
             {
               tag: 'button',
-              text: { tag: 'plain_text', content: '打开平台' },
+              text: { tag: 'plain_text', content: 'Open Lita Work' },
               type: 'primary',
               url: appUrl,
             },
             {
               tag: 'button',
-              text: { tag: 'plain_text', content: '查看 MCP 接入指南' },
+              text: { tag: 'plain_text', content: 'MCP Setup Guide' },
               type: 'default',
               url: mcpDocUrl,
             },
