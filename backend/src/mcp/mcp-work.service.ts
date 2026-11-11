@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { handleStatelessMcpRequest } from './mcp-http';
 import { WorkDefectTools } from './work-tools/work-defect.tools';
+import { WorkFeishuTools } from './work-tools/work-feishu.tools';
 import { WorkFileTools } from './work-tools/work-file.tools';
 import { WorkGithubTools } from './work-tools/work-github.tools';
 import { WorkKnowledgeTools } from './work-tools/work-knowledge.tools';
@@ -39,6 +40,7 @@ export class McpWorkService {
     taskTools: WorkTaskTools,
     ticketTools: WorkTicketTools,
     agentTools: WorkAgentTools,
+    feishuTools: WorkFeishuTools,
   ) {
     this.registrars = [
       projectTools,
@@ -50,6 +52,7 @@ export class McpWorkService {
       taskTools,
       ticketTools,
       agentTools,
+      feishuTools,
     ];
   }
 

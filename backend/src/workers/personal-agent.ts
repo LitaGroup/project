@@ -127,6 +127,7 @@ export function buildPersonalAgentFirstPrompt(
   apiUrl: string,
   userName: string,
   workdir?: string | null,
+  channelContext?: string | null,
 ): string {
   const role = prompt?.trim() || buildPersonalAgentPrompt(userName, apiUrl);
   const session = workdir
@@ -139,5 +140,6 @@ export function buildPersonalAgentFirstPrompt(
         `- 调用平台接口前执行：\`set -a; . '${workdir}/.opencode/.env'; set +a\``,
       ].join('\n')
     : '';
-  return `# 个人 AGENT 工作台\n\n${role}${session}`;
+  const context = channelContext?.trim() ? `\n\n${channelContext.trim()}` : '';
+  return `# 个人 AGENT 工作台\n\n${role}${context}${session}`;
 }

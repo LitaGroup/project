@@ -70,6 +70,8 @@ export interface PersonalAgentSendOptions {
   scope?: string | null;
   /** 当前页面上下文（不写入用户气泡，仅作为本轮提示词前缀） */
   taskContext?: string | null;
+  /** 当前接入通道/场景说明（仅在会话首条提示词里注入） */
+  channelContext?: string | null;
   /** 随消息发送的附件（已上传文件的公开地址） */
   files?: WorkerDebugAttachment[];
 }
@@ -310,6 +312,7 @@ export class PersonalAgentsService {
         this.apiUrl,
         user.name ?? worker.name,
         workdir,
+        options?.channelContext,
       ),
       promptPrefix: options?.taskContext?.trim() || undefined,
       files: options?.files,

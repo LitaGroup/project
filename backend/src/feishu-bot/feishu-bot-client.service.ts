@@ -29,6 +29,20 @@ export interface FeishuReaction {
   reactionId: string | null;
 }
 
+/** 会话历史消息（拉取话题上文/群聊上文用） */
+export interface FeishuHistoryMessage {
+  messageId: string;
+  messageType: string;
+  /** 原始 content JSON 字符串 */
+  content: string;
+  /** 发送者 id：用户为 open_id、机器人为 app_id（系统消息可能为空） */
+  senderOpenId: string | null;
+  /** 发送者类型：user / app 等 */
+  senderType: string;
+  /** 消息发送时间（毫秒时间戳；解析失败为 0） */
+  createTime: number;
+}
+
 interface TokenCache {
   token: string;
   expiresAt: number;
@@ -194,6 +208,151 @@ export class FeishuBotClientService {
     );
   }
 
+  /** 回复文本消息（话题群会落入被回复消息所在话题，普通群表现为引用回复） */
+  async replyText(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    messageId: string,
+    text: string,
+  ): Promise<FeishuSendResult> {
+    return this.replyRaw(
+      configId,
+      secrets,
+      messageId,
+      'text',
+      JSON.stringify({ text }),
+    );
+  }
+
+  /** 回复互动卡片（话题群会落入被回复消息所在话题） */
+  async replyCard(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    messageId: string,
+    card: Record<string, unknown>,
+  ): Promise<FeishuSendResult> {
+    return this.replyRaw(
+      configId,
+      secrets,
+      messageId,
+      'interactive',
+      JSON.stringify(card),
+    );
+  }
+
+  private async replyRaw(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    messageId: string,
+    msgType: string,
+    content: string,
+  ): Promise<FeishuSendResult> {
+    const data = await this.request(
+      configId,
+      secrets,
+      'POST',
+      `/im/v1/messages/${encodeURIComponent(messageId)}/reply`,
+      {
+        msg_type: msgType,
+        content,
+        uuid: randomUUID(),
+      },
+    );
+    return { messageId: readString(data, 'message_id') };
+  }
+
+  /**
+   * 拉取话题历史消息（container_id_type=thread），按时间正序返回最近 limit 条。
+   * 需要应用具备「获取单聊、群组消息」或「获取与发送单聊、群组消息」权限；
+   * 无权限时由调用方降级（不拼话题上文）。
+   */
+  async listThreadMessages(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    threadId: string,
+    limit = 20,
+  ): Promise<FeishuHistoryMessage[]> {
+    return this.listHistoryMessages(
+      configId,
+      secrets,
+      {
+        container_id_type: 'thread',
+        container_id: threadId,
+      },
+      limit,
+    );
+  }
+
+  /**
+   * 拉取群聊历史消息（container_id_type=chat），按时间正序返回最近 limit 条。
+   * 普通群补拉「群聊上文」用；话题群里 chat 容器只返回话题根消息。
+   * sinceSeconds 为秒级时间戳时只返回该时间之后的消息（飞书 chat 容器支持时间范围）。
+   */
+  async listChatMessages(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    chatId: string,
+    limit = 20,
+    sinceSeconds?: number,
+  ): Promise<FeishuHistoryMessage[]> {
+    return this.listHistoryMessages(
+      configId,
+      secrets,
+      {
+        container_id_type: 'chat',
+        container_id: chatId,
+        ...(sinceSeconds && sinceSeconds > 0
+          ? { start_time: String(Math.floor(sinceSeconds)) }
+          : {}),
+      },
+      limit,
+    );
+  }
+
+  /** 会话历史消息拉取（话题/群聊共用），倒序取最近 N 条后转正序 */
+  private async listHistoryMessages(
+    configId: number,
+    secrets: FeishuBotSecrets,
+    container: {
+      container_id_type: 'thread' | 'chat';
+      container_id: string;
+      start_time?: string;
+    },
+    limit: number,
+  ): Promise<FeishuHistoryMessage[]> {
+    const pageSize = Math.min(Math.max(Math.floor(limit) || 20, 1), 50);
+    const query = new URLSearchParams({
+      container_id_type: container.container_id_type,
+      container_id: container.container_id,
+      sort_type: 'ByCreateTimeDesc',
+      page_size: String(pageSize),
+      ...(container.start_time ? { start_time: container.start_time } : {}),
+    });
+    const data = await this.request(
+      configId,
+      secrets,
+      'GET',
+      `/im/v1/messages?${query.toString()}`,
+    );
+    const items = Array.isArray(data.items) ? (data.items as unknown[]) : [];
+    return items
+      .map((item) => {
+        const row = (item ?? {}) as Record<string, unknown>;
+        const body = (row.body ?? {}) as Record<string, unknown>;
+        const sender = (row.sender ?? {}) as Record<string, unknown>;
+        return {
+          messageId: readString(row, 'message_id') ?? '',
+          messageType: readString(row, 'msg_type') ?? '',
+          content: readString(body, 'content') ?? '',
+          senderOpenId: readString(sender, 'id'),
+          senderType: readString(sender, 'sender_type') ?? 'user',
+          createTime: Number(readString(row, 'create_time')) || 0,
+        };
+      })
+      .filter((row) => Boolean(row.messageId))
+      .reverse();
+  }
+
   private async sendRaw(
     configId: number,
     secrets: FeishuBotSecrets,
@@ -271,32 +430,37 @@ export class FeishuBotClientService {
 
   // ---- 素材 ----
 
-  /** 下载会话中的图片素材 */
+  /**
+   * 下载消息中的图片素材。
+   * 注意：`/im/v1/images` 仅能下载机器人自己上传的图片，
+   * 读取用户消息里的图片必须走消息资源接口，且 file_key 与 message_id 需匹配。
+   */
   async downloadImage(
     configId: number,
     secrets: FeishuBotSecrets,
+    messageId: string,
     imageKey: string,
   ): Promise<Buffer> {
-    const buffer = await this.requestBinary(
+    return this.requestBinary(
       configId,
       secrets,
       'GET',
-      `/im/v1/images/${encodeURIComponent(imageKey)}?type=image`,
+      `/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(imageKey)}?type=image`,
     );
-    return buffer;
   }
 
-  /** 下载会话中的文件素材 */
+  /** 下载消息中的文件素材（同样必须走消息资源接口） */
   async downloadFile(
     configId: number,
     secrets: FeishuBotSecrets,
+    messageId: string,
     fileKey: string,
   ): Promise<Buffer> {
     return this.requestBinary(
       configId,
       secrets,
       'GET',
-      `/im/v1/files/${encodeURIComponent(fileKey)}`,
+      `/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(fileKey)}?type=file`,
     );
   }
 

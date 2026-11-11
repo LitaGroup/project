@@ -2121,6 +2121,8 @@ export interface FeishuBotGroupRecordView {
   id: number
   kind: 'message' | 'reply' | 'bot_added' | 'bot_removed'
   messageId: string | null
+  /** 话题 id（thread_id）；非话题消息为空 */
+  threadId: string | null
   senderOpenId: string | null
   senderName: string | null
   senderUserId: number | null

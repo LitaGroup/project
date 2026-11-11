@@ -2,8 +2,10 @@ import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createHash, randomBytes } from 'crypto';
 import { FeishuBotCryptoService } from './feishu-bot-crypto.service';
 import { localPathOf } from './feishu-bot-client.service';
+import { parseInboundMessage } from './feishu-bot-event.service';
 import {
   chunkMarkdown,
+  FeishuBotMessageService,
   mapTextAnswer,
   markdownCard,
   splitAnswerLabels,
@@ -221,5 +223,98 @@ describe('飞书本地素材路径', () => {
     expect(localPathOf('/images/uploads/a.png')).toContain('uploads/a.png');
     expect(localPathOf('/files/../etc/passwd')).toBeNull();
     expect(localPathOf('https://example.com/a.png')).toBeNull();
+  });
+});
+
+describe('飞书 Markdown 消息发送', () => {
+  const clientMock = () => ({
+    sendCard: jest.fn(() => Promise.resolve({ messageId: 'om_send' })),
+    replyCard: jest.fn(() => Promise.resolve({ messageId: 'om_reply' })),
+  });
+
+  it('指定回复目标时逐片走回复接口，否则群发', async () => {
+    const client = clientMock();
+    const service = new FeishuBotMessageService(client as never);
+    await service.sendMarkdown(
+      2,
+      {} as never,
+      'chat_id',
+      'oc_group',
+      '你好',
+      'om_1',
+    );
+    expect(client.replyCard).toHaveBeenCalledTimes(1);
+    expect(client.replyCard.mock.calls[0][2]).toBe('om_1');
+    expect(client.sendCard).not.toHaveBeenCalled();
+
+    await service.sendMarkdown(2, {} as never, 'chat_id', 'oc_group', '你好');
+    expect(client.sendCard).toHaveBeenCalledTimes(1);
+  });
+
+  it('提问卡片同样支持回复到指定消息', async () => {
+    const client = clientMock();
+    const service = new FeishuBotMessageService(client as never);
+    await service.sendQuestionCard(
+      2,
+      {} as never,
+      'chat_id',
+      'oc_group',
+      1,
+      'q1',
+      [{ question: '选哪个', options: [{ label: 'A' }] }],
+      'om_9',
+    );
+    expect(client.replyCard).toHaveBeenCalledTimes(1);
+    expect(client.replyCard.mock.calls[0][2]).toBe('om_9');
+    expect(client.sendCard).not.toHaveBeenCalled();
+  });
+});
+
+describe('飞书消息事件解析', () => {
+  it('解析话题字段 root_id / parent_id / thread_id', () => {
+    const message = parseInboundMessage({
+      message_id: 'om_2',
+      chat_id: 'oc_group',
+      chat_type: 'group',
+      message_type: 'text',
+      content: JSON.stringify({ text: '@_user_1 你好' }),
+      root_id: 'om_1',
+      parent_id: 'om_1',
+      thread_id: 'omt_1',
+      mentions: [
+        {
+          key: '@_user_1',
+          id: { open_id: 'ou_bot' },
+          name: '机器人',
+        },
+      ],
+    });
+    expect(message).toMatchObject({
+      messageId: 'om_2',
+      chatId: 'oc_group',
+      chatType: 'group',
+      rootId: 'om_1',
+      parentId: 'om_1',
+      threadId: 'omt_1',
+      mentions: [{ key: '@_user_1', openId: 'ou_bot', name: '机器人' }],
+    });
+  });
+
+  it('普通群消息不返回话题字段', () => {
+    const message = parseInboundMessage({
+      message_id: 'om_1',
+      chat_id: 'oc_group',
+      chat_type: 'group',
+      message_type: 'text',
+      content: '{}',
+    });
+    expect(message?.threadId).toBeUndefined();
+    expect(message?.rootId).toBeUndefined();
+    expect(message?.parentId).toBeUndefined();
+  });
+
+  it('缺少 message_id / chat_id 时返回 null', () => {
+    expect(parseInboundMessage({ message_id: 'om_1' })).toBeNull();
+    expect(parseInboundMessage({ chat_id: 'oc_group' })).toBeNull();
   });
 });

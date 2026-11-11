@@ -22,25 +22,37 @@ const MAX_TABLES_PER_CARD = 4;
 export class FeishuBotMessageService {
   constructor(private readonly client: FeishuBotClientService) {}
 
-  /** 发送 Markdown 回复：超长自动分片，逐片发卡 */
+  /**
+   * 发送 Markdown 回复：超长自动分片，逐片发卡。
+   * 传入 replyToMessageId 时以回复形式发出（话题群落回原话题；每个分片都必须走回复，
+   * 否则话题群里普通发送会掉到话题外）。
+   */
   async sendMarkdown(
     configId: number,
     secrets: FeishuBotSecrets,
     receiveIdType: FeishuReceiveIdType,
     receiveId: string,
     markdown: string,
+    replyToMessageId?: string,
   ): Promise<FeishuSendResult[]> {
     const chunks = chunkMarkdown(markdown);
     const results: FeishuSendResult[] = [];
     for (const chunk of chunks) {
       results.push(
-        await this.client.sendCard(
-          configId,
-          secrets,
-          receiveIdType,
-          receiveId,
-          markdownCard(chunk),
-        ),
+        replyToMessageId
+          ? await this.client.replyCard(
+              configId,
+              secrets,
+              replyToMessageId,
+              markdownCard(chunk),
+            )
+          : await this.client.sendCard(
+              configId,
+              secrets,
+              receiveIdType,
+              receiveId,
+              markdownCard(chunk),
+            ),
       );
     }
     return results;
@@ -59,6 +71,7 @@ export class FeishuBotMessageService {
     cardId: number,
     questionId: string,
     questions: FeishuBotCardQuestion[],
+    replyToMessageId?: string,
   ): Promise<FeishuSendResult> {
     const elements: Record<string, unknown>[] = [];
     if (questions.length > 1) {
@@ -122,10 +135,13 @@ export class FeishuBotMessageService {
         ],
       });
     }
-    return this.client.sendCard(configId, secrets, receiveIdType, receiveId, {
+    const card = {
       config: { wide_screen_mode: true },
       elements,
-    });
+    };
+    return replyToMessageId
+      ? this.client.replyCard(configId, secrets, replyToMessageId, card)
+      : this.client.sendCard(configId, secrets, receiveIdType, receiveId, card);
   }
 }
 

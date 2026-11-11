@@ -203,6 +203,12 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | `update_task_template` | `templateId`、`name?`、`description?`、`agentIds?` | 编辑任务定义 |
 | `delete_task_template` | `templateId` | 删除任务定义 |
 
+### 飞书会话历史
+
+| 工具 | 主要入参 | 说明 |
+|---|---|---|
+| `feishu_history` | `chat_id`、`thread_id?`、`limit?` | 查询机器人所在飞书群聊/话题/私聊最近 7 天内的消息（默认 20 条，最多 50）；需机器人绑定飞书应用且有消息读取权限 |
+
 ## 四、流式进度与超时
 
 - 运行类与 `pull_scripts` 工具在客户端携带 `_meta.progressToken` 时（opencode / Claude Code 默认行为），经 `notifications/progress` 实时推送脚本输出；

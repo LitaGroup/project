@@ -33,6 +33,7 @@ export const FEISHU_BOT_GROUP_RECORD_CONTENT_LIMIT = 4000;
 @Index('IDX_feishu_bot_group_records_group', ['groupId', 'id'])
 @Index('IDX_feishu_bot_group_records_configId', ['configId'])
 @Index('IDX_feishu_bot_group_records_createdAt', ['createdAt'])
+@Index('IDX_feishu_bot_group_records_thread', ['groupId', 'threadId'])
 export class FeishuBotGroupRecord {
   @PrimaryGeneratedColumn()
   id: number;
@@ -52,6 +53,10 @@ export class FeishuBotGroupRecord {
   /** 飞书消息 id（进/出群事件为空） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   messageId: string | null;
+
+  /** 话题 id（thread_id）；非话题消息为空 */
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  threadId: string | null;
 
   /** 发送者/操作者飞书 open_id */
   @Column({ type: 'varchar', length: 100, nullable: true })

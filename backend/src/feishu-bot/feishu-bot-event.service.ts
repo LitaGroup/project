@@ -265,32 +265,10 @@ export class FeishuBotEventService {
       openId,
       unionId: typeof senderId.union_id === 'string' ? senderId.union_id : null,
     };
-    const messageRaw = (data.message ?? {}) as Record<string, unknown>;
-    const chatType = messageRaw.chat_type === 'group' ? 'group' : 'p2p';
-    const mentions = Array.isArray(messageRaw.mentions)
-      ? (messageRaw.mentions as unknown[])
-          .map((item) => {
-            const mention = (item ?? {}) as Record<string, unknown>;
-            const id = (mention.id ?? {}) as Record<string, unknown>;
-            return {
-              key: asString(mention.key),
-              openId: asString(id.open_id),
-              name: asString(mention.name),
-            };
-          })
-          .filter((mention) => Boolean(mention.openId))
-      : [];
-    const message: FeishuInboundMessage = {
-      messageId: asString(messageRaw.message_id),
-      chatId: asString(messageRaw.chat_id),
-      chatType,
-      messageType: asString(messageRaw.message_type),
-      content: asString(messageRaw.content) || '{}',
-      mentions,
-    };
-    if (!message.messageId || !message.chatId) return;
+    const message = parseInboundMessage(data.message);
+    if (!message) return;
 
-    if (chatType === 'p2p') {
+    if (message.chatType === 'p2p') {
       const user = await this.identities.resolve(row, source);
       if (!user) {
         await this.p2p.sendGuidance(
@@ -404,4 +382,41 @@ export class FeishuBotEventService {
 /** 事件字段安全转字符串（仅接受 string，避免对象被模板字符串意外序列化） */
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+/**
+ * 解析事件的 message 结构为内部入站消息。
+ * 话题群/话题回复会带 root_id / parent_id / thread_id：
+ * reply 接口据此把机器人回执落回原话题，群聊逻辑据此隔离话题会话并拼接话题上文。
+ */
+export function parseInboundMessage(raw: unknown): FeishuInboundMessage | null {
+  const messageRaw = (raw ?? {}) as Record<string, unknown>;
+  const chatType = messageRaw.chat_type === 'group' ? 'group' : 'p2p';
+  const mentions = Array.isArray(messageRaw.mentions)
+    ? (messageRaw.mentions as unknown[])
+        .map((item) => {
+          const mention = (item ?? {}) as Record<string, unknown>;
+          const id = (mention.id ?? {}) as Record<string, unknown>;
+          return {
+            key: asString(mention.key),
+            openId: asString(id.open_id),
+            name: asString(mention.name),
+          };
+        })
+        .filter((mention) => Boolean(mention.openId))
+    : [];
+  const messageId = asString(messageRaw.message_id);
+  const chatId = asString(messageRaw.chat_id);
+  if (!messageId || !chatId) return null;
+  return {
+    messageId,
+    chatId,
+    chatType,
+    messageType: asString(messageRaw.message_type),
+    content: asString(messageRaw.content) || '{}',
+    mentions,
+    rootId: asString(messageRaw.root_id) || undefined,
+    parentId: asString(messageRaw.parent_id) || undefined,
+    threadId: asString(messageRaw.thread_id) || undefined,
+  };
 }

@@ -6,6 +6,8 @@ import { DefectsModule } from '../defects/defects.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { ExportsModule } from '../exports/exports.module';
 import { FeishuModule } from '../feishu/feishu.module';
+import { FeishuBotGroup } from '../feishu-bot/feishu-bot-group.entity';
+import { FeishuBotModule } from '../feishu-bot/feishu-bot.module';
 import { FilesModule } from '../files/files.module';
 import { GithubModule } from '../github/github.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
@@ -28,6 +30,7 @@ import { McpService } from './mcp.service';
 import { McpWorkController } from './mcp-work.controller';
 import { McpWorkService } from './mcp-work.service';
 import { WorkDefectTools } from './work-tools/work-defect.tools';
+import { WorkFeishuTools } from './work-tools/work-feishu.tools';
 import { WorkFileTools } from './work-tools/work-file.tools';
 import { WorkGithubTools } from './work-tools/work-github.tools';
 import { WorkKnowledgeTools } from './work-tools/work-knowledge.tools';
@@ -36,7 +39,6 @@ import { WorkRunTools } from './work-tools/work-run.tools';
 import { WorkTaskTools } from './work-tools/work-task.tools';
 import { WorkTicketTools } from './work-tools/work-ticket.tools';
 import { WorkAgentTools } from './work-tools/work-agent.tools';
-
 /**
  * MCP 开放：
  * - POST /api/mcp/bots：lita-bots，外部 Agent 把平台机器人当子 Agent 调用；
@@ -44,7 +46,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([McpCallLog]),
+    TypeOrmModule.forFeature([McpCallLog, FeishuBotGroup]),
     AuthModule,
     WorkersModule,
     ProjectsModule,
@@ -62,6 +64,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     SettingsModule,
     ScriptsModule,
     FeishuModule,
+    FeishuBotModule,
     GithubModule,
     TasksModule,
     TicketsModule,
@@ -80,6 +83,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     WorkTaskTools,
     WorkTicketTools,
     WorkAgentTools,
+    WorkFeishuTools,
   ],
 })
 export class McpModule {}

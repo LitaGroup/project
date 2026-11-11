@@ -583,6 +583,9 @@ export function FeishuBotGroupPolicyPage() {
           <p className="mt-4 text-xs text-foreground-muted">
             提示：需要在飞书开放平台为应用订阅「机器人进群」「机器人出群」事件（经长连接接收），
             才能在此看到完整的进出群记录；未订阅时仍可收到群消息并懒创建群记录。
+            「智能反馈」按 5 秒窗口 / 10 条上限批量处理消息，支持按消息 ID 定向回复；
+            话题消息会以回复形式落回原话题并按话题独立会话；「仅被 @」策略下机器人会补拉最近的话题/群聊消息作为上文，
+            需要应用开通消息读取权限（im:message 或 im:message.group_msg）。
           </p>
         </>
       )}
@@ -659,17 +662,20 @@ function RecordsView({
                 {formatTime(record.createdAt)}
               </TableCell>
               <TableCell className="align-top">
-                <Badge
-                  variant={
-                    record.kind === 'bot_added'
-                      ? 'success'
-                      : record.kind === 'bot_removed'
-                        ? 'warning'
-                        : 'soft'
-                  }
-                >
-                  {RECORD_KIND_LABELS[record.kind]}
-                </Badge>
+                <div className="flex flex-wrap items-center gap-1">
+                  <Badge
+                    variant={
+                      record.kind === 'bot_added'
+                        ? 'success'
+                        : record.kind === 'bot_removed'
+                          ? 'warning'
+                          : 'soft'
+                    }
+                  >
+                    {RECORD_KIND_LABELS[record.kind]}
+                  </Badge>
+                  {record.threadId && <Badge variant="soft">话题</Badge>}
+                </div>
               </TableCell>
               <TableCell className="align-top">
                 {record.senderName ?? record.senderOpenId ?? '-'}

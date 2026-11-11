@@ -52,6 +52,12 @@ export interface FeishuInboundMessage {
   content: string;
   /** 消息中的 @ 列表（群内识别是否 @机器人） */
   mentions?: { key: string; openId: string; name: string }[];
+  /** 话题根消息 id（话题内消息、引用回复返回） */
+  rootId?: string;
+  /** 被直接回复的父消息 id（话题内消息、引用回复返回） */
+  parentId?: string;
+  /** 话题 id（话题消息返回；普通群普通消息为空） */
+  threadId?: string;
 }
 
 /** 进行中的一轮飞书会话 */
@@ -70,13 +76,19 @@ interface P2PRun {
   timeout?: NodeJS.Timeout;
 }
 
-/** 飞书私聊首轮说明：说明通道与回复格式，不写入用户气泡 */
-const P2P_FIRST_PROMPT = [
-  '# 飞书私聊',
-  '',
-  '用户正在通过飞书与你一对一私聊。回复内容会以 Markdown 卡片发送到飞书，',
-  '请直接回答问题，保持简洁清晰；引用文件/图片时给出平台链接即可。',
-].join('\n');
+/** 飞书私聊首轮上下文：说明通道、场景与回复格式，不写入用户气泡 */
+export function buildP2PFirstPrompt(chatId: string): string {
+  return [
+    '# 飞书私聊上下文',
+    '',
+    '- 通道：飞书',
+    '- 场景：私聊',
+    `- 会话：${chatId}`,
+    '',
+    '用户正在通过飞书与你一对一私聊。回复内容会以 Markdown 卡片发送到飞书，',
+    '请直接回答问题，保持简洁清晰；引用文件/图片时给出平台链接即可。',
+  ].join('\n');
+}
 
 /**
  * 飞书私聊桥接：
@@ -145,7 +157,26 @@ export class FeishuBotP2PService {
       return;
     }
 
-    const { text, files } = await this.inboundContent(config, secrets, message);
+    let text: string;
+    let files: WorkerDebugAttachment[];
+    try {
+      ({ text, files } = await this.inboundContent(config, secrets, message));
+    } catch (error) {
+      // 媒体下载/落盘失败必须显式回执，否则用户侧完全无反应（多为应用缺素材下载权限）
+      this.logger.warn(
+        `飞书附件接收失败（config#${config.id}, message=${message.messageId}）: ${(error as Error).message}`,
+      );
+      await this.client
+        .sendText(
+          config.id,
+          secrets,
+          'chat_id',
+          receiveId,
+          `附件接收失败：${(error as Error).message}\n请检查机器人应用是否开通「获取单聊、群组消息（im:message）」权限，或改发文本消息。`,
+        )
+        .catch(() => {});
+      return;
+    }
     if (!text && files.length === 0) {
       await this.client.sendText(
         config.id,
@@ -192,7 +223,7 @@ export class FeishuBotP2PService {
         return;
       }
       workerId = worker.id;
-      firstPrompt = P2P_FIRST_PROMPT;
+      firstPrompt = buildP2PFirstPrompt(message.chatId);
     }
 
     const scope = `feishu:p2p:${message.chatId}`;
@@ -221,7 +252,11 @@ export class FeishuBotP2PService {
 
     try {
       if (config.kind === 'official') {
-        await this.personalAgents.send(user, text, { scope, files });
+        await this.personalAgents.send(user, text, {
+          scope,
+          files,
+          channelContext: buildP2PFirstPrompt(message.chatId),
+        });
       } else {
         await this.debug.send(user.id, workerId, text, {
           scope,
@@ -403,7 +438,12 @@ export class FeishuBotP2PService {
           for (const imageKey of imageKeys) {
             if (!imageKey) continue;
             files.push(
-              await this.saveImageAttachment(config, secrets, imageKey),
+              await this.saveImageAttachment(
+                config,
+                secrets,
+                message.messageId,
+                imageKey,
+              ),
             );
           }
         }
@@ -414,7 +454,12 @@ export class FeishuBotP2PService {
           const imageKey = asString(payload.image_key);
           if (imageKey) {
             files.push(
-              await this.saveImageAttachment(config, secrets, imageKey),
+              await this.saveImageAttachment(
+                config,
+                secrets,
+                message.messageId,
+                imageKey,
+              ),
             );
           }
         }
@@ -428,7 +473,13 @@ export class FeishuBotP2PService {
           const fileName = asString(payload.file_name) || '飞书文件';
           if (fileKey) {
             files.push(
-              await this.saveFileAttachment(config, secrets, fileKey, fileName),
+              await this.saveFileAttachment(
+                config,
+                secrets,
+                message.messageId,
+                fileKey,
+                fileName,
+              ),
             );
           }
         }
@@ -444,11 +495,13 @@ export class FeishuBotP2PService {
   private async saveImageAttachment(
     config: FeishuBotConfig,
     secrets: FeishuBotSecrets,
+    messageId: string,
     imageKey: string,
   ): Promise<WorkerDebugAttachment> {
     const buffer = await this.client.downloadImage(
       config.id,
       secrets,
+      messageId,
       imageKey,
     );
     const path = feishuAttachmentPath('.png');
@@ -467,10 +520,16 @@ export class FeishuBotP2PService {
   private async saveFileAttachment(
     config: FeishuBotConfig,
     secrets: FeishuBotSecrets,
+    messageId: string,
     fileKey: string,
     fileName: string,
   ): Promise<WorkerDebugAttachment> {
-    const buffer = await this.client.downloadFile(config.id, secrets, fileKey);
+    const buffer = await this.client.downloadFile(
+      config.id,
+      secrets,
+      messageId,
+      fileKey,
+    );
     const safeName = fileName.replace(/[\\/\r\n]+/g, '_').slice(0, 120);
     const ext = extname(safeName).toLowerCase().slice(0, 12);
     const path = feishuAttachmentPath(ext || '.bin');
