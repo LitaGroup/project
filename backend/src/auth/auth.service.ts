@@ -171,10 +171,24 @@ export class AuthService {
   ): Promise<User> {
     // 部门查不到（无通讯录权限等）为 null，更新时保留旧值
     const department = await this.feishu.getUserDepartment(info.openId);
-    const existing = await this.usersRepo.findOne({
-      where: { feishuOpenId: info.openId },
-    });
+    // open_id 按 APP 隔离：更换飞书应用后同一人会拿到新 open_id。
+    // 先按跨 APP 稳定的 union_id 认人，命中即原位刷新 open_id，避免重复建号；
+    // 查不到再按 open_id 兜底（union_id 缺失的历史行）。
+    let existing: User | null = info.unionId
+      ? await this.usersRepo.findOne({ where: { unionId: info.unionId } })
+      : null;
+    if (existing && existing.feishuOpenId !== info.openId) {
+      this.logger.log(
+        `open_id 归位（换 APP）：${existing.name} ${existing.feishuOpenId} → ${info.openId}`,
+      );
+    }
+    if (!existing) {
+      existing = await this.usersRepo.findOne({
+        where: { feishuOpenId: info.openId },
+      });
+    }
     if (existing) {
+      existing.feishuOpenId = info.openId;
       existing.name = info.name ?? existing.name;
       existing.avatarUrl = info.avatarUrl ?? existing.avatarUrl;
       existing.email = info.email ?? existing.email;
@@ -438,9 +452,18 @@ export class AuthService {
     let created = 0;
     let updated = 0;
     for (const c of contacts) {
-      const existing = await this.usersRepo.findOne({
-        where: { feishuOpenId: c.openId },
-      });
+      // 同登录逻辑：先按 union_id 认人（跨 APP 稳定），命中原位刷新 open_id；再按 open_id 兜底
+      let existing: User | null = c.unionId
+        ? await this.usersRepo.findOne({ where: { unionId: c.unionId } })
+        : null;
+      if (existing && existing.feishuOpenId !== c.openId) {
+        existing.feishuOpenId = c.openId;
+      }
+      if (!existing) {
+        existing = await this.usersRepo.findOne({
+          where: { feishuOpenId: c.openId },
+        });
+      }
       if (existing) {
         existing.name = c.name || existing.name;
         existing.avatarUrl = c.avatarUrl ?? existing.avatarUrl;
