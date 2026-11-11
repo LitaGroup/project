@@ -137,7 +137,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/requirements', label: '需求', icon: Briefcase, ready: true },
       { to: '/iterations', label: '迭代', icon: TimelineEvent, ready: true },
       { to: '/research', label: '调研', icon: Search, ready: false },
-      { to: '/feedback', label: '反馈', icon: Bug, ready: false },
+      { to: '/feedback', label: '反馈', icon: Bug, ready: true },
     ],
   },
   {
