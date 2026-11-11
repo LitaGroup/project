@@ -29,6 +29,7 @@ import {
   PopoverTitle,
   PopoverDescription,
 } from '@appica/ui-react/popover'
+import { Checkbox } from '@appica/ui-react/checkbox'
 import { ArrowLeft, ChevronLeft, ChevronRight } from '@appica/icons-react'
 import {
   api,
@@ -55,11 +56,16 @@ const RECORD_PAGE_SIZE = 20
 
 type Feedback = { id: string; kind: 'success' | 'failure'; message: string }
 
+/** 可经下拉设置的策略：反馈采集只通过「收录群」选择器批量配置，不进下拉 */
+const EDITABLE_GROUP_POLICIES = FEISHU_BOT_GROUP_POLICIES.filter(
+  (policy) => policy !== 'feedback',
+)
+
 /** 策略选择项（含跟随默认） */
 const POLICY_ITEMS: Record<string, string> = {
   [INHERIT_VALUE]: '跟随默认',
   ...Object.fromEntries(
-    FEISHU_BOT_GROUP_POLICIES.map((policy) => [
+    EDITABLE_GROUP_POLICIES.map((policy) => [
       policy,
       FEISHU_BOT_GROUP_POLICY_LABELS[policy],
     ]),
@@ -68,7 +74,7 @@ const POLICY_ITEMS: Record<string, string> = {
 
 /** 默认策略选择项 */
 const DEFAULT_POLICY_ITEMS: Record<string, string> = Object.fromEntries(
-  FEISHU_BOT_GROUP_POLICIES.map((policy) => [
+  EDITABLE_GROUP_POLICIES.map((policy) => [
     policy,
     FEISHU_BOT_GROUP_POLICY_LABELS[policy],
   ]),
@@ -142,6 +148,12 @@ export function FeishuBotGroupPolicyPage() {
   const [defaultPolicy, setDefaultPolicy] =
     useState<FeishuBotGroupPolicy>('at')
   const [groups, setGroups] = useState<FeishuBotGroupView[]>([])
+  /** 配置绑定「系统-反馈处理」：展示「收录群」选择视图 */
+  const [feedbackCollector, setFeedbackCollector] = useState(false)
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
+    new Set(),
+  )
+  const [savingGroups, setSavingGroups] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -188,6 +200,14 @@ export function FeishuBotGroupPolicyPage() {
     const data = await api.listFeishuBotGroups(configId)
     setDefaultPolicy(data.defaultPolicy)
     setGroups(data.groups)
+    setFeedbackCollector(data.feedbackCollector)
+    setSelectedGroupIds(
+      new Set(
+        data.groups
+          .filter((group) => group.policy === 'feedback')
+          .map((group) => group.id),
+      ),
+    )
     return data
   }, [configId])
 
@@ -276,6 +296,36 @@ export function FeishuBotGroupPolicyPage() {
     } catch (e) {
       setGroups(previous)
       showFeedback(`group-${group.id}`, 'failure', (e as Error).message)
+    }
+  }
+
+  const toggleFeedbackGroup = (groupId: number, checked: boolean) => {
+    setSelectedGroupIds((current) => {
+      const next = new Set(current)
+      if (checked) next.add(groupId)
+      else next.delete(groupId)
+      return next
+    })
+  }
+
+  /** 收录群批量保存：选中群自动收录话题反馈，取消选中恢复跟随默认策略 */
+  const saveFeedbackGroups = async () => {
+    if (!config) return
+    setSavingGroups(true)
+    try {
+      await api.saveFeishuBotFeedbackGroups(config.id, [...selectedGroupIds])
+      await loadGroups()
+      showFeedback(
+        'feedback-groups',
+        'success',
+        selectedGroupIds.size > 0
+          ? `已保存：收录 ${selectedGroupIds.size} 个群`
+          : '已保存：当前没有收录任何群',
+      )
+    } catch (e) {
+      showFeedback('feedback-groups', 'failure', (e as Error).message)
+    } finally {
+      setSavingGroups(false)
     }
   }
 
@@ -425,7 +475,87 @@ export function FeishuBotGroupPolicyPage() {
         />
       ) : (
         <>
-          <Card className="mb-6">
+          {feedbackCollector ? (
+            <Card className="mb-6">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>收录群</CardTitle>
+                  <p className="mt-1 text-sm text-foreground-muted">
+                    勾选的群开启反馈收录：一个飞书话题=一条平台反馈，话题内后续成员消息自动收录为跟帖，
+                    由「系统-反馈处理」判断分发；非话题消息仅记录。
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-foreground-muted">
+                    已选 {selectedGroupIds.size} / {groups.length}
+                  </span>
+                  <Popover
+                    open={feedback?.id === 'feedback-groups'}
+                    onOpenChange={(open) => {
+                      if (!open && feedback?.kind === 'failure') {
+                        clearTimer()
+                        setFeedback(null)
+                      }
+                    }}
+                  >
+                    <PopoverTrigger
+                      render={
+                        <span className="inline-flex">
+                          <Button
+                            size="sm"
+                            disabled={savingGroups}
+                            onClick={() => void saveFeedbackGroups()}
+                          >
+                            {savingGroups ? '保存中…' : '保存收录设置'}
+                          </Button>
+                        </span>
+                      }
+                    />
+                    <PopoverContent side="top" align="center">
+                      <PopoverTitle>
+                        {feedback?.kind === 'success' ? '成功' : '失败'}
+                      </PopoverTitle>
+                      <PopoverDescription>
+                        {feedback?.message}
+                      </PopoverDescription>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </CardHeader>
+              {groups.length > 0 ? (
+                <div className="border-t border-border">
+                  {groups.map((group) => (
+                    <label
+                      key={group.id}
+                      className="flex cursor-pointer items-center gap-3 border-b border-border-strong px-6 py-3 last:border-b-0 hover:bg-background-muted"
+                    >
+                      <Checkbox
+                        checked={selectedGroupIds.has(group.id)}
+                        onCheckedChange={(checked) =>
+                          toggleFeedbackGroup(group.id, checked === true)
+                        }
+                      />
+                      <span
+                        className="min-w-0 flex-1 truncate text-sm font-medium"
+                        title={group.name ?? group.chatId}
+                      >
+                        {group.name ?? '未命名群'}
+                      </span>
+                      <code className="text-xs text-foreground-muted">
+                        {group.chatId}
+                      </code>
+                      {group.leftAt && <Badge variant="soft">已移出</Badge>}
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="border-t border-border px-6 py-4 text-sm text-foreground-muted">
+                  机器人还没有被拉入任何外部群：先在飞书把「系统-反馈处理」机器人拉进用户反馈群，群会自动出现在这里。
+                </p>
+              )}
+            </Card>
+          ) : (
+            <Card className="mb-6">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>默认策略</CardTitle>
@@ -456,7 +586,7 @@ export function FeishuBotGroupPolicyPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {FEISHU_BOT_GROUP_POLICIES.map((policy) => (
+                          {EDITABLE_GROUP_POLICIES.map((policy) => (
                             <SelectItem key={policy} value={policy}>
                               {FEISHU_BOT_GROUP_POLICY_LABELS[policy]}
                             </SelectItem>
@@ -475,6 +605,7 @@ export function FeishuBotGroupPolicyPage() {
               </Popover>
             </CardHeader>
           </Card>
+          )}
 
           <Table hoverableRows>
             <TableHeader>
@@ -506,6 +637,21 @@ export function FeishuBotGroupPolicyPage() {
                     )}
                   </TableCell>
                   <TableCell>
+                    {feedbackCollector ? (
+                      <>
+                        {group.policy === 'feedback' ? (
+                          <Badge variant="success">反馈收录</Badge>
+                        ) : (
+                          <Badge variant="soft">未收录</Badge>
+                        )}
+                        <p className="mt-1 text-xs text-foreground-muted">
+                          {group.policy === 'feedback'
+                            ? '话题消息自动收录为反馈/跟帖'
+                            : '在上方「收录群」勾选后生效'}
+                        </p>
+                      </>
+                    ) : (
+                      <>
                     <Popover
                       open={feedback?.id === `group-${group.id}`}
                       onOpenChange={(open) => {
@@ -532,7 +678,7 @@ export function FeishuBotGroupPolicyPage() {
                                 <SelectItem value={INHERIT_VALUE}>
                                   {POLICY_ITEMS[INHERIT_VALUE]}
                                 </SelectItem>
-                                {FEISHU_BOT_GROUP_POLICIES.map((policy) => (
+                                {EDITABLE_GROUP_POLICIES.map((policy) => (
                                   <SelectItem key={policy} value={policy}>
                                     {FEISHU_BOT_GROUP_POLICY_LABELS[policy]}
                                   </SelectItem>
@@ -551,9 +697,12 @@ export function FeishuBotGroupPolicyPage() {
                         </PopoverDescription>
                       </PopoverContent>
                     </Popover>
-                    <p className="mt-1 text-xs text-foreground-muted">
-                      当前生效：{FEISHU_BOT_GROUP_POLICY_LABELS[group.effectivePolicy]}
-                    </p>
+                        <p className="mt-1 text-xs text-foreground-muted">
+                          当前生效：
+                          {FEISHU_BOT_GROUP_POLICY_LABELS[group.effectivePolicy]}
+                        </p>
+                      </>
+                    )}
                   </TableCell>
                   <TableCell>{formatTime(group.lastMessageAt)}</TableCell>
                   <TableCell>{group.messageCount}</TableCell>
@@ -584,6 +733,8 @@ export function FeishuBotGroupPolicyPage() {
             提示：需要在飞书开放平台为应用订阅「机器人进群」「机器人出群」事件（经长连接接收），
             才能在此看到完整的进出群记录；未订阅时仍可收到群消息并懒创建群记录。
             「智能反馈」按 5 秒窗口 / 10 条上限批量处理消息，支持按消息 ID 定向回复；
+            「反馈采集」（仅「系统-反馈处理」机器人的收录群）同样按批次唤起机器人：
+            一个话题自动收录为一条平台反馈，话题内后续成员消息收录为跟帖；
             话题消息会以回复形式落回原话题并按话题独立会话；「仅被 @」策略下机器人会补拉最近的话题/群聊消息作为上文，
             需要应用开通消息读取权限（im:message 或 im:message.group_msg）。
           </p>

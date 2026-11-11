@@ -1,6 +1,8 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../auth/user.entity';
+import { FeedbackReply } from '../feedbacks/feedback-reply.entity';
+import { Feedback } from '../feedbacks/feedback.entity';
 import { Project } from '../projects/project.entity';
 import { Task } from '../tasks/task.entity';
 import { TasksModule } from '../tasks/tasks.module';
@@ -21,6 +23,7 @@ import { FeishuBotIdentity } from './feishu-bot-identity.entity';
 import { FeishuBotIdentityService } from './feishu-bot-identity.service';
 import { FeishuBotEvent } from './feishu-bot-event.entity';
 import { FeishuBotGroup } from './feishu-bot-group.entity';
+import { FeishuBotFeedbackService } from './feishu-bot-feedback.service';
 import { FeishuBotGroupChatService } from './feishu-bot-group-chat.service';
 import { FeishuBotGroupRecord } from './feishu-bot-group-record.entity';
 import { FeishuBotLongConnectionService } from './feishu-bot-long-connection.service';
@@ -52,6 +55,8 @@ import { FeishuBotController } from './feishu-bot.controller';
       FeishuBotApprovalCard,
       FeishuBotGroup,
       FeishuBotGroupRecord,
+      Feedback,
+      FeedbackReply,
       Worker,
       Project,
       Task,
@@ -75,6 +80,7 @@ import { FeishuBotController } from './feishu-bot.controller';
     FeishuBotP2PService,
     FeishuBotTaskChatService,
     FeishuBotProjectChatService,
+    FeishuBotFeedbackService,
     FeishuBotGroupChatService,
     FeishuBotApprovalService,
     FeishuBotEventService,

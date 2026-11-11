@@ -35,6 +35,7 @@ import type {
 } from './feishu-bot-config.entity';
 import { FeishuBotConfigService } from './feishu-bot-config.service';
 import {
+  FEISHU_BOT_FEEDBACK_GROUP_POLICY,
   FeishuBotGroup,
   isFeishuBotGroupPolicy,
   type FeishuBotGroupPolicy,
@@ -45,6 +46,10 @@ import {
   type FeishuBotGroupRecordDecision,
   type FeishuBotGroupRecordKind,
 } from './feishu-bot-group-record.entity';
+import {
+  FeishuBotFeedbackService,
+  type CollectedTopicFeedback,
+} from './feishu-bot-feedback.service';
 import {
   FeishuBotMessageService,
   mapTextAnswer,
@@ -112,6 +117,11 @@ export const FEISHU_GROUP_SILENT_MARKERS = [
 const SMART_MODE_PROMPT =
   '群聊模式：先判断这批消息是否需要你回应。不需要回应时只输出 [不回复]，不要输出其他内容；需要回应时按下方回复方式输出。';
 
+/** 反馈采集模式追加的提示词：收录由平台完成，AI 只判断分发 */
+const FEEDBACK_MODE_PROMPT =
+  '反馈采集模式：这批消息已由平台自动收录进对应反馈，你只需判断是否需要分发动作或回复。' +
+  '无需任何动作与回复时只输出 [不回复]，不要输出其他内容；需要回应时按下方回复方式输出。';
+
 /** 群聊会话首轮上下文：通道、场景（群聊/话题）、群与回复方式 */
 export function buildGroupFirstPrompt(input: {
   chatName: string | null;
@@ -127,12 +137,14 @@ export function buildGroupFirstPrompt(input: {
       ? '智能反馈（批量接收消息，可选择回复或不回复）'
       : input.policy === 'at'
         ? '仅被 @ 后反馈'
-        : '仅记录';
+        : input.policy === 'feedback'
+          ? '反馈采集（一个话题一条反馈，消息由平台自动收录，你判断分发）'
+          : '仅记录';
   const chat = input.chatName
     ? `${input.chatName}（chat_id：${input.chatId}）`
     : `chat_id：${input.chatId}`;
   const replyRules =
-    input.policy === 'smart'
+    input.policy === 'smart' || input.policy === 'feedback'
       ? [
           '# 回复方式',
           '',
@@ -207,7 +219,7 @@ interface PendingGroupMessage {
   replyToMessageId: string | null;
 }
 
-/** 智能模式待处理批次（按群 + 话题缓冲） */
+/** 智能/反馈模式待处理批次（按群 + 话题缓冲） */
 interface GroupBatch {
   config: FeishuBotConfig;
   secrets: FeishuBotSecrets;
@@ -215,6 +227,10 @@ interface GroupBatch {
   chatId: string;
   threadId: string | null;
   scope: string;
+  /** 批次生效策略（决定投递提示词与静默语义） */
+  policy: FeishuBotGroupPolicy;
+  /** 反馈采集批次对应的平台反馈 ID（智能批次为 null） */
+  feedbackId: number | null;
   messages: PendingGroupMessage[];
   timer: NodeJS.Timeout | null;
 }
@@ -474,6 +490,7 @@ export class FeishuBotGroupChatService {
     private readonly client: FeishuBotClientService,
     private readonly messages: FeishuBotMessageService,
     private readonly identities: FeishuBotIdentityService,
+    private readonly feedback: FeishuBotFeedbackService,
     private readonly debug: WorkerDebugService,
     @InjectRepository(FeishuBotGroup)
     private readonly groups: Repository<FeishuBotGroup>,
@@ -606,6 +623,23 @@ export class FeishuBotGroupChatService {
     const policy = resolveGroupPolicy(group.policy, defaultPolicy);
     if (policy === 'record') {
       await this.markDecision(record.id, 'record_only');
+      return;
+    }
+
+    // 反馈采集模式：话题消息先由平台确定性收录（首帖建反馈并回执编号），再按批次交给机器人
+    if (policy === 'feedback') {
+      await this.handleFeedbackMessage(
+        config,
+        secrets,
+        group,
+        sender,
+        message,
+        threadId,
+        replyToMessageId,
+        user,
+        extracted,
+        record,
+      );
       return;
     }
 
@@ -792,9 +826,101 @@ export class FeishuBotGroupChatService {
     this.waitForRun(run, secrets, runKey);
   }
 
+  // ==== 反馈采集模式 ====
+
+  /**
+   * 处理反馈采集群的一条消息：
+   * - 非话题消息仅记录，不收录；
+   * - 话题消息先由平台收录（首帖创建反馈并在话题内回执编号；后续消息写跟帖）；
+   * - 收录成功后进入批次：首帖立即 flush 唤起分发判断，跟帖按窗口汇总。
+   */
+  private async handleFeedbackMessage(
+    config: FeishuBotConfig,
+    secrets: FeishuBotSecrets,
+    group: FeishuBotGroup,
+    sender: FeishuSenderId,
+    message: FeishuInboundMessage,
+    threadId: string | null,
+    replyToMessageId: string | null,
+    user: User | null,
+    extracted: { text: string; supported: boolean },
+    record: FeishuBotGroupRecord,
+  ): Promise<void> {
+    if (!threadId) {
+      await this.markDecision(record.id, 'record_only');
+      return;
+    }
+    let collected: CollectedTopicFeedback;
+    try {
+      collected = await this.feedback.collect({
+        config,
+        secrets,
+        group,
+        message,
+        threadId,
+        user,
+        senderOpenId: sender.openId || null,
+        text: extracted.text,
+      });
+    } catch (error) {
+      await this.markDecision(record.id, 'error', (error as Error).message);
+      return;
+    }
+    if (collected.duplicated) {
+      // 事件重复投递：消息已收录过，不再唤起机器人
+      await this.markDecision(record.id, 'record_only');
+      return;
+    }
+    if (collected.isNew) {
+      const receipt = this.feedback.receiptText(collected.feedback);
+      await this.sendTextTo(
+        config.id,
+        secrets,
+        message.chatId,
+        replyToMessageId,
+        receipt,
+      );
+      await this.writeRecord({
+        configId: config.id,
+        groupId: group.id,
+        kind: 'reply',
+        threadId,
+        content: receipt,
+      }).catch(() => {});
+    }
+    // 话题内有待回答提问时，文本优先作为答案（与智能模式一致）
+    const active = this.runs.get(`${config.id}:${message.chatId}`);
+    if (active?.pendingQuestion && active.threadId === threadId) {
+      await this.answerPendingByText(
+        config,
+        secrets,
+        active,
+        extracted.text,
+        replyToMessageId,
+      );
+      return;
+    }
+    await this.enqueueSmartMessage(
+      config,
+      secrets,
+      group,
+      message,
+      threadId,
+      replyToMessageId,
+      user,
+      extracted,
+      record,
+      {
+        policy: 'feedback',
+        feedbackId: collected.feedback.id,
+        flushNow: collected.isNew,
+      },
+    );
+  }
+
   // ==== 智能模式批量缓冲 ====
 
-  /** 智能模式入队：文本/媒体进入批次，按 5 秒窗口或 10 条上限触发处理 */
+  /** 智能/反馈模式入队：文本/媒体进入批次，按 5 秒窗口或 10 条上限触发处理；反馈首帖立即 flush */
   private async enqueueSmartMessage(
     config: FeishuBotConfig,
     secrets: FeishuBotSecrets,
@@ -805,15 +931,31 @@ export class FeishuBotGroupChatService {
     user: User | null,
     extracted: { text: string; supported: boolean },
     record: FeishuBotGroupRecord,
+    options?: {
+      /** 批次策略：默认 smart；反馈采集群传 feedback */
+      policy?: FeishuBotGroupPolicy;
+      /** 反馈采集批次对应的反馈 ID */
+      feedbackId?: number;
+      /** 立即 flush（反馈首帖：收录后马上唤起分发判断，不等窗口） */
+      flushNow?: boolean;
+    },
   ): Promise<void> {
+    const policy = options?.policy ?? 'smart';
+    const isFeedback = policy === 'feedback';
     if (
+      !isFeedback &&
       !extracted.supported &&
       !SMART_BATCH_MEDIA_TYPES.has(message.messageType)
     ) {
       await this.markDecision(record.id, 'record_only');
       return;
     }
-    if (message.messageType === 'text' && !extracted.text) {
+    if (!isFeedback && message.messageType === 'text' && !extracted.text) {
+      await this.markDecision(record.id, 'record_only');
+      return;
+    }
+    if (isFeedback && message.messageType === 'text' && !extracted.text) {
+      // 反馈群空文本消息已被平台收录，无需再唤起机器人
       await this.markDecision(record.id, 'record_only');
       return;
     }
@@ -827,10 +969,15 @@ export class FeishuBotGroupChatService {
         chatId: message.chatId,
         threadId,
         scope: groupScopeOf(message.chatId, threadId),
+        policy,
+        feedbackId: options?.feedbackId ?? null,
         messages: [],
         timer: null,
       };
       this.batches.set(key, batch);
+    }
+    if (options?.feedbackId !== undefined) {
+      batch.feedbackId = options.feedbackId;
     }
     batch.messages.push({
       recordId: record.id,
@@ -841,7 +988,10 @@ export class FeishuBotGroupChatService {
       senderName: user?.name ?? '群成员',
       replyToMessageId,
     });
-    if (batch.messages.length >= SMART_BATCH_MAX_MESSAGES) {
+    if (
+      options?.flushNow ||
+      batch.messages.length >= SMART_BATCH_MAX_MESSAGES
+    ) {
       this.clearBatchTimer(batch);
       await this.flushBatch(key);
       return;
@@ -923,7 +1073,7 @@ export class FeishuBotGroupChatService {
         scope: batch.scope,
         threadId: batch.threadId,
         replyToMessageId: last.replyToMessageId,
-        policy: 'smart',
+        policy: batch.policy,
         recordId: 0,
         recordIds: messages.map((item) => item.recordId),
         incomingMessageId: last.messageId,
@@ -944,9 +1094,12 @@ export class FeishuBotGroupChatService {
               chatName: batch.group.name,
               chatId: batch.chatId,
               threadId: batch.threadId,
-              policy: 'smart',
+              policy: batch.policy,
             }),
-            promptPrefix: SMART_MODE_PROMPT,
+            promptPrefix:
+              batch.policy === 'feedback'
+                ? FEEDBACK_MODE_PROMPT
+                : SMART_MODE_PROMPT,
           },
         );
       } catch (error) {
@@ -986,7 +1139,7 @@ export class FeishuBotGroupChatService {
     }
   }
 
-  /** 批次消息拼成提示词：[发送者|消息ID] 内容，多条用 --- 分隔 */
+  /** 批次消息拼成提示词：[发送者|消息ID] 内容，多条用 --- 分隔；反馈批次头部标注对应反馈 */
   private async buildBatchPrompt(
     batch: GroupBatch,
     messages: PendingGroupMessage[],
@@ -997,7 +1150,15 @@ export class FeishuBotGroupChatService {
       if (!text) continue;
       lines.push(`[${item.senderName}|${item.messageId}] ${text}`);
     }
-    return lines.join('\n---\n');
+    const body = lines.join('\n---\n');
+    if (batch.feedbackId !== null) {
+      return [
+        `【反馈 #${batch.feedbackId}】本话题消息已由平台自动收录进该反馈（首帖为正文、后续为跟帖），请判断是否需要分发动作或回复。`,
+        '',
+        body,
+      ].join('\n');
+    }
+    return body;
   }
 
   /** 单条批次消息文本：文本压缩成单行，图片转存后给 HTTP 地址，其余给占位 */
@@ -1139,7 +1300,7 @@ export class FeishuBotGroupChatService {
     }));
   }
 
-  /** 修改单群策略（null = 跟随默认） */
+  /** 修改单群策略（null = 跟随默认）；反馈采集策略仅能经收录群批量端点设置 */
   async setGroupPolicy(
     configId: number,
     groupId: number,
@@ -1148,11 +1309,51 @@ export class FeishuBotGroupChatService {
     if (policy !== null && !isFeishuBotGroupPolicy(policy)) {
       throw new BadRequestException('未知的群聊答复策略');
     }
+    if (policy === FEISHU_BOT_FEEDBACK_GROUP_POLICY) {
+      throw new BadRequestException(
+        '反馈采集策略请在「收录群」配置中批量选择，不支持单群直接设置',
+      );
+    }
     const group = await this.groups.findOne({
       where: { id: groupId, configId },
     });
     if (!group) throw new NotFoundException('群不存在');
     await this.groups.update({ id: group.id }, { policy });
+  }
+
+  /**
+   * 收录群批量设置（仅「系统-反馈处理」机器人的飞书配置使用）：
+   * 选中的群置为反馈采集策略；原本被选中但本轮未选中的群恢复跟随默认策略。
+   */
+  async setFeedbackGroups(
+    configId: number,
+    groupIds: number[],
+  ): Promise<{ collected: number[] }> {
+    const ids = [...new Set(groupIds)];
+    if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+      throw new BadRequestException('收录群 ID 非法');
+    }
+    const all = await this.groups.find({ where: { configId } });
+    const known = new Set(all.map((group) => group.id));
+    for (const id of ids) {
+      if (!known.has(id)) {
+        throw new NotFoundException(`群 #${id} 不属于该机器人的飞书配置`);
+      }
+    }
+    const want = new Set(ids);
+    const collected: number[] = [];
+    for (const group of all) {
+      const selected = want.has(group.id);
+      if (selected) collected.push(group.id);
+      const next: FeishuBotGroupPolicy | null = selected
+        ? FEISHU_BOT_FEEDBACK_GROUP_POLICY
+        : group.policy === FEISHU_BOT_FEEDBACK_GROUP_POLICY
+          ? null
+          : group.policy;
+      if (next === group.policy) continue;
+      await this.groups.update({ id: group.id }, { policy: next });
+    }
+    return { collected };
   }
 
   /** 群时间线记录（分页，倒序） */
@@ -1697,8 +1898,12 @@ export class FeishuBotGroupChatService {
           run.reactionId,
         );
       }
-      // 智能模式且无错误、回复仅为静默标记：不发群消息，记为 AI 静默
-      if (!error && run.policy === 'smart' && isSilentReply(content)) {
+      // 智能/反馈模式且无错误、回复仅为静默标记：不发群消息，记为 AI 静默
+      if (
+        !error &&
+        (run.policy === 'smart' || run.policy === 'feedback') &&
+        isSilentReply(content)
+      ) {
         if (run.recordId) {
           await this.markDecision(run.recordId, 'silent');
         }

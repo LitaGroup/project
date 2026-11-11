@@ -123,11 +123,13 @@ export function FeishuBotConfigPage() {
     return map
   }, [configs])
 
-  /** 可绑定的机器人：AI 运行时 + 自定义 ID 段（含个人 AGENT；系统机器人除外） */
+  /** 可绑定的机器人：AI 运行时 + 自定义 ID 段（含个人 AGENT）；系统机器人仅「系统-反馈处理」例外 */
   const bindableWorkers = useMemo(
     () =>
       workers.filter(
-        (worker) => worker.runtime === 'opencode' && worker.id >= 1000,
+        (worker) =>
+          worker.runtime === 'opencode' &&
+          (worker.id >= 1000 || worker.systemKey === 'feedback-handler'),
       ),
     [workers],
   )

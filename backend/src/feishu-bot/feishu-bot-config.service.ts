@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WorkerRuntime } from '../common/enums';
 import { Worker } from '../workers/worker.entity';
+import { SYSTEM_FEEDBACK_HANDLER_WORKER_KEY } from '../workers/system-workers';
 import type {
   FeishuBotConfigView,
   FeishuBotSecrets,
@@ -21,6 +22,7 @@ import { FeishuBotCryptoService } from './feishu-bot-crypto.service';
 import { FeishuBotGroup } from './feishu-bot-group.entity';
 import {
   FEISHU_BOT_DEFAULT_GROUP_POLICY,
+  FEISHU_BOT_FEEDBACK_GROUP_POLICY,
   isFeishuBotGroupPolicy,
   type FeishuBotGroupPolicy,
 } from './feishu-bot-group.entity';
@@ -108,7 +110,10 @@ export class FeishuBotConfigService {
       throw new BadRequestException('真人机器人不支持绑定飞书应用');
     }
     if (worker.id < 1000) {
-      throw new BadRequestException('系统机器人不支持绑定飞书应用');
+      // 例外：「系统-反馈处理」需要绑定飞书应用进入用户反馈群采集话题反馈
+      if (worker.systemKey !== SYSTEM_FEEDBACK_HANDLER_WORKER_KEY) {
+        throw new BadRequestException('系统机器人不支持绑定飞书应用');
+      }
     }
     let row = await this.configs.findOne({ where: { workerId } });
     row = await this.applySave(row, worker.name, workerId, input);
@@ -171,6 +176,17 @@ export class FeishuBotConfigService {
     return this.toView(fresh);
   }
 
+  /** 配置绑定的机器人是否为「系统-反馈处理」（收录群配置仅对这一份飞书配置开放） */
+  async isFeedbackCollector(configId: number): Promise<boolean> {
+    const row = await this.configs.findOne({ where: { id: configId } });
+    if (!row || row.kind !== 'worker' || row.workerId === null) return false;
+    const worker = await this.workers.findOne({
+      where: { id: row.workerId },
+      select: { systemKey: true },
+    });
+    return worker?.systemKey === SYSTEM_FEEDBACK_HANDLER_WORKER_KEY;
+  }
+
   /** 外部群默认答复策略（单群策略在其之上覆盖；缺省仅被 @ 后回复） */
   async groupDefaultPolicy(configId: number): Promise<FeishuBotGroupPolicy> {
     const row = await this.loadWithSecrets(configId);
@@ -180,13 +196,18 @@ export class FeishuBotConfigService {
       : FEISHU_BOT_DEFAULT_GROUP_POLICY;
   }
 
-  /** 保存外部群默认答复策略（写入 config.policy.groupDefault） */
+  /** 保存外部群默认答复策略（写入 config.policy.groupDefault）；反馈采集策略不可作为默认策略 */
   async saveGroupDefaultPolicy(
     configId: number,
     policy: FeishuBotGroupPolicy,
   ): Promise<FeishuBotGroupPolicy> {
     if (!isFeishuBotGroupPolicy(policy)) {
       throw new BadRequestException('未知的群聊答复策略');
+    }
+    if (policy === FEISHU_BOT_FEEDBACK_GROUP_POLICY) {
+      throw new BadRequestException(
+        '反馈采集策略仅能对单个群开启，不支持设为默认策略',
+      );
     }
     const row = await this.loadWithSecrets(configId);
     const next = { ...(row.policy ?? {}), groupDefault: policy };

@@ -123,7 +123,7 @@ export function ProjectDefectsPage() {
     <div>
       <PageBreadcrumb
         items={[
-          { label: '项目', to: '/projects' },
+          { label: '需求', to: '/requirements' },
           { label: projectName ?? '…', to: `/projects/${projectId}` },
           { label: '缺陷' },
         ]}

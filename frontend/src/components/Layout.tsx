@@ -41,7 +41,6 @@ import {
   Folder,
   GitCommit,
   GitFork,
-  LayoutDashboard,
   ListCheck,
   Book,
   Package,
@@ -99,32 +98,46 @@ interface NavSection {
   adminOnly?: boolean
 }
 
+/**
+ * 研发工具页路径：业务分区瘦身后入口收敛到管理区「研发工具」分组，
+ * 路由保持原路径（深链兼容），顶部 Tab / 左侧导航按此归属「管理」分区。
+ */
+const TOOL_PATHS = [
+  '/defects',
+  '/tests',
+  '/checks',
+  '/exports',
+  '/schedules',
+  '/documents',
+  '/resources',
+  '/milestones',
+  '/commits',
+  '/apps',
+  '/settings',
+]
+
+const isToolPath = (p: string) => TOOL_PATHS.some((t) => p.startsWith(t))
+
 const NAV_SECTIONS: NavSection[] = [
   {
-    key: 'projects',
-    label: '项目',
-    to: '/',
+    // 业务分区：只保留四个业务栏目；概览/用例/检查等研发工具页入口移至管理区「研发工具」分组，
+    // 旧路由（/projects、/defects 等）保留兼容，项目详情与深链不受影响
+    key: 'business',
+    label: '业务',
+    to: '/requirements',
     match: (p) =>
       !p.startsWith('/admin') &&
       !p.startsWith('/tasks') &&
       !p.startsWith('/tickets') &&
       !p.startsWith('/docs') &&
       !p.startsWith('/robots') &&
-      !p.startsWith('/workbench'),
+      !p.startsWith('/workbench') &&
+      !isToolPath(p),
     items: [
-      { to: '/', label: '概览', icon: LayoutDashboard, ready: true },
-      { to: '/projects', label: '项目', icon: Briefcase, ready: true },
-      { to: '/tests', label: '用例', icon: ListCheck, ready: true },
-      { to: '/checks', label: '检查', icon: CircleCheck, ready: true },
-      { to: '/exports', label: '导出', icon: FileExport, ready: true },
-      { to: '/defects', label: '缺陷', icon: Bug, ready: true },
-      { to: '/documents', label: '文档', icon: FileText, ready: true },
-      { to: '/resources', label: '资源', icon: Folder, ready: true },
-      { to: '/milestones', label: '节点', icon: TimelineEvent, ready: true },
-      { to: '/commits', label: '提交', icon: GitCommit, ready: true },
-      { to: '/schedules', label: '定时任务', icon: CalendarClock, ready: true },
-      { to: '/apps', label: 'APP', icon: DeviceMobile, ready: true },
-      { to: '/settings', label: '设置', icon: Settings, ready: true },
+      { to: '/requirements', label: '需求', icon: Briefcase, ready: true },
+      { to: '/iterations', label: '迭代', icon: TimelineEvent, ready: true },
+      { to: '/research', label: '调研', icon: Search, ready: false },
+      { to: '/feedback', label: '反馈', icon: Bug, ready: false },
     ],
   },
   {
@@ -171,19 +184,41 @@ const NAV_SECTIONS: NavSection[] = [
     label: '管理',
     to: '/admin/users',
     adminOnly: true,
-    match: (p) => p.startsWith('/admin'),
-    items: [
-      { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
-      { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
-      { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
-      { to: '/admin/github-access', label: 'GitHub 权限', icon: Settings, ready: true },
-      { to: '/admin/feishu-config', label: '飞书配置', icon: PlugConnected, ready: true },
-      { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },
-      { to: '/admin/workers', label: '机器人', icon: Robot, ready: true },
-      { to: '/admin/executors', label: '执行器', icon: Cpu, ready: true },
-      { to: '/admin/mcp-servers', label: 'MCP 配置', icon: PlugConnected, ready: true },
-      { to: '/admin/mcp-logs', label: 'MCP 调用', icon: PlugConnected, ready: true },
-      { to: '/admin/model-config', label: '模型配置', icon: Sparkles, ready: true },
+    match: (p) => p.startsWith('/admin') || isToolPath(p),
+    items: [],
+    groups: [
+      {
+        items: [
+          { to: '/admin/users', label: '用户列表', icon: Users, ready: true },
+          { to: '/admin/ticket-config', label: '工单配置', icon: ClipboardList, ready: true },
+          { to: '/admin/repos', label: '代码仓库', icon: GitFork, ready: true },
+          { to: '/admin/github-access', label: 'GitHub 权限', icon: Settings, ready: true },
+          { to: '/admin/feishu-config', label: '飞书配置', icon: PlugConnected, ready: true },
+          { to: '/admin/task-templates', label: '任务定义', icon: Package, ready: true },
+          { to: '/admin/workers', label: '机器人', icon: Robot, ready: true },
+          { to: '/admin/executors', label: '执行器', icon: Cpu, ready: true },
+          { to: '/admin/mcp-servers', label: 'MCP 配置', icon: PlugConnected, ready: true },
+          { to: '/admin/mcp-logs', label: 'MCP 调用', icon: PlugConnected, ready: true },
+          { to: '/admin/model-config', label: '模型配置', icon: Sparkles, ready: true },
+        ],
+      },
+      {
+        // 业务分区瘦身后，原全局工具页入口收敛到这里（路由不变，深链照常可用）
+        label: '研发工具',
+        items: [
+          { to: '/defects', label: '缺陷', icon: Bug, ready: true },
+          { to: '/tests', label: '用例', icon: ListCheck, ready: true },
+          { to: '/checks', label: '检查', icon: CircleCheck, ready: true },
+          { to: '/exports', label: '导出', icon: FileExport, ready: true },
+          { to: '/schedules', label: '定时任务', icon: CalendarClock, ready: true },
+          { to: '/documents', label: '文档', icon: FileText, ready: true },
+          { to: '/resources', label: '资源', icon: Folder, ready: true },
+          { to: '/milestones', label: '节点', icon: TimelineEvent, ready: true },
+          { to: '/commits', label: '提交', icon: GitCommit, ready: true },
+          { to: '/apps', label: 'APP', icon: DeviceMobile, ready: true },
+          { to: '/settings', label: '设置', icon: Settings, ready: true },
+        ],
+      },
     ],
   },
 ]
@@ -346,7 +381,7 @@ export function Layout() {
     }
   }, [user])
 
-  // 工作台/机器人/个人中心不归属任何顶级分区（避免高亮「项目」），个人中心使用独立左侧导航
+  // 工作台/机器人/个人中心不归属任何顶级分区（避免高亮「业务」），个人中心使用独立左侧导航
   const activeSection = isWorkbench || isRobotChat
     ? undefined
     : isProfile

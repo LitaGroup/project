@@ -1,6 +1,6 @@
 # MCP 接入指南：lita-work 平台工具
 
-平台把原 **lita-work / knowledge-search / file-upload** 三个 Agent 技能（`.md` HTTP 端点）改造成 MCP 服务 **`lita-work`**：外部 Agent（opencode / Claude Code / Cursor 等）完成一次配置后，即可直接调用带 schema 的平台工具——项目、文档、知识库、脚本运行、缺陷/提测、代码分支、文件上传、任务协同、工单和机器人/任务定义管理等。
+平台把原 **lita-work / knowledge-search / file-upload** 三个 Agent 技能（`.md` HTTP 端点）改造成 MCP 服务 **`lita-work`**：外部 Agent（opencode / Claude Code / Cursor 等）完成一次配置后，即可直接调用带 schema 的平台工具——项目、文档、知识库、脚本运行、缺陷/提测、反馈、代码分支、文件上传、任务协同、工单和机器人/任务定义管理等。
 
 - 服务地址：`POST /api/mcp/work`（MCP Streamable HTTP，响应为 SSE 流）
 - 鉴权：机器人令牌（`Authorization: Bearer` / `X-Worker-Token` / `X-Agent-Token` / `?token=`），或管理员下发的公共 Agent 令牌；与 `.md` 端点同一令牌体系。真人用户没有独立令牌，其令牌就是绑定真人机器人的 `workers.agentToken`
@@ -135,6 +135,15 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | `list_releases` | `projectId?` | 提测记录清单 |
 | `submit_release` | `projectId`、`testers`、`content?`、`urls?`、`branches?`、`taskId?` | 发起提测（项目流转「测试中」） |
 | `update_release_status` | `releaseId`、`status` | 判定提测结果 |
+
+### 用户反馈
+
+| 工具 | 主要入参 | 说明 |
+|---|---|---|
+| `list_feedbacks` | `q?`、`status?`、`type?` | 反馈清单 Markdown 表格（含来源：平台/飞书群） |
+| `get_feedback` | `feedbackId` | 反馈详情：正文、跟帖（飞书群话题自动收录）与处理信息 |
+
+> 「系统-反馈处理」机器人：飞书反馈群按「收录群」配置后，一个话题自动收录为一条反馈；机器人经 `get_feedback` 读取后按 PROMPT 分发规则创建任务/缺陷（分发动作复用上方任务、缺陷工具）。
 
 ### GitHub / 文件
 

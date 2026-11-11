@@ -17,6 +17,7 @@ import { ProjectStatus, ProjectType } from '../common/enums';
 import { Project } from './project.entity';
 import { ProjectSyncService, SyncProjectsResult } from './project-sync.service';
 import {
+  IterationGroup,
   ProjectPage,
   ProjectPageQuery,
   ProjectsService,
@@ -120,6 +121,12 @@ export class ProjectsController {
     if (type) query.type = type;
     if (priority) query.priority = priority;
     return this.projectsService.findPage(query);
+  }
+
+  /** 迭代分组视图（须声明在 :id 之前）：需求按迭代周期聚合 + 状态计数，业务分区「迭代」栏目用 */
+  @Get('iterations')
+  groupIterations(): Promise<IterationGroup[]> {
+    return this.projectsService.groupIterations();
   }
 
   /** 从飞书多维表格同步项目（手动固定取近 15 天有更新的记录；full=true 全量） */

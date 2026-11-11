@@ -123,14 +123,42 @@ export class FeishuBotController {
   ): Promise<{
     defaultPolicy: FeishuBotGroupPolicy;
     groups: FeishuBotGroupView[];
+    /** 配置绑定「系统-反馈处理」机器人：群策略页展示「收录群」选择视图 */
+    feedbackCollector: boolean;
   }> {
     assertAdmin(req.user);
     const config = await this.assertWorkerConfig(configId);
     const defaultPolicy = await this.configs.groupDefaultPolicy(config.id);
-    return {
-      defaultPolicy,
-      groups: await this.groupChats.listGroups(config.id, defaultPolicy),
-    };
+    const [groups, feedbackCollector] = await Promise.all([
+      this.groupChats.listGroups(config.id, defaultPolicy),
+      this.configs.isFeedbackCollector(config.id),
+    ]);
+    return { defaultPolicy, groups, feedbackCollector };
+  }
+
+  /**
+   * 收录群批量配置（仅「系统-反馈处理」机器人）：
+   * 选中群置为反馈采集策略，取消选中恢复跟随默认策略。
+   */
+  @Put(':configId/feedback-groups')
+  async saveFeedbackGroups(
+    @Param('configId', ParseIntPipe) configId: number,
+    @Body() body: { groupIds?: unknown },
+    @Req() req: AuthedRequest,
+  ): Promise<{ ok: true; collected: number[] }> {
+    assertAdmin(req.user);
+    const config = await this.assertWorkerConfig(configId);
+    if (!(await this.configs.isFeedbackCollector(config.id))) {
+      throw new BadRequestException('收录群仅支持「系统-反馈处理」机器人配置');
+    }
+    if (!Array.isArray(body?.groupIds)) {
+      throw new BadRequestException('groupIds 必须为数组');
+    }
+    const { collected } = await this.groupChats.setFeedbackGroups(
+      config.id,
+      body.groupIds as number[],
+    );
+    return { ok: true, collected };
   }
 
   @Put(':configId/groups/default-policy')

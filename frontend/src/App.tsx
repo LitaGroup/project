@@ -2,7 +2,10 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useParams } from 'react
 import { Layout } from './components/Layout'
 import { useAuth } from './context/AuthContext'
 import { OverviewPage } from './pages/OverviewPage'
-import { ProjectsPage } from './pages/ProjectsPage'
+import { RequirementsPage } from './pages/RequirementsPage'
+import { IterationsPage } from './pages/IterationsPage'
+import { FeedbackPage } from './pages/FeedbackPage'
+import { FeedbackDetailPage } from './pages/FeedbackDetailPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { DocumentDetailPage } from './pages/DocumentDetailPage'
 import { CheckRunPage } from './pages/CheckRunPage'
@@ -123,12 +126,19 @@ function App() {
         {/* 其余网页全部要求登录（后端 JSON 接口由 AuthGuard 同步拦截） */}
         <Route element={<RequireAuth />}>
           <Route element={<Layout />}>
-          <Route path="/" element={<OverviewPage />} />
+          {/* 业务分区落地页：需求池；概览页保留 /overview 路由（不挂导航） */}
+          <Route path="/" element={<Navigate to="/requirements" replace />} />
+          <Route path="/overview" element={<OverviewPage />} />
+          <Route path="/requirements" element={<RequirementsPage />} />
+          <Route path="/iterations" element={<IterationsPage />} />
+          <Route path="/feedback" element={<FeedbackPage />} />
+          <Route path="/feedback/:feedbackId" element={<FeedbackDetailPage />} />
           <Route path="/workbench" element={<WorkbenchPage />} />
           <Route path="/workbench/tasks/:taskId" element={<WorkbenchPage />} />
           <Route path="/robots" element={<RobotChatPage />} />
           <Route path="/robots/:workerId" element={<RobotChatPage />} />
-          <Route path="/projects" element={<ProjectsPage />} />
+          {/* 旧「项目」列表路由兼容：统一并入需求池 */}
+          <Route path="/projects" element={<Navigate to="/requirements" replace />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route
             path="/projects/:id/checks/:checkId"

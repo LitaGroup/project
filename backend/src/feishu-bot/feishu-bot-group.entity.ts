@@ -11,16 +11,23 @@ import {
  * 机器人在群里的答复策略：
  * - smart：监听全部消息，由 AI 判断是否需要回复；
  * - at：仅被 @ 后回复（敲键盘 + 处理）；
- * - record：仅记录，不回复。
+ * - record：仅记录，不回复；
+ * - feedback：反馈采集（仅「系统-反馈处理」机器人可用）——话题消息由平台自动收录为反馈/跟帖，
+ *   收录后交给机器人判断分发；非话题消息仅记录。
  */
-export type FeishuBotGroupPolicy = 'smart' | 'at' | 'record';
+export type FeishuBotGroupPolicy = 'smart' | 'at' | 'record' | 'feedback';
 
 /** 策略取值（保存时校验白名单） */
 export const FEISHU_BOT_GROUP_POLICIES: readonly FeishuBotGroupPolicy[] = [
   'smart',
   'at',
   'record',
+  'feedback',
 ];
+
+/** 反馈采集策略（只允许「系统-反馈处理」机器人的群启用，且仅能经收录群批量端点设置） */
+export const FEISHU_BOT_FEEDBACK_GROUP_POLICY: FeishuBotGroupPolicy =
+  'feedback';
 
 /** 未单独配置策略时的默认值：仅被 @ 后回复 */
 export const FEISHU_BOT_DEFAULT_GROUP_POLICY: FeishuBotGroupPolicy = 'at';

@@ -55,7 +55,12 @@ import {
 import { StatusBadge } from '../components/StatusBadge'
 import { TypeBadge, PriorityBadge } from '../components/ProjectBadges'
 
-export function ProjectsPage() {
+/**
+ * 需求（需求池）：汇集大家要做的事情。
+ * 数据来源即现有项目实体（飞书需求池单向同步 + 平台内新建），详情沿用 /projects/:id。
+ * 「未排期」快捷视图对应迭代筛选 '-'（后端把 空串/NULL 一并视为未排期）。
+ */
+export function RequirementsPage() {
   const PAGE_SIZE = 20
   const [items, setItems] = useState<Project[]>([])
   const [total, setTotal] = useState(0)
@@ -123,14 +128,42 @@ export function ProjectsPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">项目</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">需求池</h1>
+          <p className="mt-1 text-sm">
+            汇集大家要做的事情：飞书需求池同步 + 平台内新建，排入迭代后在「迭代」跟踪进度
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <SyncFeishuButton onSynced={reload} />
-          <CreateProjectDialog onCreated={reload} />
+          <CreateRequirementDialog onCreated={reload} />
         </div>
       </div>
 
-      <Toolbar aria-label="项目筛选" className="mb-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Button
+          variant={iterationFilter === 'all' ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => {
+            setIterationFilter('all')
+            setPage(1)
+          }}
+        >
+          全部需求
+        </Button>
+        <Button
+          variant={iterationFilter === '-' ? 'secondary' : 'ghost'}
+          size="sm"
+          onClick={() => {
+            setIterationFilter('-')
+            setPage(1)
+          }}
+        >
+          未排期
+        </Button>
+      </div>
+
+      <Toolbar aria-label="需求筛选" className="mb-4">
         <ToolbarInput
           className="w-64"
           render={
@@ -146,7 +179,7 @@ export function ProjectsPage() {
                 setKeyword('')
                 setPage(1)
               }}
-              aria-label="搜索项目标题"
+              aria-label="搜索需求标题"
             />
           }
         />
@@ -272,7 +305,7 @@ export function ProjectsPage() {
         <TableHeader>
           <TableRow>
             <TableHead className="w-20">ID</TableHead>
-            <TableHead>标题</TableHead>
+            <TableHead>需求</TableHead>
             <TableHead className="text-center">类型</TableHead>
             <TableHead className="text-center">优先级</TableHead>
             <TableHead className="text-center whitespace-nowrap">预期</TableHead>
@@ -302,10 +335,10 @@ export function ProjectsPage() {
               </TableCell>
               <TableCell className="text-center whitespace-nowrap">{p.expectedReleaseAt ?? '未定'}</TableCell>
               <TableCell className="text-center">
-                {p.iterationCycle ? (
+                {p.iterationCycle && p.iterationCycle !== '-' ? (
                   <Badge variant="secondary">{p.iterationCycle}</Badge>
                 ) : (
-                  '—'
+                  '未排期'
                 )}
               </TableCell>
               <TableCell className="text-center">
@@ -319,7 +352,7 @@ export function ProjectsPage() {
                   >
                     详情
                   </Link>
-                  <DeleteProjectButton project={p} onDeleted={handleDelete} />
+                  <DeleteRequirementButton project={p} onDeleted={handleDelete} />
                 </div>
               </TableCell>
             </TableRow>
@@ -327,7 +360,7 @@ export function ProjectsPage() {
           {items.length === 0 && (
             <TableRow>
               <TableCell colSpan={8}>
-                {total === 0 ? '暂无项目，点击右上角新建' : '没有符合筛选条件的项目'}
+                {total === 0 ? '暂无需求，点击右上角新建或从飞书同步' : '没有符合筛选条件的需求'}
               </TableCell>
             </TableRow>
           )}
@@ -383,14 +416,14 @@ function SyncFeishuButton({ onSynced }: { onSynced: () => void }) {
   return (
     <>
       <Button variant="outline" size="sm" onClick={sync} disabled={loading}>
-        {loading ? '同步中…' : '从飞书同步'}
+        {loading ? '同步中…' : '从飞书需求池同步'}
       </Button>
       {message && <span className="text-sm">{message}</span>}
     </>
   )
 }
 
-function CreateProjectDialog({ onCreated }: { onCreated: () => void }) {
+function CreateRequirementDialog({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [type, setType] = useState<ProjectType>('活动')
@@ -416,10 +449,10 @@ function CreateProjectDialog({ onCreated }: { onCreated: () => void }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>新建项目</DialogTrigger>
+      <DialogTrigger render={<Button size="sm" />}>新建需求</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>新建项目</DialogTitle>
+          <DialogTitle>新建需求</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
@@ -428,7 +461,7 @@ function CreateProjectDialog({ onCreated }: { onCreated: () => void }) {
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="项目名称"
+                placeholder="需求标题"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm">
@@ -473,7 +506,7 @@ function CreateProjectDialog({ onCreated }: { onCreated: () => void }) {
   )
 }
 
-function DeleteProjectButton({
+function DeleteRequirementButton({
   project,
   onDeleted,
 }: {
@@ -485,7 +518,7 @@ function DeleteProjectButton({
       <AlertDialogTrigger render={<Button variant="outline" size="sm" />}>删除</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>删除项目</AlertDialogTitle>
+          <AlertDialogTitle>删除需求</AlertDialogTitle>
           <AlertDialogDescription>
             确定删除「{project.name}」吗？其下的文档会一并删除，且不可恢复。
           </AlertDialogDescription>

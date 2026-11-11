@@ -322,7 +322,7 @@ export function ProjectDetailPage() {
       {/* 项目详情（每个可编辑字段展示态带虚线下划线，hover 提示「点击编辑」，点击即编辑） */}
       <section className="order-first space-y-6">
         <PageBreadcrumb
-          items={[{ label: '项目', to: '/projects' }, { label: project.name }]}
+          items={[{ label: '需求', to: '/requirements' }, { label: project.name }]}
         />
         <TooltipProvider>
           <Card>

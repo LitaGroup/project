@@ -5,6 +5,7 @@ import { ChecksModule } from '../checks/checks.module';
 import { DefectsModule } from '../defects/defects.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { ExportsModule } from '../exports/exports.module';
+import { FeedbacksModule } from '../feedbacks/feedbacks.module';
 import { FeishuModule } from '../feishu/feishu.module';
 import { FeishuBotGroup } from '../feishu-bot/feishu-bot-group.entity';
 import { FeishuBotModule } from '../feishu-bot/feishu-bot.module';
@@ -30,6 +31,7 @@ import { McpService } from './mcp.service';
 import { McpWorkController } from './mcp-work.controller';
 import { McpWorkService } from './mcp-work.service';
 import { WorkDefectTools } from './work-tools/work-defect.tools';
+import { WorkFeedbackTools } from './work-tools/work-feedback.tools';
 import { WorkFeishuTools } from './work-tools/work-feishu.tools';
 import { WorkFileTools } from './work-tools/work-file.tools';
 import { WorkGithubTools } from './work-tools/work-github.tools';
@@ -61,6 +63,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     FilesModule,
     DefectsModule,
     ReleasesModule,
+    FeedbacksModule,
     SettingsModule,
     ScriptsModule,
     FeishuModule,
@@ -78,6 +81,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     WorkRunTools,
     WorkKnowledgeTools,
     WorkDefectTools,
+    WorkFeedbackTools,
     WorkGithubTools,
     WorkFileTools,
     WorkTaskTools,

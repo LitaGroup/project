@@ -1,3 +1,4 @@
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { EMPTY } from 'rxjs';
 import { WorkerRuntime } from '../common/enums';
 import type { FeishuHistoryMessage } from './feishu-bot-client.service';
@@ -218,13 +219,15 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
       ...over,
     }) as FeishuBotConfig;
 
-  const group = () =>
+  const group = (
+    policy: 'smart' | 'at' | 'record' | 'feedback' | null = null,
+  ) =>
     ({
       id: 11,
       configId: 2,
       chatId: 'oc_group',
       name: '测试群',
-      policy: null,
+      policy,
       joinedAt: new Date('2026-11-01T10:00:00+08:00'),
       leftAt: null,
       lastMessageAt: null,
@@ -242,9 +245,13 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
       ...over,
     }) as FeishuInboundMessage;
 
-  function setup(defaultPolicy: 'smart' | 'at' | 'record') {
+  function setup(
+    defaultPolicy: 'smart' | 'at' | 'record',
+    groupPolicy: 'smart' | 'at' | 'record' | 'feedback' | null = null,
+  ) {
     const groups = {
-      findOne: jest.fn(() => Promise.resolve(group())),
+      findOne: jest.fn(() => Promise.resolve(group(groupPolicy))),
+      find: jest.fn(() => Promise.resolve([group(groupPolicy)])),
       update: jest.fn(() => Promise.resolve({ affected: 1 })),
       increment: jest.fn(() => Promise.resolve({ affected: 1 })),
       createQueryBuilder: jest.fn(),
@@ -287,6 +294,18 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
         Promise.resolve({ id: 7, name: '张三', enabled: true }),
       ),
     };
+    const feedback = {
+      collect: jest.fn(() =>
+        Promise.resolve({
+          feedback: { id: 50, title: '反馈标题', source: '飞书群' },
+          isNew: false,
+          duplicated: false,
+        }),
+      ),
+      receiptText: jest.fn(
+        () => '已收录为反馈 #50，处理进展会在平台「反馈」跟进。',
+      ),
+    };
     const workers = {
       findOne: jest.fn(() =>
         Promise.resolve({
@@ -306,6 +325,7 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
         sendQuestionCard: jest.fn(),
       } as never,
       identities as never,
+      feedback as never,
       debug as never,
       groups as never,
       records as never,
@@ -319,7 +339,16 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
       projectChats as never,
       workers as never,
     );
-    return { service, groups, records, client, debug, configs, taskChats };
+    return {
+      service,
+      groups,
+      records,
+      client,
+      debug,
+      configs,
+      taskChats,
+      feedback,
+    };
   }
 
   it('仅记录策略：消息入库但不投递机器人', async () => {
@@ -615,5 +644,152 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  describe('反馈采集策略', () => {
+    it('非话题消息仅记录，不收录', async () => {
+      const { service, records, feedback, debug } = setup('at', 'feedback');
+      await service.handleGroupMessage(
+        config(),
+        { appId: 'cli_app' } as never,
+        { openId: 'ou_user', unionId: null },
+        message(),
+      );
+      expect(feedback.collect).not.toHaveBeenCalled();
+      expect(debug.send).not.toHaveBeenCalled();
+      expect(records.update).toHaveBeenCalledWith(
+        { id: 99 },
+        { decision: 'record_only' },
+      );
+    });
+
+    it('话题首帖：收录、话题内回执编号并立即唤起分发判断', async () => {
+      jest.useFakeTimers();
+      try {
+        const { service, feedback, debug, client, records } = setup(
+          'at',
+          'feedback',
+        );
+        feedback.collect.mockResolvedValue({
+          feedback: { id: 50, title: '反馈标题' },
+          isNew: true,
+          duplicated: false,
+        });
+        await service.handleGroupMessage(
+          config(),
+          { appId: 'cli_app' } as never,
+          { openId: 'ou_user', unionId: null },
+          message({ threadId: 'omt_1' }),
+        );
+        expect(feedback.collect).toHaveBeenCalled();
+        // 首帖回执以回复形式落回话题
+        expect(client.replyText).toHaveBeenCalledWith(
+          2,
+          expect.anything(),
+          'om_1',
+          '已收录为反馈 #50，处理进展会在平台「反馈」跟进。',
+        );
+        expect(records.save).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: 'reply' }),
+        );
+        // 不等 5 秒窗口，立即投递
+        expect(debug.send).toHaveBeenCalledTimes(1);
+        const calls = (debug.send as jest.Mock).mock.calls as unknown[][];
+        const options = calls[0]?.[3] as {
+          scope?: string;
+          firstPrompt?: string;
+          promptPrefix?: string;
+        };
+        expect(options.scope).toBe('feishu:group:oc_group:t:omt_1');
+        expect(options.firstPrompt).toContain('反馈采集');
+        expect(options.promptPrefix).toContain('已由平台自动收录');
+        expect(String(calls[0]?.[2])).toContain('【反馈 #50】');
+        expect(String(calls[0]?.[2])).toContain('[张三|om_1] 大家好');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('跟帖按窗口汇总后交给机器人判断追加分发', async () => {
+      jest.useFakeTimers();
+      try {
+        const { service, debug, client } = setup('at', 'feedback');
+        const send = (messageId: string, text: string) =>
+          service.handleGroupMessage(
+            config(),
+            { appId: 'cli_app' } as never,
+            { openId: 'ou_user', unionId: null },
+            message({
+              messageId,
+              threadId: 'omt_1',
+              content: JSON.stringify({ text }),
+            }),
+          );
+        await send('om_2', '我也遇到了');
+        await send('om_3', '重启后还是一样');
+        expect(debug.send).not.toHaveBeenCalled();
+        await jest.advanceTimersByTimeAsync(5_000);
+        expect(debug.send).toHaveBeenCalledTimes(1);
+        expect(client.replyText).not.toHaveBeenCalled();
+        const calls = (debug.send as jest.Mock).mock.calls as unknown[][];
+        expect(String(calls[0]?.[2])).toContain('【反馈 #50】');
+        expect(String(calls[0]?.[2])).toContain('[张三|om_2] 我也遇到了');
+        expect(String(calls[0]?.[2])).toContain('[张三|om_3] 重启后还是一样');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('重复消息事件已收录过：不再回执也不唤起机器人', async () => {
+      const { service, feedback, debug, client, records } = setup(
+        'at',
+        'feedback',
+      );
+      feedback.collect.mockResolvedValue({
+        feedback: { id: 50, title: '反馈标题' },
+        isNew: false,
+        duplicated: true,
+      });
+      await service.handleGroupMessage(
+        config(),
+        { appId: 'cli_app' } as never,
+        { openId: 'ou_user', unionId: null },
+        message({ threadId: 'omt_1' }),
+      );
+      expect(debug.send).not.toHaveBeenCalled();
+      expect(client.replyText).not.toHaveBeenCalled();
+      expect(records.update).toHaveBeenCalledWith(
+        { id: 99 },
+        { decision: 'record_only' },
+      );
+    });
+  });
+
+  describe('收录群批量配置', () => {
+    it('选中的群置为反馈采集，取消选中恢复跟随默认', async () => {
+      const { service, groups } = setup('at', null);
+      await service.setFeedbackGroups(2, [11]);
+      expect(groups.update).toHaveBeenCalledWith(
+        { id: 11 },
+        { policy: 'feedback' },
+      );
+
+      const off = setup('at', 'feedback');
+      await off.service.setFeedbackGroups(2, []);
+      expect(off.groups.update).toHaveBeenCalledWith(
+        { id: 11 },
+        { policy: null },
+      );
+    });
+
+    it('不属于该配置的群拒绝；单群接口与默认策略不允许设置 feedback', async () => {
+      const { service } = setup('at', null);
+      await expect(service.setFeedbackGroups(2, [999])).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.setGroupPolicy(2, 11, 'feedback')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
   });
 });

@@ -68,6 +68,23 @@ export function DefectPriorityBadge({ priority }: { priority: string }) {
   )
 }
 
+/** 反馈状态 → Badge variant：待处理黄 / 处理中蓝 / 已解决绿 / 已关闭淡（未知兜底 soft） */
+const feedbackVariantByStatus: Record<
+  string,
+  'info' | 'success' | 'warning' | 'soft' | 'secondary'
+> = {
+  待处理: 'warning',
+  处理中: 'info',
+  已解决: 'success',
+  已关闭: 'secondary',
+}
+
+export function FeedbackStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={feedbackVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+  )
+}
+
 /** 资源状态 → Badge variant：缺失红 / 草稿黄 / 确认绿 / 废弃淡（未知兜底 soft） */const resourceVariantByStatus: Record<
   string,
   'error' | 'success' | 'soft' | 'warning' | 'secondary'

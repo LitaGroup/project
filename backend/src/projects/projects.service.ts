@@ -176,6 +176,130 @@ const PROJECT_LIST_SELECT = {
   updatedAt: true,
 } as const;
 
+/** 迭代分组视图（GET /projects/iterations）单项，业务分区「迭代」栏目使用 */
+export interface IterationGroup {
+  /** 迭代周期原值；'-' 表示未排期 */
+  cycle: string;
+  /** 解析自 `w{n}: MM/DD-MM/DD` 的周编号；无法解析为 null */
+  week: number | null;
+  /** 日期区间展示（如 `08/19-08/25`）；无法解析为 null */
+  dateRange: string | null;
+  /** 今天（北京）是否落在该周期区间 */
+  current: boolean;
+  total: number;
+  /** 各状态需求数（未排期组没有已发布进度含义，由前端自行呈现） */
+  statusCounts: Partial<Record<ProjectStatus, number>>;
+  items: Project[];
+}
+
+/** 未排期分组键：飞书同步无法识别的迭代统一为 '-'，本地清空为空串/NULL，一并归入 */
+export const UNSCHEDULED_CYCLE = '-';
+
+/** 解析迭代周期 `w{n}: MM/DD-MM/DD`（归一化格式，见 toIterationCycle）；'-' / 空 / 无法解析返回 null */
+export function parseIterationCycle(cycle: string | null | undefined): {
+  week: number;
+  start: [number, number];
+  end: [number, number];
+} | null {
+  if (!cycle || cycle === UNSCHEDULED_CYCLE) return null;
+  const m = cycle.match(/^w(\d+):\s*(\d{2})\/(\d{2})-(\d{2})\/(\d{2})$/);
+  if (!m) return null;
+  return {
+    week: Number(m[1]),
+    start: [Number(m[2]), Number(m[3])],
+    end: [Number(m[4]), Number(m[5])],
+  };
+}
+
+/** 今天（北京时间）的 [月, 日] */
+function beijingMonthDay(now: Date = new Date()): [number, number] {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const get = (type: Intl.DateTimeFormatPart['type']) =>
+    Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return [get('month'), get('day')];
+}
+
+/** 今天（北京）是否落在迭代区间；跨年区间（12/28-01/03）按 起点之后或终点之前 判定 */
+export function isIterationCurrent(
+  start: [number, number],
+  end: [number, number],
+  now: Date = new Date(),
+): boolean {
+  const today = beijingMonthDay(now);
+  const cmp = (a: [number, number], b: [number, number]) =>
+    a[0] * 100 + a[1] - (b[0] * 100 + b[1]);
+  if (cmp(end, start) >= 0) {
+    return cmp(today, start) >= 0 && cmp(today, end) <= 0;
+  }
+  return cmp(today, start) >= 0 || cmp(today, end) <= 0;
+}
+
+/**
+ * 需求按迭代周期分组（纯函数，便于单测）：
+ * - '-' / 空串 / NULL 归入未排期组，置于最后；
+ * - 可解析的 `w{n}` 组按周编号倒序（新迭代在前）；
+ * - 无法解析的其他取值按周编号 null 组紧随其后、按周期名排序。
+ */
+export function groupProjectsByIteration(
+  projects: Project[],
+  now: Date = new Date(),
+): IterationGroup[] {
+  const map = new Map<string, Project[]>();
+  for (const p of projects) {
+    const key =
+      !p.iterationCycle || p.iterationCycle === ''
+        ? UNSCHEDULED_CYCLE
+        : p.iterationCycle;
+    const bucket = map.get(key);
+    if (bucket) bucket.push(p);
+    else map.set(key, [p]);
+  }
+
+  const groups: IterationGroup[] = [];
+  for (const [cycle, items] of map) {
+    const parsed = parseIterationCycle(cycle);
+    const statusCounts: Partial<Record<ProjectStatus, number>> = {};
+    for (const p of items) {
+      statusCounts[p.status] = (statusCounts[p.status] ?? 0) + 1;
+    }
+    groups.push({
+      cycle,
+      week: parsed?.week ?? null,
+      dateRange: parsed
+        ? `${String(parsed.start[0]).padStart(2, '0')}/${String(
+            parsed.start[1],
+          ).padStart(
+            2,
+            '0',
+          )}-${String(parsed.end[0]).padStart(2, '0')}/${String(
+            parsed.end[1],
+          ).padStart(2, '0')}`
+        : null,
+      current: parsed
+        ? isIterationCurrent(parsed.start, parsed.end, now)
+        : false,
+      total: items.length,
+      statusCounts,
+      items,
+    });
+  }
+
+  const collator = new Intl.Collator('zh-Hans', { numeric: true });
+  groups.sort((a, b) => {
+    if (a.cycle === UNSCHEDULED_CYCLE) return 1;
+    if (b.cycle === UNSCHEDULED_CYCLE) return -1;
+    if (a.week !== null && b.week !== null) return b.week - a.week;
+    if (a.week !== null) return -1;
+    if (b.week !== null) return 1;
+    return collator.compare(a.cycle, b.cycle);
+  });
+  return groups;
+}
+
 @Injectable()
 export class ProjectsService {
   private readonly logger = new Logger(ProjectsService.name);
@@ -212,12 +336,23 @@ export class ProjectsService {
   async findPage(query: ProjectPageQuery): Promise<ProjectPage> {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(200, Math.max(1, query.pageSize ?? 50));
-    const where: FindOptionsWhere<Project> = {};
-    if (query.q) where.name = ILike(`%${query.q}%`);
-    if (query.iteration) where.iterationCycle = query.iteration;
-    if (query.status) where.status = query.status;
-    if (query.type) where.type = query.type;
-    if (query.priority) where.priority = query.priority;
+    const base: FindOptionsWhere<Project> = {};
+    if (query.q) base.name = ILike(`%${query.q}%`);
+    if (query.status) base.status = query.status;
+    if (query.type) base.type = query.type;
+    if (query.priority) base.priority = query.priority;
+    let where: FindOptionsWhere<Project> | FindOptionsWhere<Project>[] = base;
+    if (query.iteration) {
+      // 需求池「未排期」约定：迭代筛选传 '-' 时把 空串/NULL 一并视为未排期
+      where =
+        query.iteration === '-'
+          ? [
+              { ...base, iterationCycle: '-' },
+              { ...base, iterationCycle: '' },
+              { ...base, iterationCycle: IsNull() },
+            ]
+          : { ...base, iterationCycle: query.iteration };
+    }
     const [items, total, iterations, priorities] = await Promise.all([
       this.projects.find({
         where,
@@ -231,6 +366,18 @@ export class ProjectsService {
       this.distinctColumn('priority'),
     ]);
     return { items, total, iterations, priorities };
+  }
+
+  /**
+   * 迭代分组视图（GET /projects/iterations）：把需求按迭代周期聚合，反映当前进度。
+   * 全量走列表轻列（与 GET /projects 同一模式），分组与统计在内存完成。
+   */
+  async groupIterations(): Promise<IterationGroup[]> {
+    const projects = await this.projects.find({
+      select: PROJECT_LIST_SELECT,
+      order: { createdAt: 'DESC' },
+    });
+    return groupProjectsByIteration(projects);
   }
 
   /** 某列的去重取值（供筛选下拉），仅返回非空值 */

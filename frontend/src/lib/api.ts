@@ -19,6 +19,18 @@ export const DEFECT_PLATFORMS = ['前端', '后端', 'APP端', '未知'] as cons
 export const DEFECT_PRIORITIES = ['高', '中', '低'] as const
 export type DefectPriority = (typeof DEFECT_PRIORITIES)[number]
 
+/** 反馈类型（与后端 FeedbackType 对应，业务分区「反馈」）：BUG（默认）/ 建议 / 其它 */
+export const FEEDBACK_TYPES = ['BUG', '建议', '其它'] as const
+export type FeedbackType = (typeof FEEDBACK_TYPES)[number]
+
+/** 反馈状态（与后端 FeedbackStatus 对应）：待处理（默认）/ 处理中 / 已解决 / 已关闭；流转仅管理员 */
+export const FEEDBACK_STATUSES = ['待处理', '处理中', '已解决', '已关闭'] as const
+export type FeedbackStatus = (typeof FEEDBACK_STATUSES)[number]
+
+/** 反馈来源（与后端 FeedbackSource 对应）：平台=网页提交；飞书群=「系统-反馈处理」话题自动收录 */
+export const FEEDBACK_SOURCES = ['平台', '飞书群'] as const
+export type FeedbackSource = (typeof FEEDBACK_SOURCES)[number]
+
 /** APP 自动化测试目标应用（与后端 AppTarget 对应，app_versions 用） */
 export const APP_TARGETS = ['lita', 'lita lite'] as const
 export type AppTarget = (typeof APP_TARGETS)[number]
@@ -689,6 +701,22 @@ export interface Project {
   updatedAt: string
 }
 
+/** 迭代分组视图单项（与后端 IterationGroup 对应，GET /projects/iterations） */
+export interface IterationGroup {
+  /** 迭代周期原值；'-' 表示未排期 */
+  cycle: string
+  /** 解析自 `w{n}: MM/DD-MM/DD` 的周编号；无法解析为 null */
+  week: number | null
+  /** 日期区间（如 `08/19-08/25`）；无法解析为 null */
+  dateRange: string | null
+  /** 今天（北京时间）是否落在该周期 */
+  current: boolean
+  total: number
+  /** 各状态需求数 */
+  statusCounts: Partial<Record<ProjectStatus, number>>
+  items: Project[]
+}
+
 /** 缺陷：仅平台内维护（接口/人工创建），属性只保留 端/预期/实际/图片/用例脚本/状态 */
 export interface Defect {
   id: number
@@ -717,6 +745,52 @@ export interface Defect {
   followupTaskId: number | null
   createdAt: string
   updatedAt: string
+}
+
+/** 用户反馈（BUG REPORT）：业务分区「反馈」，独立于研发缺陷；列表接口不含 content 正文 */
+export interface Feedback {
+  id: number
+  title: string
+  /** 类型：BUG（默认）/ 建议 / 其它 */
+  type: FeedbackType
+  /** 来源：平台（默认）/ 飞书群（反馈群话题自动收录） */
+  source: FeedbackSource
+  /** 状态：待处理（默认）/ 处理中 / 已解决 / 已关闭 */
+  status: FeedbackStatus
+  /** 问题描述（Markdown）；仅详情接口返回 */
+  content?: string
+  /** 图片：/images/... 路径数组（最多 9 张，经 POST /api/images 上传） */
+  images: string[] | null
+  reporterId: number | null
+  reporterName: string | null
+  /** 飞书来源群 chat_id（详情返回；平台提交为空） */
+  sourceChatId?: string | null
+  /** 飞书来源话题 thread_id（一个话题一条反馈；详情返回） */
+  sourceThreadId?: string | null
+  /** 飞书来源首帖消息 id（详情返回） */
+  sourceMessageId?: string | null
+  /** 处理人（管理员流转时写入） */
+  handlerName: string | null
+  /** 处理备注（仅管理员可写） */
+  handleNote: string | null
+  /** 解决时间（置已解决/已关闭时记录） */
+  resolvedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 反馈跟帖（append-only）：飞书群话题内后续成员消息的自动收录 */
+export interface FeedbackReply {
+  id: number
+  feedbackId: number
+  senderName: string | null
+  senderUserId: number | null
+  senderOpenId: string | null
+  content: string
+  images: string[] | null
+  sourceMessageId: string | null
+  sourceThreadId: string | null
+  createdAt: string
 }
 
 /** 缺陷变更记录来源：录入=前端表单 / AI=.md 接口 / 自动=脚本回归通过自动流转 */
@@ -2087,8 +2161,13 @@ export interface FeishuBotSaveInput {
   enabled?: boolean
 }
 
-/** 机器人外部群答复策略：smart=智能反馈 / at=仅被@ / record=仅记录 */
-export const FEISHU_BOT_GROUP_POLICIES = ['smart', 'at', 'record'] as const
+/** 机器人外部群答复策略：smart=智能反馈 / at=仅被@ / record=仅记录 / feedback=反馈采集（仅「系统-反馈处理」） */
+export const FEISHU_BOT_GROUP_POLICIES = [
+  'smart',
+  'at',
+  'record',
+  'feedback',
+] as const
 export type FeishuBotGroupPolicy = (typeof FEISHU_BOT_GROUP_POLICIES)[number]
 
 /** 外部群策略标签 */
@@ -2099,6 +2178,7 @@ export const FEISHU_BOT_GROUP_POLICY_LABELS: Record<
   smart: '智能反馈',
   at: '仅被@反馈',
   record: '仅记录',
+  feedback: '反馈采集',
 }
 
 /** 机器人被拉入的外部群（不含平台任务群/项目群） */
@@ -2180,6 +2260,8 @@ export const api = {
     if (params.priority) qs.set('priority', params.priority)
     return request<ProjectPage>(`/projects/page?${qs.toString()}`)
   },
+  /** 迭代分组视图：需求按迭代周期聚合 + 状态计数（业务分区「迭代」栏目） */
+  listProjectIterations: () => request<IterationGroup[]>('/projects/iterations'),
   getProject: (id: number) => request<Project>(`/projects/${id}`),
   createProject: (input: {
     name: string
@@ -2622,6 +2704,62 @@ export const api = {
     request<TestRun>(`/defects/${id}/verify`, { method: 'POST' }),
   deleteDefect: (id: number) =>
     request<void>(`/defects/${id}`, { method: 'DELETE' }),
+  /** 反馈列表（不含正文）：q 走后端拼音匹配（标题/提交人），status/type 过滤 */
+  listFeedbacks: (params?: {
+    q?: string
+    status?: FeedbackStatus
+    type?: FeedbackType
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.q) qs.set('q', params.q)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.type) qs.set('type', params.type)
+    const suffix = qs.toString()
+    return request<Feedback[]>(`/feedbacks${suffix ? `?${suffix}` : ''}`)
+  },
+  getFeedback: (id: number) => request<Feedback>(`/feedbacks/${id}`),
+  /** 反馈跟帖（飞书群话题内后续成员消息，按时间正序） */
+  listFeedbackReplies: (id: number) =>
+    request<FeedbackReply[]>(`/feedbacks/${id}/replies`),
+  /** 提交反馈（任何登录用户） */
+  createFeedback: (input: {
+    title: string
+    content: string
+    type?: FeedbackType
+    images?: string[]
+  }) =>
+    request<Feedback>('/feedbacks', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 更新反馈：提交人仅「待处理」可改内容；管理员随时；handleNote 仅管理员 */
+  updateFeedback: (
+    id: number,
+    input: Partial<{
+      title: string
+      content: string
+      /** 图片全量覆盖（空数组清除） */
+      images: string[]
+      type: FeedbackType
+      handleNote: string
+    }>,
+  ) =>
+    request<Feedback>(`/feedbacks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  /** 状态流转（仅管理员）：置已解决/已关闭补记解决时间，退回时清空 */
+  changeFeedbackStatus: (
+    id: number,
+    input: { status: FeedbackStatus; handleNote?: string },
+  ) =>
+    request<Feedback>(`/feedbacks/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 删除反馈：管理员，或提交人撤销待处理反馈 */
+  deleteFeedback: (id: number) =>
+    request<void>(`/feedbacks/${id}`, { method: 'DELETE' }),
   /** 上传图片（Markdown 正文内嵌用），返回可访问链接 */
   uploadImage: async (file: File): Promise<{ path: string; url: string }> => {
     const form = new FormData()
@@ -2963,12 +3101,19 @@ export const api = {
   deleteFeishuBot: (id: number) =>
     request<{ ok: true }>(`/feishu-bot/${id}`, { method: 'DELETE' }),
 
-  /** 机器人外部群策略：群列表 + 默认策略 */
+  /** 机器人外部群策略：群列表 + 默认策略 + 是否为「系统-反馈处理」配置（收录群视图） */
   listFeishuBotGroups: (configId: number) =>
     request<{
       defaultPolicy: FeishuBotGroupPolicy
       groups: FeishuBotGroupView[]
+      feedbackCollector: boolean
     }>(`/feishu-bot/${configId}/groups`),
+  /** 收录群批量设置（仅「系统-反馈处理」）：选中群自动收录话题反馈 */
+  saveFeishuBotFeedbackGroups: (configId: number, groupIds: number[]) =>
+    request<{ ok: true; collected: number[] }>(
+      `/feishu-bot/${configId}/feedback-groups`,
+      { method: 'PUT', body: JSON.stringify({ groupIds }) },
+    ),
   saveFeishuBotGroupDefaultPolicy: (
     configId: number,
     policy: FeishuBotGroupPolicy,

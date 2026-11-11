@@ -69,6 +69,30 @@ export enum DefectPriority {
   LOW = '低',
 }
 
+/** 反馈类型：BUG（默认）/ 建议 / 其它（业务分区「反馈」，面向全员的问题上报） */
+export enum FeedbackType {
+  BUG = 'BUG',
+  SUGGESTION = '建议',
+  OTHER = '其它',
+}
+
+/** 反馈来源：平台=网页/接口提交；飞书群=「系统-反馈处理」机器人从反馈群话题自动收录 */
+export enum FeedbackSource {
+  PLATFORM = '平台',
+  FEISHU_GROUP = '飞书群',
+}
+
+/**
+ * 反馈状态：待处理 → 处理中 → 已解决 / 已关闭。
+ * 置已解决/已关闭记录 resolvedAt，退回待处理/处理中时清空；状态流转仅管理员。
+ */
+export enum FeedbackStatus {
+  PENDING = '待处理',
+  PROCESSING = '处理中',
+  RESOLVED = '已解决',
+  CLOSED = '已关闭',
+}
+
 /**
  * 脚本运行设备/目标：决定运行位置。
  * server/h5 → project 本地 node 直跑；android/ios → appium-agent 远程执行。

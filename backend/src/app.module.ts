@@ -23,6 +23,7 @@ import { SchedulesModule } from './schedules/schedules.module';
 import { TestsModule } from './tests/tests.module';
 import { ExportsModule } from './exports/exports.module';
 import { DefectsModule } from './defects/defects.module';
+import { FeedbacksModule } from './feedbacks/feedbacks.module';
 import { ResourcesModule } from './resources/resources.module';
 import { MilestonesModule } from './milestones/milestones.module';
 import { FeishuModule } from './feishu/feishu.module';
@@ -79,6 +80,7 @@ import { FeishuBotModule } from './feishu-bot/feishu-bot.module';
     TestsModule,
     ExportsModule,
     DefectsModule,
+    FeedbacksModule,
     ResourcesModule,
     MilestonesModule,
     AppVersionsModule,
