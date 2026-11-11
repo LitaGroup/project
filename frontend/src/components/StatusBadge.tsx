@@ -85,6 +85,22 @@ export function FeedbackStatusBadge({ status }: { status: string }) {
   )
 }
 
+/** 灵感状态 → Badge variant：构思黄 / 采纳绿 / 废弃淡（未知兜底 soft） */
+const ideaVariantByStatus: Record<
+  string,
+  'success' | 'warning' | 'secondary' | 'soft'
+> = {
+  构思: 'warning',
+  采纳: 'success',
+  废弃: 'secondary',
+}
+
+export function IdeaStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={ideaVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+  )
+}
+
 /** 资源状态 → Badge variant：缺失红 / 草稿黄 / 确认绿 / 废弃淡（未知兜底 soft） */const resourceVariantByStatus: Record<
   string,
   'error' | 'success' | 'soft' | 'warning' | 'secondary'

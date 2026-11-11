@@ -396,12 +396,6 @@ export function ProjectDetailPage() {
                 </dd>
               </div>
               <div className="flex items-center justify-between">
-                <dt>飞书通知群</dt>
-                <dd className="flex items-center gap-1">
-                  <EditWebhookDialog project={project} onSaved={reload} />
-                </dd>
-              </div>
-              <div className="flex items-center justify-between">
                 <dt>代码分支</dt>
                 <dd className="flex items-center gap-1">
                   <span
@@ -1268,74 +1262,6 @@ function EditDescriptionDialog({
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="项目背景、目标、链接…"
                   rows={8}
-                />
-              </label>
-              {error && <p className="text-sm">保存失败:{error}</p>}
-            </div>
-          </DialogBody>
-          <DialogFooter>
-            <DialogClose>
-              <Button variant="outline" size="sm">取消</Button>
-            </DialogClose>
-            <Button onClick={submit}>保存</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
-
-/** 设置项目的飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送开始/结果通知；展示态点击值打开弹窗 */
-function EditWebhookDialog({
-  project,
-  onSaved,
-}: {
-  project: Project
-  onSaved: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [webhook, setWebhook] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next)
-    if (next) {
-      setWebhook(project.feishuWebhook ?? '')
-      setError(null)
-    }
-  }
-
-  const submit = () => {
-    setError(null)
-    api
-      .updateProject(project.id, { feishuWebhook: webhook })
-      .then(() => {
-        setOpen(false)
-        onSaved()
-      })
-      .catch((e: Error) => setError(e.message))
-  }
-
-  return (
-    <>
-      <EditableValue onClick={() => handleOpenChange(true)}>
-        <span className="block max-w-40 truncate" title={project.feishuWebhook ?? ''}>
-          {project.feishuWebhook ?? '—'}
-        </span>
-      </EditableValue>
-      <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>设置飞书通知群</DialogTitle>
-          </DialogHeader>
-          <DialogBody>
-            <div className="flex flex-col gap-4">
-              <label className="flex flex-col gap-1 text-sm">
-                群机器人 webhook 的 secret（hook 地址最后一段，留空则走平台默认群）
-                <Input
-                  value={webhook}
-                  onChange={(e) => setWebhook(e.target.value)}
-                  placeholder="如 e09e9672-1f50-4b65-a181-8750bae489fc"
                 />
               </label>
               {error && <p className="text-sm">保存失败:{error}</p>}

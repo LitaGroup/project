@@ -16,7 +16,6 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { Observable } from 'rxjs';
 import { In, Repository } from 'typeorm';
-import { NotifyService } from '../notify/notify.service';
 import { Project } from '../projects/project.entity';
 import {
   type RemoteRunContext,
@@ -78,7 +77,6 @@ export class ChecksService implements OnModuleInit {
     private readonly projects: Repository<Project>,
     @Inject(forwardRef(() => SchedulesService))
     private readonly schedulesService: SchedulesService,
-    private readonly notifyService: NotifyService,
     private readonly remoteRun: RemoteRunService,
     config: ConfigService,
   ) {
@@ -89,7 +87,7 @@ export class ChecksService implements OnModuleInit {
   }
 
   onModuleInit(): void {
-    // 注册 appium-agent 远程执行回调（操作 check_runs + live 快照 + 飞书通知）
+    // 注册 appium-agent 远程执行回调（操作 check_runs + live 快照）
     this.remoteRun.register('check', {
       onActivate: (ctx, agentName) => {
         const live = this.liveRuns.get(ctx.runId);
@@ -239,7 +237,7 @@ export class ChecksService implements OnModuleInit {
    * 启动一次脚本运行：先落 running 记录并立即返回，脚本在后台异步执行，
    * 运行中实时更新 total/current，结束后落完整结果（前端通过 SSE 实时获取进度）。
    * scheduleId 标记触发来源（定时任务），手动运行为空；
-   * source 标记任务触发方式（schedule=到点调度 / manual=手动），仅用于飞书"开始执行"通知。
+   * source 标记任务触发方式（schedule=到点调度 / manual=手动），随远程执行上下文记录。
    */
   async startRun(
     checkId: number,
@@ -260,19 +258,7 @@ export class ChecksService implements OnModuleInit {
       }),
     );
     this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
-    // 任务触发的运行：执行前推送"开始执行"卡片（含触发方式）
-    if (scheduleId !== undefined) {
-      void this.notifyService.notifyScheduleRunStart(
-        {
-          projectId: check.projectId,
-          scheduleId,
-          checkCode: check.code,
-          scriptPath: check.scriptPath,
-        },
-        source,
-      );
-    }
-    this.executeRun(run.id, absPath, check, scheduleId ?? null, source);
+    this.executeRun(run.id, absPath, check);
     return run;
   }
 
@@ -295,18 +281,6 @@ export class ChecksService implements OnModuleInit {
     );
     this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
     const runTitle = `检查：${check.code}`;
-    if (scheduleId !== undefined) {
-      void this.notifyService.notifyScheduleRunStart(
-        {
-          projectId: check.projectId,
-          scheduleId,
-          runTitle,
-          checkCode: check.code,
-          scriptPath: check.scriptPath,
-        },
-        source,
-      );
-    }
     this.remoteRun.enqueue('check', run.id, {
       projectId: check.projectId,
       runTitle,
@@ -321,7 +295,7 @@ export class ChecksService implements OnModuleInit {
     return run;
   }
 
-  /** 远程终态/中断：落 patch + 推 SSE 终态 + 飞书结果卡片（仅定时任务触发时通知） */
+  /** 远程终态/中断：落 patch + 推 SSE 终态快照 */
   private applyRemoteFinal(
     ctx: RemoteRunContext,
     patch: Record<string, unknown>,
@@ -338,23 +312,6 @@ export class ChecksService implements OnModuleInit {
             () => this.liveRuns.delete(ctx.runId),
             LIVE_SNAPSHOT_TTL_MS,
           );
-        }
-        if (ctx.meta.scheduleId !== undefined) {
-          void this.notifyService.notifyScheduleRun({
-            projectId: ctx.meta.projectId,
-            scheduleId: ctx.meta.scheduleId,
-            runTitle: ctx.meta.runTitle,
-            checkCode: ctx.meta.checkCode,
-            scriptPath: ctx.meta.scriptPath,
-            status: (patch.status as 'success' | 'fail' | 'error') ?? 'error',
-            source: ctx.meta.source,
-            startedAt: new Date(ctx.startedAt),
-            total: (patch.total as number) ?? 0,
-            success: (patch.success as number) ?? 0,
-            fail: (patch.fail as number) ?? 0,
-            skip: (patch.skip as number) ?? 0,
-            message: (patch.message as string) ?? null,
-          });
         }
       });
   }
@@ -529,15 +486,8 @@ export class ChecksService implements OnModuleInit {
   /**
    * 后台执行脚本：node 直跑 .check.ts（Node 24+ 原生类型擦除），以脚本根目录为 cwd，
    * 逐行解析 stdout 的行协议 `[{type}] {json}`，实时更新步数，进程结束后落最终结果。
-   * scheduleId 非空（定时/手动任务触发）时，终态向项目飞书群 webhook 推送结果。
    */
-  private executeRun(
-    runId: number,
-    absPath: string,
-    check: Check,
-    scheduleId: number | null,
-    source: 'schedule' | 'manual',
-  ): void {
+  private executeRun(runId: number, absPath: string, check: Check): void {
     const startedAt = Date.now();
     const items: CheckRunItem[] = [];
     const logs: string[] = [];
@@ -622,7 +572,7 @@ export class ChecksService implements OnModuleInit {
         ? (done.message as string) || null
         : stderr.trim().split('\n').slice(-5).join('\n') ||
           (errorMessage ?? '脚本异常退出，未输出 [done]');
-      // 超时场景无论是否有 stderr 输出，都明确标注超时（飞书通知依赖该描述）
+      // 超时场景无论是否有 stderr 输出，都明确标注超时
       if (!done && timedOut) {
         message = `脚本执行超时（>${RUN_TIMEOUT_MS / 1000}s）${message ? `：${message}` : ''}`;
       }
@@ -652,29 +602,6 @@ export class ChecksService implements OnModuleInit {
             live.emitter.emit('update', { ...live.snapshot });
             // 终态快照保留 TTL，供晚到的 SSE 订阅直接取结果
             setTimeout(() => this.liveRuns.delete(runId), LIVE_SNAPSHOT_TTL_MS);
-          }
-          // 任务触发的运行：向项目飞书群 webhook 推送结果卡片（含异常/超时）
-          if (scheduleId !== null) {
-            const countBy = (s: 'success' | 'fail' | 'skip') =>
-              items.filter((i) => i.status === s).length;
-            // 异常结束时 [done] 计数缺失，按已解析的明细条数兜底
-            const success = finalPatch.success ?? countBy('success');
-            const fail = finalPatch.fail ?? countBy('fail');
-            const skip = finalPatch.skip ?? countBy('skip');
-            void this.notifyService.notifyScheduleRun({
-              projectId: check.projectId,
-              scheduleId,
-              checkCode: check.code,
-              scriptPath: check.scriptPath,
-              status: status,
-              source,
-              startedAt: new Date(startedAt),
-              total: finalPatch.total ?? success + fail + skip,
-              success,
-              fail,
-              skip,
-              message: finalPatch.message ?? null,
-            });
           }
         });
     };

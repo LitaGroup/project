@@ -1005,7 +1005,7 @@ export class ProjectsService {
       `curl -X POST /api/scripts/import.md -H 'Content-Type: application/json' -d '{"projectId": ${project.id}}'  # 扫描项目脚本目录，未登记的 .check.ts/.test.ts/.export.ts 一次导入为 检查/用例/导出（按脚本路径判重，编号由文件名生成）`,
       '```',
       '',
-      '修改项目配置（仅本地字段：脚本目录 / 飞书通知群 / 描述 / 人员，空串清除；脚本目录即上方导入扫描的子目录，相对脚本根目录）：',
+      '修改项目配置（仅本地字段：脚本目录 / 描述 / 人员，空串清除；脚本目录即上方导入扫描的子目录，相对脚本根目录）：',
       '',
       '```bash',
       `curl -X POST /api/projects/${project.id}/update.md -H 'Content-Type: application/json' -d '{"scriptsPath": "projects/xxx", "resources": {"frontend": "张三", "backend": "李四", "qa": "王五", "product": "钱七", "client": "赵六"}}'`,
@@ -1070,7 +1070,7 @@ export class ProjectsService {
     ].join('\n');
   }
 
-  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、飞书群机器人 webhook（feishuWebhook）、描述（description）、人员（resources），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布/人员）会在下次同步时被飞书侧覆盖 */
+  /** 更新项目可编辑字段：类型/状态/优先级/迭代周期/预期发布时间 + 脚本目录（scriptsPath）、描述（description）、人员（resources），空串清除。注意：飞书同步项目的同步字段（类型/状态/优先级/迭代/预期发布/人员）会在下次同步时被飞书侧覆盖 */
   async update(
     id: number,
     input: {
@@ -1080,7 +1080,6 @@ export class ProjectsService {
       iterationCycle?: string;
       expectedReleaseAt?: string;
       scriptsPath?: string;
-      feishuWebhook?: string;
       description?: string;
       resources?: {
         frontend?: string;
@@ -1124,9 +1123,6 @@ export class ProjectsService {
     if (input.scriptsPath !== undefined) {
       project.scriptsPath = this.normalizeScriptsPath(input.scriptsPath);
     }
-    if (input.feishuWebhook !== undefined) {
-      project.feishuWebhook = this.normalizeWebhook(input.feishuWebhook);
-    }
     if (input.description !== undefined) {
       project.description = input.description.trim() || null;
     }
@@ -1155,14 +1151,13 @@ export class ProjectsService {
   }
 
   /**
-   * AI 用：仅本地字段更新（脚本目录/飞书通知群/描述/人员），返回 Markdown 结果。
+   * AI 用：仅本地字段更新（脚本目录/描述/人员），返回 Markdown 结果。
    * 刻意不含飞书同步字段（类型/状态/优先级/迭代/预期发布），避免与飞书侧互相覆盖。
    */
   async updateMarkdown(
     id: number,
     input: {
       scriptsPath?: string;
-      feishuWebhook?: string;
       description?: string;
       resources?: {
         frontend?: string;
@@ -1178,11 +1173,6 @@ export class ProjectsService {
     if (input.scriptsPath !== undefined) {
       lines.push(
         `- 脚本目录：${project.scriptsPath ? `\`${project.scriptsPath}\`` : '已清除'}`,
-      );
-    }
-    if (input.feishuWebhook !== undefined) {
-      lines.push(
-        `- 飞书通知群：${project.feishuWebhook ? `\`${project.feishuWebhook}\`` : '已清除'}`,
       );
     }
     if (input.description !== undefined) {
@@ -1243,20 +1233,6 @@ export class ProjectsService {
       );
     }
     return normalized || null;
-  }
-
-  /** 飞书通知群：只存 webhook 的 secret 部分；粘贴完整 hook 地址时自动截取，空串清除 */
-  private normalizeWebhook(webhook: string): string | null {
-    let normalized = webhook.trim();
-    if (!normalized) return null;
-    const hookMatch = normalized.match(/\/hook\/([0-9a-z-]+)\/?$/i);
-    if (hookMatch) normalized = hookMatch[1];
-    if (!/^[0-9a-z-]+$/i.test(normalized)) {
-      throw new BadRequestException(
-        '飞书通知群只需填写 webhook 地址的 secret 部分，如 e09e9672-1f50-4b65-a181-8750bae489fc',
-      );
-    }
-    return normalized;
   }
 
   /** 人员（resources 列）：{frontend?, backend?, qa?, product?, client?}，各值 trim、空值移除键；null/空对象清除 */

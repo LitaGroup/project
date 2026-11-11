@@ -15,8 +15,10 @@ import { TaskNotifyService } from './task-notify.service';
 import {
   mapLegacyTaskStatus,
   nextInboxRetryDelay,
+  nextOfferStallAction,
   nextReminderAction,
   nextResumeRetryDelay,
+  OFFER_STALL_REMIND_MAX_TIMES,
   TASK_INBOX_STALE_MS,
   TASK_REMIND_TIMEOUT_DAYS,
 } from './task-loop.rules';
@@ -168,6 +170,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
           agentId: result.agentId,
           assignedAt: new Date(),
           offerAttemptAt: null,
+          offerStallRemindCount: 0,
           missingItems: null,
           remindCount: 0,
           firstRemindedAt: null,
@@ -367,40 +370,81 @@ export class TaskLoopService implements OnApplicationBootstrap {
     }
   }
 
-  /** 待接受超过阈值仍未接受/拒绝：提醒机器人负责人，不自动接受或改派。 */
+  /**
+   * 待接受超过阈值仍未接受/拒绝：只提醒机器人本身——AI 重发带提醒文案的邀约，
+   * 真人发飞书工作台卡片。每任务实际发出最多 3 次（offerStallRemindCount 落库）；
+   * 北京时间 22:00~08:00 静默顺延；发送失败不计数，按 30 分钟节流随 LOOP 重试。
+   * 不通知负责人/需求方，也不自动接受或改派。
+   */
   private async warnOfferStalled(task: Task): Promise<void> {
+    // 审批任务默认接受，不适用待接受卡住提醒
+    if (task.type === TaskType.APPROVAL) return;
+    if (!task.agentId) return;
     if (!task.assignedAt) return;
     const assignedAt = new Date(task.assignedAt).getTime();
     const now = Date.now();
     if (!Number.isFinite(assignedAt) || now - assignedAt < OFFER_STALL_MS) {
       return;
     }
+    // 静默时段或已达上限：不发送、不计数、不写事件
+    if (nextOfferStallAction(task.offerStallRemindCount, now) !== 'send')
+      return;
     const last = this.offerStalledNotifiedAt.get(task.id) ?? 0;
     if (now - last < OFFER_STALL_REMIND_MS) return;
     this.offerStalledNotifiedAt.set(task.id, now);
-    const title = `任务长时间未接受：${task.code} ${task.title}`;
-    const description =
-      '任务邀约已发出超过 10 分钟，机器人仍未接受或拒绝。请检查机器人状态、执行器连接与任务定义配置。';
-    const notified = await this.taskNotify.notifyTaskAgentOwner(
-      task,
-      'notice',
-      title,
-      description,
-    );
-    if (!notified.sent) {
-      await this.taskNotify.notifyTaskRequester(
-        task,
-        'notice',
-        title,
-        description,
-        { fallbackToRequesterOwner: true },
+    const human = await this.dispatchService.isHumanWorker(task.agentId);
+    let sent = false;
+    let ownerName: string | null = null;
+    try {
+      if (human) {
+        const result = await this.taskNotify.notifyTaskHumanAssignee(
+          task,
+          'notice',
+          `任务待接受提醒：${task.code} ${task.title}`,
+          '任务分配后长时间未接受，请前往工作台接受或拒绝。',
+        );
+        sent = result.sent;
+        ownerName = result.ownerName ?? null;
+      } else {
+        // AI 机器人：与首次邀约同样的容量/会话互斥前提
+        if (this.dispatchService.taskChatRunning(task.id)) return;
+        if (!(await this.dispatchService.hasExecutionCapacity(task.agentId)))
+          return;
+        await this.dispatchService.offer(task.id, { reminder: true });
+        sent = true;
+      }
+    } catch (e) {
+      this.logger.warn(
+        `任务 #${task.id} 待接受提醒发送失败: ${(e as Error).message}`,
       );
+      return;
     }
-    await this.tasksService.addEvent(task.id, '系统', description, null, {
-      watchdog: true,
-      reason: 'offer-accept-timeout',
-      assignedAt: new Date(assignedAt).toISOString(),
-    });
+    if (!sent) return;
+    const count = (task.offerStallRemindCount ?? 0) + 1;
+    await this.tasks.update(
+      {
+        id: task.id,
+        status: TaskStatus.WAITING,
+        subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+      },
+      { offerStallRemindCount: count },
+    );
+    await this.tasksService.addEvent(
+      task.id,
+      '系统',
+      `第 ${count}/${OFFER_STALL_REMIND_MAX_TIMES} 次待接受提醒已发出${
+        ownerName
+          ? `（真人执行人「${ownerName}」工作台卡片）`
+          : '（机器人邀约提醒）'
+      }；北京时间 22:00~08:00 静默`,
+      null,
+      {
+        watchdog: true,
+        reason: 'offer-accept-timeout',
+        attempt: count,
+        assignedAt: new Date(assignedAt).toISOString(),
+      },
+    );
   }
 
   // ===== 待继续：统一恢复队列 =====

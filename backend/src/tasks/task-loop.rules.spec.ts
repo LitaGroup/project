@@ -1,7 +1,10 @@
 import { TaskStatus, TaskSubStatus } from '../common/enums';
 import {
+  isOfferRemindQuietHour,
   mapLegacyTaskStatus,
+  nextOfferStallAction,
   nextReminderAction,
+  OFFER_STALL_REMIND_MAX_TIMES,
   TASK_REMIND_INTERVAL_MS,
   TASK_REMIND_TIMEOUT_MS,
 } from './task-loop.rules';
@@ -71,6 +74,56 @@ describe('nextReminderAction', () => {
     expect(
       nextReminderAction(null, new Date(now - TASK_REMIND_TIMEOUT_MS), now),
     ).toBe('terminate');
+  });
+});
+
+describe('isOfferRemindQuietHour / nextOfferStallAction（待接受卡住提醒）', () => {
+  it('北京时间 22:00~08:00 为静默时段（按 UTC+8 显式计算）', () => {
+    // 北京时间 22:00 → UTC 14:00；北京时间 08:00 → UTC 00:00
+    expect(isOfferRemindQuietHour(Date.parse('2026-11-10T14:00:00Z'))).toBe(
+      true,
+    );
+    expect(isOfferRemindQuietHour(Date.parse('2026-11-10T15:30:00Z'))).toBe(
+      true,
+    );
+    expect(isOfferRemindQuietHour(Date.parse('2026-11-10T23:59:00Z'))).toBe(
+      true,
+    );
+    // 北京时间 08:00 整结束静默（08:00 起恢复提醒）
+    expect(isOfferRemindQuietHour(Date.parse('2026-11-11T00:00:00Z'))).toBe(
+      false,
+    );
+    // 北京时间 08:00 起恢复提醒
+    expect(isOfferRemindQuietHour(Date.parse('2026-11-11T08:00:00Z'))).toBe(
+      false,
+    );
+    expect(isOfferRemindQuietHour(Date.parse('2026-11-11T13:59:00Z'))).toBe(
+      false,
+    );
+    expect(isOfferRemindQuietHour(Date.parse('2026-11-11T14:00:00Z'))).toBe(
+      true,
+    );
+  });
+
+  it('未达 3 次且不在静默时段 → send', () => {
+    expect(nextOfferStallAction(0, Date.parse('2026-11-11T03:00:00Z'))).toBe(
+      'send',
+    );
+    expect(nextOfferStallAction(2, Date.parse('2026-11-11T03:00:00Z'))).toBe(
+      'send',
+    );
+  });
+
+  it('达到 3 次上限 → maxed；静默时段优先返回 quiet', () => {
+    expect(
+      nextOfferStallAction(
+        OFFER_STALL_REMIND_MAX_TIMES,
+        Date.parse('2026-11-11T03:00:00Z'),
+      ),
+    ).toBe('maxed');
+    expect(nextOfferStallAction(0, Date.parse('2026-11-10T15:00:00Z'))).toBe(
+      'quiet',
+    );
   });
 });
 

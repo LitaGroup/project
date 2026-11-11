@@ -25,6 +25,9 @@ describe('TaskLoopService 多机器人协同', () => {
       remindCount: 0,
       firstRemindedAt: null,
       lastRemindedAt: null,
+      assignedAt: null,
+      offerAttemptAt: null,
+      offerStallRemindCount: 0,
       parentId: null,
       rootId: 1,
       requesterType: 'user',
@@ -42,6 +45,7 @@ describe('TaskLoopService 多机器人协同', () => {
     hasExecutionCapacity: jest.Mock;
     taskChatRunning: jest.Mock;
     claimExecution: jest.Mock;
+    isHumanWorker: jest.Mock;
   };
   let taskNotify: {
     notifyTaskOwner: jest.Mock;
@@ -95,6 +99,7 @@ describe('TaskLoopService 多机器人协同', () => {
           agentId: 1001,
         }),
       ),
+      isHumanWorker: jest.fn().mockResolvedValue(false),
     };
     taskNotify = {
       notifyTaskOwner: jest.fn().mockResolvedValue({ sent: true }),
@@ -153,6 +158,16 @@ describe('TaskLoopService 多机器人协同', () => {
     tasksRepo.find.mockImplementation(
       (args?: { where?: { subStatus?: TaskSubStatus } }) =>
         Promise.resolve(args?.where?.subStatus === status ? [task] : []),
+    );
+  }
+
+  /** 带待接受提醒计数的 update 补丁（用于断言「未计数」） */
+  function stallCountPatches(): unknown[][] {
+    return (tasksRepo.update.mock.calls as unknown[][]).filter(
+      (call) =>
+        typeof call[1] === 'object' &&
+        call[1] !== null &&
+        'offerStallRemindCount' in (call[1] as Record<string, unknown>),
     );
   }
 
@@ -234,34 +249,147 @@ describe('TaskLoopService 多机器人协同', () => {
     expect(taskNotify.notifyTaskHumanAssignee).not.toHaveBeenCalled();
   });
 
-  it('待接受超过 10 分钟仍未接受时提醒负责人但不自动接受', async () => {
-    const task = baseTask({
-      subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
-      agentId: 1001,
-      assignedAt: new Date(Date.now() - 11 * 60_000),
-    });
-    returnForStatus(TaskSubStatus.PENDING_ACCEPTANCE, task);
+  // ===== 待接受卡住提醒：只提醒机器人本身、最多 3 次、22:00~08:00 北京时间静默 =====
+  // 固定时钟到北京时间 11:00（提醒活跃窗口），避免真实运行时刻影响用例
+  const ACTIVE_NOW = new Date('2026-11-11T03:00:00Z');
+  const QUIET_NOW = new Date('2026-11-10T15:00:00Z'); // 北京时间 23:00
 
-    await service.tick();
+  it('待接受超过 10 分钟仍未接受：AI 机器人收到重发邀约提醒并计数，不通知负责人', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(ACTIVE_NOW);
+    try {
+      const task = baseTask({
+        subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+        agentId: 1001,
+        assignedAt: new Date('2026-11-11T02:49:00Z'),
+        offerAttemptAt: new Date('2026-11-11T02:59:50Z'), // 30 秒内，常规重试被节流
+      });
+      returnForStatus(TaskSubStatus.PENDING_ACCEPTANCE, task);
 
-    expect(dispatchService.offer).toHaveBeenCalledWith(1);
-    expect(taskNotify.notifyTaskAgentOwner).toHaveBeenCalledWith(
-      task,
-      'notice',
-      expect.stringContaining('长时间未接受'),
-      expect.stringContaining('仍未接受或拒绝'),
-    );
-    expect(tasksService.addEvent).toHaveBeenCalledWith(
-      1,
-      '系统',
-      expect.stringContaining('超过 10 分钟'),
-      null,
-      expect.objectContaining({ reason: 'offer-accept-timeout' }),
-    );
-    expect(tasksRepo.update).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ status: TaskStatus.RUNNING }),
-    );
+      await service.tick();
+
+      expect(dispatchService.offer).toHaveBeenCalledWith(1, {
+        reminder: true,
+      });
+      expect(taskNotify.notifyTaskAgentOwner).not.toHaveBeenCalled();
+      expect(taskNotify.notifyTaskRequester).not.toHaveBeenCalled();
+      expect(tasksRepo.update).toHaveBeenCalledWith(
+        {
+          id: 1,
+          status: TaskStatus.WAITING,
+          subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+        },
+        { offerStallRemindCount: 1 },
+      );
+      expect(tasksService.addEvent).toHaveBeenCalledWith(
+        1,
+        '系统',
+        expect.stringContaining('第 1/3 次待接受提醒'),
+        null,
+        expect.objectContaining({ reason: 'offer-accept-timeout' }),
+      );
+      expect(tasksRepo.update).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ status: TaskStatus.RUNNING }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('待接受卡住提醒最多 3 次，达上限后不再发送也不计数', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(ACTIVE_NOW);
+    try {
+      const task = baseTask({
+        subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+        agentId: 1001,
+        assignedAt: new Date('2026-11-11T02:49:00Z'),
+        offerAttemptAt: new Date('2026-11-11T02:59:50Z'),
+        offerStallRemindCount: 3,
+      });
+      returnForStatus(TaskSubStatus.PENDING_ACCEPTANCE, task);
+
+      await service.tick();
+
+      expect(dispatchService.offer).not.toHaveBeenCalled();
+      expect(taskNotify.notifyTaskHumanAssignee).not.toHaveBeenCalled();
+      expect(stallCountPatches()).toHaveLength(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('北京时间 22:00~08:00 静默：卡住提醒不发送、不计数', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(QUIET_NOW);
+    try {
+      const task = baseTask({
+        subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+        agentId: 1001,
+        assignedAt: new Date('2026-11-10T14:49:00Z'),
+        offerAttemptAt: new Date('2026-11-10T14:59:50Z'),
+      });
+      returnForStatus(TaskSubStatus.PENDING_ACCEPTANCE, task);
+
+      await service.tick();
+
+      expect(dispatchService.offer).not.toHaveBeenCalled();
+      expect(taskNotify.notifyTaskHumanAssignee).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('真人执行机器人卡住：发工作台卡片提醒绑定真人', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(ACTIVE_NOW);
+    try {
+      dispatchService.isHumanWorker.mockResolvedValue(true);
+      const task = baseTask({
+        subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+        agentId: 1001,
+        assignedAt: new Date('2026-11-11T02:49:00Z'),
+        offerAttemptAt: new Date('2026-11-11T02:59:50Z'),
+      });
+      returnForStatus(TaskSubStatus.PENDING_ACCEPTANCE, task);
+
+      await service.tick();
+
+      expect(taskNotify.notifyTaskHumanAssignee).toHaveBeenCalledWith(
+        task,
+        'notice',
+        expect.stringContaining('任务待接受提醒'),
+        expect.stringContaining('工作台'),
+      );
+      expect(dispatchService.offer).not.toHaveBeenCalled();
+      expect(tasksRepo.update).toHaveBeenCalledWith(expect.anything(), {
+        offerStallRemindCount: 1,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('卡住提醒发送失败不计数，仅记日志重试', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(ACTIVE_NOW);
+    try {
+      dispatchService.offer.mockRejectedValue(new Error('执行器离线'));
+      const task = baseTask({
+        subStatus: TaskSubStatus.PENDING_ACCEPTANCE,
+        agentId: 1001,
+        assignedAt: new Date('2026-11-11T02:49:00Z'),
+        offerAttemptAt: new Date('2026-11-11T02:59:50Z'),
+      });
+      returnForStatus(TaskSubStatus.PENDING_ACCEPTANCE, task);
+
+      await service.tick();
+
+      expect(stallCountPatches()).toHaveLength(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('没有可用机器人时进入待反馈', async () => {

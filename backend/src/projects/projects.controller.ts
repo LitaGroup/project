@@ -45,8 +45,6 @@ class UpdateProjectDto {
   expectedReleaseAt?: string;
   /** 脚本目录：相对 CHECK_SCRIPTS_DIR 的路径，空串清除 */
   scriptsPath?: string;
-  /** 飞书通知群：群机器人 webhook 的 secret（粘贴完整地址自动截取），空串清除 */
-  feishuWebhook?: string;
   /** 项目描述（Markdown），空串清除 */
   description?: string;
   /** 人员：{frontend?, backend?, qa?, product?, client?}，空值移除键，{} / null 清除 */
@@ -63,8 +61,6 @@ class UpdateProjectDto {
 class UpdateProjectMarkdownDto {
   /** 脚本目录：相对脚本根目录的子目录，空串清除 */
   scriptsPath?: string;
-  /** 飞书通知群：webhook secret 或完整 hook 地址（自动截取），空串清除 */
-  feishuWebhook?: string;
   /** 项目描述（Markdown），空串清除 */
   description?: string;
   /** 人员：{frontend?, backend?, qa?, product?, client?}，空值移除键，{} / null 清除 */
@@ -174,7 +170,7 @@ export class ProjectsController {
 
   /**
    * AI 用：仅本地字段更新并以 Markdown 返回结果（text/markdown）。
-   * 可改 脚本目录 / 飞书通知群 / 描述 / 人员，空串清除；用法见项目 .md 视图。
+   * 可改 脚本目录 / 描述 / 人员，空串清除；用法见项目 .md 视图。
    */
   @Post(':id/update.md')
   @Header('Content-Type', 'text/markdown; charset=utf-8')

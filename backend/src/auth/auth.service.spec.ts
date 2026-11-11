@@ -56,7 +56,26 @@ function createRepo() {
   };
 }
 
-function createService(env: Record<string, string> = {}) {
+/** 官方机器人配置桩：默认存在且启用；official=null 表示未配置 */
+function createOfficialBot(official?: { appId: string } | null) {
+  const row = official ?? { id: 1, appId: 'cli_test', enabled: true };
+  return {
+    loadEnabledOfficial: jest
+      .fn()
+      .mockResolvedValue(official === null ? null : row),
+    secretsOf: () => ({
+      appId: row.appId,
+      appSecret: 'secret_test',
+      verificationToken: null,
+      encryptKey: null,
+    }),
+  };
+}
+
+function createService(
+  env: Record<string, string> = {},
+  official?: { appId: string } | null,
+) {
   const repo = createRepo();
   const feishu = {
     sendUserText: jest.fn().mockResolvedValue(undefined),
@@ -72,8 +91,6 @@ function createService(env: Record<string, string> = {}) {
   };
   const service = new AuthService(
     createConfig({
-      FEISHU_APP_ID: 'cli_test',
-      FEISHU_APP_SECRET: 'secret_test',
       APP_URL: 'http://localhost:5173',
       ...env,
     }),
@@ -81,6 +98,7 @@ function createService(env: Record<string, string> = {}) {
     feishu as never,
     workers as never,
     personalAgents as never,
+    createOfficialBot(official) as never,
   );
   return { service, repo, feishu, workers, personalAgents };
 }
@@ -95,9 +113,9 @@ const FEISHU_INFO = {
 
 describe('AuthService（飞书登录 + 会话）', () => {
   describe('buildAuthorizeUrl', () => {
-    it('包含 app_id / redirect_uri / state', () => {
+    it('包含 app_id / redirect_uri / state（官方机器人数据库配置凭据）', async () => {
       const { service } = createService();
-      const url = service.buildAuthorizeUrl('state-abc');
+      const url = await service.buildAuthorizeUrl('state-abc');
       expect(url).toContain(
         'https://open.feishu.cn/open-apis/authen/v1/index?',
       );
@@ -108,13 +126,14 @@ describe('AuthService（飞书登录 + 会话）', () => {
       expect(url).toContain('state=state-abc');
     });
 
-    it('缺少 FEISHU_APP_ID/SECRET 时报可读错误', () => {
-      const { service } = createService({
-        FEISHU_APP_ID: '',
-        FEISHU_APP_SECRET: '',
-      });
-      expect(() => service.buildAuthorizeUrl('s')).toThrow(BadRequestException);
-      expect(() => service.buildAuthorizeUrl('s')).toThrow(/飞书登录未配置/);
+    it('未配置平台官方机器人时报可读错误', async () => {
+      const { service } = createService({}, null);
+      await expect(service.buildAuthorizeUrl('s')).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.buildAuthorizeUrl('s')).rejects.toThrow(
+        /飞书登录未配置/,
+      );
     });
   });
 

@@ -316,8 +316,8 @@ export class WorkRunTools implements WorkToolRegistrar {
         inputSchema: {},
       },
       () =>
-        executeTool(this.logger, 'get_settings', principal, () =>
-          markdownResult(this.settings.renderMarkdown()),
+        executeTool(this.logger, 'get_settings', principal, async () =>
+          markdownResult(await this.settings.renderMarkdown()),
         ),
     );
 
@@ -344,11 +344,12 @@ export class WorkRunTools implements WorkToolRegistrar {
             status = 'error';
             message = error instanceof Error ? error.message : String(error);
           }
+          const settings = await this.settings.getSettings();
           return markdownResult(
             [
               '# 更新脚本仓库',
               '',
-              `- 脚本根目录：\`${this.settings.getSettings().scriptsDir}\``,
+              `- 脚本根目录：\`${settings.scriptsDir}\``,
               '',
               '## 输出',
               '',

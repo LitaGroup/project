@@ -10,7 +10,7 @@ export class SettingsController {
 
   /** 平台配置概览：脚本目录、访问域名（均只读，来源于配置文件） */
   @Get()
-  getSettings(): Settings {
+  async getSettings(): Promise<Settings> {
     return this.settingsService.getSettings();
   }
 
@@ -30,12 +30,13 @@ export class SettingsController {
     res.setHeader('Cache-Control', 'no-cache');
     // 关闭反向代理缓冲，保证逐行实时到达
     res.setHeader('X-Accel-Buffering', 'no');
+    const settings = await this.settingsService.getSettings();
     res.write(
       [
         mdFrontmatter({ title: '更新脚本仓库' }),
         '# 更新脚本仓库',
         '',
-        `- 脚本根目录：\`${this.settingsService.getSettings().scriptsDir}\``,
+        `- 脚本根目录：\`${settings.scriptsDir}\``,
         '',
         '## 输出',
         '',
@@ -59,7 +60,7 @@ export class SettingsMarkdownController {
 
   @Get()
   @Header('Content-Type', 'text/markdown; charset=utf-8')
-  getSettingsMarkdown(): string {
+  async getSettingsMarkdown(): Promise<string> {
     return this.settingsService.renderMarkdown();
   }
 }

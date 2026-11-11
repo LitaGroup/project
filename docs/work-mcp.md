@@ -1,6 +1,6 @@
 # MCP 接入指南：lita-work 平台工具
 
-平台把原 **lita-work / knowledge-search / file-upload** 三个 Agent 技能（`.md` HTTP 端点）改造成 MCP 服务 **`lita-work`**：外部 Agent（opencode / Claude Code / Cursor 等）完成一次配置后，即可直接调用带 schema 的平台工具——项目、文档、知识库、脚本运行、缺陷/提测、反馈、代码分支、文件上传、任务协同、工单和机器人/任务定义管理等。
+平台把原 **lita-work / knowledge-search / file-upload** 三个 Agent 技能（`.md` HTTP 端点）改造成 MCP 服务 **`lita-work`**：外部 Agent（opencode / Claude Code / Cursor 等）完成一次配置后，即可直接调用带 schema 的平台工具——项目、文档、知识库、脚本运行、缺陷/提测、反馈、灵感、代码分支、文件上传、任务协同、工单和机器人/任务定义管理等。
 
 - 服务地址：`POST /api/mcp/work`（MCP Streamable HTTP，响应为 SSE 流）
 - 鉴权：机器人令牌（`Authorization: Bearer` / `X-Worker-Token` / `X-Agent-Token` / `?token=`），或管理员下发的公共 Agent 令牌；与 `.md` 端点同一令牌体系。真人用户没有独立令牌，其令牌就是绑定真人机器人的 `workers.agentToken`
@@ -83,7 +83,7 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 |---|---|---|
 | `search_projects` | `query` | 按名称模糊搜索项目，返回前 5 个 |
 | `get_project` | `projectId` | 项目完整详情（文档/资源/节点/检查/用例/导出/定时任务/提测/缺陷与最近运行结果） |
-| `update_project` | `projectId`、`scriptsPath?`、`feishuWebhook?`、`description?`、`resources?` | 仅更新平台本地字段（脚本目录/通知群/描述/人员） |
+| `update_project` | `projectId`、`scriptsPath?`、`description?`、`resources?` | 仅更新平台本地字段（脚本目录/描述/人员） |
 | `read_document` | `documentId` | 文档元信息 + Markdown 正文 |
 | `upsert_document` | `projectId`、`fileName`、`content`、`title?`、`type?`、`description?` | 按 `(projectId, fileName)` upsert |
 | `sync_apipost_document` | `projectId`、`url`、`type?` | 导入 APIPOST 接口文档 |
@@ -144,6 +144,18 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | `get_feedback` | `feedbackId` | 反馈详情：正文、跟帖（飞书群话题自动收录）与处理信息 |
 
 > 「系统-反馈处理」机器人：飞书反馈群按「收录群」配置后，一个话题自动收录为一条反馈；机器人经 `get_feedback` 读取后按 PROMPT 分发规则创建任务/缺陷（分发动作复用上方任务、缺陷工具）。
+
+### 灵感
+
+| 工具 | 主要入参 | 说明 |
+|---|---|---|
+| `list_ideas` | `q?`、`status?`、`type?` | 灵感清单 Markdown 表格（构思/废弃/采纳，采纳后带关联需求） |
+| `get_idea` | `ideaId` | 灵感详情：正文、图片、类型/状态/创建人与采纳信息 |
+| `create_idea` | `title`、`content?`、`type?`、`images?` | 创建灵感（想法/创意/待办/建议/其它） |
+| `update_idea` | `ideaId`、`title?`、`content?`、`type?`、`images?` | 完善灵感：构思期任何身份可协作编辑，采纳/废弃后仅管理员 |
+| `change_idea_status` | `ideaId`、`status`、`createProject?`、`projectId?`、`projectType?` | 流转状态（仅管理员）：采纳时新建或关联需求池需求 |
+
+> 「我的 AI」会通过 `update_idea` 直接完善当前灵感正文；采纳后灵感与需求池项目建立软关联（`projectId`），可经 `GET /api/projects/{id}.md` 继续推进。
 
 ### GitHub / 文件
 

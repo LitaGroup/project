@@ -67,7 +67,7 @@ export class Project {
   @Column({ type: 'varchar', length: 500, nullable: true })
   scriptsPath: string | null;
 
-  /** 飞书通知群：群机器人 webhook 的 secret（hook 地址最后一段），发送时拼接完整地址；空则回退 FEISHU_WEBHOOK_URL */
+  /** 飞书通知群 webhook（已停用：群 webhook 通知整体下线，仅保留历史数据，不再读写） */
   @Column({ type: 'varchar', length: 500, nullable: true })
   feishuWebhook: string | null;
 

@@ -237,6 +237,8 @@ export class TaskDispatchService
       task.remindCount = 0;
       task.firstRemindedAt = null;
       task.lastRemindedAt = null;
+      // 离开待接受（接受/审批自动接受）：卡住提醒计数清零
+      task.offerStallRemindCount = 0;
       return manager.save(task);
     });
   }
@@ -269,9 +271,16 @@ export class TaskDispatchService
    * 派发执行中的任务，或在已有会话中继续对话。
    * 等待任务必须先由 claimExecution 原子占用机器人。
    */
-  /** 待接受任务邀约：只让机器人决定接受/拒绝，不自动进入执行中。 */
-  async offer(taskId: number): Promise<Task> {
-    return this.dispatch(taskId, null, undefined, 'offer');
+  /** 待接受任务邀约：只让机器人决定接受/拒绝，不自动进入执行中。reminder=true 为卡住重提醒。 */
+  async offer(taskId: number, options?: { reminder?: boolean }): Promise<Task> {
+    return this.dispatch(
+      taskId,
+      null,
+      undefined,
+      'offer',
+      undefined,
+      options?.reminder ? { offerReminder: true } : undefined,
+    );
   }
 
   async dispatch(
@@ -280,7 +289,7 @@ export class TaskDispatchService
     userMessage?: string,
     mode: 'execute' | 'offer' = 'execute',
     perspective?: TaskChatPerspective,
-    options?: { queueInOpencode?: boolean },
+    options?: { queueInOpencode?: boolean; offerReminder?: boolean },
   ): Promise<Task> {
     const task = await this.mustFind(taskId);
     const offering = mode === 'offer';
@@ -498,7 +507,7 @@ export class TaskDispatchService
 
       // 5. 发任务指令（角色定义与技能已由工位文件提供；历史上下文由会话自身维持）
       const prompt = offering
-        ? await this.buildOfferPrompt(task)
+        ? await this.buildOfferPrompt(task, options?.offerReminder)
         : await this.buildPrompt(task);
       const text = continuing
         ? reused
@@ -1609,7 +1618,7 @@ export class TaskDispatchService
             'notice',
             `任务执行失败：${task.code} ${task.title}`,
             '执行器会话已失败，请到任务详情检查并决定是否重新派发。',
-            { fallbackToRequesterOwner: true },
+            { fallbackToTicketOwner: true },
           );
         }
       }
@@ -1865,7 +1874,7 @@ export class TaskDispatchService
         'notice',
         title,
         description,
-        { fallbackToRequesterOwner: true },
+        { fallbackToTicketOwner: true },
       );
     }
     await this.addEvent(task.id, '系统', description, null, {
@@ -2044,9 +2053,20 @@ export class TaskDispatchService
     }
   }
 
-  /** 待接受邀约：机器人必须先明确接受或拒绝，接受前的会话终态不会自动执行任务。 */
-  private async buildOfferPrompt(task: Task): Promise<string> {
+  /** 待接受邀约：机器人必须先明确接受或拒绝，接受前的会话终态不会自动执行任务。reminder=true 时前置卡住提醒。 */
+  private async buildOfferPrompt(
+    task: Task,
+    reminder?: boolean,
+  ): Promise<string> {
     return [
+      ...(reminder
+        ? [
+            '# 任务邀约提醒（长时间未处理）',
+            '',
+            '本任务已分配给你并超过 10 分钟仍未接受或拒绝，平台再次提醒。请尽快二选一：task-accept 或 task-refuse，命令同下。',
+            '',
+          ]
+        : []),
       '# 任务邀约（等待中-待接受）',
       '',
       '先阅读任务内容与任务定义，判断它是否属于你的职责范围。此时不要开始实际执行。',

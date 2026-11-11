@@ -22,10 +22,6 @@ import { Task } from '../tasks/task.entity';
 import { TaskWorkerInboxService } from '../tasks/task-worker-inbox.service';
 import { ProjectRelease, ReleaseBranch } from './project-release.entity';
 
-/** 提测通知群「H5 Release | 提测上线」的群机器人 webhook（固定） */
-const RELEASE_WEBHOOK =
-  'https://open.feishu.cn/open-apis/bot/v2/hook/819b2008-2cb9-4a2d-a44a-92d01cea83d9';
-
 /** 卡片内提测内容截断长度（lark_md 卡片过长会被飞书折叠/截断） */
 const CONTENT_CARD_MAX = 800;
 
@@ -81,7 +77,7 @@ export class ReleasesService {
   /**
    * 提测：创建提测记录并把项目状态流转为「测试中」。
    * 测试人员至少 1 人且均须存在于用户系统（users 表，飞书登录落库），否则 400。
-   * 通知（提测群 + 项目人员私聊）异步发送，失败仅告警不阻断提测。
+   * 通知（项目人员私聊）异步发送，失败仅告警不阻断提测。
    */
   async submit(
     projectId: number,
@@ -129,7 +125,7 @@ export class ReleasesService {
       await this.projects.save(project);
     }
 
-    // 通知不阻断提测（群机器人 / 私聊失败仅告警）
+    // 通知不阻断提测（私聊失败仅告警）
     void this.notify(release, project);
     return release;
   }
@@ -263,7 +259,7 @@ export class ReleasesService {
       }`,
       `- 提测内容：${release.content ? '已记录（见项目详情）' : '—'}`,
       `- 提测状态：**${releaseStatusOf(release.status)}**（待冒烟 / 进行中 / 已通过 / 未通过）`,
-      `- 已通知：提测群「H5 Release | 提测上线」+ 项目人员私聊（发送失败仅告警，不影响提测）`,
+      `- 已通知：项目人员私聊（发送失败仅告警，不影响提测）`,
       `- 阅读地址：GET /api/projects/${release.projectId}.md`,
       `- 提测记录：GET /api/releases.md?projectId=${release.projectId}`,
       release.workerId
@@ -393,18 +389,15 @@ export class ReleasesService {
   }
 
   /**
-   * 提测通知：提测群机器人 webhook + 项目人员（resources 全部人员 + 测试人员，去重）
-   * 机器人私聊卡片。人员按姓名在 users 表查 openId，查不到的跳过并告警。
+   * 提测通知：项目人员（resources 全部人员 + 测试人员，去重）机器人私聊卡片。
+   * 人员按姓名在 users 表查 openId，查不到的跳过并告警。
    */
   private async notify(
     release: ProjectRelease,
     project: Project,
   ): Promise<void> {
     const card = this.buildCard(release, project);
-    await Promise.all([
-      this.sendGroupWebhook(release.projectId, card),
-      this.notifyMembers(release, project, card),
-    ]);
+    await this.notifyMembers(release, project, card);
   }
 
   private buildCard(
@@ -432,7 +425,7 @@ export class ReleasesService {
     lines.push(
       `**详情**：[查看项目](${this.appUrl.replace(/\/$/, '')}/projects/${project.id})`,
     );
-    // 卡片体：机器人 API（sendUserCard）直接发送该对象；群机器人 webhook 发送时外层再包 msg_type 信封
+    // 卡片体：机器人 API（sendUserCard）直接发送该对象
     return {
       config: { wide_screen_mode: true },
       header: {
@@ -443,36 +436,6 @@ export class ReleasesService {
         { tag: 'div', text: { tag: 'lark_md', content: lines.join('\n') } },
       ],
     };
-  }
-
-  /** 群机器人 webhook（免签，需 msg_type 信封），业务失败也可能 HTTP 200，需看响应体 code */
-  private async sendGroupWebhook(
-    projectId: number,
-    card: Record<string, unknown>,
-  ): Promise<void> {
-    try {
-      const res = await fetch(RELEASE_WEBHOOK, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ msg_type: 'interactive', card }),
-      });
-      const body = (await res.json().catch(() => null)) as {
-        code?: number;
-        StatusCode?: number;
-        msg?: string;
-        StatusMessage?: string;
-      } | null;
-      const code = body?.code ?? body?.StatusCode ?? (res.ok ? 0 : -1);
-      if (!res.ok || code !== 0) {
-        this.logger.warn(
-          `提测群推送失败（HTTP ${res.status}, code ${code}: ${body?.msg ?? body?.StatusMessage ?? '-'}）: project=${projectId}`,
-        );
-      }
-    } catch (e) {
-      this.logger.warn(
-        `提测群推送异常: ${(e as Error).message}（project=${projectId}）`,
-      );
-    }
   }
 
   /** 项目人员（resources 前端/后端/测试/产品/客户端）+ 测试人员 去重后逐个私聊卡片 */

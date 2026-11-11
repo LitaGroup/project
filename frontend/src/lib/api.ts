@@ -31,6 +31,14 @@ export type FeedbackStatus = (typeof FEEDBACK_STATUSES)[number]
 export const FEEDBACK_SOURCES = ['平台', '飞书群'] as const
 export type FeedbackSource = (typeof FEEDBACK_SOURCES)[number]
 
+/** 灵感类型（与后端 IdeaType 对应，业务分区「灵感」）：想法（默认）/ 创意 / 待办 / 建议 / 其它 */
+export const IDEA_TYPES = ['想法', '创意', '待办', '建议', '其它'] as const
+export type IdeaType = (typeof IDEA_TYPES)[number]
+
+/** 灵感状态（与后端 IdeaStatus 对应）：构思（默认）/ 废弃 / 采纳；流转仅管理员 */
+export const IDEA_STATUSES = ['构思', '废弃', '采纳'] as const
+export type IdeaStatus = (typeof IDEA_STATUSES)[number]
+
 /** APP 自动化测试目标应用（与后端 AppTarget 对应，app_versions 用） */
 export const APP_TARGETS = ['lita', 'lita lite'] as const
 export type AppTarget = (typeof APP_TARGETS)[number]
@@ -677,8 +685,6 @@ export interface Project {
   description?: string | null
   /** 脚本目录：相对脚本根目录的路径，登记检查时只在该子目录下扫描 */
   scriptsPath?: string | null
-  /** 飞书通知群：群机器人 webhook 的 secret，任务运行时向该群推送通知 */
-  feishuWebhook?: string | null
   documents?: ProjectDocument[]
   checks?: ProjectCheck[]
   tests?: ProjectTest[]
@@ -795,6 +801,28 @@ export interface FeedbackReply {
   createdAt: string
 }
 
+/** 灵感：业务分区「灵感」收集想法/创意/待办/建议；构思期全员可编辑，采纳即进入需求池 */
+export interface Idea {
+  id: number
+  title: string
+  /** 类型：想法（默认）/ 创意 / 待办 / 建议 / 其它 */
+  type: IdeaType
+  /** 状态：构思（默认）/ 废弃 / 采纳 */
+  status: IdeaStatus
+  /** 正文（Markdown，可空）；仅详情接口返回 */
+  content?: string
+  /** 图片：/images/... 路径数组（最多 9 张，经 POST /api/images 上传） */
+  images: string[] | null
+  creatorId: number | null
+  creatorName: string | null
+  /** 采纳后关联的需求池项目 ID */
+  projectId: number | null
+  /** 采纳时间（退回构思/废弃时清空） */
+  adoptedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 /** 缺陷变更记录来源：录入=前端表单 / AI=.md 接口 / 自动=脚本回归通过自动流转 */
 export const DEFECT_RECORD_SOURCES = ['录入', 'AI', '自动'] as const
 
@@ -895,14 +923,16 @@ export interface Settings {
   appUrl: string
   /** 接口访问地址（API_URL） */
   apiUrl: string
-  /** Lita 平台 API 地址（LITA_API_HOST，飞书 token 服务） */
+  /** Lita 平台 API 地址（LITA_API_HOST，多语言文案等平台接口） */
   litaApiHost: string
   /** 项目同步源多维表格地址（FEISHU_PROJECT_SOURCE_URL，未配置用内置默认） */
   feishuProjectSourceUrl: string
-  /** 飞书 token 来源：lita（LITA_USER_TOKEN 已配置）/ app-credential（自建应用凭据兜底） */
-  feishuTokenSource: 'lita' | 'app-credential'
-  /** 兜底通知 webhook 是否已配置（不暴露 secret） */
-  feishuWebhookConfigured: boolean
+  /** 平台官方机器人（飞书统一凭据：tenant token 与 OAuth 登录）配置状态 */
+  feishuOfficialBot: {
+    configured: boolean
+    appId: string | null
+    enabled: boolean
+  }
   /** GitHub 集成：token 配置状态（不回显明文）与组织名 */
   github: {
     tokenConfigured: boolean
@@ -2006,7 +2036,7 @@ export interface WorkbenchAgentInfo {
 }
 
 /** 详情页「我的 AI」页面类型（每个类型 + ID 使用独立会话） */
-export type AgentPageContextType = 'document' | 'script' | 'project'
+export type AgentPageContextType = 'document' | 'script' | 'project' | 'idea'
 
 /** 详情页「我的 AI」上下文：会话按 type + id 隔离，内容读取接口供 AI 取当前页面 */
 export interface AgentPageContext {
@@ -2283,7 +2313,6 @@ export const api = {
       /** YYYY-MM-DD，空串清除 */
       expectedReleaseAt?: string
       scriptsPath?: string
-      feishuWebhook?: string
       /** 项目描述（Markdown），空串清除 */
       description?: string
     },
@@ -2762,6 +2791,59 @@ export const api = {
   /** 删除反馈：管理员，或提交人撤销待处理反馈 */
   deleteFeedback: (id: number) =>
     request<void>(`/feedbacks/${id}`, { method: 'DELETE' }),
+  /** 灵感列表（不含正文）：q 走后端拼音匹配（标题/创建人），status/type 过滤 */
+  listIdeas: (params?: {
+    q?: string
+    status?: IdeaStatus
+    type?: IdeaType
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.q) qs.set('q', params.q)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.type) qs.set('type', params.type)
+    const suffix = qs.toString()
+    return request<Idea[]>(`/ideas${suffix ? `?${suffix}` : ''}`)
+  },
+  getIdea: (id: number) => request<Idea>(`/ideas/${id}`),
+  /** 创建灵感（任何登录用户；机器人经 lita-work MCP 创建） */
+  createIdea: (input: {
+    title: string
+    content?: string
+    type?: IdeaType
+    images?: string[]
+  }) => request<Idea>('/ideas', { method: 'POST', body: JSON.stringify(input) }),
+  /** 更新灵感：构思期任何登录用户可编辑；采纳/废弃后仅管理员 */
+  updateIdea: (
+    id: number,
+    input: Partial<{
+      title: string
+      content: string
+      /** 图片全量覆盖（空数组清除） */
+      images: string[]
+      type: IdeaType
+    }>,
+  ) =>
+    request<Idea>(`/ideas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  /** 状态流转（仅管理员）：采纳时新建（createProject）或关联（projectId）需求池需求 */
+  changeIdeaStatus: (
+    id: number,
+    input: {
+      status: IdeaStatus
+      createProject?: boolean
+      projectId?: number | null
+      projectType?: ProjectType
+    },
+  ) =>
+    request<Idea>(`/ideas/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 删除灵感：管理员，或创建人撤销构思中的灵感 */
+  deleteIdea: (id: number) =>
+    request<void>(`/ideas/${id}`, { method: 'DELETE' }),
   /** 上传图片（Markdown 正文内嵌用），返回可访问链接 */
   uploadImage: async (file: File): Promise<{ path: string; url: string }> => {
     const form = new FormData()

@@ -1,6 +1,5 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { NotifyModule } from '../notify/notify.module';
 import { Project } from '../projects/project.entity';
 import { RemoteRunModule } from '../remote-run/remote-run.module';
 import { SchedulesModule } from '../schedules/schedules.module';
@@ -13,7 +12,6 @@ import { ChecksService } from './checks.service';
   imports: [
     TypeOrmModule.forFeature([Check, CheckRun, Project]),
     forwardRef(() => SchedulesModule),
-    NotifyModule,
     RemoteRunModule,
   ],
   controllers: [ChecksController],

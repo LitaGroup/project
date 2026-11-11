@@ -28,13 +28,14 @@ import {
   DropdownMenuItem,
 } from '@appica/ui-react/dropdown-menu'
 import {
+  Book,
   Briefcase,
+  Bulb,
   Bug,
   ClipboardList,
   Cpu,
   FileCode,
   GitFork,
-  Book,
   Package,
   PlugConnected,
   Plus,
@@ -112,7 +113,7 @@ const isToolPath = (p: string) => TOOL_PATHS.some((t) => p.startsWith(t))
 
 const NAV_SECTIONS: NavSection[] = [
   {
-    // 业务分区：只保留四个业务栏目；概览/用例/检查等研发工具页入口移至管理区「研发工具」分组，
+    // 业务分区：只保留五个业务栏目（需求/迭代/灵感/调研/反馈）；概览/用例/检查等研发工具页入口移至管理区「研发工具」分组，
     // 旧路由（/projects、/defects 等）保留兼容，项目详情与深链不受影响
     key: 'business',
     label: '业务',
@@ -128,6 +129,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/requirements', label: '需求', icon: Briefcase, ready: true },
       { to: '/iterations', label: '迭代', icon: TimelineEvent, ready: true },
+      { to: '/ideas', label: '灵感', icon: Bulb, ready: true },
       { to: '/research', label: '调研', icon: Search, ready: false },
       { to: '/feedback', label: '反馈', icon: Bug, ready: true },
     ],

@@ -28,6 +28,8 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
     update: jest.Mock;
   };
   let workersService: { ownerOpenId: jest.Mock };
+  let tickets: { findOne: jest.Mock };
+  let ticketRuns: { findOne: jest.Mock };
   let botConfig: {
     loadEnabledOfficial: jest.Mock;
     loadWithSecrets: jest.Mock;
@@ -54,6 +56,8 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     workersService = { ownerOpenId: jest.fn() };
+    tickets = { findOne: jest.fn().mockResolvedValue(null) };
+    ticketRuns = { findOne: jest.fn().mockResolvedValue(null) };
     botConfig = {
       loadEnabledOfficial: jest
         .fn()
@@ -85,6 +89,8 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
       tasks as never,
       users as never,
       approvalCards as never,
+      tickets as never,
+      ticketRuns as never,
       workersService as never,
       botConfig as never,
       botClient as never,
@@ -272,7 +278,7 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
     expect(botClient.sendCard).not.toHaveBeenCalled();
   });
 
-  it('AI 需求方人工兜底时通知负责人且不标记为需求方', async () => {
+  it('AI 需求方人工兜底时通知工单创建人（不标成需求方）', async () => {
     workers.findOne.mockResolvedValueOnce({
       id: 1002,
       name: '技术-后端架构师',
@@ -282,7 +288,17 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
       ownerUserId: 9,
       ownerName: '胡峰',
     });
-    workersService.ownerOpenId.mockResolvedValueOnce('ou_owner');
+    // 节点任务 → 最近一次工作流运行 → 工单
+    ticketRuns.findOne.mockResolvedValueOnce({ id: 31, ticketId: 88 });
+    tickets.findOne
+      .mockResolvedValueOnce({ id: 88, createdById: 21 })
+      // 工单查询只取 createdById，不再进第二层
+      .mockResolvedValueOnce({ id: 88, createdById: 21 });
+    users.findOne.mockResolvedValueOnce({
+      id: 21,
+      name: '王五',
+      feishuOpenId: 'ou_ticket_creator',
+    });
 
     await expect(
       service.notifyTaskRequester(
@@ -293,14 +309,115 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
         }),
         'notice',
         '任务待验收：TK-0054 咱们APP的主要业务是什么',
-        '需求方机器人自动验收失败，已通知负责人检查。',
-        { fallbackToRequesterOwner: true },
+        '需求方机器人自动验收失败，已通知工单创建人检查。',
+        { fallbackToTicketOwner: true },
       ),
-    ).resolves.toEqual({ sent: true, ownerName: '胡峰' });
+    ).resolves.toEqual({ sent: true, ownerName: '王五' });
 
+    expect(ticketRuns.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { taskId: 42 } }),
+    );
+    expect(tickets.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 88 } }),
+    );
     const text = sentCardText();
-    expect(text).toContain('**负责人**：胡峰');
-    expect(text).not.toContain('**需求方**：胡峰');
+    expect(text).toContain('**工单创建人**：王五');
+    expect(text).not.toContain('**需求方**：王五');
+    // 不再回退机器人负责人
+    expect(workersService.ownerOpenId).not.toHaveBeenCalled();
+  });
+
+  it('AI 需求方升级兜底：任务无工单关联时静默跳过', async () => {
+    workers.findOne.mockResolvedValueOnce({
+      id: 1002,
+      name: '技术-后端架构师',
+      runtime: WorkerRuntime.OPENCODE,
+      humanUserId: null,
+      personalAgentUserId: null,
+      ownerUserId: 9,
+      ownerName: '胡峰',
+    });
+    ticketRuns.findOne.mockResolvedValueOnce(null);
+    tickets.findOne.mockResolvedValueOnce(null);
+
+    await expect(
+      service.notifyTaskRequester(
+        baseTask({ requesterType: 'worker', requesterId: 1002 }),
+        'notice',
+        '任务执行失败：TK-0042 活动页开发',
+        '执行器会话已失败。',
+        { fallbackToTicketOwner: true },
+      ),
+    ).resolves.toEqual({ sent: false });
+
+    expect(botClient.sendCard).not.toHaveBeenCalled();
+  });
+
+  it('AI 需求方升级兜底：兼容存量调度工单（tickets.taskId）', async () => {
+    workers.findOne.mockResolvedValueOnce({
+      id: 1002,
+      name: '技术-后端架构师',
+      runtime: WorkerRuntime.OPENCODE,
+      humanUserId: null,
+      personalAgentUserId: null,
+      ownerUserId: 9,
+      ownerName: '胡峰',
+    });
+    ticketRuns.findOne.mockResolvedValueOnce(null);
+    tickets.findOne
+      .mockResolvedValueOnce({ id: 77 })
+      // 第一次按 taskId 查 id，第二次按 id 取创建人
+      .mockResolvedValueOnce({ id: 77, createdById: 22 });
+    users.findOne.mockResolvedValueOnce({
+      id: 22,
+      name: '赵六',
+      feishuOpenId: 'ou_legacy_creator',
+    });
+
+    await expect(
+      service.notifyTaskRequester(
+        baseTask({ requesterType: 'worker', requesterId: 1002 }),
+        'notice',
+        '任务执行失败：TK-0042 活动页开发',
+        '执行器会话已失败。',
+        { fallbackToTicketOwner: true },
+      ),
+    ).resolves.toEqual({ sent: true, ownerName: '赵六' });
+
+    expect(tickets.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { taskId: 42 } }),
+    );
+  });
+
+  it('AI 需求方升级兜底：工单创建人无飞书 openId 时静默跳过', async () => {
+    workers.findOne.mockResolvedValueOnce({
+      id: 1002,
+      name: '技术-后端架构师',
+      runtime: WorkerRuntime.OPENCODE,
+      humanUserId: null,
+      personalAgentUserId: null,
+      ownerUserId: 9,
+      ownerName: '胡峰',
+    });
+    ticketRuns.findOne.mockResolvedValueOnce({ id: 31, ticketId: 88 });
+    tickets.findOne.mockResolvedValueOnce({ id: 88, createdById: 21 });
+    users.findOne.mockResolvedValueOnce({
+      id: 21,
+      name: '王五',
+      feishuOpenId: null,
+    });
+
+    await expect(
+      service.notifyTaskRequester(
+        baseTask({ requesterType: 'worker', requesterId: 1002 }),
+        'notice',
+        '任务执行失败：TK-0042 活动页开发',
+        '执行器会话已失败。',
+        { fallbackToTicketOwner: true },
+      ),
+    ).resolves.toEqual({ sent: false });
+
+    expect(botClient.sendCard).not.toHaveBeenCalled();
   });
 
   it('审批任务卡片包含工单链接、关键正文与通过/驳回/查看按钮', async () => {

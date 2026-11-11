@@ -6,6 +6,7 @@ import { WorkFeedbackTools } from './work-tools/work-feedback.tools';
 import { WorkFeishuTools } from './work-tools/work-feishu.tools';
 import { WorkFileTools } from './work-tools/work-file.tools';
 import { WorkGithubTools } from './work-tools/work-github.tools';
+import { WorkIdeaTools } from './work-tools/work-idea.tools';
 import { WorkKnowledgeTools } from './work-tools/work-knowledge.tools';
 import { WorkProjectTools } from './work-tools/work-project.tools';
 import { WorkRunTools } from './work-tools/work-run.tools';
@@ -37,6 +38,7 @@ export class McpWorkService {
     knowledgeTools: WorkKnowledgeTools,
     defectTools: WorkDefectTools,
     feedbackTools: WorkFeedbackTools,
+    ideaTools: WorkIdeaTools,
     githubTools: WorkGithubTools,
     fileTools: WorkFileTools,
     taskTools: WorkTaskTools,
@@ -50,6 +52,7 @@ export class McpWorkService {
       knowledgeTools,
       defectTools,
       feedbackTools,
+      ideaTools,
       githubTools,
       fileTools,
       taskTools,

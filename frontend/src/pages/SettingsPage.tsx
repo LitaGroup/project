@@ -183,7 +183,7 @@ export function SettingsPage() {
               <SettingRow
                 label="Lita API 地址"
                 value={settings.litaApiHost}
-                hint="LITA_API_HOST，飞书 token 服务"
+                hint="LITA_API_HOST，多语言文案等平台接口"
               />
               <SettingRow
                 label="项目同步源"
@@ -191,17 +191,21 @@ export function SettingsPage() {
                 hint="FEISHU_PROJECT_SOURCE_URL（未配置用内置默认）"
               />
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm">飞书 token 来源</span>
-                <Badge variant={settings.feishuTokenSource === 'lita' ? 'primary' : 'soft'}>
-                  {settings.feishuTokenSource === 'lita'
-                    ? 'Lita 平台（推荐）'
-                    : '自建应用凭据（兜底）'}
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm">兜底通知 webhook</span>
-                <Badge variant={settings.feishuWebhookConfigured ? 'success' : 'soft'}>
-                  {settings.feishuWebhookConfigured ? '已配置' : '未配置'}
+                <span className="text-sm">飞书官方机器人（登录与通知统一凭据）</span>
+                <Badge
+                  variant={
+                    settings.feishuOfficialBot.configured && settings.feishuOfficialBot.enabled
+                      ? 'success'
+                      : settings.feishuOfficialBot.configured
+                        ? 'soft'
+                        : 'soft'
+                  }
+                >
+                  {settings.feishuOfficialBot.configured
+                    ? `${settings.feishuOfficialBot.appId ?? '-'}（${
+                        settings.feishuOfficialBot.enabled ? '已启用' : '已停用'
+                      }）`
+                    : '未配置（管理 → 飞书配置绑定）'}
                 </Badge>
               </div>
             </div>

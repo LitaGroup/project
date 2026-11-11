@@ -11,6 +11,7 @@ import { FeishuBotGroup } from '../feishu-bot/feishu-bot-group.entity';
 import { FeishuBotModule } from '../feishu-bot/feishu-bot.module';
 import { FilesModule } from '../files/files.module';
 import { GithubModule } from '../github/github.module';
+import { IdeasModule } from '../ideas/ideas.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { MilestonesModule } from '../milestones/milestones.module';
 import { ProjectsModule } from '../projects/projects.module';
@@ -35,6 +36,7 @@ import { WorkFeedbackTools } from './work-tools/work-feedback.tools';
 import { WorkFeishuTools } from './work-tools/work-feishu.tools';
 import { WorkFileTools } from './work-tools/work-file.tools';
 import { WorkGithubTools } from './work-tools/work-github.tools';
+import { WorkIdeaTools } from './work-tools/work-idea.tools';
 import { WorkKnowledgeTools } from './work-tools/work-knowledge.tools';
 import { WorkProjectTools } from './work-tools/work-project.tools';
 import { WorkRunTools } from './work-tools/work-run.tools';
@@ -64,6 +66,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     DefectsModule,
     ReleasesModule,
     FeedbacksModule,
+    IdeasModule,
     SettingsModule,
     ScriptsModule,
     FeishuModule,
@@ -82,6 +85,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     WorkKnowledgeTools,
     WorkDefectTools,
     WorkFeedbackTools,
+    WorkIdeaTools,
     WorkGithubTools,
     WorkFileTools,
     WorkTaskTools,

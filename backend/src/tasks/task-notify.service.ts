@@ -10,6 +10,8 @@ import { FeishuBotConfigService } from '../feishu-bot/feishu-bot-config.service'
 import { FeishuBotIdentityService } from '../feishu-bot/feishu-bot-identity.service';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
+import { Ticket } from '../tickets/ticket.entity';
+import { TicketWorkflowRun } from '../tickets/ticket-workflow-run.entity';
 import { Task } from './task.entity';
 
 export type TaskNotifyKind = 'feedback' | 'accept' | 'notice';
@@ -23,10 +25,11 @@ export interface TaskNotifyResult {
 
 export interface TaskRequesterNotifyOptions {
   /**
-   * 普通 AI 机器人需求方没有绑定用户时，是否回退通知其负责人。
-   * 仅用于自动处理失败、人工介入等升级场景；正常待验收/待反馈不打扰负责人。
+   * 普通 AI 机器人需求方没有绑定用户时，是否回退通知关联工单的创建人。
+   * 仅用于自动处理失败、人工介入等升级场景；正常待验收/待反馈不打扰其他人。
+   * 任务未关联工单或工单创建人解析不到时静默跳过（不再回退机器人负责人）。
    */
-  fallbackToRequesterOwner?: boolean;
+  fallbackToTicketOwner?: boolean;
 }
 
 export interface ApprovalTaskNotifyInput {
@@ -61,7 +64,8 @@ interface NotifyReceiver {
  * - 待反馈优先通知历史调度机器人负责人，其次处理机器人负责人；
  * - 待验收通知真实需求方（人、真人机器人绑定用户或个人 AGENT 主人）；
  *   普通 AI 机器人需求方由收件箱/自动验收驱动，正常通知不打扰其负责人；
- * - 未找到有效需求方时回退执行机器人负责人，避免异常提醒完全丢失；
+ * - 升级兜底（自动验收/自动回复失败等）回退通知任务关联工单的创建人；
+ *   无工单关联或创建人无飞书 openId 时静默跳过；
  * - 审批类型任务发送审批卡片（工单链接 + 关键正文 + 通过/驳回/查看按钮）。
  */
 @Injectable()
@@ -78,6 +82,10 @@ export class TaskNotifyService {
     private readonly users: Repository<User>,
     @InjectRepository(FeishuBotApprovalCard)
     private readonly approvalCards: Repository<FeishuBotApprovalCard>,
+    @InjectRepository(Ticket)
+    private readonly tickets: Repository<Ticket>,
+    @InjectRepository(TicketWorkflowRun)
+    private readonly ticketRuns: Repository<TicketWorkflowRun>,
     private readonly workersService: WorkersService,
     @Inject(forwardRef(() => FeishuBotConfigService))
     private readonly feishuBotConfig: FeishuBotConfigService,
@@ -140,23 +148,10 @@ export class TaskNotifyService {
           : (requesterWorker?.personalAgentUserId ?? null);
       if (!boundUserId) {
         // 普通 AI 机器人需求方没有绑定用户，默认不发飞书；
-        // 仅自动验收/自动回复失败等升级场景回退通知负责人，且不能标成需求方。
-        if (options?.fallbackToRequesterOwner && requesterWorker) {
-          const openId = await this.workersService.ownerOpenId(requesterWorker);
-          if (openId) {
-            return this.sendCard(
-              task,
-              {
-                openId,
-                ownerName: requesterWorker.ownerName ?? requesterWorker.name,
-                userId: requesterWorker.ownerUserId,
-              },
-              kind,
-              title,
-              description,
-              '负责人',
-            );
-          }
+        // 仅自动验收/自动回复失败等升级场景回退通知任务关联工单的创建人，
+        // 无工单关联或创建人无飞书 openId 时静默跳过（不再回退机器人负责人）。
+        if (options?.fallbackToTicketOwner) {
+          return this.notifyTaskTicketOwner(task, kind, title, description);
         }
         return { sent: false };
       }
@@ -194,6 +189,54 @@ export class TaskNotifyService {
       }
     }
     return this.notifyTaskOwner(task, kind, title, description);
+  }
+
+  /**
+   * 升级兜底：通知当前任务关联工单的创建人。
+   * 工作流节点任务经 ticket_workflow_runs 反查（驳回重入取最近一条），
+   * 兼容存量调度工单 tickets.taskId；不回溯根任务，无工单或解析不到时静默跳过。
+   */
+  private async notifyTaskTicketOwner(
+    task: Task,
+    kind: TaskNotifyKind,
+    title: string,
+    description: string,
+  ): Promise<TaskNotifyResult> {
+    const ticketId = await this.resolveTaskTicketId(task.id);
+    if (!ticketId) return { sent: false };
+    const ticket = await this.tickets.findOne({
+      where: { id: ticketId },
+      select: { id: true, createdById: true },
+    });
+    if (!ticket?.createdById) return { sent: false };
+    const user = await this.users.findOne({
+      where: { id: ticket.createdById },
+      select: { id: true, name: true, feishuOpenId: true },
+    });
+    if (!user?.feishuOpenId) return { sent: false };
+    return this.sendCard(
+      task,
+      { openId: user.feishuOpenId, ownerName: user.name, userId: user.id },
+      kind,
+      title,
+      description,
+      '工单创建人',
+    );
+  }
+
+  /** 当前任务的工单 id：节点任务取最近一次工作流运行，兼容存量调度工单 */
+  private async resolveTaskTicketId(taskId: number): Promise<number | null> {
+    const run = await this.ticketRuns.findOne({
+      where: { taskId },
+      select: { id: true, ticketId: true },
+      order: { id: 'DESC' },
+    });
+    if (run?.ticketId) return run.ticketId;
+    const legacy = await this.tickets.findOne({
+      where: { taskId },
+      select: { id: true },
+    });
+    return legacy?.id ?? null;
   }
 
   /**
@@ -518,7 +561,7 @@ export class TaskNotifyService {
     kind: TaskNotifyKind,
     title: string,
     description: string,
-    receiverLabel: '负责人' | '需求方' | '执行人',
+    receiverLabel: '负责人' | '需求方' | '执行人' | '工单创建人',
     options?: { workbench?: boolean; actionLabel?: string },
   ): Promise<TaskNotifyResult> {
     const template = kind === 'accept' ? 'green' : 'orange';

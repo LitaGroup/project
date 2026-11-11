@@ -302,7 +302,7 @@ export class TaskQuestionAutoAnswerService {
       'notice',
       `任务等待回答：${child.code} ${child.title}`,
       `父任务机器人自动答复失败，请到任务详情回答：${request.questions[0]?.question ?? request.id}`,
-      { fallbackToRequesterOwner: true },
+      { fallbackToTicketOwner: true },
     );
   }
 

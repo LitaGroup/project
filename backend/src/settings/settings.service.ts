@@ -1,10 +1,13 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import * as path from 'path';
 import { mdFrontmatter } from '../common/frontmatter';
 import { AgentGateway } from '../agent/agent.gateway';
 import { DEFAULT_PROJECT_SOURCE_URL } from '../projects/project-sync.service';
 import { ScriptLibrarySyncService } from '../scripts/script-library-sync.service';
+import { FeishuBotConfig } from '../feishu-bot/feishu-bot-config.entity';
 
 export interface Settings {
   /** 运行环境（NODE_ENV） */
@@ -19,14 +22,16 @@ export interface Settings {
   appUrl: string;
   /** 接口访问地址（API_URL） */
   apiUrl: string;
-  /** Lita 平台 API 地址（LITA_API_HOST，飞书 token 服务） */
+  /** Lita 平台 API 地址（LITA_API_HOST，多语言文案等平台接口） */
   litaApiHost: string;
   /** 项目同步源多维表格地址（FEISHU_PROJECT_SOURCE_URL，未配置用内置默认） */
   feishuProjectSourceUrl: string;
-  /** 飞书 token 来源：lita（LITA_USER_TOKEN 已配置）/ app-credential（自建应用凭据兜底） */
-  feishuTokenSource: 'lita' | 'app-credential';
-  /** 兜底通知 webhook 是否已配置（不暴露 secret） */
-  feishuWebhookConfigured: boolean;
+  /** 平台官方机器人（飞书统一凭据：tenant token 与 OAuth 登录）配置状态 */
+  feishuOfficialBot: {
+    configured: boolean;
+    appId: string | null;
+    enabled: boolean;
+  };
   /** GitHub 集成：token 配置状态（不回显明文）与组织名 */
   github: {
     tokenConfigured: boolean;
@@ -58,8 +63,6 @@ export class SettingsService {
   private readonly apiUrl: string;
   private readonly litaApiHost: string;
   private readonly feishuProjectSourceUrl: string;
-  private readonly feishuTokenSource: 'lita' | 'app-credential';
-  private readonly feishuWebhookConfigured: boolean;
   private readonly githubTokenConfigured: boolean;
   private readonly githubOrg: string;
   private readonly publicAgentTokenConfigured: boolean;
@@ -69,6 +72,8 @@ export class SettingsService {
     private readonly agentGateway: AgentGateway,
     /** 脚本仓库更新复用脚本库 main 分支同步（同一定时任务的实现） */
     private readonly scriptLibrarySync: ScriptLibrarySyncService,
+    @InjectRepository(FeishuBotConfig)
+    private readonly feishuBotConfigs: Repository<FeishuBotConfig>,
   ) {
     this.environment = config.get<string>('NODE_ENV') ?? 'development';
     this.port = config.get<number>('PORT') ?? 3100;
@@ -89,10 +94,6 @@ export class SettingsService {
     this.feishuProjectSourceUrl =
       config.get<string>('FEISHU_PROJECT_SOURCE_URL') ??
       DEFAULT_PROJECT_SOURCE_URL;
-    this.feishuTokenSource = config.get<string>('LITA_USER_TOKEN')
-      ? 'lita'
-      : 'app-credential';
-    this.feishuWebhookConfigured = !!config.get<string>('FEISHU_WEBHOOK_URL');
     this.githubTokenConfigured = !!config.get<string>('GITHUB_TOKEN')?.trim();
     this.githubOrg = config.get<string>('GITHUB_ORG')?.trim() || 'LitaGroup';
     this.publicAgentTokenConfigured = !!config
@@ -100,8 +101,12 @@ export class SettingsService {
       ?.trim();
   }
 
-  /** 平台配置概览：运行环境、脚本/图片目录、访问域名、飞书相关、appium-agent 连接信息（均只读，不含密钥） */
-  getSettings(): Settings {
+  /** 平台配置概览：运行环境、脚本/图片目录、访问域名、飞书官方机器人状态、appium-agent 连接信息（均只读，不含密钥） */
+  async getSettings(): Promise<Settings> {
+    const official = await this.feishuBotConfigs.findOne({
+      where: { kind: 'official' },
+      select: { id: true, appId: true, enabled: true },
+    });
     return {
       environment: this.environment,
       port: this.port,
@@ -111,8 +116,11 @@ export class SettingsService {
       apiUrl: this.apiUrl,
       litaApiHost: this.litaApiHost,
       feishuProjectSourceUrl: this.feishuProjectSourceUrl,
-      feishuTokenSource: this.feishuTokenSource,
-      feishuWebhookConfigured: this.feishuWebhookConfigured,
+      feishuOfficialBot: {
+        configured: Boolean(official),
+        appId: official?.appId ?? null,
+        enabled: official?.enabled ?? false,
+      },
       github: {
         tokenConfigured: this.githubTokenConfigured,
         org: this.githubOrg,
@@ -148,8 +156,8 @@ export class SettingsService {
   }
 
   /** 平台设置的 Markdown 视图（`/api/settings.md` 与 lita-work MCP 工具共用） */
-  renderMarkdown(): string {
-    const s = this.getSettings();
+  async renderMarkdown(): Promise<string> {
+    const s = await this.getSettings();
     return [
       mdFrontmatter({ title: '平台设置' }),
       '# 平台设置',
@@ -161,8 +169,13 @@ export class SettingsService {
       `- 前端地址：${s.appUrl}`,
       `- 接口地址：${s.apiUrl}`,
       `- Lita API：${s.litaApiHost}`,
-      `- 飞书 token 来源：${s.feishuTokenSource}`,
-      `- 兜底通知 webhook：${s.feishuWebhookConfigured ? '已配置' : '未配置'}`,
+      `- 飞书官方机器人（tenant token 与登录统一凭据）：${
+        s.feishuOfficialBot.configured
+          ? `\`${s.feishuOfficialBot.appId ?? '-'}\`（${
+              s.feishuOfficialBot.enabled ? '已启用' : '已停用'
+            }）`
+          : '未配置（管理 → 飞书配置绑定）'
+      }`,
       `- GitHub：${s.github.tokenConfigured ? `已配置（组织 ${s.github.org}，每分钟监听项目登记分支的新提交）` : '未配置 GITHUB_TOKEN（代码监听停用）'}`,
       `- 公共 Agent 令牌：${s.publicAgentTokenConfigured ? '已配置（管理员权限，X-Agent-Token 调用 .md 端点，操作人记「公共 Agent」）' : '未配置 PUBLIC_AGENT_TOKEN'}`,
       `- appium-agent：${s.agent.online ? `在线（${s.agent.name ?? '未知'}）` : '离线'}`,

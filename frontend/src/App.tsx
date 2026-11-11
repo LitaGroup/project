@@ -4,6 +4,8 @@ import { useAuth } from './context/AuthContext'
 import { OverviewPage } from './pages/OverviewPage'
 import { RequirementsPage } from './pages/RequirementsPage'
 import { IterationsPage } from './pages/IterationsPage'
+import { IdeasPage } from './pages/IdeasPage'
+import { IdeaDetailPage } from './pages/IdeaDetailPage'
 import { FeedbackPage } from './pages/FeedbackPage'
 import { FeedbackDetailPage } from './pages/FeedbackDetailPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
@@ -131,6 +133,8 @@ function App() {
           <Route path="/overview" element={<OverviewPage />} />
           <Route path="/requirements" element={<RequirementsPage />} />
           <Route path="/iterations" element={<IterationsPage />} />
+          <Route path="/ideas" element={<IdeasPage />} />
+          <Route path="/ideas/:ideaId" element={<IdeaDetailPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/feedback/:feedbackId" element={<FeedbackDetailPage />} />
           <Route path="/workbench" element={<WorkbenchPage />} />

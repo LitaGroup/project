@@ -93,6 +93,25 @@ export enum FeedbackStatus {
   CLOSED = '已关闭',
 }
 
+/** 灵感类型：想法（默认）/ 创意 / 待办 / 建议 / 其它（业务分区「灵感」） */
+export enum IdeaType {
+  IDEA = '想法',
+  CREATIVE = '创意',
+  TODO = '待办',
+  SUGGESTION = '建议',
+  OTHER = '其它',
+}
+
+/**
+ * 灵感状态：构思（默认，可持续完善）→ 采纳（已进入需求池）/ 废弃。
+ * 构思期任何登录用户可编辑内容；状态流转仅管理员。
+ */
+export enum IdeaStatus {
+  DRAFT = '构思',
+  ABANDONED = '废弃',
+  ADOPTED = '采纳',
+}
+
 /**
  * 脚本运行设备/目标：决定运行位置。
  * server/h5 → project 本地 node 直跑；android/ios → appium-agent 远程执行。

@@ -10,6 +10,7 @@ import { FeishuService } from '../feishu/feishu.service';
 import { WorkersService } from '../workers/workers.service';
 import { PersonalAgentsService } from '../workers/personal-agents.service';
 import { User } from './user.entity';
+import { FeishuBotConfigService } from '../feishu-bot/feishu-bot-config.service';
 
 /** 登录成功后发送的飞书欢迎消息标题 */
 const WELCOME_TITLE = '你好，欢迎登录 project';
@@ -48,7 +49,7 @@ export interface FeishuLoginResult {
   tokens: FeishuOAuthTokens;
 }
 
-/** 飞书应用凭据（网页登录直接依赖，不同于 tenant token 的 Lita 来源） */
+/** 飞书应用凭据（网页登录使用，来源为平台官方机器人数据库配置） */
 interface FeishuAppCredential {
   appId: string;
   appSecret: string;
@@ -75,6 +76,7 @@ export class AuthService {
     private readonly feishu: FeishuService,
     private readonly workersService: WorkersService,
     private readonly personalAgents: PersonalAgentsService,
+    private readonly feishuBotConfigs: FeishuBotConfigService,
   ) {
     this.http = axios.create({
       baseURL: 'https://open.feishu.cn/open-apis',
@@ -90,8 +92,8 @@ export class AuthService {
   }
 
   /** 飞书网页授权地址（authen/v1/index） */
-  buildAuthorizeUrl(state: string): string {
-    const { appId, redirectUri } = this.getFeishuCredential();
+  async buildAuthorizeUrl(state: string): Promise<string> {
+    const { appId, redirectUri } = await this.getFeishuCredential();
     const params = new URLSearchParams({
       app_id: appId,
       redirect_uri: redirectUri,
@@ -110,7 +112,7 @@ export class AuthService {
    * 令牌随登录落库，当前无消费方（原飞书云文档搜索已下线），保留给后续需要用户身份的飞书接口。
    */
   async exchangeCodeForLogin(code: string): Promise<FeishuLoginResult> {
-    const { appId, appSecret, redirectUri } = this.getFeishuCredential();
+    const { appId, appSecret, redirectUri } = await this.getFeishuCredential();
     let accessToken: string;
     let refreshToken: string | null = null;
     let expiresIn = 7200;
@@ -504,15 +506,18 @@ export class AuthService {
     return user;
   }
 
-  /** 飞书应用凭据（登录直接依赖 app_id/secret；tenant token 的 Lita 来源不适用于 OAuth） */
-  private getFeishuCredential(): FeishuAppCredential {
-    const appId = this.config.get<string>('FEISHU_APP_ID');
-    const appSecret = this.config.get<string>('FEISHU_APP_SECRET');
-    if (!appId || !appSecret) {
+  /**
+   * 飞书应用凭据：统一使用平台数据库配置的「平台官方机器人」（登录需该应用在飞书后台
+   * 开启「网页授权登录」并登记重定向 URL；tenant token 的旧 Lita 来源已下线）。
+   */
+  private async getFeishuCredential(): Promise<FeishuAppCredential> {
+    const config = await this.feishuBotConfigs.loadEnabledOfficial();
+    if (!config) {
       throw new BadRequestException(
-        '飞书登录未配置：缺少 FEISHU_APP_ID / FEISHU_APP_SECRET（需在飞书后台开启「网页授权登录」能力）',
+        '飞书登录未配置：请在管理 → 飞书配置绑定并启用平台官方机器人（需在飞书后台开启「网页授权登录」能力）',
       );
     }
+    const { appId, appSecret } = this.feishuBotConfigs.secretsOf(config);
     const appUrl =
       this.config.get<string>('APP_URL') ?? 'http://localhost:5273';
     return {

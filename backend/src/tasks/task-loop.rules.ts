@@ -3,6 +3,33 @@ import { TaskStatus, TaskSubStatus } from '../common/enums';
 /** 待反馈/待验收提醒间隔：30 分钟 */
 export const TASK_REMIND_INTERVAL_MS = 30 * 60 * 1000;
 
+/** 待接受卡住提醒：每任务最多提醒次数（实际发出才计数） */
+export const OFFER_STALL_REMIND_MAX_TIMES = 3;
+
+/**
+ * 待接受卡住提醒静默时段：北京时间 22:00~08:00 不发提醒（不计数，顺延到窗口外）。
+ * 按 UTC+8 显式计算，不依赖进程时区。
+ */
+export function isOfferRemindQuietHour(
+  now: number | Date = Date.now(),
+): boolean {
+  const ms = typeof now === 'number' ? now : now.getTime();
+  const beijingHour = new Date(ms + 8 * 60 * 60_000).getUTCHours();
+  return beijingHour >= 22 || beijingHour < 8;
+}
+
+/**
+ * 待接受卡住提醒动作：静默时段或已达 3 次上限则跳过，否则发送。
+ */
+export function nextOfferStallAction(
+  remindCount: number | null | undefined,
+  now: number | Date = Date.now(),
+): 'send' | 'quiet' | 'maxed' {
+  if (isOfferRemindQuietHour(now)) return 'quiet';
+  if ((remindCount ?? 0) >= OFFER_STALL_REMIND_MAX_TIMES) return 'maxed';
+  return 'send';
+}
+
 /** 从首次提醒起最多等待 7 天，仍未处理则自动收尾（待反馈→失败取消 / 待验收→完成） */
 export const TASK_REMIND_TIMEOUT_DAYS = 7;
 export const TASK_REMIND_TIMEOUT_MS =

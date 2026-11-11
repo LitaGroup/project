@@ -691,8 +691,8 @@ export class FeishuBotClientService {
     return Buffer.from(await response.arrayBuffer());
   }
 
-  /** 带缓存的 tenant_access_token（提前 5 分钟过期） */
-  private async tenantToken(
+  /** 带缓存的 tenant_access_token（提前 5 分钟过期）；平台统一凭据（官方机器人）也经此获取 */
+  async tenantToken(
     configId: number,
     secrets: FeishuBotSecrets,
   ): Promise<string> {

@@ -1,16 +1,19 @@
 import {
   BadRequestException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   OnModuleInit,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import axios, { AxiosInstance } from 'axios';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { mdFrontmatter } from '../common/frontmatter';
 import { imageWebroot } from '../common/paths';
+import { FeishuBotClientService } from '../feishu-bot/feishu-bot-client.service';
+import { FeishuBotConfigService } from '../feishu-bot/feishu-bot-config.service';
 import {
   bitableRecordsToMarkdown,
   docxBlocksToMarkdown,
@@ -132,7 +135,8 @@ function extFromMagic(buf: Buffer, contentType?: string): string {
 /**
  * 飞书开放平台客户端。
  * 只读（单向导入：文档/项目/缺陷已解绑，飞书 → 平台，不回写）。
- * 凭据：Lita 平台 token 服务（LITA_USER_TOKEN），兜底 FEISHU_APP_ID / FEISHU_APP_SECRET。
+ * 凭据：统一使用平台数据库配置的「平台官方机器人」（feishu_bot_configs kind=official），
+ * tenant_access_token 经 FeishuBotClientService 按配置缓存；环境变量应用凭据已下线。
  */
 @Injectable()
 export class FeishuService implements OnModuleInit {
@@ -140,7 +144,12 @@ export class FeishuService implements OnModuleInit {
   private readonly http: AxiosInstance;
   private tokenCache: TenantTokenCache | null = null;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    @Inject(forwardRef(() => FeishuBotConfigService))
+    private readonly feishuBotConfigs: FeishuBotConfigService,
+    @Inject(forwardRef(() => FeishuBotClientService))
+    private readonly feishuBotClient: FeishuBotClientService,
+  ) {
     this.http = axios.create({
       baseURL: 'https://open.feishu.cn/open-apis',
       timeout: 60_000,
@@ -895,86 +904,24 @@ export class FeishuService implements OnModuleInit {
   }
 
   /**
-   * 从 Lita 平台 token 服务获取飞书 tenant_access_token。
-   * 测试/生产统一走该 API；凭据为 LITA_USER_TOKEN（环境变量）。
-   * 兜底：未配置 LITA_USER_TOKEN 时退回自建应用 FEISHU_APP_ID/SECRET 模式。
+   * 平台统一飞书凭据：数据库配置的「平台官方机器人」（feishu_bot_configs kind=official）。
+   * tenant_access_token 经 FeishuBotClientService 按配置缓存，此处仅做本地短路缓存。
    */
   async refreshToken(): Promise<string> {
-    const userToken = this.config.get<string>('LITA_USER_TOKEN');
-    if (!userToken) {
-      return this.refreshTokenByAppCredential();
-    }
-    const host = this.config.get<string>(
-      'LITA_API_HOST',
-      'https://api.cinta.team',
-    );
-    const { data } = await axios.post<{
-      code?: number;
-      status?: number;
-      msg?: string;
-      message?: string;
-      data?: { token?: string; expireAt?: number } | string;
-    }>(
-      `${host}/admin-ai/v1/auth/platform-token/getToken`,
-      { platform: 'feishu', tokenType: 'tenant_access_token' },
-      { headers: { 'L-USER-TOKEN': userToken }, timeout: 15_000 },
-    );
-    const failed =
-      (data.code !== undefined && data.code !== 0) ||
-      (data.status !== undefined && data.status !== 0);
-    if (failed || !data.data) {
+    const config = await this.feishuBotConfigs.loadEnabledOfficial();
+    if (!config) {
       throw new BadRequestException(
-        `获取飞书 token 失败: ${data.msg ?? data.message ?? '未知错误'}`,
+        '缺少飞书凭据：请在管理 → 飞书配置绑定并启用平台官方机器人',
       );
     }
-    const payload =
-      typeof data.data === 'string'
-        ? { token: data.data, expireAt: Math.floor(Date.now() / 1000) + 7200 }
-        : {
-            token: data.data.token ?? '',
-            expireAt:
-              data.data.expireAt ?? Math.floor(Date.now() / 1000) + 7200,
-          };
-    if (!payload.token) {
-      throw new BadRequestException('获取飞书 token 失败：返回为空');
-    }
-    // expireAt 为秒级时间戳，提前 5 分钟过期
+    const secrets = this.feishuBotConfigs.secretsOf(config);
+    const token = await this.feishuBotClient.tenantToken(config.id, secrets);
     this.tokenCache = {
-      token: payload.token,
-      expireAt: (payload.expireAt - 300) * 1000,
+      token,
+      // 官方应用 tenant token 约 2 小时有效，客户端缓存已提前 5 分钟过期；本地缓存 25 分钟
+      expireAt: Date.now() + 25 * 60_000,
     };
-    this.logger.log(
-      `飞书 token 已刷新，有效期至 ${new Date(payload.expireAt * 1000).toISOString()}`,
-    );
-    return this.tokenCache.token;
-  }
-
-  /** 兜底：自建应用 app_id/app_secret 换 tenant_access_token */
-  private async refreshTokenByAppCredential(): Promise<string> {
-    const appId = this.config.get<string>('FEISHU_APP_ID');
-    const appSecret = this.config.get<string>('FEISHU_APP_SECRET');
-    if (!appId || !appSecret) {
-      throw new BadRequestException(
-        '缺少飞书凭据，请配置 LITA_USER_TOKEN（推荐）或 FEISHU_APP_ID / FEISHU_APP_SECRET',
-      );
-    }
-    const { data } = await this.http.post<{
-      code: number;
-      msg: string;
-      tenant_access_token: string;
-      expire: number;
-    }>('/auth/v3/tenant_access_token/internal', {
-      app_id: appId,
-      app_secret: appSecret,
-    });
-    if (data.code !== 0) {
-      throw new BadRequestException(`飞书鉴权失败: ${data.msg}`);
-    }
-    this.tokenCache = {
-      token: data.tenant_access_token,
-      expireAt: Date.now() + (data.expire - 300) * 1000,
-    };
-    return this.tokenCache.token;
+    return token;
   }
 
   private async request<T>(

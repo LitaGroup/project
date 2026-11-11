@@ -44,7 +44,7 @@ export class AuthController {
 
   /** 登录入口：302 到飞书授权页（state 写短效 Cookie，回调时比对防 CSRF） */
   @Get('feishu')
-  feishuLogin(@Req() req: Request, @Res() res: Response) {
+  async feishuLogin(@Req() req: Request, @Res() res: Response) {
     try {
       const state = this.authService.generateState();
       res.cookie(
@@ -52,7 +52,7 @@ export class AuthController {
         state,
         this.authService.stateCookieOptions(),
       );
-      res.redirect(this.authService.buildAuthorizeUrl(state));
+      res.redirect(await this.authService.buildAuthorizeUrl(state));
     } catch (e) {
       this.redirectLoginError(res, (e as Error).message);
     }

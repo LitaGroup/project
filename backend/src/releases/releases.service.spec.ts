@@ -20,8 +20,6 @@ describe('ReleasesService', () => {
   let tasksFindOne: jest.Mock;
   let sendUserCard: jest.Mock;
   let enqueueReleaseStatus: jest.Mock;
-  let fetchMock: jest.Mock;
-  const realFetch = globalThis.fetch;
 
   const project = (over: Partial<Project> = {}): Project =>
     ({
@@ -90,23 +88,9 @@ describe('ReleasesService', () => {
       ],
     }).compile();
     service = moduleRef.get(ReleasesService);
-    // 群机器人 webhook 打桩：单测不应出网
-    fetchMock = jest.fn();
-    fetchMock.mockImplementation(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ code: 0 }),
-      } as Response),
-    );
-    globalThis.fetch = fetchMock;
   });
 
-  afterEach(() => {
-    globalThis.fetch = realFetch;
-  });
-
-  it('提测成功：创建记录 + 状态流转「测试中」+ 群与项目人员私聊通知', async () => {
+  it('提测成功：创建记录 + 状态流转「测试中」+ 项目人员私聊通知', async () => {
     const release = await service.submit(1, {
       content: ' 修复了登录问题 ',
       urls: [' https://staging.example.com ', ''],
@@ -127,7 +111,6 @@ describe('ReleasesService', () => {
       expect.objectContaining({ status: ProjectStatus.IN_TEST }),
     );
     await Promise.resolve(); // 放行 fire-and-forget 通知
-    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sendUserCard).toHaveBeenCalledTimes(3); // 张三/李四/王五 去重后
   });
 

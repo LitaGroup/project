@@ -123,6 +123,10 @@ export class Task {
   @Column({ type: 'timestamptz', nullable: true })
   offerAttemptAt: Date | null;
 
+  /** 待接受卡住提醒次数（每任务上限 3 次；离开待接受时清零） */
+  @Column({ type: 'int', default: 0 })
+  offerStallRemindCount: number;
+
   /** 工作计划（Markdown，历史识别或外部 AI 更新，派发时随任务下发给机器人） */
   @Column({ type: 'text', nullable: true })
   workPlan: string | null;
