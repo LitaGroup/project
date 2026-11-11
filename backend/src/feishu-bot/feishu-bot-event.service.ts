@@ -332,7 +332,7 @@ export class FeishuBotEventService {
     operator: FeishuSenderId,
   ): Promise<unknown> {
     const approval = await this.approvals
-      .handleCardAction(row, secrets, value, operator)
+      .handleCardAction(row, value, operator)
       .catch((error: Error) => {
         this.logger.warn(`审批卡片动作处理失败：${error.message}`);
         return {

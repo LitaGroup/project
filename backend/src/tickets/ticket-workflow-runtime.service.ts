@@ -593,6 +593,20 @@ export class TicketWorkflowRuntimeService {
       },
     );
     await this.completeRunWithOutcome(run, completed ?? task, 'approved');
+    // 网页、卡片回调与 API 审批都在这里汇合：统一回写飞书卡片，失败只告警
+    void this.taskNotify
+      .syncApprovalCardResult({
+        taskId: task.id,
+        ticket: { id: ticket.id, code: ticket.code, title: ticket.title },
+        state: 'approved',
+        operator: { id: user.id, name: user.name },
+        remark: approvalRemark,
+      })
+      .catch((error: Error) =>
+        this.logger.warn(
+          `审批卡片回写失败（${ticket.code}）：${error.message}`,
+        ),
+      );
     return this.mustFind(ticketId);
   }
 
@@ -689,6 +703,20 @@ export class TicketWorkflowRuntimeService {
       },
     );
     await this.completeRunWithOutcome(run, failedTask ?? task, 'rejected');
+    // 驳回通常经网页填写必填意见完成，同样统一回写飞书卡片
+    void this.taskNotify
+      .syncApprovalCardResult({
+        taskId: task.id,
+        ticket: { id: ticket.id, code: ticket.code, title: ticket.title },
+        state: 'rejected',
+        operator: { id: user.id, name: user.name },
+        remark: text,
+      })
+      .catch((error: Error) =>
+        this.logger.warn(
+          `审批卡片回写失败（${ticket.code}）：${error.message}`,
+        ),
+      );
     return this.mustFind(ticketId);
   }
 

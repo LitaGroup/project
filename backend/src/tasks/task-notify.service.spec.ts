@@ -2,7 +2,7 @@ import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { Task } from './task.entity';
 import { TaskNotifyService } from './task-notify.service';
 
-let botClient: { sendCard: jest.Mock };
+let botClient: { sendCard: jest.Mock; updateCard: jest.Mock };
 
 describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () => {
   const baseTask = (over: Partial<Task> = {}): Task =>
@@ -21,10 +21,16 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
   let workers: { findOne: jest.Mock };
   let tasks: { findOne: jest.Mock };
   let users: { findOne: jest.Mock };
-  let approvalCards: { save: jest.Mock; create: jest.Mock };
+  let approvalCards: {
+    save: jest.Mock;
+    create: jest.Mock;
+    find: jest.Mock;
+    update: jest.Mock;
+  };
   let workersService: { ownerOpenId: jest.Mock };
   let botConfig: {
     loadEnabledOfficial: jest.Mock;
+    loadWithSecrets: jest.Mock;
     secretsOf: jest.Mock;
   };
   let botIdentities: { openIdFor: jest.Mock };
@@ -44,10 +50,15 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
     approvalCards = {
       save: jest.fn().mockResolvedValue({ id: 1 }),
       create: jest.fn().mockImplementation((row: unknown) => row),
+      find: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     workersService = { ownerOpenId: jest.fn() };
     botConfig = {
       loadEnabledOfficial: jest
+        .fn()
+        .mockResolvedValue({ id: 9, kind: 'official', enabled: true }),
+      loadWithSecrets: jest
         .fn()
         .mockResolvedValue({ id: 9, kind: 'official', enabled: true }),
       secretsOf: jest.fn().mockReturnValue({
@@ -59,6 +70,7 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
     };
     botClient = {
       sendCard: jest.fn().mockResolvedValue({ messageId: 'om_card_1' }),
+      updateCard: jest.fn().mockResolvedValue(undefined),
     };
     botIdentities = { openIdFor: jest.fn().mockResolvedValue(null) };
     config = {
@@ -350,6 +362,100 @@ describe('TaskNotifyService 飞书任务通知（平台官方机器人）', () =
       }),
     );
   });
+
+  it('审批通过后回写卡片为只读结果卡片并登记状态', async () => {
+    approvalCards.find.mockResolvedValueOnce([pendingApprovalCard()]);
+
+    await service.syncApprovalCardResult({
+      taskId: 42,
+      ticket: { id: 11, code: 'WO-0011', title: '发布申请' },
+      state: 'approved',
+      operator: { id: 7, name: '王五' },
+      remark: '同意发布',
+    });
+
+    expect(botClient.updateCard).toHaveBeenCalledWith(
+      9,
+      expect.any(Object),
+      'om_card_1',
+      expect.any(Object),
+    );
+    const card = updatedCard();
+    expect(cardTemplate(card)).toBe('green');
+    expect(updatedCardText()).toContain(
+      '**工单**：[WO-0011 发布申请](https://project.example/tickets/11)',
+    );
+    expect(updatedCardText()).toContain('**操作人**：王五');
+    expect(updatedCardText()).toContain('**意见**：同意发布');
+    expect(updatedCardText()).toContain('该审批已通过');
+    expect(updatedCardActions().map((action) => action.text?.content)).toEqual([
+      '查看工单',
+    ]);
+    expect(approvalCards.update).toHaveBeenCalledWith(
+      { id: 3, state: 'pending' },
+      expect.objectContaining({
+        state: 'approved',
+        actedById: 7,
+        actedByName: '王五',
+      }),
+    );
+  });
+
+  it('网页驳回后卡片替换为红色结果卡片并保留驳回意见', async () => {
+    approvalCards.find.mockResolvedValueOnce([pendingApprovalCard()]);
+
+    await service.syncApprovalCardResult({
+      taskId: 42,
+      ticket: { id: 11, code: 'WO-0011', title: '发布申请' },
+      state: 'rejected',
+      operator: { id: 8, name: '赵六' },
+      remark: '材料不全',
+    });
+
+    const card = updatedCard();
+    expect(cardTemplate(card)).toBe('red');
+    expect(updatedCardText()).toContain('**意见**：材料不全');
+    expect(updatedCardText()).toContain('该审批已驳回');
+    expect(updatedCardActions().map((action) => action.text?.content)).toEqual([
+      '查看工单',
+    ]);
+    expect(approvalCards.update).toHaveBeenCalledWith(
+      { id: 3, state: 'pending' },
+      expect.objectContaining({ state: 'rejected', actedById: 8 }),
+    );
+  });
+
+  it('没有待处理卡片登记时不更新飞书卡片', async () => {
+    approvalCards.find.mockResolvedValueOnce([]);
+
+    await service.syncApprovalCardResult({
+      taskId: 42,
+      ticket: { id: 11, code: 'WO-0011', title: '发布申请' },
+      state: 'approved',
+      operator: { id: 7, name: '王五' },
+    });
+
+    expect(botClient.updateCard).not.toHaveBeenCalled();
+    expect(approvalCards.update).not.toHaveBeenCalled();
+  });
+
+  it('卡片更新失败仍登记状态且不影响审批结果', async () => {
+    approvalCards.find.mockResolvedValueOnce([pendingApprovalCard()]);
+    botClient.updateCard.mockRejectedValueOnce(new Error('飞书接口调用失败'));
+
+    await expect(
+      service.syncApprovalCardResult({
+        taskId: 42,
+        ticket: { id: 11, code: 'WO-0011', title: '发布申请' },
+        state: 'approved',
+        operator: { id: 7, name: '王五' },
+      }),
+    ).resolves.toBeUndefined();
+    expect(approvalCards.update).toHaveBeenCalledWith(
+      { id: 3, state: 'pending' },
+      expect.objectContaining({ state: 'approved' }),
+    );
+  });
 });
 
 interface SentCardAction {
@@ -385,6 +491,44 @@ function sentCardText(): string {
 
 function cardActions(): SentCardAction[] | undefined {
   const elements = sentCard().elements as
+    Array<{ tag?: string; actions?: SentCardAction[] }> | undefined;
+  return elements?.find((element) => element.tag === 'action')?.actions;
+}
+
+function pendingApprovalCard(): Record<string, unknown> {
+  return {
+    id: 3,
+    configId: 9,
+    ticketId: 11,
+    taskId: 42,
+    messageId: 'om_card_1',
+    state: 'pending',
+  };
+}
+
+function updatedCard(): Record<string, unknown> {
+  const call = botClient.updateCard.mock.calls.at(-1) as
+    [number, unknown, string, Record<string, unknown>] | undefined;
+  return call?.[3] ?? {};
+}
+
+function cardTemplate(card: Record<string, unknown>): string | undefined {
+  return (card.header as { template?: string } | undefined)?.template;
+}
+
+function updatedCardText(): string {
+  const elements = updatedCard().elements as
+    Array<{ tag?: string; text?: { content?: string } }> | undefined;
+  return (
+    elements
+      ?.filter((element) => element.tag === 'div')
+      .map((element) => element.text?.content ?? '')
+      .join('\n') ?? ''
+  );
+}
+
+function updatedCardActions(): SentCardAction[] | undefined {
+  const elements = updatedCard().elements as
     Array<{ tag?: string; actions?: SentCardAction[] }> | undefined;
   return elements?.find((element) => element.tag === 'action')?.actions;
 }

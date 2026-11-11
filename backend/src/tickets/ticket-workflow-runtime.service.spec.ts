@@ -44,7 +44,10 @@ describe('TicketWorkflowRuntimeService', () => {
     dispatch: jest.Mock;
     isHumanWorker: jest.Mock;
   };
-  let taskNotify: { notifyApprovalTask: jest.Mock };
+  let taskNotify: {
+    notifyApprovalTask: jest.Mock;
+    syncApprovalCardResult: jest.Mock;
+  };
   let llm: { generateTitle: jest.Mock };
   let service: TicketWorkflowRuntimeService;
 
@@ -82,6 +85,7 @@ describe('TicketWorkflowRuntimeService', () => {
     };
     taskNotify = {
       notifyApprovalTask: jest.fn().mockResolvedValue({ sent: true }),
+      syncApprovalCardResult: jest.fn().mockResolvedValue(undefined),
     };
     llm = { generateTitle: jest.fn().mockResolvedValue(null) };
     service = new TicketWorkflowRuntimeService(
@@ -323,6 +327,13 @@ describe('TicketWorkflowRuntimeService', () => {
       }),
     );
     expect(complete).toHaveBeenCalledWith(run, completedTask, 'approved');
+    expect(taskNotify.syncApprovalCardResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: activeTask.id,
+        state: 'approved',
+        operator: { id: user.id, name: user.name },
+      }),
+    );
   });
 
   it('非当前审批任务处理人不能直接审批', async () => {
@@ -435,6 +446,13 @@ describe('TicketWorkflowRuntimeService', () => {
       expect.objectContaining({ approval: true, remark: '同意发布' }),
     );
     expect(complete).toHaveBeenCalledWith(run, completedTask, 'approved');
+    expect(taskNotify.syncApprovalCardResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: activeTask.id,
+        state: 'approved',
+        remark: '同意发布',
+      }),
+    );
   });
 
   it('审批驳回必须填写意见并按 rejected 推进', async () => {
@@ -508,6 +526,14 @@ describe('TicketWorkflowRuntimeService', () => {
       }),
     );
     expect(complete).toHaveBeenCalledWith(run, failedTask, 'rejected');
+    expect(taskNotify.syncApprovalCardResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: activeTask.id,
+        state: 'rejected',
+        operator: { id: user.id, name: user.name },
+        remark: '材料不全',
+      }),
+    );
   });
 
   it('审批节点创建审批类型任务并自动接受（真人处理人）', async () => {

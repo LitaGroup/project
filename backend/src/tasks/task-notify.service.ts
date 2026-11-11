@@ -38,6 +38,16 @@ export interface ApprovalTaskNotifyInput {
   initiatorName?: string | null;
 }
 
+export interface ApprovalCardResultInput {
+  /** 审批类型任务 id（卡片登记按它定位） */
+  taskId: number;
+  ticket: { id: number; code: string; title: string };
+  state: 'approved' | 'rejected';
+  operator: { id: number; name: string };
+  /** 通过意见（可选）或驳回原因（必填） */
+  remark?: string | null;
+}
+
 /** 通知接收人：openId 为兜底值，userId 用于优先解析官方机器人应用下的 open_id */
 interface NotifyReceiver {
   openId: string;
@@ -341,6 +351,120 @@ export class TaskNotifyService {
       );
       return { sent: false, ownerName: receiver.ownerName };
     }
+  }
+
+  /**
+   * 审批完成后回写飞书审批卡片：把待处理卡片替换为只读结果卡片。
+   * 网页、卡片回调与 API 审批都经过工单运行时，统一在这里回写，
+   * 避免只有卡片「通过」按钮更新、网页驳回后卡片仍保留通过/驳回按钮。
+   * 无登记卡片、配置停用或飞书失败只告警，不影响审批结果。
+   */
+  async syncApprovalCardResult(input: ApprovalCardResultInput): Promise<void> {
+    const cards = await this.approvalCards
+      .find({
+        where: { taskId: input.taskId, state: 'pending' },
+        order: { id: 'DESC' },
+      })
+      .catch((error: Error) => {
+        this.logger.warn(
+          `审批卡片查询失败（任务#${input.taskId}）：${error.message}`,
+        );
+        return [];
+      });
+    if (!cards.length) return;
+    const actedAt = new Date();
+    for (const card of cards) {
+      if (card.messageId) {
+        try {
+          const config = await this.feishuBotConfig.loadWithSecrets(
+            card.configId,
+          );
+          if (config.enabled) {
+            await this.feishuBotClient.updateCard(
+              config.id,
+              this.feishuBotConfig.secretsOf(config),
+              card.messageId,
+              this.approvalResultCard(input, actedAt),
+            );
+          }
+        } catch (error) {
+          this.logger.warn(
+            `审批卡片状态更新失败（${input.ticket.code}，card#${card.id}）：${(error as Error).message}`,
+          );
+        }
+      }
+      // 卡片更新失败也要落状态，避免重复点击再次触发审批
+      await this.approvalCards
+        .update(
+          { id: card.id, state: 'pending' },
+          {
+            state: input.state,
+            actedById: input.operator.id,
+            actedByName: input.operator.name,
+            actedAt,
+          },
+        )
+        .catch((error: Error) =>
+          this.logger.warn(
+            `审批卡片登记更新失败（card#${card.id}）：${error.message}`,
+          ),
+        );
+    }
+  }
+
+  /** 审批结果只读卡片：通过=绿色、驳回=红色，仅保留「查看工单」 */
+  private approvalResultCard(
+    input: ApprovalCardResultInput,
+    actedAt: Date,
+  ): Record<string, unknown> {
+    const approved = input.state === 'approved';
+    const ticketUrl = `${this.appUrl}/tickets/${input.ticket.id}`;
+    const remark = input.remark?.trim();
+    return {
+      config: { wide_screen_mode: true },
+      header: {
+        title: {
+          tag: 'plain_text',
+          content:
+            `${approved ? '审批已通过' : '审批已驳回'}：${input.ticket.code} ${input.ticket.title}`.slice(
+              0,
+              80,
+            ),
+        },
+        template: approved ? 'green' : 'red',
+      },
+      elements: [
+        {
+          tag: 'div',
+          text: {
+            tag: 'lark_md',
+            content: [
+              `**工单**：[${input.ticket.code} ${input.ticket.title}](${ticketUrl})`,
+              `**操作人**：${input.operator.name}`,
+              `**时间**：${actedAt.toLocaleString('zh-CN', {
+                timeZone: 'Asia/Shanghai',
+              })}`,
+              ...(remark ? [`**意见**：${remark}`] : []),
+              '',
+              approved
+                ? '该审批已通过，可在工单中查看最新流程进度。'
+                : '该审批已驳回，可在工单中查看最新流程进度。',
+            ].join('\n'),
+          },
+        },
+        {
+          tag: 'action',
+          actions: [
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '查看工单' },
+              type: 'default',
+              url: ticketUrl,
+            },
+          ],
+        },
+      ],
+    };
   }
 
   /** 需求方用户 id：当前任务创建人优先，子任务回退根任务创建人 */
