@@ -87,9 +87,14 @@ export class WorkIdeaTools implements WorkToolRegistrar {
       {
         title: '创建灵感',
         description:
-          '收集一个想法/创意/待办/建议。标题必填，正文为 Markdown（可空）；图片需先上传得到 /images/... 地址。',
+          '收集一个想法/创意/待办/建议。标题可省略（省略时根据正文异步生成），正文为 Markdown（可空）；图片需先上传得到 /images/... 地址。',
         inputSchema: {
-          title: z.string().min(1).max(200).describe('标题'),
+          title: z
+            .string()
+            .min(1)
+            .max(200)
+            .optional()
+            .describe('标题（可省略，省略时平台根据正文生成）'),
           content: z.string().optional().describe('正文（Markdown，可空）'),
           type: IdeaTypeArg.optional(),
           images: z
@@ -137,6 +142,23 @@ export class WorkIdeaTools implements WorkToolRegistrar {
             ideaActorOf(principal),
           );
           return markdownResult(await this.ideas.findOneMarkdown(idea.id));
+        }),
+    );
+
+    server.registerTool(
+      'delete_idea',
+      {
+        title: '删除灵感',
+        description:
+          '删除灵感：管理员可删任意；创建人仅能撤销「构思」中的灵感。删除后不可恢复。',
+        inputSchema: {
+          ideaId: z.number().int().positive().describe('灵感 ID'),
+        },
+      },
+      async (args) =>
+        executeTool(this.logger, 'delete_idea', principal, async () => {
+          await this.ideas.remove(args.ideaId, ideaActorOf(principal));
+          return markdownResult(`# 灵感已删除\n\n- 灵感 ID：${args.ideaId}`);
         }),
     );
 

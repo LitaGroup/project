@@ -19,6 +19,10 @@ export class Idea {
   @PrimaryGeneratedColumn()
   id: number;
 
+  /**
+   * 标题：页面不再单独填写；创建时先用正文首行兜底，
+   * 有正文且未显式传标题时异步由 AI 生成「I-{id}」+ 简洁标题。
+   */
   @Column({ length: 200 })
   title: string;
 

@@ -50,7 +50,6 @@ import {
   type IdeaType,
 } from '../lib/api'
 import { IdeaStatusBadge } from '../components/StatusBadge'
-import { IdeaFormDialog } from '../components/IdeaFormDialog'
 import { useAuth } from '../context/AuthContext'
 
 /**
@@ -134,7 +133,9 @@ export function IdeasPage() {
           >
             MD
           </a>
-          <IdeaFormDialog onSaved={reload} />
+          <Link to="/ideas/new" className={buttonVariants()}>
+            记录灵感
+          </Link>
         </div>
       </div>
 

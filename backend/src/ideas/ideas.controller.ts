@@ -25,8 +25,8 @@ import {
 import { Idea } from './idea.entity';
 
 class CreateIdeaDto implements CreateIdeaInput {
-  /** 标题（必填，≤200 字） */
-  title: string;
+  /** 标题（可省略，省略时由平台根据正文异步生成） */
+  title?: string;
   /** 正文（Markdown，可空） */
   content?: string;
   /** 类型：想法（默认）/ 创意 / 待办 / 建议 / 其它 */

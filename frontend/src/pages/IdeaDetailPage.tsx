@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { Button } from '@appica/ui-react/button'
+import { Button, buttonVariants } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
 import { Card, CardHeader, CardTitle } from '@appica/ui-react/card'
 import { Input } from '@appica/ui-react/input'
@@ -44,7 +44,6 @@ import {
   type ProjectType,
 } from '../lib/api'
 import { IdeaStatusBadge } from '../components/StatusBadge'
-import { IdeaFormDialog } from '../components/IdeaFormDialog'
 import { MarkdownViewer } from '../components/MarkdownViewer'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
@@ -161,7 +160,12 @@ export function IdeaDetailPage() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {canEdit && (
-              <IdeaFormDialog idea={idea} onSaved={setIdea} />
+              <Link
+                to={`/ideas/${idea.id}/edit`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                编辑
+              </Link>
             )}
             {canDelete && (
               <DeleteIdeaButton

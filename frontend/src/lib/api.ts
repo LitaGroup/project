@@ -2807,7 +2807,8 @@ export const api = {
   getIdea: (id: number) => request<Idea>(`/ideas/${id}`),
   /** 创建灵感（任何登录用户；机器人经 lita-work MCP 创建） */
   createIdea: (input: {
-    title: string
+    /** 标题可省略：省略时由平台根据正文异步生成 */
+    title?: string
     content?: string
     type?: IdeaType
     images?: string[]

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -9,7 +10,9 @@ import { FindOptionsSelect, FindOptionsWhere, Repository } from 'typeorm';
 import { IdeaStatus, IdeaType, ProjectType } from '../common/enums';
 import { beijingTime, mdFrontmatter } from '../common/frontmatter';
 import { matchesPinyinSearch } from '../common/pinyin-search';
+import { LlmService } from '../model-config/llm.service';
 import { ProjectsService } from '../projects/projects.service';
+import { deriveTaskTitle } from '../tasks/task-title';
 import { Idea } from './idea.entity';
 
 /** 图片上限（单条灵感最多 9 张，经 POST /api/images 上传） */
@@ -17,6 +20,9 @@ const MAX_IMAGES = 9;
 
 /** 列表查询上限（灵感为轻量记录，全量倒序拉取后前端展示） */
 const LIST_LIMIT = 1000;
+
+/** 未填写标题且正文为空时的临时标题 */
+const DEFAULT_IDEA_TITLE = '新灵感';
 
 export const IDEA_LIST_SELECT: FindOptionsSelect<Idea> = {
   id: true,
@@ -43,7 +49,8 @@ export interface IdeaActor {
 }
 
 export interface CreateIdeaInput {
-  title: string;
+  /** 标题（可省略：省略时用正文首行推导临时标题，并异步由 AI 生成标题） */
+  title?: string;
   /** 正文（Markdown，可空） */
   content?: string;
   /** 构思/创意/待办/建议/其它（默认想法） */
@@ -83,10 +90,15 @@ function escapeCell(value: string): string {
 
 @Injectable()
 export class IdeasService {
+  private readonly logger = new Logger(IdeasService.name);
+  /** 正在生成标题的灵感 ID，避免重复触发 */
+  private readonly titleNaming = new Set<number>();
+
   constructor(
     @InjectRepository(Idea)
     private readonly ideas: Repository<Idea>,
     private readonly projects: ProjectsService,
+    private readonly llm: LlmService,
   ) {}
 
   /**
@@ -116,9 +128,13 @@ export class IdeasService {
   }
 
   async create(input: CreateIdeaInput, actor: IdeaActor): Promise<Idea> {
+    const content = (input.content ?? '').trim();
+    const explicitTitle = (input.title ?? '').trim();
     const idea = this.ideas.create({
-      title: this.normalizeTitle(input.title),
-      content: (input.content ?? '').trim(),
+      title: explicitTitle
+        ? this.normalizeTitle(explicitTitle)
+        : this.temporaryTitle(content),
+      content,
       type: this.normalizeType(input.type),
       status: IdeaStatus.DRAFT,
       images: this.normalizeImages(input.images),
@@ -127,7 +143,10 @@ export class IdeasService {
       projectId: null,
       adoptedAt: null,
     });
-    return this.ideas.save(idea);
+    const saved = await this.ideas.save(idea);
+    // 页面不再填写标题：有正文时异步生成；手动传入标题（MCP 等）保持原值
+    if (!explicitTitle && content) this.scheduleTitleNaming(saved);
+    return saved;
   }
 
   /**
@@ -141,6 +160,9 @@ export class IdeasService {
   ): Promise<Idea> {
     const idea = await this.findOne(id);
     this.assertEditable(idea, actor);
+    // 空正文创建时标题为兜底值：补上正文后触发一次 AI 命名
+    const defaultTitlePending =
+      idea.title === DEFAULT_IDEA_TITLE && input.title === undefined;
 
     if (input.title !== undefined)
       idea.title = this.normalizeTitle(input.title);
@@ -149,7 +171,11 @@ export class IdeasService {
       idea.images = this.normalizeImages(input.images);
     }
     if (input.type !== undefined) idea.type = this.normalizeType(input.type);
-    return this.ideas.save(idea);
+    const saved = await this.ideas.save(idea);
+    if (defaultTitlePending && saved.content.trim()) {
+      this.scheduleTitleNaming(saved);
+    }
+    return saved;
   }
 
   /**
@@ -189,6 +215,41 @@ export class IdeasService {
       throw new ForbiddenException('仅管理员或创建人（构思中）可删除灵感');
     }
     await this.ideas.remove(idea);
+  }
+
+  /**
+   * 未填写标题时异步生成「I-{id}」+ 模型标题。
+   * 未配置模型场景时跳过；期间标题被人工修改则不覆盖（乐观条件）。
+   */
+  private scheduleTitleNaming(idea: Idea): void {
+    if (!idea.id || this.titleNaming.has(idea.id)) return;
+    this.titleNaming.add(idea.id);
+    void this.generateTitle(idea)
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`灵感 ${idea.id} 标题生成失败：${message}`);
+      })
+      .finally(() => this.titleNaming.delete(idea.id));
+  }
+
+  private async generateTitle(idea: Idea): Promise<void> {
+    const material = idea.content.trim();
+    if (!material) return;
+    const generated = await this.llm.generateTitle(material.slice(0, 4000));
+    if (!generated) return;
+    const title = `「I-${idea.id}」${generated}`.slice(0, 200);
+    const result = await this.ideas
+      .createQueryBuilder()
+      .update(Idea)
+      .set({ title })
+      .where('id = :id AND title = :original', {
+        id: idea.id,
+        original: idea.title,
+      })
+      .execute();
+    if (result.affected) {
+      this.logger.log(`灵感 ${idea.id} 标题已生成：${title}`);
+    }
   }
 
   /** GET /api/ideas.md：灵感清单 Markdown 视图 */
@@ -236,6 +297,7 @@ export class IdeasService {
     });
     const meta = [
       `- 灵感 ID：${idea.id}`,
+      `- 平台链接：/ideas/${idea.id}`,
       `- 类型：${idea.type}`,
       `- 状态：${idea.status}`,
       `- 创建人：${idea.creatorName ?? '-'}（创建 ${beijingTime(idea.createdAt)}）`,
@@ -288,6 +350,11 @@ export class IdeasService {
     if (!trimmed) throw new BadRequestException('标题不能为空');
     if (trimmed.length > 200) throw new BadRequestException('标题最长 200 字');
     return trimmed;
+  }
+
+  /** 未填写标题时的临时标题：正文首个有效行，空正文兜底「新灵感」 */
+  private temporaryTitle(content: string): string {
+    return (deriveTaskTitle(content) || DEFAULT_IDEA_TITLE).slice(0, 200);
   }
 
   private normalizeType(type?: IdeaType): IdeaType {

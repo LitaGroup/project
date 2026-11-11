@@ -5,6 +5,7 @@ import { OverviewPage } from './pages/OverviewPage'
 import { RequirementsPage } from './pages/RequirementsPage'
 import { IterationsPage } from './pages/IterationsPage'
 import { IdeasPage } from './pages/IdeasPage'
+import { IdeaEditPage } from './pages/IdeaEditPage'
 import { IdeaDetailPage } from './pages/IdeaDetailPage'
 import { FeedbackPage } from './pages/FeedbackPage'
 import { FeedbackDetailPage } from './pages/FeedbackDetailPage'
@@ -134,6 +135,8 @@ function App() {
           <Route path="/requirements" element={<RequirementsPage />} />
           <Route path="/iterations" element={<IterationsPage />} />
           <Route path="/ideas" element={<IdeasPage />} />
+          <Route path="/ideas/new" element={<IdeaEditPage key="idea-new" />} />
+          <Route path="/ideas/:ideaId/edit" element={<IdeaEditPage />} />
           <Route path="/ideas/:ideaId" element={<IdeaDetailPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/feedback/:feedbackId" element={<FeedbackDetailPage />} />

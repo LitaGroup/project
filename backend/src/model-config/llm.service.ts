@@ -145,7 +145,7 @@ export class LlmService {
   }
 
   /**
-   * 生成单行标题（通用方法，供工单/任务及后续其它场景复用）：
+   * 生成单行标题（通用方法，供工单/任务/灵感等场景复用）：
    * 使用 title-naming 场景；场景未配置返回 null。
    */
   async generateTitle(material: string): Promise<string | null> {
@@ -153,7 +153,7 @@ export class LlmService {
     if (!trimmed) return null;
     const content = await this.ask(MODEL_SCENARIO_TITLE_NAMING, {
       system: TITLE_SYSTEM_PROMPT,
-      prompt: `根据下面的工单/任务信息，生成一个能概括核心诉求的中文标题。只输出标题本身。\n\n${trimmed.slice(0, 4000)}`,
+      prompt: `根据下面的信息，生成一个能概括核心诉求的中文标题。只输出标题本身。\n\n${trimmed.slice(0, 4000)}`,
       maxTokens: 256,
       temperature: 0.2,
     });

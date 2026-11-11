@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { IdeaStatus, IdeaType, ProjectType } from '../common/enums';
 import { Idea } from './idea.entity';
 import { IdeasService, type IdeaActor } from './ideas.service';
@@ -29,32 +25,50 @@ function ideaRow(overrides?: Partial<Idea>): Idea {
   };
 }
 
-function makeService(row: Idea, projectCreate?: jest.Mock) {
+function makeService(
+  row: Idea,
+  projectCreate?: jest.Mock,
+  llm: { generateTitle: jest.Mock } = {
+    generateTitle: jest.fn().mockResolvedValue(null),
+  },
+) {
   const findOne = jest.fn().mockResolvedValue(row);
   const save = jest.fn().mockImplementation((v: Idea) => Promise.resolve(v));
   const remove = jest.fn().mockResolvedValue(undefined);
-  const repository = { findOne, save, remove } as never;
+  const query = {
+    update: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    execute: jest.fn().mockResolvedValue({ affected: 1 }),
+  };
+  const repository = {
+    findOne,
+    save,
+    remove,
+    createQueryBuilder: jest.fn().mockReturnValue(query),
+  } as never;
   const projects = {
     create:
       projectCreate ?? jest.fn().mockResolvedValue({ id: 99, name: row.title }),
     findOne: jest.fn().mockResolvedValue({ id: 42, name: '已有需求' }),
   };
-  const service = new IdeasService(repository, projects as never);
-  return { service, save, remove, projects };
+  const service = new IdeasService(repository, projects as never, llm as never);
+  return { service, save, remove, projects, llm, query };
 }
 
 describe('IdeasService.create', () => {
-  it('标题必填且拒绝非法类型与图片地址', async () => {
+  it('标题可省略，非法类型与图片地址仍拒绝', async () => {
     const create = jest.fn().mockImplementation((v: Idea): Idea => v);
     const save = jest.fn().mockImplementation((v: Idea) => Promise.resolve(v));
     const projects = { create: jest.fn(), findOne: jest.fn() };
+    const llm = { generateTitle: jest.fn().mockResolvedValue(null) };
     const service = new IdeasService(
       { create, save } as never,
       projects as never,
+      llm as never,
     );
-    await expect(service.create({ title: '  ' }, actor())).rejects.toThrow(
-      BadRequestException,
-    );
+    const saved = await service.create({ content: '一句话灵感' }, actor());
+    expect(saved.title).toBe('一句话灵感');
     await expect(
       service.create({ title: 'ok', type: '不存在' as IdeaType }, actor()),
     ).rejects.toThrow('灵感类型仅允许');
@@ -69,11 +83,48 @@ describe('IdeasService.create', () => {
     const service = new IdeasService(
       { create, save } as never,
       { create: jest.fn(), findOne: jest.fn() } as never,
+      { generateTitle: jest.fn().mockResolvedValue(null) } as never,
     );
     const saved = await service.create({ title: '一句话灵感' }, actor());
     expect(saved.status).toBe(IdeaStatus.DRAFT);
     expect(saved.content).toBe('');
     expect(saved.creatorId).toBe(7);
+  });
+
+  it('未填标题时用正文首行兜底并异步生成 AI 标题', async () => {
+    const create = jest
+      .fn()
+      .mockImplementation((v: Idea): Idea => ({ ...v, id: 12 }));
+    const save = jest.fn().mockImplementation((v: Idea) => Promise.resolve(v));
+    const query = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    const llm = { generateTitle: jest.fn().mockResolvedValue('灵感墙') };
+    const service = new IdeasService(
+      {
+        create,
+        save,
+        createQueryBuilder: jest.fn().mockReturnValue(query),
+      } as never,
+      { create: jest.fn(), findOne: jest.fn() } as never,
+      llm as never,
+    );
+    const saved = await service.create(
+      { content: '做一个灵感墙\n收集零散想法' },
+      actor(),
+    );
+    expect(saved.title).toBe('做一个灵感墙');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(llm.generateTitle).toHaveBeenCalledWith(
+      '做一个灵感墙\n收集零散想法',
+    );
+    expect(query.where).toHaveBeenCalledWith('id = :id AND title = :original', {
+      id: 12,
+      original: '做一个灵感墙',
+    });
   });
 });
 
@@ -87,6 +138,22 @@ describe('IdeasService.update', () => {
     );
     expect(updated.content).toBe('补充细节');
     expect(save).toHaveBeenCalled();
+  });
+
+  it('空正文的兜底标题在补充正文后触发 AI 命名', async () => {
+    const llm = { generateTitle: jest.fn().mockResolvedValue('灵感墙') };
+    const { service, query } = makeService(
+      ideaRow({ title: '新灵感', content: '' }),
+      undefined,
+      llm,
+    );
+    await service.update(1, { content: '做一个灵感墙' }, actor());
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(llm.generateTitle).toHaveBeenCalledWith('做一个灵感墙');
+    expect(query.where).toHaveBeenCalledWith('id = :id AND title = :original', {
+      id: 1,
+      original: '新灵感',
+    });
   });
 
   it('采纳/废弃后非管理员不可修改', async () => {
@@ -222,10 +289,14 @@ describe('IdeasService.remove', () => {
     const repository = {
       findOne: jest.fn().mockResolvedValue(null),
     } as never;
-    const service = new IdeasService(repository, {
-      create: jest.fn(),
-      findOne: jest.fn(),
-    } as never);
+    const service = new IdeasService(
+      repository,
+      {
+        create: jest.fn(),
+        findOne: jest.fn(),
+      } as never,
+      { generateTitle: jest.fn() } as never,
+    );
     await expect(service.findOne(404)).rejects.toThrow(NotFoundException);
   });
 });

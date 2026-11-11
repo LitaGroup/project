@@ -255,10 +255,11 @@
 - 灵感（`ideas`）是独立的想法收集区，收集想法/创意/待办/建议等；类型：想法（默认）/ 创意 / 待办 / 建议 / 其它；状态：构思（默认）/ 废弃 / 采纳。不是需求池实体，也不参与任务状态机。
 - 创建需真人登录身份；机器人经 `lita-work` MCP `create_idea` 创建，创建人优先落到绑定真人，未绑定真人时 `creatorId` 为空、`creatorName` 记机器人名称快照。
 - 正文为 Markdown（可为空，允许快速记一句话），图片复用 `/api/images` 上传（最多 9 张）；列表查询不得带出正文大字段。
+- 写入页只维护 Markdown 正文，图片走编辑器内置上传，不单独采集标题/类型/图片数组；创建时标题先用正文首行兜底，后台用 `title-naming` 场景异步生成 `「I-{id}」+ 标题`，失败不影响保存。类型保持默认「想法」，`images` 字段保留兼容。
 - **构思期任何登录用户可编辑**（协作完善）；进入采纳/废弃后仅管理员可改内容。状态流转仅管理员。
 - 采纳即进入需求池：`ideas.projectId` 记录关联的 `projects.id`（应用层软引用，不建物理外键），二选一——用灵感标题/正文在需求池新建需求（项目类型可选，默认其它），或关联已有需求；记录 `adoptedAt`。退回构思/废弃时清空 `adoptedAt`，`projectId` 保留作历史关联，再次采纳可重选或复用。
 - 删除：管理员可删任意；创建人仅能撤销「构思」中的灵感。
-- 详情页右侧「我的 AI」上下文类型为 `idea`，`contextReadUrl` 指向 `/api/ideas/{id}.md`；AI 通过 `lita-work` MCP `update_idea` 直接完善正文，采纳动作走 `change_idea_status`（仅管理员身份可用）。
+- 详情/编辑页右侧「我的 AI」上下文类型为 `idea`，`contextReadUrl` 指向 `/api/ideas/{id}.md`；AI 可通过 `lita-work` MCP `create_idea` 创建、`update_idea` 完善正文、`delete_idea` 删除（删除遵循管理员/创建人构思期权限），采纳动作走 `change_idea_status`（仅管理员身份可用）。新建页尚无真实 ID，使用 `idea:new` 临时会话并注入当前草稿，可先协助梳理/扩写，也可按用户明确要求调用 `create_idea`；保存后切换到真实灵感会话。
 
 ### GitHub 与凭证网关
 
