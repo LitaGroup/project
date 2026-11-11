@@ -26,6 +26,7 @@ function feedbackRow(overrides?: Partial<Feedback>): Feedback {
     reporterId: 7,
     reporterName: '小明',
     handlerName: null,
+    taskId: null,
     handleNote: null,
     resolvedAt: null,
     createdAt: new Date('2026-11-11T02:00:00Z'),
@@ -204,5 +205,19 @@ describe('FeedbacksService.remove', () => {
     );
     await admin.service.remove(1, actor({ isAdmin: true }));
     expect(admin.remove).toHaveBeenCalled();
+  });
+});
+
+describe('FeedbacksService.findOneMarkdown', () => {
+  it('已关联处理任务时输出任务地址', async () => {
+    const { service } = makeService(feedbackRow({ taskId: 77 }));
+    const markdown = await service.findOneMarkdown(1);
+    expect(markdown).toContain('处理任务：`GET /api/tasks/77.md`');
+  });
+
+  it('无处理任务时不输出任务行', async () => {
+    const { service } = makeService(feedbackRow());
+    const markdown = await service.findOneMarkdown(1);
+    expect(markdown).not.toContain('处理任务');
   });
 });

@@ -257,6 +257,18 @@ export function FeedbackDetailPage() {
                 <FeedbackStatusBadge status={feedback.status} />
               </dd>
             </div>
+            <div>
+              <dt className="text-foreground-muted">处理任务</dt>
+              <dd>
+                {feedback.taskId ? (
+                  <Link to={`/tasks/${feedback.taskId}`} className="underline">
+                    TK-{String(feedback.taskId).padStart(4, '0')}
+                  </Link>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
           </dl>
           {isAdmin ? (
             <>

@@ -117,9 +117,10 @@ export const FEISHU_GROUP_SILENT_MARKERS = [
 const SMART_MODE_PROMPT =
   '群聊模式：先判断这批消息是否需要你回应。不需要回应时只输出 [不回复]，不要输出其他内容；需要回应时按下方回复方式输出。';
 
-/** 反馈采集模式追加的提示词：收录由平台完成，AI 只判断分发 */
+/** 反馈采集模式追加的提示词：收录与新反馈派单由平台完成，AI 只判断额外动作与回复 */
 const FEEDBACK_MODE_PROMPT =
-  '反馈采集模式：这批消息已由平台自动收录进对应反馈，你只需判断是否需要分发动作或回复。' +
+  '反馈采集模式：这批消息已由平台自动收录进对应反馈（新反馈首帖还会自动创建处理任务并指派给你），' +
+  '你只需判断是否需要额外分发动作或回复。' +
   '无需任何动作与回复时只输出 [不回复]，不要输出其他内容；需要回应时按下方回复方式输出。';
 
 /** 群聊会话首轮上下文：通道、场景（群聊/话题）、群与回复方式 */
@@ -626,7 +627,7 @@ export class FeishuBotGroupChatService {
       return;
     }
 
-    // 反馈采集模式：话题消息先由平台确定性收录（首帖建反馈并回执编号），再按批次交给机器人
+    // 反馈采集模式：话题消息先由平台确定性收录（首帖建反馈并英文回执链接、自动创建处理任务），再按批次交给机器人
     if (policy === 'feedback') {
       await this.handleFeedbackMessage(
         config,
@@ -831,7 +832,8 @@ export class FeishuBotGroupChatService {
   /**
    * 处理反馈采集群的一条消息：
    * - 非话题消息仅记录，不收录；
-   * - 话题消息先由平台收录（首帖创建反馈并在话题内回执编号；后续消息写跟帖）；
+   * - 话题消息先由平台收录（首帖创建反馈并在话题内英文回执反馈链接、
+   *   自动创建「用户反馈处理」任务派给当前机器人；后续消息按话题归一写跟帖）；
    * - 收录成功后进入批次：首帖立即 flush 唤起分发判断，跟帖按窗口汇总。
    */
   private async handleFeedbackMessage(
@@ -887,6 +889,14 @@ export class FeishuBotGroupChatService {
         threadId,
         content: receipt,
       }).catch(() => {});
+      // 新反馈自动派处理任务给当前机器人：异步执行，失败不影响回执与话题批次
+      void this.feedback
+        .createHandlingTask(collected.feedback, config)
+        .catch((error: Error) =>
+          this.logger.warn(
+            `反馈 #${collected.feedback.id} 处理任务创建异常：${error.message}`,
+          ),
+        );
     }
     // 话题内有待回答提问时，文本优先作为答案（与智能模式一致）
     const active = this.runs.get(`${config.id}:${message.chatId}`);
@@ -1153,7 +1163,7 @@ export class FeishuBotGroupChatService {
     const body = lines.join('\n---\n');
     if (batch.feedbackId !== null) {
       return [
-        `【反馈 #${batch.feedbackId}】本话题消息已由平台自动收录进该反馈（首帖为正文、后续为跟帖），请判断是否需要分发动作或回复。`,
+        `【反馈 #${batch.feedbackId}】本话题消息已由平台自动收录进该反馈（首帖为正文、后续为跟帖，新反馈已自动创建处理任务），请判断是否需要补充动作或回复。`,
         '',
         body,
       ].join('\n');

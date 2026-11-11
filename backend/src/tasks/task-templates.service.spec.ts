@@ -53,7 +53,7 @@ describe('TaskTemplatesService', () => {
     );
   });
 
-  it('启动时幂等补齐未知任务与项目开发交付系统定义', async () => {
+  it('启动时幂等补齐未知任务、项目开发交付与用户反馈处理系统定义', async () => {
     templates.findOne
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ ...template(6), name: '未知任务' })
@@ -61,7 +61,9 @@ describe('TaskTemplatesService', () => {
       .mockResolvedValueOnce({
         ...template(7),
         name: '技术-项目开发交付',
-      });
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...template(8), name: '用户反馈处理' });
 
     await service.onModuleInit();
 
@@ -74,6 +76,10 @@ describe('TaskTemplatesService', () => {
       [7, '技术-项目开发交付', expect.any(String), '[2]'],
     );
     expect(templates.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO task_templates'),
+      [8, '用户反馈处理', expect.any(String), '[4]'],
+    );
+    expect(templates.query).toHaveBeenCalledWith(
       expect.stringContaining("pg_get_serial_sequence('task_templates', 'id')"),
       [999],
     );
@@ -82,6 +88,13 @@ describe('TaskTemplatesService', () => {
   it('项目开发交付系统定义不可删除', async () => {
     await expect(service.remove(7)).rejects.toThrow(
       '系统任务定义（ID=7）由平台保留，不能删除',
+    );
+    expect(templates.findOne).not.toHaveBeenCalled();
+  });
+
+  it('用户反馈处理系统定义不可删除', async () => {
+    await expect(service.remove(8)).rejects.toThrow(
+      '系统任务定义（ID=8）由平台保留，不能删除',
     );
     expect(templates.findOne).not.toHaveBeenCalled();
   });

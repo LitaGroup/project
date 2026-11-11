@@ -771,6 +771,8 @@ export interface Feedback {
   sourceMessageId?: string | null
   /** 处理人（管理员流转时写入） */
   handlerName: string | null
+  /** 收录后自动创建的处理任务 ID（tasks.id，详情返回；无任务为空） */
+  taskId?: number | null
   /** 处理备注（仅管理员可写） */
   handleNote: string | null
   /** 解决时间（置已解决/已关闭时记录） */

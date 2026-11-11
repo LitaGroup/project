@@ -10,10 +10,15 @@ import {
   FeishuBotFeedbackService,
   imageKeysOf,
   placeholderOf,
+  topicRootOf,
 } from './feishu-bot-feedback.service';
 import type { FeishuInboundMessage } from './feishu-bot-p2p.service';
 
-const config = { id: 2, appId: 'cli_app' } as FeishuBotConfig;
+const config = {
+  id: 2,
+  appId: 'cli_app',
+  workerId: 5,
+} as FeishuBotConfig;
 const secrets = { appId: 'cli_app' } as FeishuBotSecrets;
 const group = { id: 11, chatId: 'oc_group' } as FeishuBotGroup;
 const user = { id: 7, name: '张三' } as User;
@@ -52,11 +57,24 @@ function setup() {
     ),
     update: jest.fn(() => Promise.resolve({ affected: 1 })),
   };
-  const client = { downloadImage: jest.fn() };
+  const client = {
+    downloadImage: jest.fn(),
+    appUrl: 'http://localhost:5273',
+  };
+  const workers = {
+    findOne: jest.fn(() => Promise.resolve(null)),
+  };
+  const tasks = {
+    create: jest.fn(() =>
+      Promise.resolve({ id: 77, code: 'TK-0077', title: '处理任务' }),
+    ),
+  };
   const service = new FeishuBotFeedbackService(
     client as never,
     feedbacks as never,
     replies as never,
+    workers as never,
+    tasks as never,
   );
   const setExisting = (row: unknown) => {
     existing = row;
@@ -68,6 +86,8 @@ function setup() {
     repliesQb,
     insertExecute,
     client,
+    workers,
+    tasks,
     setExisting,
   };
 }
@@ -104,6 +124,11 @@ describe('反馈采集纯函数', () => {
     expect(placeholderOf('image')).toBe('[图片]');
     expect(placeholderOf('audio')).toBe('[语音]');
     expect(placeholderOf('merge_forward')).toBe('[merge_forward]');
+  });
+
+  it('话题归属归一：回复取 root_id，首帖取自身消息 id', () => {
+    expect(topicRootOf(message({ rootId: 'om_root' }))).toBe('om_root');
+    expect(topicRootOf(message())).toBe('om_1');
   });
 });
 
@@ -179,6 +204,39 @@ describe('FeishuBotFeedbackService.collect', () => {
     expect(feedbacks.save).not.toHaveBeenCalled();
   });
 
+  it('thread_id 变化的话题内回复（@ 机器人）：按 root_id 归一归并，不新建反馈', async () => {
+    const { service, feedbacks, insertExecute } = setup();
+    // thread_id 条件查不到，话题根消息 id 条件命中已有反馈
+    (feedbacks.findOne as jest.Mock).mockImplementation(
+      ({ where }: { where: Array<{ sourceMessageId?: string }> }) => {
+        const byRoot = where.find((row) => row.sourceMessageId);
+        return Promise.resolve(
+          byRoot?.sourceMessageId === 'om_root'
+            ? { id: 50, sourceThreadId: 'omt_1' }
+            : null,
+        );
+      },
+    );
+    const result = await service.collect({
+      config,
+      secrets,
+      group,
+      message: message({
+        messageId: 'om_2',
+        threadId: 'omt_2',
+        rootId: 'om_root',
+      }),
+      threadId: 'omt_2',
+      user,
+      senderOpenId: 'ou_user',
+      text: '@反馈处理机器人 帮忙看下',
+    });
+    expect(result.isNew).toBe(false);
+    expect(result.feedback.id).toBe(50);
+    expect(feedbacks.save).not.toHaveBeenCalled();
+    expect(insertExecute).toHaveBeenCalled();
+  });
+
   it('跟帖消息 id 重复：判定为事件重复不再唤起', async () => {
     const { service, repliesQb, setExisting } = setup();
     setExisting({ id: 50, source: FeedbackSource.FEISHU_GROUP });
@@ -230,10 +288,103 @@ describe('FeishuBotFeedbackService.collect', () => {
     expect(result.feedback.id).toBe(51);
   });
 
-  it('回执文案包含反馈编号', () => {
+  it('回执为英文并附平台反馈链接', () => {
     const { service } = setup();
-    expect(service.receiptText({ id: 50 } as never)).toContain(
-      '已收录为反馈 #50',
+    expect(service.receiptText({ id: 50 } as never)).toBe(
+      'Feedback received, verifying. Recorded at: http://localhost:5273/feedback/50',
     );
+  });
+});
+
+describe('FeishuBotFeedbackService.createHandlingTask', () => {
+  const collectedFeedback = () =>
+    ({
+      id: 50,
+      title: '登录页白屏',
+      type: 'BUG',
+      content: '登录页白屏',
+      reporterName: '张三',
+      sourceChatId: 'oc_group',
+      sourceThreadId: 'omt_1',
+      taskId: null,
+    }) as never;
+
+  it('新反馈自动建处理任务：系统定义 ID=8、当前机器人执行、负责人为需求方', async () => {
+    const { service, workers, tasks, feedbacks } = setup();
+    workers.findOne.mockImplementation(
+      ({ where }: { where: Record<string, unknown> }) =>
+        Promise.resolve(
+          where.humanUserId
+            ? { id: 21, name: '真人-张三' }
+            : { id: 5, name: '系统-反馈处理', ownerUserId: 7 },
+        ),
+    );
+    const task = await service.createHandlingTask(collectedFeedback(), config);
+    expect(task?.code).toBe('TK-0077');
+    expect(tasks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        templateId: 8,
+        agentId: 5,
+        createdById: 7,
+        requesterType: 'worker',
+        requesterId: 21,
+        operatorName: '反馈收录',
+      }),
+    );
+    const createCall = (tasks.create as jest.Mock).mock.calls[0] as
+      [{ description: string }] | undefined;
+    expect(createCall?.[0]?.description).toContain('/api/feedbacks/50.md');
+    expect(feedbacks.update).toHaveBeenCalledWith({ id: 50 }, { taskId: 77 });
+  });
+
+  it('负责人无真人机器人时需求方记为用户', async () => {
+    const { service, workers, tasks } = setup();
+    workers.findOne.mockImplementation(
+      ({ where }: { where: Record<string, unknown> }) =>
+        Promise.resolve(
+          where.humanUserId
+            ? null
+            : { id: 5, name: '系统-反馈处理', ownerUserId: 7 },
+        ),
+    );
+    await service.createHandlingTask(collectedFeedback(), config);
+    expect(tasks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ requesterType: 'user', requesterId: 7 }),
+    );
+  });
+
+  it('机器人未配置负责人：跳过创建不抛错', async () => {
+    const { service, workers, tasks } = setup();
+    workers.findOne.mockResolvedValue({
+      id: 5,
+      name: '系统-反馈处理',
+      ownerUserId: null,
+    });
+    const task = await service.createHandlingTask(collectedFeedback(), config);
+    expect(task).toBeNull();
+    expect(tasks.create).not.toHaveBeenCalled();
+  });
+
+  it('已有 taskId 幂等跳过', async () => {
+    const { service, tasks } = setup();
+    const task = await service.createHandlingTask(
+      { id: 50, taskId: 77 } as never,
+      config,
+    );
+    expect(task).toBeNull();
+    expect(tasks.create).not.toHaveBeenCalled();
+  });
+
+  it('任务创建失败不影响反馈收录', async () => {
+    const { service, workers, tasks, feedbacks } = setup();
+    workers.findOne.mockResolvedValue({
+      id: 5,
+      name: '系统-反馈处理',
+      ownerUserId: 7,
+    });
+    tasks.create.mockRejectedValue(new Error('任务定义不存在'));
+    const task = await service.createHandlingTask(collectedFeedback(), config);
+    expect(task).toBeNull();
+    expect(feedbacks.update).not.toHaveBeenCalled();
   });
 });

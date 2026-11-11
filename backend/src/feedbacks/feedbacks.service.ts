@@ -274,6 +274,7 @@ export class FeedbacksService {
       `- 状态：${f.status}`,
       `- 提交人：${f.reporterName ?? '-'}（创建 ${beijingTime(f.createdAt)}）`,
     ];
+    if (f.taskId) meta.push(`- 处理任务：\`GET /api/tasks/${f.taskId}.md\``);
     if (f.handlerName) meta.push(`- 处理人：${f.handlerName}`);
     if (f.resolvedAt) meta.push(`- 解决时间：${beijingTime(f.resolvedAt)}`);
     if (f.images?.length) meta.push(`- 图片：${f.images.join('、')}`);

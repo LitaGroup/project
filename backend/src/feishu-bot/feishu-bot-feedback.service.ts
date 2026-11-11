@@ -3,12 +3,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import * as path from 'path';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 import type { User } from '../auth/user.entity';
 import { FeedbackSource, FeedbackStatus, FeedbackType } from '../common/enums';
 import { imageWebroot } from '../common/paths';
 import { FeedbackReply } from '../feedbacks/feedback-reply.entity';
 import { Feedback } from '../feedbacks/feedback.entity';
+import type { Task } from '../tasks/task.entity';
+import { TasksService } from '../tasks/tasks.service';
+import { SYSTEM_FEEDBACK_TASK_TEMPLATE_ID } from '../tasks/system-task-templates';
+import { Worker } from '../workers/worker.entity';
 import { FeishuBotClientService } from './feishu-bot-client.service';
 import type {
   FeishuBotConfig,
@@ -41,16 +45,29 @@ const MESSAGE_PLACEHOLDERS: Record<string, string> = {
 /** 采集结果 */
 export interface CollectedTopicFeedback {
   feedback: Feedback;
-  /** 首帖：本轮新建了反馈（需要话题内回执编号并唤起分发判断） */
+  /** 首帖：本轮新建了反馈（需要话题内回执链接、自动创建处理任务并唤起分发判断） */
   isNew: boolean;
   /** 该消息已收录过（事件重复），不要再次唤起 AI */
   duplicated: boolean;
 }
 
 /**
+ * 话题归属归一：话题内的回复带 root_id（话题根消息 id，飞书话题群以它为准），
+ * 首帖自身即话题根（root_id 为空时取消息 id）。thread_id 只在部分事件出现且可能变化，
+ * 不能单独作为「一个话题一条反馈」的判重键。
+ */
+export function topicRootOf(message: FeishuInboundMessage): string {
+  const rootId = message.rootId?.trim();
+  return rootId || message.messageId;
+}
+
+/**
  * 「系统-反馈处理」话题采集：反馈采集群内一个飞书话题对应一条平台反馈。
- * - 首帖自动创建 feedbacks（来源=飞书群，记录 chat_id/thread_id/首帖消息 id）；
+ * - 首帖自动创建 feedbacks（来源=飞书群，记录 chat_id/thread_id/话题根消息 id），
+ *   并英文回执平台反馈链接、自动创建「用户反馈处理」任务派给当前机器人；
  * - 后续成员消息追加 feedback_replies 跟帖（按消息 id 去重，重复事件不再唤起 AI）；
+ * - 飞书话题内的回复（含 @ 机器人）以 root_id 指向话题根消息为准：thread_id
+ *   可能缺失或不一致，单靠它会把同话题消息误建成新反馈（飞书话题群已知行为）；
  * - 飞书图片转存平台 /images 目录，与网页提交的图片同一存储；
  * - 采集由平台确定性完成，机器人只负责分发判断（PROMPT 定义规则）。
  */
@@ -64,6 +81,9 @@ export class FeishuBotFeedbackService {
     private readonly feedbacks: Repository<Feedback>,
     @InjectRepository(FeedbackReply)
     private readonly replies: Repository<FeedbackReply>,
+    @InjectRepository(Worker)
+    private readonly workers: Repository<Worker>,
+    private readonly tasks: TasksService,
   ) {}
 
   /**
@@ -80,48 +100,153 @@ export class FeishuBotFeedbackService {
     senderOpenId: string | null;
     text: string;
   }): Promise<CollectedTopicFeedback> {
-    const existing = await this.feedbacks.findOne({
-      where: {
-        source: FeedbackSource.FEISHU_GROUP,
-        sourceChatId: input.group.chatId,
-        sourceThreadId: input.threadId,
-      },
-    });
+    const topicRoot = topicRootOf(input.message);
+    this.logger.debug(
+      `反馈群话题收录：chat=${input.group.chatId} thread=${input.threadId} ` +
+        `root=${topicRoot} message=${input.message.messageId}`,
+    );
+    const existing = await this.findTopicFeedback(
+      input.group.chatId,
+      input.threadId,
+      topicRoot,
+    );
     if (!existing) {
-      const created = await this.createFeedback(input);
+      const created = await this.createFeedback(input, topicRoot);
       if (created) return { feedback: created, isNew: true, duplicated: false };
       // 唯一索引冲突（并发首帖）：重查按跟帖收录
-      const concurrent = await this.feedbacks.findOne({
-        where: {
-          source: FeedbackSource.FEISHU_GROUP,
-          sourceChatId: input.group.chatId,
-          sourceThreadId: input.threadId,
-        },
-      });
+      const concurrent = await this.findTopicFeedback(
+        input.group.chatId,
+        input.threadId,
+        topicRoot,
+      );
       if (!concurrent) throw new Error('反馈创建失败且重查不到来源话题记录');
       return this.appendReply(concurrent, input);
     }
     return this.appendReply(existing, input);
   }
 
-  /** 收录时话题内回执文案（编号让上报人有感知） */
+  /** 收录时话题内回执文案：英文确认收到，并给出平台反馈详情链接 */
   receiptText(feedback: Feedback): string {
-    return `已收录为反馈 #${feedback.id}，处理进展会在平台「反馈」跟进。`;
+    return `Feedback received, verifying. Recorded at: ${this.client.appUrl}/feedback/${feedback.id}`;
+  }
+
+  /**
+   * 新反馈收录后自动创建处理任务（任务定义 ID=8「用户反馈处理」）：
+   * 执行方固定为当前采集机器人（config.workerId），需求方为该机器人的负责人
+   * （有真人机器人时记为真人）。成功后把任务 id 回写 feedback.taskId。
+   * 未配置负责人或创建失败只告警、不影响反馈收录（与缺陷自动派单同一策略）。
+   */
+  async createHandlingTask(
+    feedback: Feedback,
+    config: FeishuBotConfig,
+  ): Promise<Task | null> {
+    if (feedback.taskId || !config.workerId) return null;
+    const worker = await this.workers.findOne({
+      where: { id: config.workerId },
+    });
+    if (!worker) return null;
+    const ownerUserId = worker.ownerUserId ?? 0;
+    if (ownerUserId <= 0) {
+      this.logger.warn(
+        `反馈 #${feedback.id} 未自动创建处理任务：机器人「${worker.name}」#${worker.id} 未配置负责人`,
+      );
+      return null;
+    }
+    const human = await this.workers.findOne({
+      where: { humanUserId: ownerUserId },
+      select: { id: true, name: true },
+    });
+    const feedbackUrl = `${this.client.appUrl}/feedback/${feedback.id}`;
+    const description = [
+      '# 用户反馈处理',
+      '',
+      '本任务由平台收录飞书反馈群话题后自动创建。',
+      '',
+      '## 反馈信息',
+      '',
+      `- 反馈：[\`#${feedback.id}\`](${feedbackUrl})（Agent 视图：\`GET /api/feedbacks/${feedback.id}.md\`）`,
+      `- 标题：${feedback.title}`,
+      `- 类型：${feedback.type}`,
+      `- 提交人：${feedback.reporterName ?? '群成员'}`,
+      `- 来源：飞书群（群 ${feedback.sourceChatId ?? '-'} / 话题 ${feedback.sourceThreadId ?? '-'}）`,
+      '',
+      '## 反馈正文',
+      '',
+      feedback.content,
+      '',
+      '## 处理要求',
+      '',
+      `- 处理前先读 \`GET /api/feedbacks/${feedback.id}.md\` 获取最新正文与群内跟帖。`,
+      '- 核实反馈是否属实、类型（BUG/建议/其它）与紧急程度，定位相关项目与系统。',
+      '- 能处理的完成处理；不能直接处理的给出明确结论与转派建议。',
+      '- 在任务 HANDOFF 中记录核实过程与处理结果，完成后申请需求方验收。',
+    ].join('\n');
+    try {
+      const task = await this.tasks.create({
+        title: `处理反馈 #${feedback.id}：${feedback.title}`.slice(0, 200),
+        description,
+        outputSpec:
+          '完成该反馈的核实与处理，HANDOFF 给出可复核的结论（定位、处理结果或建议）；无法处理时说明原因。',
+        templateId: SYSTEM_FEEDBACK_TASK_TEMPLATE_ID,
+        agentId: worker.id,
+        createdById: ownerUserId,
+        requesterType: human ? 'worker' : 'user',
+        requesterId: human?.id ?? ownerUserId,
+        operatorName: '反馈收录',
+      });
+      await this.feedbacks.update({ id: feedback.id }, { taskId: task.id });
+      this.logger.log(
+        `反馈 #${feedback.id} 已自动创建处理任务 ${task.code}（执行：「${worker.name}」#${worker.id}）`,
+      );
+      return task;
+    } catch (error) {
+      this.logger.warn(
+        `反馈 #${feedback.id} 自动创建处理任务失败：${(error as Error).message}`,
+      );
+      return null;
+    }
   }
 
   // ==== 内部 ====
 
+  /**
+   * 话题判重：thread_id 与话题根消息 id（root_id 归一）任一命中即同一反馈；
+   * 话题内 @ 机器人等 thread_id 缺失/变化的回复据此归并，不再新建反馈。
+   */
+  private findTopicFeedback(
+    chatId: string,
+    threadId: string,
+    topicRoot: string,
+  ): Promise<Feedback | null> {
+    const where: FindOptionsWhere<Feedback>[] = [
+      {
+        source: FeedbackSource.FEISHU_GROUP,
+        sourceChatId: chatId,
+        sourceThreadId: threadId,
+      },
+      {
+        source: FeedbackSource.FEISHU_GROUP,
+        sourceChatId: chatId,
+        sourceMessageId: topicRoot,
+      },
+    ];
+    return this.feedbacks.findOne({ where });
+  }
+
   /** 首帖创建反馈；返回 null 表示唯一索引冲突（并发首帖） */
-  private async createFeedback(input: {
-    config: FeishuBotConfig;
-    secrets: FeishuBotSecrets;
-    group: FeishuBotGroup;
-    message: FeishuInboundMessage;
-    threadId: string;
-    user: User | null;
-    senderOpenId: string | null;
-    text: string;
-  }): Promise<Feedback | null> {
+  private async createFeedback(
+    input: {
+      config: FeishuBotConfig;
+      secrets: FeishuBotSecrets;
+      group: FeishuBotGroup;
+      message: FeishuInboundMessage;
+      threadId: string;
+      user: User | null;
+      senderOpenId: string | null;
+      text: string;
+    },
+    topicRoot: string,
+  ): Promise<Feedback | null> {
     const images = await this.transferImages(
       input.config,
       input.secrets,
@@ -139,7 +264,7 @@ export class FeishuBotFeedbackService {
       source: FeedbackSource.FEISHU_GROUP,
       sourceChatId: input.group.chatId,
       sourceThreadId: input.threadId,
-      sourceMessageId: input.message.messageId,
+      sourceMessageId: topicRoot,
       content: input.text.trim() || placeholderOf(input.message.messageType),
       images: images.length ? images.slice(0, MAX_IMAGES) : null,
       reporterId: input.user?.id ?? null,

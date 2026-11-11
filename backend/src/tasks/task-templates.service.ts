@@ -11,13 +11,19 @@ import { WorkerRole } from '../common/enums';
 import { mdFrontmatter } from '../common/frontmatter';
 import { markdownCell, markdownLabel } from '../common/markdown-table';
 import { Worker } from '../workers/worker.entity';
-import { SYSTEM_PROJECT_MANAGER_WORKER_ID } from '../workers/system-workers';
+import {
+  SYSTEM_FEEDBACK_HANDLER_WORKER_ID,
+  SYSTEM_PROJECT_MANAGER_WORKER_ID,
+} from '../workers/system-workers';
 import { Task } from './task.entity';
 import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
 import {
   ensureTaskTemplateSequenceFloor,
   isSystemTaskTemplateId,
+  SYSTEM_FEEDBACK_TASK_TEMPLATE_DESCRIPTION,
+  SYSTEM_FEEDBACK_TASK_TEMPLATE_ID,
+  SYSTEM_FEEDBACK_TASK_TEMPLATE_NAME,
   SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_DESCRIPTION,
   SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
   SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_NAME,
@@ -73,6 +79,12 @@ export class TaskTemplatesService implements OnModuleInit {
       name: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_NAME,
       description: SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_DESCRIPTION,
       agentIds: [SYSTEM_PROJECT_MANAGER_WORKER_ID],
+    });
+    await this.ensureSystemTemplate({
+      id: SYSTEM_FEEDBACK_TASK_TEMPLATE_ID,
+      name: SYSTEM_FEEDBACK_TASK_TEMPLATE_NAME,
+      description: SYSTEM_FEEDBACK_TASK_TEMPLATE_DESCRIPTION,
+      agentIds: [SYSTEM_FEEDBACK_HANDLER_WORKER_ID],
     });
     await ensureTaskTemplateSequenceFloor(this.templates);
   }
@@ -196,7 +208,7 @@ export class TaskTemplatesService implements OnModuleInit {
     }
     lines.push(
       '',
-      '系统任务定义（ID 6「未知任务」、ID 7「技术-项目开发交付」）不可改名、不可删除；描述和处理机器人仍可维护。',
+      '系统任务定义（ID 6「未知任务」、ID 7「技术-项目开发交付」、ID 8「用户反馈处理」）不可改名、不可删除；描述和处理机器人仍可维护。',
       '',
       '## AI 操作',
       '',

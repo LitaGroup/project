@@ -13,7 +13,8 @@ import { FeedbackSource, FeedbackStatus, FeedbackType } from '../common/enums';
  * 图片为 `/images/...` 路径数组（POST /api/images 上传后回填）。
  * 状态流转仅管理员；提交人可在「待处理」时编辑与撤销（应用层校验，见 feedbacks.service）。
  * 来源为「飞书群」时由「系统-反馈处理」机器人按话题自动收录：一个话题一条反馈，
- * 后续成员消息写入 feedback_replies 跟帖；(sourceChatId, sourceThreadId) 部分唯一索引防重复建反馈。
+ * 话题内回复（含 @ 机器人）按 root_id 归一到话题根消息 id 判重归并，
+ * 后续成员消息写入 feedback_replies 跟帖；(sourceChatId, sourceThreadId) 部分唯一索引兜底防并发重复建反馈。
  */
 @Entity('feedbacks')
 @Index('UQ_feedbacks_feishu_thread', ['sourceChatId', 'sourceThreadId'], {
@@ -51,7 +52,7 @@ export class Feedback {
   @Column({ type: 'varchar', length: 100, nullable: true })
   sourceThreadId: string | null;
 
-  /** 飞书来源首帖消息 id（回执定位用；平台提交为空） */
+  /** 飞书来源话题根消息 id（root_id 归一：回复取 root_id、首帖取自身 id；话题判重与归并用） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   sourceMessageId: string | null;
 
@@ -83,6 +84,10 @@ export class Feedback {
   /** 受理人（管理员处理时写入） */
   @Column({ type: 'varchar', length: 100, nullable: true })
   handlerName: string | null;
+
+  /** 收录后自动创建的处理任务（tasks.id 应用层软引用，不建物理外键；无任务为空） */
+  @Column({ type: 'int', nullable: true })
+  taskId: number | null;
 
   /** 处理备注（管理员流转时填写） */
   @Column({ type: 'text', nullable: true })

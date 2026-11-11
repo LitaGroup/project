@@ -34,10 +34,30 @@ export const SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_DESCRIPTION = [
   '由系统机器人「技术-项目经理」作为首位处理机器人，负责读取项目上下文、拆分并分派子任务、验收交付和整合结果；管理员可追加其它机器人作为兜底。',
 ].join('\n');
 
+/** 飞书反馈群收录新反馈后自动派单使用的系统任务定义固定 ID */
+export const SYSTEM_FEEDBACK_TASK_TEMPLATE_ID = 8;
+
+export const SYSTEM_FEEDBACK_TASK_TEMPLATE_NAME = '用户反馈处理';
+export const SYSTEM_FEEDBACK_TASK_TEMPLATE_DESCRIPTION = [
+  '承接平台收录飞书反馈群话题后自动创建的用户反馈处理任务。',
+  '',
+  '## 任务范围',
+  '',
+  '- 读取任务描述中的反馈地址（`GET /api/feedbacks/{id}.md`），核实反馈正文与群内跟帖。',
+  '- 判断反馈真实性、类型（BUG/建议/其它）与紧急程度，定位相关项目与系统。',
+  '- 能处理的完成处理；不能直接处理的给出明确结论与转派建议。',
+  '- 在 HANDOFF 中记录核实过程与处理结果，完成后申请需求方验收。',
+  '',
+  '## 默认处理机器人',
+  '',
+  '由系统机器人「系统-反馈处理」承接（收录时自动创建任务并指派，需求方为该机器人负责人）；管理员可追加其它机器人作为兜底。',
+].join('\n');
+
 /** 系统任务定义固定 ID 集合（不可删除，名称/类型由平台保留） */
 export const SYSTEM_TASK_TEMPLATE_IDS: ReadonlySet<number> = new Set([
   SYSTEM_UNKNOWN_TASK_TEMPLATE_ID,
   SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
+  SYSTEM_FEEDBACK_TASK_TEMPLATE_ID,
 ]);
 
 export function isSystemTaskTemplateId(id: number): boolean {

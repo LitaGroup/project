@@ -303,8 +303,10 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
         }),
       ),
       receiptText: jest.fn(
-        () => '已收录为反馈 #50，处理进展会在平台「反馈」跟进。',
+        () =>
+          'Feedback received, verifying. Recorded at: http://localhost:5273/feedback/50',
       ),
+      createHandlingTask: jest.fn(() => Promise.resolve(null)),
     };
     const workers = {
       findOne: jest.fn(() =>
@@ -663,7 +665,7 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
       );
     });
 
-    it('话题首帖：收录、话题内回执编号并立即唤起分发判断', async () => {
+    it('话题首帖：收录、英文回执链接、自动创建处理任务并立即唤起分发判断', async () => {
       jest.useFakeTimers();
       try {
         const { service, feedback, debug, client, records } = setup(
@@ -682,13 +684,15 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
           message({ threadId: 'omt_1' }),
         );
         expect(feedback.collect).toHaveBeenCalled();
-        // 首帖回执以回复形式落回话题
+        // 首帖回执（英文 + 反馈链接）以回复形式落回话题
         expect(client.replyText).toHaveBeenCalledWith(
           2,
           expect.anything(),
           'om_1',
-          '已收录为反馈 #50，处理进展会在平台「反馈」跟进。',
+          'Feedback received, verifying. Recorded at: http://localhost:5273/feedback/50',
         );
+        // 新反馈自动派处理任务给当前机器人
+        expect(feedback.createHandlingTask).toHaveBeenCalled();
         expect(records.save).toHaveBeenCalledWith(
           expect.objectContaining({ kind: 'reply' }),
         );
@@ -758,6 +762,7 @@ describe('FeishuBotGroupChatService 群消息策略', () => {
       );
       expect(debug.send).not.toHaveBeenCalled();
       expect(client.replyText).not.toHaveBeenCalled();
+      expect(feedback.createHandlingTask).not.toHaveBeenCalled();
       expect(records.update).toHaveBeenCalledWith(
         { id: 99 },
         { decision: 'record_only' },
