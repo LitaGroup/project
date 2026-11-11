@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
 import { Button } from '@appica/ui-react/button'
@@ -348,6 +355,24 @@ function KnowledgeArticleView({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const editorRef = useRef<MarkdownEditorHandle>(null)
+  const titleRef = useRef<HTMLTextAreaElement>(null)
+
+  /** 标题输入框按内容自动撑高：多行标题完整展示，不被单行宽度截断 */
+  const fitTitleHeight = useCallback(() => {
+    const element = titleRef.current
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${element.scrollHeight}px`
+  }, [])
+
+  useLayoutEffect(() => {
+    fitTitleHeight()
+  }, [fitTitleHeight, title])
+
+  useEffect(() => {
+    window.addEventListener('resize', fitTitleHeight)
+    return () => window.removeEventListener('resize', fitTitleHeight)
+  }, [fitTitleHeight])
 
   const save = () => {
     setSaving(true)
@@ -369,8 +394,10 @@ function KnowledgeArticleView({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           {editable ? (
-            <Input
-              className="h-auto border-0 px-0 text-2xl font-semibold shadow-none"
+            <Textarea
+              ref={titleRef}
+              rows={1}
+              className="h-auto min-h-0 resize-none overflow-hidden border-0 bg-transparent px-0 py-0 text-2xl font-semibold shadow-none"
               value={title}
               onChange={(e) => {
                 setTitle(e.target.value)
@@ -379,7 +406,9 @@ function KnowledgeArticleView({
               aria-label="文章标题"
             />
           ) : (
-            <h1 className="text-2xl font-semibold">{article.title}</h1>
+            <h1 className="break-words text-2xl font-semibold">
+              {article.title}
+            </h1>
           )}
           <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-xs text-foreground-muted">
             <span>{article.path}</span>

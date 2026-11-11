@@ -501,7 +501,7 @@ export function TaskDetailView({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-semibold text-foreground-intense">
+              <h1 className="break-words text-xl font-semibold text-foreground-intense">
                 {title ?? `${currentTask.code} ${currentTask.title}`}
               </h1>
               {extraBadges}
