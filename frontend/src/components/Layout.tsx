@@ -488,7 +488,10 @@ export function Layout() {
                 </KbdGroup>
               </TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end" className="min-w-40">
+            <DropdownMenuContent
+              align="end"
+              className="w-max min-w-40 max-w-80"
+            >
               <DropdownMenuItem onClick={() => navigate('/tasks/new')}>
                 <ClipboardList size={16} />
                 新建任务
