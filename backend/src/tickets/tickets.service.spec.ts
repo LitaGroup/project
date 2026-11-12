@@ -140,7 +140,9 @@ describe('TicketsService', () => {
 
   it('旧版类别工单拒绝创建，必须通过工单配置（工作流）创建', async () => {
     await expect(
-      service.create({ category: '技术工单' } as never, user as never),
+      service.create({ category: '技术工单' } as never, {
+        user: user as never,
+      }),
     ).rejects.toThrow('旧版工单类别创建已下线');
     expect(workflowRuntime.create).not.toHaveBeenCalled();
     expect(tasksService.create).not.toHaveBeenCalled();
@@ -156,13 +158,14 @@ describe('TicketsService', () => {
     workflowRuntime.create.mockResolvedValue(created);
     workflowRuntime.workflowView.mockResolvedValue(view);
 
+    const actor = { user: user as never, worker: null };
     const saved = await service.create(
       {
         workflowDefinitionId: 5,
         title: '发布 v1.2.0',
         inputValues: { title: '发布 v1.2.0' },
       },
-      user as never,
+      actor,
     );
 
     expect(workflowRuntime.create).toHaveBeenCalledWith(
@@ -171,7 +174,7 @@ describe('TicketsService', () => {
         title: '发布 v1.2.0',
         inputValues: { title: '发布 v1.2.0' },
       },
-      user,
+      actor,
     );
     expect(saved).toMatchObject({
       code: 'WO-0003',

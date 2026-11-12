@@ -234,6 +234,7 @@
 ### 工单与工作流
 
 - 新工单一律携带 `workflowDefinitionId` 创建；旧 category + 默认调度任务定义模型已退役，不要恢复。
+- 发起身份：网页会话与真人机器人令牌以「用户绑定的真人机器人」为发起机器人（`createdById` 记真人）；AI 机器人可经 `lita-work` MCP `create_ticket` 以自身为发起机器人，此时 `createdById` 为空、`createdByName` 记机器人名称快照，节点任务需求方为该机器人。验收节点仅发起机器人（或其绑定用户）可操作，MCP 提供 `accept_ticket`。
 - `workflow_definitions` 保存草稿与最新发布版本号，`workflow_definition_versions` 保存不可变发布版本。创建工单固定使用最新发布版本，实例继续引用创建时版本。
 - 节点类型为 `start/operation/approval/acceptance/condition`；流转结果为 `succeeded/failed/approved/rejected`，`$end` 是流程结束虚拟节点。判断节点不创建任务，进入后按起始输入字段的结构化条件（字段 + 运算符 + 值，多条件「且」）自动分流，必须恰好配置一条默认（无条件）分支兜底，分支可直接流转到 `$end`；单次流转链对连续判断节点有循环上限保护。
 - 审批节点创建的节点任务类型为「审批」：创建后自动接受并停留执行中，真人审批人可通过/驳回（通过意见可选、驳回意见必填），也可在飞书审批卡片内一键通过；飞书审批卡片携带工单链接、关键正文与通过/驳回/查看按钮，由平台官方机器人发送。
@@ -247,7 +248,7 @@
 - 管理区「模型配置」（`model_scenarios`）按固定场景维护 OpenAI 兼容连接：`baseUrl` / `apiKey` / `model` / 思考等级（`off/low/medium/high`）。场景来自 `backend/src/model-config/model-scenarios.ts` 代码注册表，新增场景无需迁移；`apiKey` 明文落库但 `select:false`，只写不回显，列表仅返回 `hasApiKey`。
 - `LlmService` 提供通用单次调用 `ask`（非流式、20s 超时、全局并发 3）与标题生成 `generateTitle`；场景未配置返回 null，由调用方降级，失败不得影响主流程。
 - 工单与根任务创建后异步生成标题 `「T-{id}」+ 模型生成内容`（`title-naming` 场景，`T-` 后为数字 ID，与 code `WO-/TK-` 并存），不阻塞创建、派发与节点流转，失败只告警。更新使用乐观条件（标题仍为创建时值），不覆盖人工修改。
-- 仅工单与根任务入口（`create.md` / MCP `create_task` / 项目交付任务）触发生成；子任务、工单节点任务、缺陷自动派单任务保留原结构化标题。
+- 仅工单与根任务入口（`POST /api/tickets` / MCP `create_ticket`、任务 `create.md` / MCP `create_task`、项目交付任务）触发生成；子任务、工单节点任务、缺陷自动派单任务保留原结构化标题。
 
 ### 单点登录（SSO）
 

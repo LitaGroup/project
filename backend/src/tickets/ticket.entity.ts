@@ -36,9 +36,9 @@ export class Ticket {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  /** 创建人（需求方）快照 */
-  @Column({ type: 'int' })
-  createdById: number;
+  /** 创建人（需求方）快照；AI 机器人发起时为空 */
+  @Column({ type: 'int', nullable: true })
+  createdById: number | null;
 
   @Column({ type: 'varchar', length: 100 })
   createdByName: string;

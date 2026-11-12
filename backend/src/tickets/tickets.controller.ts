@@ -83,10 +83,11 @@ export class TicketsController {
     return this.tickets.findOne(id);
   }
 
+  /** 创建工单：网页会话以用户身份发起，AI 机器人经 lita-work MCP create_ticket 发起 */
   @Post()
   create(@Body() dto: CreateTicketDto, @Req() req: AuthedRequest) {
     if (!req.user) throw new ForbiddenException('创建工单需要用户身份');
-    return this.tickets.create(dto, req.user);
+    return this.tickets.create(dto, { user: req.user, worker: null });
   }
 
   /** 机器人拒绝当前节点：nodeKey 须与当前节点一致，仅当前节点处理机器人可用 */

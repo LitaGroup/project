@@ -27,6 +27,7 @@ import { Ticket } from './ticket.entity';
 import { TicketWorkflowRun } from './ticket-workflow-run.entity';
 import {
   renderInputValues,
+  type TicketCreateActor,
   TicketWorkflowRuntimeService,
 } from './ticket-workflow-runtime.service';
 
@@ -289,7 +290,10 @@ export class TicketsService {
     };
   }
 
-  async create(input: CreateTicketInput, user: User): Promise<TicketView> {
+  async create(
+    input: CreateTicketInput,
+    actor: TicketCreateActor,
+  ): Promise<TicketView> {
     if (!input.workflowDefinitionId) {
       // 旧调度模型（category + 默认调度任务定义）已随 ID 10-15 定义一并退役
       throw new BadRequestException(
@@ -302,7 +306,7 @@ export class TicketsService {
         title: input.title,
         inputValues: input.inputValues ?? {},
       },
-      user,
+      actor,
     );
     const workflow = await this.workflowRuntime.workflowView(ticket);
     return {

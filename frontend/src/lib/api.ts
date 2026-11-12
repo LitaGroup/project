@@ -1864,7 +1864,8 @@ export interface Ticket {
   category: string
   title: string
   description: string | null
-  createdById: number
+  /** AI 机器人发起时为空 */
+  createdById: number | null
   createdByName: string
   assigneeType: TicketAssigneeType
   assigneeId: number

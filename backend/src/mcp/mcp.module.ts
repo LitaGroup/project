@@ -24,6 +24,7 @@ import { TasksModule } from '../tasks/tasks.module';
 import { TestsModule } from '../tests/tests.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { WorkersModule } from '../workers/workers.module';
+import { WorkflowsModule } from '../workflows/workflows.module';
 import { McpCallLog } from './mcp-log.entity';
 import { McpController } from './mcp.controller';
 import { McpLogsController } from './mcp-logs.controller';
@@ -74,6 +75,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     GithubModule,
     TasksModule,
     TicketsModule,
+    WorkflowsModule,
   ],
   controllers: [McpController, McpWorkController, McpLogsController],
   providers: [

@@ -200,15 +200,20 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 
 | 工具 | 主要入参 | 说明 |
 |---|---|---|
+| `list_ticket_defines` | — | 可创建工单的配置（启用且已发布）与起始节点输入字段 |
+| `create_ticket` | `workflowDefinitionId`、`title?`、`inputValues?` | 按工单配置创建工单并进入起始节点派发 |
 | `get_task_ticket` | `taskId` | 调度工单上下文与可转派任务定义 |
 | `route_task_ticket` | `taskId`、`templateId`、`title`、`content`、`outputSpec`、`workPlan` | 澄清后转交任务定义 |
 | `get_ticket` | `ticketId` | 工作流工单完整上下文与节点进度 |
+| `accept_ticket` | `ticketId`、`outcome`、`remark?` | 发起机器人验收当前验收节点（approved 完成 / rejected 退回） |
 | `reject_ticket_node` | `ticketId`、`nodeKey`、`reason` | 当前节点处理机器人拒绝节点 |
 | `list_ticket_documents` | `taskId` | 所属工单的交付文档清单 |
 | `read_ticket_document` | `taskId`、`documentId` | 读取一篇交付文档 |
 | `deliver_ticket_document` | `taskId`、`title`、`url?`、`content?` | 交付链接或正文（二选一） |
 | `update_ticket_document` | `taskId`、`documentId`、`title?`、`url?`、`content?` | 更新本任务交付的文档 |
 | `delete_ticket_document` | `taskId`、`documentId` | 删除本任务交付的文档 |
+
+> 创建工单：真人机器人令牌以绑定真人身份发起；AI 机器人令牌以机器人自身为发起机器人（工单创建人为空，发起机器人记该机器人）。
 
 ### 机器人与任务定义
 

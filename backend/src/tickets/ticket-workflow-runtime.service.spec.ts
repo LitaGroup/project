@@ -2,6 +2,7 @@ import {
   TaskStatus,
   TaskSubStatus,
   TaskType,
+  WorkerRole,
   WorkerRuntime,
 } from '../common/enums';
 import type { User } from '../auth/user.entity';
@@ -23,6 +24,9 @@ describe('TicketWorkflowRuntimeService', () => {
     findOne: jest.Mock;
     update: jest.Mock;
     createQueryBuilder: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+    delete: jest.Mock;
   };
   let runs: {
     find: jest.Mock;
@@ -56,6 +60,11 @@ describe('TicketWorkflowRuntimeService', () => {
       findOne: jest.fn(),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       createQueryBuilder: jest.fn(),
+      create: jest.fn((value: Partial<Ticket>) => value),
+      save: jest.fn((value: Partial<Ticket>) =>
+        Promise.resolve({ id: 11, ...value } as Ticket),
+      ),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     runs = {
       find: jest.fn().mockResolvedValue([]),
@@ -962,6 +971,133 @@ describe('TicketWorkflowRuntimeService', () => {
       ).not.toThrow();
       // 等待异步 catch 完成，避免未处理拒绝
       await new Promise((resolve) => setImmediate(resolve));
+    });
+  });
+
+  describe('创建工单身份', () => {
+    const startNode: WorkflowNodeDefinition = {
+      key: 'start',
+      name: '发起工单',
+      kind: 'start',
+      taskTemplateId: null,
+      responsibleWorkerId: null,
+      inputFields: [
+        { key: 'title', label: '标题', type: 'text', required: true },
+      ],
+      autoAccept: false,
+      description: null,
+    };
+
+    beforeEach(() => {
+      definitions.findOne.mockResolvedValue({
+        id: 5,
+        name: '发布申请',
+        category: '发布',
+        enabled: true,
+        latestPublishedVersion: 1,
+      });
+      versions.findOne.mockResolvedValue({
+        id: 9,
+        version: 1,
+        definition: {
+          startNode: 'start',
+          nodes: [startNode],
+          edges: [],
+        } as WorkflowDefinitionJson,
+      });
+      jest
+        .spyOn(
+          service as unknown as {
+            enterNode: (
+              ticket: Ticket,
+              workflow: WorkflowDefinitionJson,
+              key: string | null,
+            ) => Promise<void>;
+          },
+          'enterNode',
+        )
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(
+          service as unknown as {
+            scheduleTitleNaming: (ticket: Ticket) => void;
+          },
+          'scheduleTitleNaming',
+        )
+        .mockImplementation(() => undefined);
+      tickets.findOne.mockResolvedValue({ id: 11 });
+    });
+
+    it('真人身份以绑定真人机器人为发起机器人', async () => {
+      workers.findOne.mockResolvedValue({
+        id: 1001,
+        name: '张三-真人',
+        enabled: true,
+      });
+
+      await service.create(
+        { workflowDefinitionId: 5, inputValues: { title: '发布 v1' } },
+        { user: { id: 2, name: '张三' } as User },
+      );
+
+      expect(tickets.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdById: 2,
+          createdByName: '张三',
+          initiatorWorkerId: 1001,
+          initiatorWorkerName: '张三-真人',
+          assigneeId: 1001,
+        }),
+      );
+      expect(workers.findOne).toHaveBeenCalled();
+    });
+
+    it('AI 机器人身份以自身为发起机器人，创建人为空', async () => {
+      await service.create(
+        { workflowDefinitionId: 5, inputValues: { title: '发布 v1' } },
+        {
+          worker: {
+            id: 2001,
+            name: 'AI 机器人',
+            enabled: true,
+            role: WorkerRole.WORKER,
+            personalAgentUserId: null,
+          } as Worker,
+        },
+      );
+
+      expect(workers.findOne).not.toHaveBeenCalled();
+      expect(tickets.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdById: null,
+          createdByName: 'AI 机器人',
+          initiatorWorkerId: 2001,
+          initiatorWorkerName: 'AI 机器人',
+          assigneeId: 2001,
+        }),
+      );
+    });
+
+    it('个人 AGENT 与无身份调用被拒绝', async () => {
+      await expect(
+        service.create(
+          { workflowDefinitionId: 5, inputValues: {} },
+          {
+            worker: {
+              id: 3001,
+              name: '个人 AGENT',
+              enabled: true,
+              role: WorkerRole.WORKER,
+              personalAgentUserId: 2,
+            } as Worker,
+          },
+        ),
+      ).rejects.toThrow('当前机器人不能发起工单');
+
+      await expect(
+        service.create({ workflowDefinitionId: 5, inputValues: {} }, {}),
+      ).rejects.toThrow('创建工单需要用户或机器人身份');
+      expect(tickets.create).not.toHaveBeenCalled();
     });
   });
 });

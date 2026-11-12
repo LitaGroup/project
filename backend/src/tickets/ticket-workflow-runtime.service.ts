@@ -44,6 +44,16 @@ export interface CreateWorkflowTicketInput {
   inputValues: Record<string, unknown>;
 }
 
+/**
+ * 创建工单的调用方身份：
+ * - user（真人机器人令牌或公共 Agent）：用其绑定的真人机器人作为发起机器人；
+ * - 仅 worker（AI 机器人令牌）：以该 AI 机器人自身作为发起机器人，createdById 为空。
+ */
+export interface TicketCreateActor {
+  user?: User | null;
+  worker?: Worker | null;
+}
+
 export interface TicketWorkflowRunView extends TicketWorkflowRun {
   /** 节点任务当前主-子状态（无任务为空） */
   taskStatus: string | null;
@@ -279,7 +289,10 @@ export class TicketWorkflowRuntimeService {
     }
   }
 
-  async create(input: CreateWorkflowTicketInput, user: User): Promise<Ticket> {
+  async create(
+    input: CreateWorkflowTicketInput,
+    actor: TicketCreateActor,
+  ): Promise<Ticket> {
     const definition = await this.definitions.findOne({
       where: { id: Number(input.workflowDefinitionId), enabled: true },
     });
@@ -296,16 +309,7 @@ export class TicketWorkflowRuntimeService {
     if (!version) throw new NotFoundException('工单发布版本不存在');
     const workflow = version.definition;
     const start = workflow.nodes.find((node) => node.kind === 'start');
-    const initiator = await this.workers.findOne({
-      where: { humanUserId: user.id },
-      select: { id: true, name: true, enabled: true },
-    });
-    if (!initiator) {
-      throw new BadRequestException('当前用户没有绑定真人机器人，不能发起工单');
-    }
-    if (!initiator.enabled) {
-      throw new BadRequestException('发起机器人已停用');
-    }
+    const initiator = await this.resolveInitiator(actor);
     const inputValues = this.normalizeInputValues(
       start?.inputFields ?? [],
       input.inputValues ?? {},
@@ -325,17 +329,17 @@ export class TicketWorkflowRuntimeService {
         category: definition.category || definition.name.slice(0, 64),
         title,
         description: inputValueText(inputValues.description).trim() || null,
-        createdById: user.id,
-        createdByName: user.name,
+        createdById: initiator.createdById,
+        createdByName: initiator.createdByName,
         assigneeType: 'worker',
-        assigneeId: initiator.id,
-        assigneeName: initiator.name,
+        assigneeId: initiator.worker.id,
+        assigneeName: initiator.worker.name,
         taskId: null,
         workflowDefinitionId: definition.id,
         workflowVersionId: version.id,
         workflowVersion: version.version,
-        initiatorWorkerId: initiator.id,
-        initiatorWorkerName: initiator.name,
+        initiatorWorkerId: initiator.worker.id,
+        initiatorWorkerName: initiator.worker.name,
         inputValues,
         workflowStatus: TICKET_STATUS_PROCESSING,
         currentNodeKey: start?.key ?? null,
@@ -353,6 +357,54 @@ export class TicketWorkflowRuntimeService {
     // 标题命名异步执行：不阻塞创建返回与节点派发，失败只告警
     this.scheduleTitleNaming(saved);
     return this.mustFind(saved.id);
+  }
+
+  /**
+   * 解析发起机器人：
+   * - 有用户身份时沿用「用户绑定的真人机器人」规则（网页与真人机器人令牌）；
+   * - 仅机器人身份（AI 机器人）时自身即发起机器人，创建人为空、名称取机器人名称快照。
+   */
+  private async resolveInitiator(actor: TicketCreateActor): Promise<{
+    worker: Worker;
+    createdById: number | null;
+    createdByName: string;
+  }> {
+    if (actor.user) {
+      const worker = await this.workers.findOne({
+        where: { humanUserId: actor.user.id },
+        select: { id: true, name: true, enabled: true },
+      });
+      if (!worker) {
+        throw new BadRequestException(
+          '当前用户没有绑定真人机器人，不能发起工单',
+        );
+      }
+      if (!worker.enabled) {
+        throw new BadRequestException('发起机器人已停用');
+      }
+      return {
+        worker,
+        createdById: actor.user.id,
+        createdByName: actor.user.name,
+      };
+    }
+    if (actor.worker) {
+      if (!actor.worker.enabled) {
+        throw new BadRequestException('发起机器人已停用');
+      }
+      if (
+        actor.worker.role !== WorkerRole.WORKER ||
+        actor.worker.personalAgentUserId
+      ) {
+        throw new BadRequestException('当前机器人不能发起工单');
+      }
+      return {
+        worker: actor.worker,
+        createdById: null,
+        createdByName: actor.worker.name,
+      };
+    }
+    throw new ForbiddenException('创建工单需要用户或机器人身份');
   }
 
   /**
