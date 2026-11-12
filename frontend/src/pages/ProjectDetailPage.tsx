@@ -96,6 +96,7 @@ import {
   type ProjectSchedule,
   type ProjectType,
   type ProjectWorkItem,
+  type ReleaseBranch,
   type ReleaseStatus,
   type RepoPlatform,
 } from '../lib/api'
@@ -124,6 +125,10 @@ import {
 } from '../components/TestActionButtons'
 import { NewDefectDialog } from '../components/NewDefectDialog'
 import { MarkdownViewer } from '../components/MarkdownViewer'
+import {
+  MarkdownEditor,
+  type MarkdownEditorHandle,
+} from '../components/MarkdownEditor'
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -443,9 +448,10 @@ export function ProjectDetailPage() {
                 <dd>{project.resources?.client ?? '—'}</dd>
               </div>
             </dl>
-            {/* 项目交付入口：固定在属性卡最下面 */}
-            <div className="border-t border-border px-6 py-4">
+            {/* 项目交付与提测入口：固定在属性卡最下面 */}
+            <div className="flex flex-col gap-2 border-t border-border px-6 py-4">
               <ProjectDeliveryButton project={project} onCreated={reload} />
+              <SubmitReleaseDialog project={project} onSubmitted={reload} />
             </div>
           </Card>
         </TooltipProvider>
@@ -4371,5 +4377,367 @@ function ProjectDeliveryButton({
         )}
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** 提测弹窗：内容/访问地址/代码分支/测试人员 + 提测时间（当前时间只读）；成功后状态流转「测试中」 */
+function SubmitReleaseDialog({
+  project,
+  onSubmitted,
+}: {
+  project: Project
+  onSubmitted: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [content, setContent] = useState('')
+  const [urls, setUrls] = useState<string[]>([])
+  const [branches, setBranches] = useState<ReleaseBranch[]>([])
+  const [testers, setTesters] = useState<string[]>([])
+  const [userNames, setUserNames] = useState<string[]>([])
+  // GitHub 仓库候选（组织内）：输入联想 + 提交校验（见 useGithubRepoCandidates）
+  const {
+    repoOptions,
+    reposState,
+    repoFilteredItems,
+    load: loadRepoOptions,
+    search: searchRepoOptions,
+    confirmExists,
+  } = useGithubRepoCandidates()
+  // 各仓库的分支候选（key = 仓库全名），供分支联想与校验
+  const [branchOptions, setBranchOptions] = useState<Record<string, string[]>>({})
+  const [submittedAt, setSubmittedAt] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const releaseEditorRef = useRef<MarkdownEditorHandle>(null)
+
+  /** 拉取某仓库的分支候选（按仓库全名缓存），供分支联想与提交校验 */
+  const loadBranchOptions = useCallback((repo: string) => {
+    const name = repo.trim()
+    if (!name) return
+    api
+      .listGithubBranches(name)
+      .then((list) => setBranchOptions((m) => ({ ...m, [name]: list })))
+      .catch(() => setBranchOptions((m) => ({ ...m, [name]: [] })))
+  }, [])
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      setContent('')
+      setUrls([])
+      // 代码分支默认带入项目已登记的 仓库+分支，并预取其分支候选
+      const initial = (project.projectBranches ?? []).map((b) => ({
+        repo: b.repo,
+        branch: b.branch,
+      }))
+      setBranches(initial)
+      // 测试人员预填项目配置的测试人员（resources.qa 支持多人串，按常见分隔符拆分）
+      setTesters(
+        (project.resources?.qa ?? '')
+          .split(/[、,，;；\s]+/)
+          .filter(Boolean),
+      )
+      setSubmittedAt(new Date().toLocaleString())
+      setError(null)
+      setBranchOptions({})
+      loadRepoOptions()
+      for (const b of initial) loadBranchOptions(b.repo)
+      api
+        .listUsers()
+        .then((users) => setUserNames(users.map((u) => u.name)))
+        .catch(() => setUserNames([]))
+    }
+  }
+
+  const validTesters = testers.map((t) => t.trim()).filter(Boolean)
+  const canSave = validTesters.length > 0 && !saving
+
+  /** 校验代码分支：字段成对、仓库属于组织且存在、分支存在（仅针对已加载到候选的仓库） */
+  const validateBranches = (): string | null => {
+    const rows = branches.filter((b) => b.repo.trim() || b.branch.trim())
+    if (rows.length === 0) return null
+    for (const b of rows) {
+      if (!b.repo.trim() || !b.branch.trim()) {
+        return '代码分支需同时选择仓库与分支'
+      }
+    }
+    if (reposState === 'error') {
+      return '无法加载 GitHub 仓库列表，请检查 GitHub 集成配置后再选择代码分支'
+    }
+    if (reposState !== 'ready') return '正在加载 GitHub 仓库列表，请稍候重试'
+    for (const b of rows) {
+      const opts = branchOptions[b.repo.trim()]
+      if (opts && !opts.includes(b.branch.trim())) {
+        return `分支不存在：${b.repo.trim()} @ ${b.branch.trim()}`
+      }
+    }
+    return null
+  }
+
+  const submit = async () => {
+    setError(null)
+    const branchError = validateBranches()
+    if (branchError) {
+      setError(branchError)
+      return
+    }
+    setSaving(true)
+    try {
+      // 仓库存在性不靠初始候选（仅最近更新前 50 条）includes 判断，逐个实时确认
+      for (const b of branches) {
+        const repo = b.repo.trim()
+        if (repo && !(await confirmExists(repo))) {
+          throw new Error(`仓库不存在或不属于组织：${repo}`)
+        }
+      }
+      await api.submitRelease(project.id, {
+        // 取编辑器当前内容：onChange 有防抖，避免刚输入就提测丢字
+        content:
+          (releaseEditorRef.current?.getMarkdown() ?? content).trim() || undefined,
+        urls: urls.map((u) => u.trim()).filter(Boolean),
+        branches: branches
+          .filter((b) => b.repo.trim() && b.branch.trim())
+          .map((b) => ({ repo: b.repo.trim(), branch: b.branch.trim() })),
+        testers: validTesters,
+      })
+      setOpen(false)
+      onSubmitted()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger render={<Button className="w-full" />}>提测</DialogTrigger>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>项目提测</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-4">
+            {/* 提测时间：当前时间自动填入，不允许修改 */}
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-foreground-muted">提测时间</span>
+              <span>{submittedAt}</span>
+            </div>
+            <label className="flex flex-col gap-1 text-sm">
+              测试人员（至少 1 人，须为用户系统内用户；提测后机器人私聊通知）
+              <div className="flex flex-col gap-2">
+                {testers.map((tester, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Autocomplete
+                        items={userNames}
+                        value={tester}
+                        onValueChange={(v) =>
+                          setTesters((list) =>
+                            list.map((t, j) => (j === i ? (v as string) : t)),
+                          )
+                        }
+                        clearable
+                      >
+                        <AutocompleteInput
+                          placeholder="如 王五"
+                          aria-label={`测试人员 ${i + 1}`}
+                        />
+                        <AutocompleteContent>
+                          <AutocompleteEmpty>未找到匹配的用户（须为登录过本平台的用户）</AutocompleteEmpty>
+                          <AutocompleteList>
+                            {(item: string) => (
+                              <AutocompleteItem key={item} value={item}>
+                                {item}
+                              </AutocompleteItem>
+                            )}
+                          </AutocompleteList>
+                        </AutocompleteContent>
+                      </Autocomplete>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setTesters((list) => list.filter((_, j) => j !== i))}
+                    >
+                      移除
+                    </Button>
+                  </div>
+                ))}
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setTesters((list) => [...list, ''])}
+                  >
+                    添加人员
+                  </Button>
+                </div>
+              </div>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              代码分支（默认带入项目已登记的 仓库+分支，仅可选组织内存在的仓库与分支）
+              <div className="flex flex-col gap-2">
+                {branches.map((branch, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Autocomplete
+                        items={repoOptions}
+                        filteredItems={repoFilteredItems}
+                        value={branch.repo}
+                        onValueChange={(v) => {
+                          const next = v as string
+                          setBranches((list) =>
+                            list.map((b, j) =>
+                              j === i
+                                ? {
+                                    repo: next,
+                                    // 仓库变化时清空分支（原分支可能不属于新仓库）
+                                    branch: b.repo === next ? b.branch : '',
+                                  }
+                                : b,
+                            ),
+                          )
+                          searchRepoOptions(next)
+                          loadBranchOptions(next)
+                        }}
+                        clearable
+                      >
+                        <AutocompleteInput
+                          placeholder="仓库，如 LitaGroup/lita-h5"
+                          aria-label={`仓库 ${i + 1}`}
+                        />
+                        <AutocompleteContent>
+                          <AutocompleteEmpty>未找到匹配的仓库</AutocompleteEmpty>
+                          <AutocompleteList>
+                            {(item: string) => (
+                              <AutocompleteItem key={item} value={item}>
+                                {item}
+                              </AutocompleteItem>
+                            )}
+                          </AutocompleteList>
+                        </AutocompleteContent>
+                      </Autocomplete>
+                    </div>
+                    <div className="w-40 shrink-0">
+                      <Autocomplete
+                        items={branchOptions[branch.repo.trim()] ?? []}
+                        value={branch.branch}
+                        onValueChange={(v) =>
+                          setBranches((list) =>
+                            list.map((b, j) =>
+                              j === i ? { ...b, branch: v as string } : b,
+                            ),
+                          )
+                        }
+                        clearable
+                      >
+                        <AutocompleteInput
+                          placeholder="分支，如 test"
+                          aria-label={`分支 ${i + 1}`}
+                        />
+                        <AutocompleteContent>
+                          <AutocompleteEmpty>
+                            {branch.repo.trim() ? '未找到匹配的分支' : '先选择仓库'}
+                          </AutocompleteEmpty>
+                          <AutocompleteList>
+                            {(item: string) => (
+                              <AutocompleteItem key={item} value={item}>
+                                {item}
+                              </AutocompleteItem>
+                            )}
+                          </AutocompleteList>
+                        </AutocompleteContent>
+                      </Autocomplete>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setBranches((list) => list.filter((_, j) => j !== i))}
+                    >
+                      移除
+                    </Button>
+                  </div>
+                ))}
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBranches((list) => [...list, { repo: '', branch: '' }])}
+                  >
+                    添加分支
+                  </Button>
+                </div>
+                {reposState === 'error' && branches.length > 0 && (
+                  <p className="text-foreground-muted">
+                    无法加载 GitHub 仓库列表（请检查 GitHub 集成配置）
+                  </p>
+                )}
+              </div>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              访问地址（可多个，可为空）
+              <div className="flex flex-col gap-2">
+                {urls.map((url, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      value={url}
+                      onChange={(e) =>
+                        setUrls((list) =>
+                          list.map((u, j) => (j === i ? e.target.value : u)),
+                        )
+                      }
+                      placeholder="https://…"
+                      aria-label={`访问地址 ${i + 1}`}
+                      className="flex-1"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setUrls((list) => list.filter((_, j) => j !== i))}
+                    >
+                      移除
+                    </Button>
+                  </div>
+                ))}
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setUrls((list) => [...list, ''])}
+                  >
+                    添加地址
+                  </Button>
+                </div>
+              </div>
+            </label>
+            <div className="flex flex-col gap-1 text-sm">
+              <span>提测内容（Markdown，可为空）</span>
+              <div className="md-editor-scroll h-72 rounded-none border border-border-strong bg-background">
+                {/* key 用打开时间：每次打开弹窗都从空白重新挂载（Milkdown 编辑器为非受控） */}
+                <MarkdownEditor
+                  key={submittedAt}
+                  ref={releaseEditorRef}
+                  value={content}
+                  appica
+                  onChange={setContent}
+                />
+              </div>
+            </div>
+            {error && <p className="text-sm">{error}</p>}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>
+            <Button variant="outline" size="sm">
+              取消
+            </Button>
+          </DialogClose>
+          <Button onClick={submit} disabled={!canSave}>
+            {saving ? '提测中…' : '确认提测'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
