@@ -31,6 +31,9 @@ import { FeishuBotMessageService } from './feishu-bot-message.service';
 import { FeishuBotP2PService } from './feishu-bot-p2p.service';
 import { FeishuBotProjectChat } from './feishu-bot-project-chat.entity';
 import { FeishuBotProjectChatService } from './feishu-bot-project-chat.service';
+import { FeishuBotBacklogChat } from './feishu-bot-backlog-chat.entity';
+import { FeishuBotBacklogChatService } from './feishu-bot-backlog-chat.service';
+import { Backlog } from '../iterations/backlog.entity';
 import { FeishuBotTaskChat } from './feishu-bot-task-chat.entity';
 import { FeishuBotTaskChatService } from './feishu-bot-task-chat.service';
 import { FeishuBotController } from './feishu-bot.controller';
@@ -52,6 +55,8 @@ import { FeishuBotController } from './feishu-bot.controller';
       FeishuBotEvent,
       FeishuBotTaskChat,
       FeishuBotProjectChat,
+      FeishuBotBacklogChat,
+      Backlog,
       FeishuBotApprovalCard,
       FeishuBotGroup,
       FeishuBotGroupRecord,
@@ -80,6 +85,7 @@ import { FeishuBotController } from './feishu-bot.controller';
     FeishuBotP2PService,
     FeishuBotTaskChatService,
     FeishuBotProjectChatService,
+    FeishuBotBacklogChatService,
     FeishuBotFeedbackService,
     FeishuBotGroupChatService,
     FeishuBotApprovalService,
@@ -91,6 +97,7 @@ import { FeishuBotController } from './feishu-bot.controller';
     FeishuBotClientService,
     FeishuBotIdentityService,
     FeishuBotProjectChatService,
+    FeishuBotBacklogChatService,
   ],
 })
 export class FeishuBotModule {}

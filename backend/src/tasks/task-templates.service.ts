@@ -21,6 +21,9 @@ import { TaskTemplate } from './task-template.entity';
 import {
   ensureTaskTemplateSequenceFloor,
   isSystemTaskTemplateId,
+  SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_DESCRIPTION,
+  SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_ID,
+  SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_NAME,
   SYSTEM_FEEDBACK_TASK_TEMPLATE_DESCRIPTION,
   SYSTEM_FEEDBACK_TASK_TEMPLATE_ID,
   SYSTEM_FEEDBACK_TASK_TEMPLATE_NAME,
@@ -85,6 +88,11 @@ export class TaskTemplatesService implements OnModuleInit {
       name: SYSTEM_FEEDBACK_TASK_TEMPLATE_NAME,
       description: SYSTEM_FEEDBACK_TASK_TEMPLATE_DESCRIPTION,
       agentIds: [SYSTEM_FEEDBACK_HANDLER_WORKER_ID],
+    });
+    await this.ensureSystemTemplate({
+      id: SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_ID,
+      name: SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_NAME,
+      description: SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_DESCRIPTION,
     });
     await ensureTaskTemplateSequenceFloor(this.templates);
   }

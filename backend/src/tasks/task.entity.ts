@@ -31,6 +31,7 @@ export interface TaskPlanRef {
 @Index(['status'])
 @Index(['subStatus'])
 @Index(['status', 'subStatus'])
+@Index('IDX_tasks_updatedAt', ['updatedAt'])
 @Index('IDX_tasks_projectId', ['projectId'])
 export class Task {
   @PrimaryGeneratedColumn()

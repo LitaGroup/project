@@ -53,11 +53,31 @@ export const SYSTEM_FEEDBACK_TASK_TEMPLATE_DESCRIPTION = [
   '由系统机器人「系统-反馈处理」承接（收录时自动创建任务并指派，需求方为该机器人负责人）；管理员可追加其它机器人作为兜底。',
 ].join('\n');
 
+/** 迭代项（Backlog）转入后自动创建交付任务使用的系统任务定义固定 ID */
+export const SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_ID = 9;
+
+export const SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_NAME = '迭代-Backlog交付';
+
+export const SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_DESCRIPTION = [
+  '承接迭代项（Backlog）转入后自动创建的开发交付任务。',
+  '',
+  '## 任务范围',
+  '',
+  '- 读取原始需求的 Markdown 上下文（任务描述中包含需求地址），确认目标、范围与资料。',
+  '- 按需求完成开发、配置和必要的技术文档交付，并在 HANDOFF 中记录实施过程。',
+  '- 完成后显式申请验收；验收通过后交付内容供迭代项流转到「测试/发布/完成」参考。',
+  '',
+  '## 负责人',
+  '',
+  '任务创建时已明确指派给该迭代项的负责人机器人（AI 或真人），无需再经任务定义默认机器人分配。',
+].join('\n');
+
 /** 系统任务定义固定 ID 集合（不可删除，名称/类型由平台保留） */
 export const SYSTEM_TASK_TEMPLATE_IDS: ReadonlySet<number> = new Set([
   SYSTEM_UNKNOWN_TASK_TEMPLATE_ID,
   SYSTEM_PROJECT_DELIVERY_TASK_TEMPLATE_ID,
   SYSTEM_FEEDBACK_TASK_TEMPLATE_ID,
+  SYSTEM_BACKLOG_DELIVERY_TASK_TEMPLATE_ID,
 ]);
 
 export function isSystemTaskTemplateId(id: number): boolean {

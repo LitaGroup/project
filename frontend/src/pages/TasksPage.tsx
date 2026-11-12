@@ -27,7 +27,7 @@ import {
 import {
   api,
   TASK_SUB_STATUSES,
-  type TaskPackage,
+  type TaskBoardItem,
   type TaskRealtimeMessage,
   type Worker,
 } from '../lib/api'
@@ -49,9 +49,9 @@ const ACTIVE_SUB_STATUSES = TASK_SUB_STATUSES.filter(
 
 /** 合并单条任务快照并按更新时间倒序，保持与服务端列表顺序一致 */
 function upsertTask(
-  list: TaskPackage[] | null,
-  task: TaskPackage,
-): TaskPackage[] {
+  list: TaskBoardItem[] | null,
+  task: TaskBoardItem,
+): TaskBoardItem[] {
   const current = list ?? []
   const exists = current.some((item) => item.id === task.id)
   const next = exists
@@ -111,7 +111,7 @@ function formatShort(iso: string): string {
 /** 任务清单页：进行任务（未结束任务列表）+ 所有任务（全量列表） */
 export function TasksPage() {
   const [tab, setTab] = useState<'active' | 'all'>('active')
-  const [tasks, setTasks] = useState<TaskPackage[] | null>(null)
+  const [tasks, setTasks] = useState<TaskBoardItem[] | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
 
   // 数据走 SSE：连接后服务端先推全量快照，之后推任务增量；
@@ -226,7 +226,7 @@ function TaskListView({
   workerName,
   activeOnly = false,
 }: {
-  tasks: TaskPackage[] | null
+  tasks: TaskBoardItem[] | null
   workerName: Map<number, string>
   activeOnly?: boolean
 }) {

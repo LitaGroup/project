@@ -109,6 +109,35 @@ export interface TaskOverview {
   subStatuses: Record<string, number>;
 }
 
+/**
+ * 任务看板列表投影：只包含列表渲染与需求方解析所需字段。
+ * Markdown 正文、工作计划、产物等大文本只在详情接口返回，不随看板快照下发。
+ */
+const TASK_BOARD_FIELDS = [
+  'id',
+  'code',
+  'title',
+  'parentId',
+  'status',
+  'subStatus',
+  'requesterType',
+  'requesterId',
+  'createdById',
+  'agentId',
+  'updatedAt',
+] as const satisfies ReadonlyArray<keyof Task>;
+
+/** 看板快照/增量推送使用的轻量任务视图 */
+export type TaskBoardItem = Pick<Task, (typeof TASK_BOARD_FIELDS)[number]> & {
+  requesterName: string | null;
+};
+
+/** 需求方解析所需的最小任务字段 */
+type RequesterFields = Pick<
+  Task,
+  'requesterType' | 'requesterId' | 'createdById'
+>;
+
 /** 项目详情展示的项目交付任务快照 */
 export interface ProjectDeliveryTaskView {
   task: Task;
@@ -213,7 +242,7 @@ export class TasksService {
         });
       });
     }
-    // 平铺列表（看板用）：附带执行中任务的实时输出，避免前端逐个拉详情
+    // 平铺列表（rootOnly=false）：附带执行中任务的实时输出，避免调用方逐个拉详情
     const nameOf = await this.requesterNameResolver(roots);
     return roots.map((r) =>
       Object.assign(r, {
@@ -223,19 +252,29 @@ export class TasksService {
     );
   }
 
-  /** 单个任务列表快照（SSE 任务变更推送用，不含详情事件时间线） */
-  async findOneForList(
-    id: number,
-  ): Promise<
-    (Task & { liveLines: string[]; requesterName: string | null }) | null
-  > {
-    const task = await this.tasks.findOne({ where: { id } });
+  /** 看板全量快照：只查列表投影字段（不含 Markdown 正文与实时输出），按更新时间倒序 */
+  async findAllForBoard(): Promise<TaskBoardItem[]> {
+    const rows = await this.tasks
+      .createQueryBuilder('t')
+      .select([...TASK_BOARD_FIELDS])
+      .orderBy('t.updatedAt', 'DESC')
+      .getMany();
+    const nameOf = await this.requesterNameResolver(rows);
+    return rows.map((task) =>
+      Object.assign(task, { requesterName: nameOf(task) }),
+    );
+  }
+
+  /** 单个任务列表快照（SSE 任务变更推送用，只取看板投影字段） */
+  async findOneForList(id: number): Promise<TaskBoardItem | null> {
+    const task = await this.tasks
+      .createQueryBuilder('t')
+      .select([...TASK_BOARD_FIELDS])
+      .where('t.id = :id', { id })
+      .getOne();
     if (!task) return null;
     const nameOf = await this.requesterNameResolver([task]);
-    return Object.assign(task, {
-      liveLines: this.recentLiveLines(id),
-      requesterName: nameOf(task),
-    });
+    return Object.assign(task, { requesterName: nameOf(task) });
   }
 
   /**
@@ -243,12 +282,12 @@ export class TasksService {
    * user 取用户姓名；需求方缺省时回退任务创建人。
    */
   private async requesterNameResolver(
-    tasks: Task[],
-  ): Promise<(task: Task) => string | null> {
+    tasks: RequesterFields[],
+  ): Promise<(task: RequesterFields) => string | null> {
     const workerIds = new Set<number>();
     const userIds = new Set<number>();
     const requesterOf = (
-      task: Task,
+      task: RequesterFields,
     ): { type: 'user' | 'worker' | null; id: number | null } => {
       const type = task.requesterType ?? (task.createdById ? 'user' : null);
       const id = task.requesterId ?? task.createdById;
@@ -398,7 +437,7 @@ export class TasksService {
 
       void (async () => {
         try {
-          const tasks = await this.findAll({ rootOnly: false });
+          const tasks = await this.findAllForBoard();
           if (closed) return;
           send({ type: 'snapshot', tasks, at: Date.now() });
           ready = true;

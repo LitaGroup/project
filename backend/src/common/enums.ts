@@ -373,3 +373,47 @@ export enum ModelThinkingLevel {
   MEDIUM = 'medium',
   HIGH = 'high',
 }
+
+/**
+ * 迭代类型：
+ * - T0：快速通道，常驻单例；需求确认可开发即进入，开发完成即可上线（紧急/简单/BUG 等）；
+ * - W1：按周迭代，有唯一标识与起止日期，通常每周一个。
+ */
+export enum IterationType {
+  T0 = 'T0',
+  W1 = 'W1',
+}
+
+/** 迭代状态：进行中（默认）/ 已结束（W1 到期后手动结束；T0 常驻不结束） */
+export enum IterationStatus {
+  ACTIVE = '进行中',
+  CLOSED = '已结束',
+}
+
+/**
+ * 迭代项（Backlog）状态：等待 → 执行 → 测试 → 发布 → 完成，允许取消。
+ * 由成员或管理员手动流转，平台记录操作人与各阶段时间；与任务/需求状态解耦。
+ */
+export enum BacklogStatus {
+  WAITING = '等待',
+  EXECUTING = '执行',
+  TESTING = '测试',
+  RELEASING = '发布',
+  COMPLETED = '完成',
+  CANCELED = '取消',
+}
+
+/**
+ * 迭代项成员角色：
+ * 产品（需求人）/ 业务（运营等相关人）/ 项目（项目负责人）/
+ * 技术（前端/后端/测试/客户端）。
+ */
+export enum BacklogMemberRole {
+  PRODUCT = '产品',
+  BUSINESS = '业务',
+  PROJECT = '项目',
+  FRONTEND = '前端',
+  BACKEND = '后端',
+  QA = '测试',
+  CLIENT = '客户端',
+}

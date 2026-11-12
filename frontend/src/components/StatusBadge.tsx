@@ -17,6 +17,35 @@ export function StatusBadge({ status }: { status: ProjectStatus }) {
   return <Badge variant={variantByStatus[status] ?? 'soft'}>{status}</Badge>
 }
 
+/** 迭代状态 → Badge：进行中蓝 / 已结束淡（未知兜底 soft） */
+const iterationVariantByStatus: Record<string, 'info' | 'secondary' | 'soft'> = {
+  进行中: 'info',
+  已结束: 'secondary',
+}
+
+export function IterationStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge variant={iterationVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+  )
+}
+
+/** 迭代项状态 → Badge：等待黄 / 执行蓝 / 测试主色 / 发布蓝 / 完成绿 / 取消淡 */
+const backlogVariantByStatus: Record<
+  string,
+  'warning' | 'info' | 'primary' | 'success' | 'secondary' | 'soft'
+> = {
+  等待: 'warning',
+  执行: 'info',
+  测试: 'primary',
+  发布: 'info',
+  完成: 'success',
+  取消: 'secondary',
+}
+
+export function BacklogStatusBadge({ status }: { status: string }) {
+  return <Badge variant={backlogVariantByStatus[status] ?? 'soft'}>{status}</Badge>
+}
+
 /** 提测记录状态 → Badge variant：待冒烟黄 / 进行中蓝 / 已通过绿 / 未通过红（未知兜底 soft） */
 const releaseVariantByStatus: Record<
   string,

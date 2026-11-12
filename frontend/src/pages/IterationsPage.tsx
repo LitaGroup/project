@@ -1,49 +1,35 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '@appica/ui-react/badge'
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from '@appica/ui-react/table'
+import { buttonVariants } from '@appica/ui-react/button'
 import { Card, CardHeader, CardTitle } from '@appica/ui-react/card'
-import { ChevronDown, ChevronRight } from '@appica/icons-react'
-import { api, PROJECT_STATUSES, type IterationGroup } from '../lib/api'
-import { StatusBadge } from '../components/StatusBadge'
-import { TypeBadge, PriorityBadge } from '../components/ProjectBadges'
-
-/** 已终结（发布/关闭）占比作为迭代进度 */
-const DONE_STATUSES = ['已发布', '已关闭'] as const
-
-function doneCount(group: IterationGroup): number {
-  return DONE_STATUSES.reduce(
-    (sum, s) => sum + (group.statusCounts[s] ?? 0),
-    0,
-  )
-}
+import {
+  api,
+  BACKLOG_STATUSES,
+  type BacklogStatus,
+  type IterationSummary,
+} from '../lib/api'
+import { IterationStatusBadge } from '../components/StatusBadge'
+import { useAuth } from '../context/AuthContext'
 
 /**
- * 迭代：计划要做的事情，从需求池排期而来。
- * 按迭代周期（w 编号 + 日期区间）分组展示需求清单与状态进度；数据来自 GET /projects/iterations。
+ * 迭代：T0 快速通道 + W1 周迭代，由 backlog 组成。
+ * T0 常驻、需求确认即开发、开发完成即可上线；W1 按周进行，有唯一标识与起止日期。
  */
 export function IterationsPage() {
-  const [groups, setGroups] = useState<IterationGroup[] | null>(null)
+  const { user } = useAuth()
+  const isAdmin = user?.role === '管理员'
+  const [items, setItems] = useState<IterationSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // 展开的迭代组（cycle 键）：加载后默认只展开当前迭代
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
     api
-      .listProjectIterations()
+      .listIterations()
       .then((r) => {
         if (cancelled) return
-        setGroups(r)
-        const current = r.find((g) => g.current)
-        setExpanded(new Set(current ? [current.cycle] : []))
+        setItems(r)
+        setError(null)
       })
       .catch((e: Error) => {
         if (!cancelled) setError(e.message)
@@ -53,167 +39,139 @@ export function IterationsPage() {
     }
   }, [])
 
-  const toggle = (cycle: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(cycle)) next.delete(cycle)
-      else next.add(cycle)
-      return next
-    })
-
   const summary = useMemo(() => {
-    if (!groups) return null
-    const iterations = groups.filter((g) => g.week !== null)
-    const current = iterations.find((g) => g.current)
+    if (!items) return null
+    const w1 = items.filter((item) => item.type === 'W1')
+    const current = w1.find((item) => item.current)
     return {
-      iterations: iterations.length,
-      total: groups.reduce((s, g) => s + g.total, 0),
-      done: groups.reduce((s, g) => s + doneCount(g), 0),
-      current,
+      total: items.length,
+      w1: w1.length,
+      current: current?.code ?? '未命中',
+      backlogTotal: items.reduce((sum, item) => sum + item.total, 0),
+      done: items.reduce((sum, item) => sum + item.done, 0),
     }
-  }, [groups])
+  }, [items])
 
   return (
     <div>
-      <div className="mb-4">
-        <h1 className="text-2xl font-semibold">迭代</h1>
-        <p className="mt-1 text-sm">
-          从需求池排期而来的计划事项，按迭代周期分组，反映当前进度
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">迭代</h1>
+          <p className="mt-1 text-sm">
+            T0 快速通道 + W1 周迭代；迭代由 backlog 组成，需求转入时指定负责人
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <a
+            href="/api/iterations.md"
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm underline"
+            title="Markdown 视图"
+          >
+            MD
+          </a>
+          {isAdmin && (
+            <Link to="/iterations/new" className={buttonVariants()}>
+              新建 W1 迭代
+            </Link>
+          )}
+        </div>
       </div>
 
       {error && <p className="mb-4 text-sm">加载失败:{error}</p>}
 
       {summary && (
         <div className="mb-4 flex flex-wrap gap-3">
-          <IterationStat label="迭代数" value={summary.iterations} />
+          <IterationStat label="迭代数" value={summary.total} />
+          <IterationStat label="W1 迭代" value={summary.w1} />
+          <IterationStat label="当前迭代" value={summary.current} />
           <IterationStat
-            label="当前迭代"
-            value={summary.current?.cycle ?? '未命中'}
+            label="迭代项 / 完成"
+            value={`${summary.done}/${summary.backlogTotal}`}
           />
-          <IterationStat label="排期需求" value={summary.total} />
-          <IterationStat label="已发布 / 已关闭" value={summary.done} />
         </div>
       )}
 
-      {!groups && !error && <p className="text-sm text-foreground-muted">加载中…</p>}
+      {!items && !error && (
+        <p className="text-sm text-foreground-muted">加载中…</p>
+      )}
 
       <div className="flex flex-col gap-3">
-        {(groups ?? []).map((g) => {
-          const open = expanded.has(g.cycle)
-          const done = doneCount(g)
-          const percent = g.total === 0 ? 0 : Math.round((done / g.total) * 100)
-          const unscheduled = g.cycle === '-'
-          return (
-            <Card key={g.cycle} className={g.current ? 'ring-1 ring-foreground-intense' : undefined}>
-              <CardHeader
-                className="cursor-pointer select-none"
-                onClick={() => toggle(g.cycle)}
-              >
-                <CardTitle className="flex items-center gap-3 text-base">
-                  {open ? (
-                    <ChevronDown size={16} className="shrink-0" />
-                  ) : (
-                    <ChevronRight size={16} className="shrink-0" />
-                  )}
-                  {unscheduled ? (
-                    <span className="text-foreground-muted">未排期</span>
-                  ) : (
-                    <span className="font-mono">{g.cycle}</span>
-                  )}
-                  {g.dateRange && (
-                    <span className="text-sm text-foreground-muted">{g.dateRange}</span>
-                  )}
-                  {g.current && <Badge variant="soft">当前迭代</Badge>}
-                  <span className="ml-auto text-sm text-foreground-muted">
-                    共 {g.total} 条
-                  </span>
-                </CardTitle>
-                {!unscheduled && (
-                  <div className="mt-2 flex items-center gap-3">
-                    <div className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-background">
-                      <div
-                        className="h-full rounded-full bg-foreground-intense"
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                    <span className="w-16 text-right text-sm text-foreground-muted">
-                      {percent}% 完成
-                    </span>
-                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
-                      {PROJECT_STATUSES.filter((s) => (g.statusCounts[s] ?? 0) > 0).map(
-                        (s) => (
-                          <span key={s}>
-                            {s} {g.statusCounts[s]}
-                          </span>
-                        ),
-                      )}
-                    </span>
-                  </div>
+        {(items ?? []).map((iteration) => (
+          <Card
+            key={iteration.id}
+            className={iteration.current ? 'ring-1 ring-foreground-intense' : undefined}
+          >
+            <CardHeader>
+              <CardTitle className="flex flex-wrap items-center gap-3 text-base">
+                {iteration.type === 'T0' ? (
+                  <Badge variant="primary">T0</Badge>
+                ) : (
+                  <span className="font-mono">{iteration.code}</span>
                 )}
-              </CardHeader>
-              {open && (
-                <div className="px-4 pb-4">
-                  <Table hoverableRows>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-20">ID</TableHead>
-                        <TableHead>需求</TableHead>
-                        <TableHead className="text-center">类型</TableHead>
-                        <TableHead className="text-center">优先级</TableHead>
-                        <TableHead className="text-center whitespace-nowrap">预期</TableHead>
-                        <TableHead className="text-center">状态</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {g.items.map((p) => (
-                        <TableRow key={p.id}>
-                          <TableCell>{p.id}</TableCell>
-                          <TableCell className="max-w-md truncate" title={p.name}>
-                            <Link to={`/projects/${p.id}`} className="underline">
-                              {p.name}
-                            </Link>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <TypeBadge type={p.type} />
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {p.priority ? (
-                              <PriorityBadge priority={p.priority} />
-                            ) : (
-                              '—'
-                            )}
-                          </TableCell>
-                          <TableCell className="text-center whitespace-nowrap">
-                            {p.expectedReleaseAt ?? '未定'}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <StatusBadge status={p.status} />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {g.items.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={6}>该迭代暂无需求</TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
+                <Link to={`/iterations/${iteration.id}`} className="underline">
+                  {iteration.name}
+                </Link>
+                {iteration.type === 'W1' && (
+                  <span className="text-sm text-foreground-muted">
+                    {iteration.startAt ?? '?'} ~ {iteration.endAt ?? '?'}
+                  </span>
+                )}
+                {iteration.current && <Badge variant="soft">当前迭代</Badge>}
+                <IterationStatusBadge status={iteration.status} />
+                <span className="ml-auto text-sm text-foreground-muted">
+                  共 {iteration.total} 条
+                </span>
+              </CardTitle>
+              <div className="mt-2 flex items-center gap-3">
+                <div className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-background">
+                  <div
+                    className="h-full rounded-full bg-foreground-intense"
+                    style={{ width: `${iteration.percent}%` }}
+                  />
                 </div>
-              )}
-            </Card>
-          )
-        })}
+                <span className="w-16 text-right text-sm text-foreground-muted">
+                  {iteration.percent}% 完成
+                </span>
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-foreground-muted">
+                  {BACKLOG_STATUSES.filter(
+                    (status: BacklogStatus) =>
+                      (iteration.statusCounts[status] ?? 0) > 0,
+                  ).map((status) => (
+                    <span key={status}>
+                      {status} {iteration.statusCounts[status]}
+                    </span>
+                  ))}
+                  {iteration.total === 0 && <span>暂无迭代项</span>}
+                </span>
+              </div>
+            </CardHeader>
+          </Card>
+        ))}
+        {items && items.length === 0 && (
+          <p className="text-sm text-foreground-muted">
+            暂无迭代；管理员可新建 W1 迭代或向 T0 快速通道转入需求。
+          </p>
+        )}
       </div>
     </div>
   )
 }
 
-function IterationStat({ label, value }: { label: string; value: string | number }) {
+function IterationStat({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number
+}) {
   return (
     <Card className="min-w-40">
       <CardHeader>
-        <CardTitle className="text-sm font-medium text-foreground-muted">{label}</CardTitle>
+        <CardTitle className="text-sm font-medium text-foreground-muted">
+          {label}
+        </CardTitle>
         <p className="text-xl font-semibold text-foreground-intense">{value}</p>
       </CardHeader>
     </Card>

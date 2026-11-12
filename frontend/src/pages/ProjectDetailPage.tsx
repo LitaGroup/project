@@ -111,6 +111,7 @@ import {
   TicketStatusBadge,
 } from '../components/StatusBadge'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
+import { TransferToIterationButton } from '../components/TransferToIterationButton'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import { RunStats } from '../components/RunStats'
@@ -330,15 +331,21 @@ export function ProjectDetailPage() {
               <CardTitle className="flex items-center justify-between gap-2">
                 <span className="truncate">{project.name}</span>
                 {/* Markdown 视图：后端 .md URL 规范（GET /api/projects/:id.md） */}
-                <a
-                  href={`/api/projects/${project.id}.md`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="shrink-0 text-sm font-normal underline"
-                  title="Markdown 视图"
-                >
-                  MD
-                </a>
+                <div className="flex shrink-0 items-center gap-2">
+                  <a
+                    href={`/api/projects/${project.id}.md`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-normal underline"
+                    title="Markdown 视图"
+                  >
+                    MD
+                  </a>
+                  <TransferToIterationButton
+                    projectId={project.id}
+                    projectName={project.name}
+                  />
+                </div>
               </CardTitle>
               <CardDescription>
                 <EditDescriptionDialog project={project} onSaved={reload} />

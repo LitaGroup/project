@@ -58,6 +58,7 @@
 - `backend/src/common/`：枚举、路径、Frontmatter、运行 Markdown、拼音搜索等公共能力。
 - `backend/src/auth/`：飞书 OAuth、会话、用户同步、Agent 令牌和全局鉴权。
 - `backend/src/projects/`、`documents/`、`resources/`、`milestones/`：项目及项目资料。
+- `backend/src/iterations/`：迭代（T0 / W1）与迭代项（Backlog）；转入时指定负责人机器人并自动创建交付任务，迭代沟通群由 `feishu-bot/` 维护。
 - `backend/src/checks/`、`tests/`、`exports/`、`schedules/`、`scripts/`：脚本登记、导入、运行、历史与调度。
 - `backend/src/tasks/`：任务状态机、任务定义、派发、协同、文档、工作台和实时流。
 - `backend/src/tickets/`、`workflows/`：工单、工作流定义、发布版本和运行时流转。
@@ -135,8 +136,19 @@
 
 - 顶级分区「业务」（原「项目」）左侧只保留五个业务栏目：需求 `/requirements`、迭代 `/iterations`、灵感 `/ideas`、调研（占位，未启用）、反馈 `/feedback`；落地页 `/` 重定向到需求池，概览页仅保留 `/overview` 路由不挂导航。
 - 需求池复用项目实体（飞书需求池单向同步 + 平台内新建），详情与 `/api/projects*`、`.md` Agent 视图全部不变；`/projects` 重定向到 `/requirements`，项目子路由（`/projects/:id/...`）保留。
-- 迭代不新建实体：`GET /api/projects/iterations` 按 `iterationCycle` 分组（`-`/空/NULL 归未排期，置底；`w` 编号倒序；北京时间判定当前迭代），前端渲染分组进度视图。
+- 迭代独立建模（`iterations` + `backlogs`，见「迭代与 Backlog」）；`projects.iterationCycle` 仅保留为飞书同步的参考字段与需求筛选值，旧分组接口 `GET /api/projects/iterations` 不再作为迭代页数据源。
 - 原全局工具页（缺陷/用例/检查/导出/定时任务/文档/资源/节点/提交/APP/设置）不再提供导航入口：管理分区「研发工具」仅保留「系统设置」（`/settings`），其余工具页路由与访问权限不变，仅可经深链或其它页面跳转进入；`TOOL_PATHS` 仍用于把这些路径的导航归属判定为管理分区。
+
+### 迭代与 Backlog
+
+- 迭代分两类：**T0 常驻快速通道**（单例，`code=T0`，无起止日期；需求确认可开发即进入、开发完成即可上线）与 **W1 周迭代**（由管理员手动创建，唯一标识 + 起止日期）。
+- 迭代由 **Backlog** 组成，独立于需求池：`backlogs.projectId` 记录原始需求（`projects.id`，应用层软引用）。一个需求同时只允许一个未取消的 backlog；取消后可再次转入。
+- 转入/追加必须指定**负责人机器人**（AI 或真人）：创建交付任务时显式 `agentId=负责人`，使用系统任务定义 **ID=9「迭代-Backlog交付」**，AI 与真人均走任务中心派发。
+- 成员角色：产品 / 业务 / 项目 / 前端 / 后端 / 测试 / 客户端；产品与技术从需求 `resources` 按姓名自动带入，项目与业务由管理员手动选择。
+- 状态：等待 → 执行 → 测试 → 发布 → 完成，允许回退与取消；由成员或管理员手动流转，记录操作人与各阶段时间；取消时联动取消未结束的交付任务。状态与任务/需求状态解耦。
+- 支持向已有迭代追加需求、移动 backlog 到其它迭代（移动不重建交付任务与沟通群）；W1 到期未完成的 backlog 留在原迭代，由管理员手动结转到新迭代。
+- 每个 backlog 创建后自动建立飞书沟通群（`LitaWork-迭代-{标题} 沟通群`），拉入成员真人与负责人机器人绑定的飞书应用；完成/取消后保留 7 天自动解散，建群失败不阻断、定时对账重试。
+- Agent 视图：`GET /api/iterations.md`、`GET /api/iterations/{id}.md`、`GET /api/backlogs/{id}.md`。
 
 ### 项目、文档与项目资料
 

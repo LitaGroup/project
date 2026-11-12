@@ -39,6 +39,22 @@ export type IdeaType = (typeof IDEA_TYPES)[number]
 export const IDEA_STATUSES = ['构思', '废弃', '采纳'] as const
 export type IdeaStatus = (typeof IDEA_STATUSES)[number]
 
+/** 迭代类型（与后端 IterationType 对应）：T0 快速通道（常驻）/ W1 周迭代 */
+export const ITERATION_TYPES = ['T0', 'W1'] as const
+export type IterationType = (typeof ITERATION_TYPES)[number]
+
+/** 迭代状态（与后端 IterationStatus 对应）：进行中 / 已结束 */
+export const ITERATION_STATUSES = ['进行中', '已结束'] as const
+export type IterationStatus = (typeof ITERATION_STATUSES)[number]
+
+/** 迭代项状态（与后端 BacklogStatus 对应）：等待 → 执行 → 测试 → 发布 → 完成；允许取消 */
+export const BACKLOG_STATUSES = ['等待', '执行', '测试', '发布', '完成', '取消'] as const
+export type BacklogStatus = (typeof BACKLOG_STATUSES)[number]
+
+/** 迭代项成员角色（与后端 BacklogMemberRole 对应） */
+export const BACKLOG_MEMBER_ROLES = ['产品', '业务', '项目', '前端', '后端', '测试', '客户端'] as const
+export type BacklogMemberRole = (typeof BACKLOG_MEMBER_ROLES)[number]
+
 /** APP 自动化测试目标应用（与后端 AppTarget 对应，app_versions 用） */
 export const APP_TARGETS = ['lita', 'lita lite'] as const
 export type AppTarget = (typeof APP_TARGETS)[number]
@@ -721,6 +737,65 @@ export interface IterationGroup {
   /** 各状态需求数 */
   statusCounts: Partial<Record<ProjectStatus, number>>
   items: Project[]
+}
+
+/** 迭代项成员（角色 + 平台用户 + 姓名快照） */
+export interface BacklogMember {
+  role: BacklogMemberRole
+  userId: number
+  name: string
+}
+
+/** 迭代进度汇总（与后端 IterationProgress 对应） */
+export interface IterationProgress {
+  total: number
+  done: number
+  percent: number
+  statusCounts: Partial<Record<BacklogStatus, number>>
+}
+
+/** 迭代列表项（GET /iterations，含 backlog 进度） */
+export interface IterationSummary extends IterationProgress {
+  id: number
+  code: string
+  type: IterationType
+  name: string
+  startAt: string | null
+  endAt: string | null
+  status: IterationStatus
+  /** 是否当前迭代（W1 今天在起止区间内；T0 恒为 true） */
+  current: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** 迭代项（Backlog）：从需求转入，指定负责人机器人后自动创建交付任务 */
+export interface Backlog {
+  id: number
+  code: string
+  iterationId: number
+  /** 原始需求（projects.id） */
+  projectId: number
+  title: string
+  status: BacklogStatus
+  ownerWorkerId: number | null
+  ownerName: string | null
+  members: BacklogMember[] | null
+  /** 自动创建的交付任务（tasks.id） */
+  taskId: number | null
+  statusBy: string | null
+  startedAt: string | null
+  testingAt: string | null
+  releasingAt: string | null
+  completedAt: string | null
+  canceledAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 迭代详情（GET /iterations/:id）：迭代信息 + 迭代项列表 */
+export interface IterationDetail extends IterationSummary {
+  backlogs: Backlog[]
 }
 
 /** 缺陷：仅平台内维护（接口/人工创建），属性只保留 端/预期/实际/图片/用例脚本/状态 */
@@ -1882,10 +1957,24 @@ export interface TicketWorkflowDefinitionDetail extends TicketWorkflowDefinition
 }
 
 
+/** 任务看板 SSE（GET /api/tasks/stream）使用的轻量列表项：不含 Markdown 正文与产物等大字段 */
+export interface TaskBoardItem {
+  id: number
+  code: string
+  title: string
+  parentId: number | null
+  status: TaskStatus
+  subStatus: TaskSubStatus
+  /** 需求方展示名（服务端批量解析） */
+  requesterName: string | null
+  agentId: number | null
+  updatedAt: string
+}
+
 /** 任务看板 SSE（GET /api/tasks/stream）：初始快照 + 增量事件 */
 export type TaskRealtimeMessage =
-  | { type: 'snapshot'; tasks: TaskPackage[]; at: number }
-  | { type: 'task.upsert'; task: TaskPackage; at: number }
+  | { type: 'snapshot'; tasks: TaskBoardItem[]; at: number }
+  | { type: 'task.upsert'; task: TaskBoardItem; at: number }
   | { type: 'task.line'; taskId: number; line: string; at: number }
   | { type: 'task.delete'; ids: number[]; at: number }
   | { type: 'ping'; at: number }
@@ -2294,6 +2383,80 @@ export const api = {
   },
   /** 迭代分组视图：需求按迭代周期聚合 + 状态计数（业务分区「迭代」栏目） */
   listProjectIterations: () => request<IterationGroup[]>('/projects/iterations'),
+  /** 迭代列表（T0 置顶，W1 按开始日期倒序） */
+  listIterations: (params?: {
+    type?: IterationType
+    status?: IterationStatus
+  }) => {
+    const qs = new URLSearchParams()
+    if (params?.type) qs.set('type', params.type)
+    if (params?.status) qs.set('status', params.status)
+    const q = qs.toString()
+    return request<IterationSummary[]>(`/iterations${q ? `?${q}` : ''}`)
+  },
+  /** 迭代详情：迭代信息 + 迭代项列表 */
+  getIteration: (id: number) => request<IterationDetail>(`/iterations/${id}`),
+  /** 创建 W1 周迭代（仅管理员） */
+  createIteration: (input: {
+    code: string
+    name: string
+    startAt: string
+    endAt: string
+  }) =>
+    request<IterationSummary>('/iterations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  /** 更新迭代：名称 / 起止日期 / 结束或重开（仅管理员） */
+  updateIteration: (
+    id: number,
+    input: {
+      name?: string
+      startAt?: string | null
+      endAt?: string | null
+      status?: IterationStatus
+    },
+  ) =>
+    request<IterationSummary>(`/iterations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  /** 批量转入：选中需求转为该迭代的 backlog（每条必填负责人） */
+  createBacklogs: (
+    iterationId: number,
+    items: Array<{
+      projectId: number
+      ownerWorkerId: number
+      members?: Array<{ role: BacklogMemberRole; userId: number }>
+    }>,
+  ) =>
+    request<Backlog[]>(`/iterations/${iterationId}/backlogs`, {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  /** 迭代项详情 */
+  getBacklog: (id: number) => request<Backlog>(`/backlogs/${id}`),
+  /** 迭代项状态流转（成员或管理员） */
+  updateBacklogStatus: (id: number, status: BacklogStatus) =>
+    request<Backlog>(`/backlogs/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
+  /** 移动迭代项到另一个迭代 */
+  moveBacklog: (id: number, iterationId: number) =>
+    request<Backlog>(`/backlogs/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ iterationId }),
+    }),
+  /** 更新迭代项成员（仅管理员） */
+  updateBacklogMembers: (
+    id: number,
+    members: Array<{ role: BacklogMemberRole; userId: number }>,
+  ) =>
+    request<Backlog>(`/backlogs/${id}/members`, {
+      method: 'PATCH',
+      body: JSON.stringify({ members }),
+    }),
   getProject: (id: number) => request<Project>(`/projects/${id}`),
   createProject: (input: {
     name: string
