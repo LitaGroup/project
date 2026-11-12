@@ -43,7 +43,7 @@ type: docs
 
 ## 三、端点参考
 
-以下 `{APP_URL}` 为平台部署地址（如 `https://work.cinta.team`）。
+以下 `{APP_URL}` 为平台部署地址（生产为 `http://work.cinta.team`，该域名未配置证书，仅提供 http）。
 
 ### 3.1 授权端点
 
@@ -111,10 +111,10 @@ Authorization: Bearer {access_token}
 
 ```bash
 # 1. 引导用户浏览器打开授权地址（示例）
-# https://work.cinta.team/api/sso/authorize?response_type=code&client_id=sso_xxx&redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback&state=xyz
+# http://work.cinta.team/api/sso/authorize?response_type=code&client_id=sso_xxx&redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback&state=xyz
 
 # 2. 回调拿到 code 后换 access_token
-curl -X POST https://work.cinta.team/api/sso/token \
+curl -X POST http://work.cinta.team/api/sso/token \
   -d grant_type=authorization_code \
   -d code=返回的code \
   -d "redirect_uri=https://app.example.com/callback" \
@@ -122,7 +122,7 @@ curl -X POST https://work.cinta.team/api/sso/token \
   -d client_secret=SECRET
 
 # 3. 读取用户信息
-curl https://work.cinta.team/api/sso/userinfo \
+curl http://work.cinta.team/api/sso/userinfo \
   -H "Authorization: Bearer ACCESS_TOKEN"
 ```
 
@@ -134,7 +134,7 @@ curl https://work.cinta.team/api/sso/userinfo \
 - **client_secret**：仅创建/重置时一次性展示，服务端保管，不要放进前端代码或 URL；
 - **access_token**：独立 JWT（`typ=sso_access`），与平台网页会话令牌互不通用；2 小时过期后重走授权码即可（用户在平台会话 7 天内静默免登）；
 - **state**：接入方必须生成随机值并在回调时校验，防 CSRF；
-- 回调地址务必使用 https。
+- 回调地址建议使用 https；平台自身访问地址当前为 http（`http://work.cinta.team`）。
 
 ---
 
