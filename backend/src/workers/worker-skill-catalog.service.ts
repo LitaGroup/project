@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { fetchFullTree } from './gitea-tree';
 import { isDeprecatedSkill } from './worker-skill-deprecation';
 
 /** 技能目录条目（供机器人表单选择） */
@@ -16,16 +17,6 @@ export interface SkillCatalogItem {
   url: string;
   /** Gitea 页面地址（查看原文） */
   sourceUrl: string;
-}
-
-/** Gitea 仓库树条目（仅取用到的字段） */
-interface GiteaTreeEntry {
-  path?: string;
-  type?: string;
-}
-
-interface GiteaTreeResponse {
-  tree?: GiteaTreeEntry[];
 }
 
 const DEFAULT_REPO_URL = 'http://gitea.cinta.team/docs/skills';
@@ -193,10 +184,12 @@ export class WorkerSkillCatalogService {
       default_branch?: string;
     }>(apiRepo);
     const branch = repoInfo.default_branch?.trim() || 'main';
-    const tree = await this.requestJson<GiteaTreeResponse>(
-      `${apiRepo}/git/trees/${encodeURIComponent(branch)}?recursive=true`,
+    const tree = await fetchFullTree(
+      (url) => this.requestJson<unknown>(url),
+      apiRepo,
+      branch,
     );
-    const paths = (tree.tree ?? [])
+    const paths = tree
       .filter(
         (item) => item.type === 'blob' && item.path?.endsWith('/SKILL.md'),
       )

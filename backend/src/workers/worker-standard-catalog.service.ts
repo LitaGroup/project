@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { fetchFullTree } from './gitea-tree';
 import { WorkerStandard } from './worker.entity';
 
 /** 规范目录条目（供机器人表单选择） */
@@ -30,17 +31,6 @@ export interface ManagedStandardFiles {
   directories: string[];
   /** 目录下全部文件（相对仓库根，已排序去重） */
   files: string[];
-}
-
-/** Gitea 仓库树条目（仅取用到的字段） */
-interface GiteaTreeEntry {
-  path?: string;
-  type?: string;
-}
-
-interface GiteaTreeResponse {
-  tree?: GiteaTreeEntry[];
-  truncated?: boolean;
 }
 
 const DEFAULT_REPO_URL = 'http://gitea.cinta.team/docs/standard';
@@ -211,10 +201,12 @@ export class WorkerStandardCatalogService {
       apiRepo,
     );
     const branch = selectedBranch || repoInfo.default_branch?.trim() || 'main';
-    const tree = await this.requestJson<GiteaTreeResponse>(
-      `${apiRepo}/git/trees/${encodeURIComponent(branch)}?recursive=true`,
+    const tree = await fetchFullTree(
+      (url) => this.requestJson<unknown>(url),
+      apiRepo,
+      branch,
     );
-    const files = (tree.tree ?? [])
+    const files = tree
       .filter((item) => {
         if (item.type !== 'blob' || !item.path) return false;
         // 系统垃圾文件不作为规范文档同步
@@ -292,10 +284,12 @@ export class WorkerStandardCatalogService {
       default_branch?: string;
     }>(apiRepo);
     const branch = repoInfo.default_branch?.trim() || 'main';
-    const tree = await this.requestJson<GiteaTreeResponse>(
-      `${apiRepo}/git/trees/${encodeURIComponent(branch)}?recursive=true`,
+    const tree = await fetchFullTree(
+      (url) => this.requestJson<unknown>(url),
+      apiRepo,
+      branch,
     );
-    const paths = (tree.tree ?? [])
+    const paths = tree
       .filter(
         (item) =>
           item.type === 'blob' &&
