@@ -14,6 +14,10 @@ import { AUTH_COOKIE, AuthService, OAUTH_STATE_COOKIE } from './auth.service';
 import { readCookie } from './cookies';
 import { Public } from './public.decorator';
 import { User } from './user.entity';
+import {
+  SSO_CONTEXT_COOKIE,
+  ssoResumeUrlFromContext,
+} from '../sso/sso.constants';
 
 /** /me 响应的用户子集（不含 open_id 等敏感标识） */
 function serializeUser(user: User) {
@@ -87,7 +91,13 @@ export class AuthController {
         this.authService.signSessionToken(user),
         this.authService.sessionCookieOptions(),
       );
-      res.redirect(this.appUrl());
+      // SSO 授权流程暂存过上下文：登录成功后回跳 authorize 续发授权码；
+      // 回跳地址由 Cookie 内容重建，authorize 会再次完整校验（无开放重定向风险）
+      const ssoResume = ssoResumeUrlFromContext(
+        readCookie(req, SSO_CONTEXT_COOKIE),
+      );
+      res.clearCookie(SSO_CONTEXT_COOKIE, { path: '/' });
+      res.redirect(ssoResume ?? this.appUrl());
     } catch (e) {
       this.redirectLoginError(res, (e as Error).message);
     }

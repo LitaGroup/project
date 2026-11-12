@@ -57,6 +57,7 @@
 - `backend/src/main.ts`：全局 `/api` 前缀、CORS、静态目录。
 - `backend/src/common/`：枚举、路径、Frontmatter、运行 Markdown、拼音搜索等公共能力。
 - `backend/src/auth/`：飞书 OAuth、会话、用户同步、Agent 令牌和全局鉴权。
+- `backend/src/sso/`：单点登录（OAuth2 授权码 IdP）：管理区「SSO 应用」登记接入方，authorize / token / userinfo 供其它网站接入平台登录。
 - `backend/src/projects/`、`documents/`、`resources/`、`milestones/`：项目及项目资料。
 - `backend/src/iterations/`：迭代（T0 / W1）与迭代项（Backlog）；转入时指定负责人机器人并自动创建交付任务，迭代沟通群由 `feishu-bot/` 维护。
 - `backend/src/checks/`、`tests/`、`exports/`、`schedules/`、`scripts/`：脚本登记、导入、运行、历史与调度。
@@ -79,6 +80,7 @@
 - `MCP.md`：lita-work / lita-bots / lita-proxy 三个 MCP 服务接入总览（令牌、客户端配置与工具入口）。
 - `docs/work-mcp.md`：lita-work MCP（`POST /api/mcp/work`）接入指南与工具清单。
 - `docs/MCP_BOTS.md`：lita-bots MCP（`POST /api/mcp/bots`）会话、提问与工具说明。
+- `docs/SSO.md`：单点登录（OAuth2 授权码）接入指南（authorize / token / userinfo）。
 - `skills/`：已随 MCP 二期下线（lita-work / knowledge-search / file-upload 等平台能力技能不再随仓库发布）。
 
 ## 后端通用约定
@@ -245,6 +247,13 @@
 - `LlmService` 提供通用单次调用 `ask`（非流式、20s 超时、全局并发 3）与标题生成 `generateTitle`；场景未配置返回 null，由调用方降级，失败不得影响主流程。
 - 工单与根任务创建后异步生成标题 `「T-{id}」+ 模型生成内容`（`title-naming` 场景，`T-` 后为数字 ID，与 code `WO-/TK-` 并存），不阻塞创建、派发与节点流转，失败只告警。更新使用乐观条件（标题仍为创建时值），不覆盖人工修改。
 - 仅工单与根任务入口（`create.md` / MCP `create_task` / 项目交付任务）触发生成；子任务、工单节点任务、缺陷自动派单任务保留原结构化标题。
+
+### 单点登录（SSO）
+
+- 平台可作为 OAuth2 授权码模式 IdP：接入方在管理区「SSO 应用」登记（`clientId` / `clientSecret` 只写不回显、仅创建与重置时一次性返回；回调地址白名单精确匹配，未登记的 `redirect_uri` 直接 400 不回跳）。
+- 协议端点 `GET /api/sso/authorize`、`POST /api/sso/token`、`GET /api/sso/userinfo` 均 `@Public` 且各自鉴权；管理端点 `/api/sso/clients*` 走全局 Guard 并要求管理员。
+- authorize 未登录时把接入方参数暂存短效 Cookie（`pmp_sso_ctx`）→ 飞书登录 → callback 据此回跳 authorize 续发授权码；回跳地址由 Cookie 重建并再次完整校验，无开放重定向风险。
+- 授权码一次性、10 分钟有效、绑定 user/client/redirect_uri 三元组；`access_token` 为独立 JWT（`typ=sso_access`、`aud=clientId`、密钥优先 `SSO_JWT_SECRET`，缺省从 `AUTH_JWT_SECRET` 派生），与平台会话令牌互不通用，2 小时有效，无 refresh token。
 
 ### 提测与缺陷
 

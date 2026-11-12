@@ -99,6 +99,9 @@ const McpLogsPage = lazy(() =>
 const McpServersPage = lazy(() =>
   import('./pages/McpServersPage').then((m) => ({ default: m.McpServersPage })),
 )
+const SsoClientsPage = lazy(() =>
+  import('./pages/SsoClientsPage').then((m) => ({ default: m.SsoClientsPage })),
+)
 const ModelConfigPage = lazy(() =>
   import('./pages/ModelConfigPage').then((m) => ({ default: m.ModelConfigPage })),
 )
@@ -441,6 +444,7 @@ function App() {
               <Route path="/admin/mcp-servers" element={<McpServersPage />} />
               <Route path="/admin/mcp-logs" element={<McpLogsPage />} />
               <Route path="/admin/model-config" element={<ModelConfigPage />} />
+              <Route path="/admin/sso-clients" element={<SsoClientsPage />} />
             </Route>
             <Route path="/tasks/:id" element={<TaskPackageDetailPage />} />
             <Route path="/tickets" element={<TicketHomePage />} />

@@ -1248,6 +1248,33 @@ export interface McpServerTestResult {
   durationMs: number
 }
 
+/** SSO 接入方（管理区列表/详情；密钥只返回是否已配置，不回显原文） */
+export interface SsoClientConfig {
+  id: number
+  name: string
+  clientId: string
+  /** 回调地址白名单（精确匹配） */
+  redirectUris: string[]
+  enabled: boolean
+  remark: string | null
+  hasSecret: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** 保存 SSO 接入方入参（编辑时未传字段保持原值） */
+export interface SsoClientSaveInput {
+  name: string
+  redirectUris: string[]
+  enabled?: boolean
+  remark?: string | null
+}
+
+/** 新建/重置密钥响应：clientSecret 仅本次一次性返回 */
+export interface SsoClientCreated extends SsoClientConfig {
+  clientSecret: string
+}
+
 // ===== 模型配置（管理区） =====
 
 /** 模型思考等级：off 关闭思考（最低档），其余逐级提高 */
@@ -3424,6 +3451,27 @@ export const api = {
     }),
   deleteMcpServer: (id: number) =>
     request<{ ok: true }>(`/mcp/servers/${id}`, { method: 'DELETE' }),
+
+  /** SSO 接入方列表（管理区；密钥只返回是否已配置） */
+  listSsoClients: () => request<SsoClientConfig[]>('/sso/clients'),
+  /** 新建接入方：clientId/clientSecret 仅本次响应返回 */
+  createSsoClient: (input: SsoClientSaveInput) =>
+    request<SsoClientCreated>('/sso/clients', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateSsoClient: (id: number, input: Partial<SsoClientSaveInput>) =>
+    request<SsoClientConfig>(`/sso/clients/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  /** 重置密钥：旧密钥立即失效，新密钥仅本次返回 */
+  resetSsoClientSecret: (id: number) =>
+    request<{ clientSecret: string }>(`/sso/clients/${id}/secret-reset`, {
+      method: 'POST',
+    }),
+  deleteSsoClient: (id: number) =>
+    request<{ ok: true }>(`/sso/clients/${id}`, { method: 'DELETE' }),
 
   /** 模型配置：固定场景列表（apiKey 只返回是否已配置） */
   listModelConfigs: () =>

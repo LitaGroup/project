@@ -42,6 +42,7 @@ import { McpModule } from './mcp/mcp.module';
 import { McpServersModule } from './mcp-servers/mcp-servers.module';
 import { ModelConfigModule } from './model-config/model-config.module';
 import { FeishuBotModule } from './feishu-bot/feishu-bot.module';
+import { SsoModule } from './sso/sso.module';
 
 @Module({
   imports: [
@@ -98,6 +99,7 @@ import { FeishuBotModule } from './feishu-bot/feishu-bot.module';
     McpModule,
     McpServersModule,
     ModelConfigModule,
+    SsoModule,
     ScriptsModule,
     FeishuModule,
     FeishuBotModule,
