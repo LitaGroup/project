@@ -20,6 +20,12 @@ import { Executor } from '../executors/executor.entity';
 import { OpencodeEventHub } from '../executors/opencode-event-hub.service';
 import type { OpencodeEvent } from '../executors/opencode-event-hub.service';
 import { isFreshOutcome, OpencodeClient } from '../executors/opencode-client';
+import {
+  isModelQuotaError,
+  markModelExhausted,
+  resolveWorkerModel,
+} from '../executors/model-availability';
+import { toOpencodeModelRef } from '../executors/opencode-run';
 import { Worker } from './worker.entity';
 import { agentTokenShell, mcpConfigShell, workerEnvShell } from './worker-env';
 import { WorkersService } from './workers.service';
@@ -367,18 +373,20 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
       );
       this.pushLine(job, '· 生成初始化指令（AGENTS.md + 技能 + 规范）…');
       const prompt = await this.buildPrompt(worker, githubCredentialStatus);
+      // 主模型限额冷却中改用备用模型，避免初始化也撞限额
+      const initModel = resolveWorkerModel(worker)?.model ?? {
+        providerId: worker.providerId!,
+        modelId: worker.modelId!,
+        variant: worker.variant ?? null,
+      };
       this.pushLine(
         job,
-        `· 创建执行器会话（${worker.providerId}/${worker.modelId}）…`,
+        `· 创建执行器会话（${initModel.providerId}/${initModel.modelId}）…`,
       );
       const session = await client.createSession({
         title: `初始化机器人 #${worker.id} ${worker.name}`.slice(0, 100),
         // 空值已在 start() 校验过（缺失即 400），此处断言非空
-        model: {
-          id: worker.modelId!,
-          providerID: worker.providerId!,
-          ...(worker.variant ? { variant: worker.variant } : {}),
-        },
+        model: toOpencodeModelRef(initModel),
         location: { directory: workdir },
       });
       // 订阅执行器事件：把该会话的工具调用转成进度行（先订阅再下发，避免漏事件）
@@ -398,6 +406,18 @@ export class WorkerEnvironmentService implements OnModuleDestroy {
           const info = await client.session(session.id);
           if (isFreshOutcome(info, afterMs)) {
             if (info.outcome !== 'succeeded') {
+              // 主模型限额：记录共享冷却，重试初始化时自动改用备用模型
+              const error = await client
+                .lastAssistantError(session.id, afterMs)
+                .catch(() => null);
+              if (isModelQuotaError(error)) {
+                markModelExhausted(
+                  executor.id,
+                  initModel.providerId,
+                  initModel.modelId,
+                  error?.message,
+                );
+              }
               throw new Error(`执行器会话 ${session.id} 执行失败`);
             }
             // 会话终态与消息落库可能有短暂延迟，重试几次再取文本

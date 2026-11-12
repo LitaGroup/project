@@ -47,6 +47,10 @@ export interface CreateWorkerInput {
   modelId?: string | null;
   /** 默认思考等级（opencode variant id；空=模型默认） */
   variant?: string | null;
+  /** 备用模型：主模型限额/限流/token 用尽时自动切换（可空=不启用） */
+  backupProviderId?: string | null;
+  backupModelId?: string | null;
+  backupVariant?: string | null;
   prompt?: string | null;
   skills?: WorkerSkill[] | null;
   standards?: WorkerStandard[] | null;
@@ -126,6 +130,29 @@ function normalizeResourcePermission(value: unknown): WorkerResourcePermission {
   throw new BadRequestException(
     '资源权限仅支持 none（无权限）/ read（仅只读资源）/ write（全部资源）',
   );
+}
+
+/**
+ * 备用模型归一：缺供应商/模型或与主模型完全相同时视为未配置（清空三个字段）；
+ * 备用模型只在主模型可用的前提下有意义，不单独保留残缺配置。
+ */
+function normalizeBackupModel(worker: Worker): void {
+  const providerId = worker.backupProviderId?.trim() || null;
+  const modelId = worker.backupModelId?.trim() || null;
+  if (
+    !providerId ||
+    !modelId ||
+    (providerId === worker.providerId?.trim() &&
+      modelId === worker.modelId?.trim())
+  ) {
+    worker.backupProviderId = null;
+    worker.backupModelId = null;
+    worker.backupVariant = null;
+    return;
+  }
+  worker.backupProviderId = providerId;
+  worker.backupModelId = modelId;
+  worker.backupVariant = worker.backupVariant?.trim() || null;
 }
 
 /** 机器人视图：实体 + 工位路径 + 实时状态 + 当前任务（均不落库实时推导） */
@@ -453,6 +480,9 @@ export class WorkersService implements OnApplicationBootstrap {
       providerId: input.providerId?.trim() || null,
       modelId: input.modelId?.trim() || null,
       variant: input.variant?.trim() || null,
+      backupProviderId: input.backupProviderId?.trim() || null,
+      backupModelId: input.backupModelId?.trim() || null,
+      backupVariant: input.backupVariant?.trim() || null,
       prompt: input.prompt?.trim() || null,
       skills,
       standards,
@@ -463,6 +493,7 @@ export class WorkersService implements OnApplicationBootstrap {
       resourcePermission: normalizeResourcePermission(input.resourcePermission),
       maxParallelTasks: normalizeMaxParallelTasks(input.maxParallelTasks),
     });
+    normalizeBackupModel(worker);
     await this.assertConfig(worker);
     await this.resolveOwner(worker, input.ownerUserId ?? null);
     const saved = await this.workers.save(worker);
@@ -514,7 +545,10 @@ export class WorkersService implements OnApplicationBootstrap {
       worker.humanUserId &&
       (input.providerId !== undefined ||
         input.modelId !== undefined ||
-        input.variant !== undefined)
+        input.variant !== undefined ||
+        input.backupProviderId !== undefined ||
+        input.backupModelId !== undefined ||
+        input.backupVariant !== undefined)
     ) {
       throw new BadRequestException(
         '真人机器人不能配置 AI 供应商/模型/思考等级',
@@ -528,6 +562,15 @@ export class WorkersService implements OnApplicationBootstrap {
     }
     if (input.variant !== undefined) {
       worker.variant = input.variant?.trim() || null;
+    }
+    if (input.backupProviderId !== undefined) {
+      worker.backupProviderId = input.backupProviderId?.trim() || null;
+    }
+    if (input.backupModelId !== undefined) {
+      worker.backupModelId = input.backupModelId?.trim() || null;
+    }
+    if (input.backupVariant !== undefined) {
+      worker.backupVariant = input.backupVariant?.trim() || null;
     }
     if (input.prompt !== undefined)
       worker.prompt = input.prompt?.trim() || null;
@@ -561,6 +604,7 @@ export class WorkersService implements OnApplicationBootstrap {
         input.maxParallelTasks,
       );
     }
+    normalizeBackupModel(worker);
     await this.assertConfig(worker);
     if (input.ownerUserId !== undefined) {
       await this.resolveOwner(worker, input.ownerUserId ?? null);
@@ -615,7 +659,10 @@ export class WorkersService implements OnApplicationBootstrap {
         worker.executorId ||
         worker.providerId ||
         worker.modelId ||
-        worker.variant
+        worker.variant ||
+        worker.backupProviderId ||
+        worker.backupModelId ||
+        worker.backupVariant
       ) {
         throw new BadRequestException(
           '真人机器人不能配置 AI 执行器/供应商/模型/思考等级',

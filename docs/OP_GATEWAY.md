@@ -1,6 +1,6 @@
 ---
 description: "> AI 助手提示：机器人 GitHub 操作必须经 OP Gateway；权限由 workers.githubPermission 决定，PAT 加密存于平台并由 Gateway 专用接口按需获取。"
-version: 1.1.0
+version: 1.2.0
 type: docs
 ---
 
@@ -153,7 +153,7 @@ X-Gateway-Token: <OP_GATEWAY_SHARED_TOKEN>
 X-Worker-Token: <LITA_WORK_TOKEN>
 ```
 
-- 只返回 `{ workerId, permission }`，不返回任何凭证。
+- 返回 `{ workerId, workerName, permission, user }`，不返回任何凭证；`user` 为绑定真人的展示属性（`userId` / 姓名 / 头像 / 邮箱 / 部门），AI 机器人或未绑定真人时为 `null`。
 - `permission` 为 `write/read/none`，与 `githubPermission` 独立；默认 `none`。
 - 每次请求实时读取，机器人停用或权限变更后立即生效。
 - 供 `admin-api` 的 Agent 资源列表与 MySQL SQL 执行前验权使用；接口细节见 [OP_GATEWAY_API.md](./OP_GATEWAY_API.md) 第九节。

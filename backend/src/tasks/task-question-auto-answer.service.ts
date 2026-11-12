@@ -14,7 +14,7 @@ import {
   type OpencodeQuestionInfo,
   type OpencodeQuestionRequest,
 } from '../executors/opencode-client';
-import { runOpencodePrompt } from '../executors/opencode-run';
+import { runOpencodePrompt, planPromptModels } from '../executors/opencode-run';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
@@ -154,6 +154,11 @@ export class TaskQuestionAutoAnswerService {
         }),
       ]);
       if (!child) throw new Error('子任务不存在');
+      const plan = planPromptModels(endpoint.worker, endpoint.executor.id, {
+        providerId: endpoint.providerId,
+        modelId: endpoint.modelId,
+        variant: endpoint.variant,
+      });
       const raw = await runOpencodePrompt(
         new OpencodeClient(endpoint.executor),
         {
@@ -161,11 +166,9 @@ export class TaskQuestionAutoAnswerService {
             0,
             100,
           ),
-          model: {
-            id: endpoint.modelId,
-            providerID: endpoint.providerId,
-            ...(endpoint.variant ? { variant: endpoint.variant } : {}),
-          },
+          model: plan.model,
+          fallback: plan.fallback,
+          onQuotaError: plan.onQuotaError,
           location: endpoint.workdir
             ? { directory: endpoint.workdir }
             : endpoint.executor.defaultLocation

@@ -1439,6 +1439,10 @@ export interface Worker {
   modelId: string | null
   /** 默认思考等级（opencode variant id；空=模型默认） */
   variant: string | null
+  /** 备用模型：主模型限额/限流/token 用尽时自动切换（空=未配置） */
+  backupProviderId: string | null
+  backupModelId: string | null
+  backupVariant: string | null
   prompt: string | null
   skills: WorkerSkill[] | null
   standards: WorkerStandard[] | null

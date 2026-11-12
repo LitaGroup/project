@@ -70,6 +70,15 @@ const CommonWorkerFields = {
   providerId: z.string().nullish().describe('供应商 ID'),
   modelId: z.string().nullish().describe('模型 ID'),
   variant: z.string().nullish().describe('默认思考等级'),
+  backupProviderId: z
+    .string()
+    .nullish()
+    .describe('备用模型供应商 ID（主模型限额/限流时自动切换，可空）'),
+  backupModelId: z
+    .string()
+    .nullish()
+    .describe('备用模型 ID（主模型限额/限流时自动切换，可空）'),
+  backupVariant: z.string().nullish().describe('备用模型思考等级'),
   prompt: z.string().nullish().describe('机器人定义 AGENTS.md'),
   skills: z
     .array(SkillArg)

@@ -4,7 +4,11 @@ import { Repository } from 'typeorm';
 import { WorkerRole } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
-import { runOpencodePrompt } from '../executors/opencode-run';
+import {
+  runOpencodePrompt,
+  planPromptModels,
+  toOpencodeModelRef,
+} from '../executors/opencode-run';
 import { Worker } from './worker.entity';
 import { WorkersService } from './workers.service';
 import { isSystemWorkerId } from './system-workers';
@@ -27,6 +31,8 @@ export interface OptimizeEndpoint {
   modelId: string;
   variant: string | null;
   location?: { directory: string };
+  /** 正在编辑的机器人（用于读取备用模型；表单直选执行器时为空） */
+  worker?: Worker | null;
 }
 
 export interface OptimizeRunHooks {
@@ -76,13 +82,20 @@ export class WorkerAiService {
     hooks?: OptimizeRunHooks,
   ): Promise<string> {
     const { executor, providerId, modelId, variant, location } = endpoint;
+    const plan = endpoint.worker
+      ? planPromptModels(endpoint.worker, executor.id, {
+          providerId,
+          modelId,
+          variant,
+        })
+      : {
+          model: toOpencodeModelRef({ providerId, modelId, variant }),
+        };
     const text = await runOpencodePrompt(new OpencodeClient(executor), {
       title: '优化机器人 AGENTS.md',
-      model: {
-        id: modelId,
-        providerID: providerId,
-        ...(variant ? { variant } : {}),
-      },
+      model: plan.model,
+      fallback: plan.fallback,
+      onQuotaError: plan.onQuotaError,
       location,
       prompt: `${PROMPT_OPTIMIZE_SYSTEM}\n\n---\n\n请优化以下机器人 AGENTS.md：\n\n${content}`,
       timeoutMs: 5 * 60_000,
@@ -168,6 +181,7 @@ export class WorkerAiService {
       modelId,
       variant,
       location: workdir ? { directory: workdir } : undefined,
+      worker,
     };
   }
 

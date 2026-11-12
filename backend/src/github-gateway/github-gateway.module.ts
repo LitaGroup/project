@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { User } from '../auth/user.entity';
 import { GatewayCredentialAudit } from './gateway-credential-audit.entity';
 import { GithubPermissionCredential } from './github-permission-credential.entity';
 import { GatewayCredentialService } from './gateway-credential.service';
@@ -20,6 +21,7 @@ import { WorkersModule } from '../workers/workers.module';
     TypeOrmModule.forFeature([
       GatewayCredentialAudit,
       GithubPermissionCredential,
+      User,
     ]),
     WorkersModule,
   ],

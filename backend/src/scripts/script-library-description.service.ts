@@ -7,7 +7,7 @@ import * as path from 'path';
 import { Repository } from 'typeorm';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
-import { runOpencodePrompt } from '../executors/opencode-run';
+import { runOpencodePrompt, planPromptModels } from '../executors/opencode-run';
 import { SYSTEM_SCRIPT_DESCRIPTION_WORKER_ID } from '../workers/system-workers';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
@@ -263,15 +263,18 @@ export class ScriptLibraryDescriptionService implements OnApplicationBootstrap {
       );
       const content = await fs.readFile(absPath, 'utf8').catch(() => '');
       const hash = createHash('sha1').update(content).digest('hex');
+      const plan = planPromptModels(endpoint.worker, endpoint.executor.id, {
+        providerId: endpoint.providerId,
+        modelId: endpoint.modelId,
+        variant: endpoint.variant,
+      });
       const text = await runOpencodePrompt(
         new OpencodeClient(endpoint.executor),
         {
           title: `脚本描述 ${scriptPath}`,
-          model: {
-            id: endpoint.modelId,
-            providerID: endpoint.providerId,
-            ...(endpoint.variant ? { variant: endpoint.variant } : {}),
-          },
+          model: plan.model,
+          fallback: plan.fallback,
+          onQuotaError: plan.onQuotaError,
           location: { directory: endpoint.workdir },
           prompt: [
             '分析脚本：',

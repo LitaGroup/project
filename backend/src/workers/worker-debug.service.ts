@@ -38,6 +38,17 @@ import {
   isFreshOutcome,
   type OpencodeQuestionRequest,
 } from '../executors/opencode-client';
+import {
+  isModelExhausted,
+  isModelQuotaError,
+  markModelExhausted,
+  resolveWorkerModel,
+  workerBackupModel,
+} from '../executors/model-availability';
+import {
+  FALLBACK_CONTINUE_PROMPT,
+  toOpencodeModelRef,
+} from '../executors/opencode-run';
 import { Worker } from './worker.entity';
 import { WorkerDebugSession } from './worker-debug-session.entity';
 import type {
@@ -401,6 +412,8 @@ interface DebugSession {
   interruptRequested: boolean;
   /** 每次发送/中断/重置递增，避免上一轮异步轮询收尾到新一轮会话 */
   runSeq: number;
+  /** 本轮是否已因主模型限额切换过备用模型（每轮最多一次） */
+  backupSwitched: boolean;
   messages: WorkerDebugMessage[];
   /** 最近一次 todowrite 的待办清单（SSE 事件采集 + 执行结束消息历史对账） */
   todos: OpencodeTodo[];
@@ -841,6 +854,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     }
     session.running = true;
     session.interruptRequested = false;
+    session.backupSwitched = false;
     session.error = null;
     session.updatedAt = new Date();
     const runSeq = ++session.runSeq;
@@ -1119,6 +1133,88 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     return error instanceof Error ? error : new Error(String(error));
   }
 
+  /**
+   * 主模型限额：切换到机器人配置的备用模型并在原会话续跑本轮。
+   * 返回新的运行基准时间（毫秒）；未切换返回 null（走原有失败流程）。
+   */
+  private async switchModelOnQuotaError(
+    session: DebugSession,
+    assistantId: string,
+    runSeq: number,
+    afterMs: number,
+  ): Promise<number | null> {
+    if (session.backupSwitched || !session.sessionId) return null;
+    const error = await session.client
+      .lastAssistantError(session.sessionId, afterMs)
+      .catch(() => null);
+    if (!isModelQuotaError(error)) return null;
+    // 当前运行的模型进入共享冷却，同执行器共用该模型的新会话直接用备用
+    markModelExhausted(
+      session.context.executor.id,
+      session.activeModel.providerId,
+      session.activeModel.modelId,
+      error?.message,
+    );
+    const backup = workerBackupModel(session.context.worker);
+    if (!backup) return null;
+    if (
+      backup.providerId === session.activeModel.providerId &&
+      backup.modelId === session.activeModel.modelId
+    ) {
+      return null;
+    }
+    if (
+      isModelExhausted(
+        session.context.executor.id,
+        backup.providerId,
+        backup.modelId,
+      )
+    ) {
+      return null;
+    }
+    if (session.interruptRequested || session.runSeq !== runSeq) return null;
+    session.backupSwitched = true;
+    try {
+      await session.client.switchModel(
+        session.sessionId,
+        toOpencodeModelRef(backup),
+      );
+      const retry = await session.client.prompt(session.sessionId, {
+        text: FALLBACK_CONTINUE_PROMPT,
+      });
+      session.activeModel = {
+        providerId: backup.providerId,
+        modelId: backup.modelId,
+        variant: backup.variant,
+      };
+      session.appliedModelKey = this.modelKey(session.activeModel);
+      // 失败轮次遗留的 running 工具按错误结算，避免界面一直显示运行中
+      const assistant = session.messages.find(
+        (message) => message.id === assistantId,
+      );
+      if (assistant) {
+        settleDebugRunningTools(
+          assistant,
+          'error',
+          '主模型限额，已切换备用模型继续执行',
+        );
+      }
+      session.updatedAt = new Date();
+      void this.persist(session);
+      this.emitUpdate(session);
+      this.logger.log(
+        `调试会话 ${session.key} 主模型限额，已切换备用模型 ${backup.providerId}/${backup.modelId}`,
+      );
+      return retry?.time?.created ?? 0;
+    } catch (e) {
+      this.logger.warn(
+        `调试会话 ${session.key} 切换备用模型失败：${(e as Error).message}`,
+      );
+      session.backupSwitched = false;
+      return null;
+    }
+  }
+
   private async run(
     session: DebugSession,
     assistantId: string,
@@ -1221,7 +1317,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       session.initialized = true;
       // prompt 为异步接口（立即返回本轮用户消息），会话 outcome/time.idle 具有粘性：
       // 只采信晚于本轮用户消息结束的运行，否则续聊轮次会把上一轮回复误判为本轮完成
-      const runAfterMs = promptResult?.time?.created ?? 0;
+      const runAfterMsRef = { value: promptResult?.time?.created ?? 0 };
 
       const deadline = Date.now() + RUN_TIMEOUT_MS;
       let questionSyncedAt = 0;
@@ -1235,14 +1331,14 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
           if (session.interruptRequested || session.runSeq !== runSeq) return;
         }
         const info = await session.client.session(session.sessionId);
-        if (isFreshOutcome(info, runAfterMs)) {
+        if (isFreshOutcome(info, runAfterMsRef.value)) {
           if (info.outcome === 'succeeded') {
             let output: string | null = null;
             // 会话终态可能略早于消息可读，做短重试避免误报空输出。
             for (let attempt = 0; attempt < 3 && !output; attempt++) {
               output = await session.client.lastAssistantText(
                 session.sessionId,
-                runAfterMs,
+                runAfterMsRef.value,
               );
               if (!output && attempt < 2) await sleep(500);
             }
@@ -1262,6 +1358,17 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
             }
             this.finishSuccess(session, assistantId, output.trim());
             return;
+          }
+          // 主模型限额：切换备用模型并在原会话续跑本轮（每轮最多一次）
+          const switchedTo = await this.switchModelOnQuotaError(
+            session,
+            assistantId,
+            runSeq,
+            runAfterMsRef.value,
+          );
+          if (switchedTo !== null) {
+            runAfterMsRef.value = switchedTo;
+            continue;
           }
           throw new Error('opencode 会话执行失败');
         }
@@ -1640,6 +1747,7 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
       running: false,
       interruptRequested: false,
       runSeq: 0,
+      backupSwitched: false,
       messages: [],
       todos: [],
       error: null,
@@ -1750,12 +1858,17 @@ export class WorkerDebugService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** 机器人配置的默认模型（用户未显式选择时使用） */
+  /** 机器人配置的默认模型（用户未显式选择时使用；主模型限额冷却中改用备用模型） */
   private defaultModelOf(context: DebugContext): WorkerDebugModelSelection {
-    return {
+    const model = resolveWorkerModel(context.worker)?.model ?? {
       providerId: context.worker.providerId!,
       modelId: context.worker.modelId!,
       variant: context.worker.variant ?? null,
+    };
+    return {
+      providerId: model.providerId,
+      modelId: model.modelId,
+      variant: model.variant,
     };
   }
 

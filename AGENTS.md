@@ -187,6 +187,7 @@
 - 系统机器人默认不能绑定飞书应用，唯一例外是 `systemKey=feedback-handler`「系统-反馈处理」：绑定飞书应用进入用户反馈群做话题采集与分发。
 - 真人机器人通过 `workers.humanUserId` 与用户唯一绑定，`runtime=human`，以人为执行器，可并行执行多个任务，不走 opencode 会话。
 - AI 机器人按 `workers.maxParallelTasks`（默认 3，1 为串行）并行执行任务，达到上限后新任务保持等待；等待、待验收等非执行状态不占用执行容量。
+- 机器人可配置备用模型（`workers.backupProviderId/backupModelId/backupVariant`）：主模型命中 429/限流/配额/余额/Token 用尽等限额错误时自动切换。限额识别与冷却在 `executors/model-availability.ts`，冷却按「执行器 + 供应商 + 模型」共享并固定 30 分钟（进程内内存），到期自动回主模型；与主模型相同的备用配置视为未配置。任务会话在原会话 `switchModel` 后自动续跑（每轮最多切一次），一次性会话、调试/我的 AI、工位初始化同样优先使用未冷却的模型；未配置备用或备用也失败时保持原有失败流程。
 - 一次性会话（需求方自动回复/自动验收、提测通知）不占用任务的执行容量，进程内按机器人防重入。
 - 个人 AGENT 通过 `personalAgentUserId` 唯一绑定，只服务「我的 AI」对话，不出现在对外机器人清单，不承接任务分配或工单执行，不可网页删除。
 - 工位目录：production 为 `{WORKER_BASE_DIR}/worker/{id}`，其他环境为 `{WORKER_BASE_DIR}/worker-dev/{id}`。

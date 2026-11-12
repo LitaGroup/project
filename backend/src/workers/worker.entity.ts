@@ -114,6 +114,19 @@ export class Worker {
   @Column({ type: 'varchar', length: 50, nullable: true })
   variant: string | null;
 
+  /**
+   * 备用模型供应商/模型/思考等级（可空）。
+   * 主模型命中限额、限流或 token 用尽时自动切换，见 executors/model-availability.ts。
+   */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  backupProviderId: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  backupModelId: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  backupVariant: string | null;
+
   /** 机器人定义 AGENTS.md（Markdown，保存后同步到工位） */
   @Column({ type: 'text', nullable: true })
   prompt: string | null;

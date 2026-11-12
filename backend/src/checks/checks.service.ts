@@ -258,7 +258,7 @@ export class ChecksService implements OnModuleInit {
       }),
     );
     this.liveRuns.set(run.id, { snapshot: run, emitter: new EventEmitter() });
-    this.executeRun(run.id, absPath, check);
+    this.executeRun(run.id, absPath);
     return run;
   }
 
@@ -487,7 +487,7 @@ export class ChecksService implements OnModuleInit {
    * 后台执行脚本：node 直跑 .check.ts（Node 24+ 原生类型擦除），以脚本根目录为 cwd，
    * 逐行解析 stdout 的行协议 `[{type}] {json}`，实时更新步数，进程结束后落最终结果。
    */
-  private executeRun(runId: number, absPath: string, check: Check): void {
+  private executeRun(runId: number, absPath: string): void {
     const startedAt = Date.now();
     const items: CheckRunItem[] = [];
     const logs: string[] = [];

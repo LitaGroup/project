@@ -33,6 +33,16 @@ import {
   OpencodeEventHub,
 } from '../executors/opencode-event-hub.service';
 import { parseOpencodeToolEvent } from '../executors/opencode-tools';
+import {
+  isModelQuotaError,
+  markModelExhausted,
+  resolveWorkerModel,
+  type ModelErrorLike,
+} from '../executors/model-availability';
+import {
+  FALLBACK_CONTINUE_PROMPT,
+  toOpencodeModelRef,
+} from '../executors/opencode-run';
 import { Worker } from '../workers/worker.entity';
 import {
   agentTokenShell,
@@ -170,6 +180,9 @@ export class TaskDispatchService
 
   /** taskId → 已占用事件流连接的执行器 id（retain/release 配对） */
   private readonly hubRetained = new Map<number, number>();
+
+  /** taskId → 本轮已因主模型限额切换过备用模型（每轮最多切换一次） */
+  private readonly backupSwitched = new Set<number>();
 
   /** 启动时先对账一次：恢复执行中任务的事件流订阅并补推进漏收终态 */
   async onApplicationBootstrap(): Promise<void> {
@@ -362,6 +375,11 @@ export class TaskDispatchService
     if (!worker.executorId || !worker.providerId || !worker.modelId) {
       throw new NotFoundException('机器人未配置完整（执行器/供应商/模型）');
     }
+    // 主模型处于限额冷却时直接用备用模型；未配置备用时保持主模型
+    const modelSelection = resolveWorkerModel(worker);
+    if (!modelSelection) {
+      throw new NotFoundException('机器人未配置完整（执行器/供应商/模型）');
+    }
     const executor = await this.executors.findOne({
       where: { id: worker.executorId },
     });
@@ -438,11 +456,7 @@ export class TaskDispatchService
         }
         const created = await client.createSession({
           title: `${task.code} ${task.title}`,
-          model: {
-            id: worker.modelId,
-            providerID: worker.providerId,
-            ...(worker.variant ? { variant: worker.variant } : {}),
-          },
+          model: toOpencodeModelRef(modelSelection.model),
           location: { directory: workdir },
         });
         sessionId = created.id;
@@ -455,13 +469,29 @@ export class TaskDispatchService
             `${previousExecutorId}:${previousSessionId}`,
           );
         }
-      } else if (wasExecuting && !options?.queueInOpencode) {
-        // LOOP 重新派发/恢复时先中断仍在跑的本轮；用户续聊直接交给 opencode 排队。
-        await client
-          .interrupt(sessionId)
-          .catch((e: Error) =>
-            this.logger.warn(`会话 ${sessionId} 中断失败: ${e.message}`),
+      } else {
+        if (modelSelection.usingBackup) {
+          // 主模型冷却中：复用会话也切到备用模型，避免继续撞限额
+          await client
+            .switchModel(sessionId, toOpencodeModelRef(modelSelection.model))
+            .catch((e: Error) =>
+              this.logger.warn(
+                `会话 ${sessionId} 切换备用模型失败: ${e.message}`,
+              ),
+            );
+          this.pushLine(
+            task.id,
+            `↻ 主模型限额冷却中，复用会话已切换备用模型 ${modelSelection.model.providerId}/${modelSelection.model.modelId}`,
           );
+        }
+        if (wasExecuting && !options?.queueInOpencode) {
+          // LOOP 重新派发/恢复时先中断仍在跑的本轮；用户续聊直接交给 opencode 排队。
+          await client
+            .interrupt(sessionId)
+            .catch((e: Error) =>
+              this.logger.warn(`会话 ${sessionId} 中断失败: ${e.message}`),
+            );
+        }
       }
 
       // 3. 占用执行器事件流（有执行中的任务才保持连接；结束/中断后释放）
@@ -471,6 +501,7 @@ export class TaskDispatchService
       this.textBuffers.delete(task.id);
       this.applyReminders.delete(task.id);
       this.failedReconciled.delete(task.id);
+      this.backupSwitched.delete(task.id);
       this.permissionNotified.delete(task.id);
       this.questionSyncedAt.delete(task.id);
       for (const key of this.questionNotified) {
@@ -1273,6 +1304,17 @@ export class TaskDispatchService
         const error = data.error as
           { type?: string; message?: string } | undefined;
         this.pushLine(taskId, `✗ 执行失败：${error?.message ?? event.type}`);
+        // 主模型限额：切备用模型并续跑本轮，不结束任务
+        if (
+          await this.continueWithBackupModel(
+            taskId,
+            event.executorId,
+            sessionId,
+            error ?? null,
+          )
+        ) {
+          break;
+        }
         await this.finalizeFailedTurn(
           taskId,
           `执行失败：${[error?.type, error?.message].filter(Boolean).join(' ') || event.type}`,
@@ -1584,6 +1626,89 @@ export class TaskDispatchService
       },
     );
     return this.mustFind(taskId);
+  }
+
+  /**
+   * 主模型限额（限流/配额/余额/token 用尽）：在同一会话切换备用模型并续跑本轮。
+   * 每轮最多切换一次（备用也失败时走既有失败流程），返回是否已接管本轮。
+   */
+  private async continueWithBackupModel(
+    taskId: number,
+    executorId: number,
+    sessionId: string,
+    error: ModelErrorLike | null,
+  ): Promise<boolean> {
+    if (!isModelQuotaError(error)) return false;
+    const task = await this.tasks.findOne({ where: { id: taskId } });
+    if (!task || !task.agentId) return false;
+    if (
+      task.status !== TaskStatus.RUNNING ||
+      task.subStatus !== TaskSubStatus.EXECUTING
+    ) {
+      return false;
+    }
+    const worker = await this.workers.findOne({ where: { id: task.agentId } });
+    if (!worker) return false;
+    const selection = resolveWorkerModel(worker);
+    if (!selection) return false;
+    // 共享冷却：本次失败的模型立即进入冷却，同执行器共用该模型的新会话改用备用
+    markModelExhausted(
+      executorId,
+      selection.model.providerId,
+      selection.model.modelId,
+      error?.message,
+    );
+    const fallback = selection.fallback;
+    if (!fallback || this.backupSwitched.has(taskId)) return false;
+    this.backupSwitched.add(taskId);
+    const executor = await this.executors.findOne({
+      where: { id: executorId },
+    });
+    if (!executor) {
+      this.backupSwitched.delete(taskId);
+      return false;
+    }
+    const client = new OpencodeClient(executor);
+    const fallbackLabel = `${fallback.providerId}/${fallback.modelId}`;
+    try {
+      // 先结算失败的本轮消息，再切换模型续跑（同一会话保留上下文）
+      await this.taskChat.failTask(
+        taskId,
+        `主模型达到使用限额，已切换备用模型继续执行（${fallbackLabel}）`,
+      );
+      await client.switchModel(sessionId, toOpencodeModelRef(fallback));
+      await client.prompt(sessionId, { text: FALLBACK_CONTINUE_PROMPT });
+    } catch (e) {
+      this.logger.warn(
+        `任务 #${taskId} 切换备用模型失败，回退失败流程：${(e as Error).message}`,
+      );
+      this.backupSwitched.delete(taskId);
+      return false;
+    }
+    // 新一轮：清掉失败去重标记，等待新的会话事件
+    this.failedReconciled.delete(taskId);
+    this.textBuffers.delete(taskId);
+    this.awaitingTurnStart.add(taskId);
+    this.pushLine(
+      taskId,
+      `↻ 主模型限额，已切换备用模型 ${fallbackLabel} 继续执行`,
+    );
+    await this.addEvent(
+      taskId,
+      '系统',
+      `主模型达到使用限额（限流/配额），已自动切换备用模型 ${fallbackLabel} 继续执行`,
+      null,
+      {
+        watchdog: true,
+        reason: 'model-quota-fallback',
+        from: {
+          providerId: selection.model.providerId,
+          modelId: selection.model.modelId,
+        },
+        to: { providerId: fallback.providerId, modelId: fallback.modelId },
+      },
+    );
+    return true;
   }
 
   /**
@@ -1990,6 +2115,19 @@ export class TaskDispatchService
           await this.finalizeSuccess(task.id);
         } else if (info.outcome === 'failed') {
           this.pushLine(task.id, '↻ 对账补偿：会话执行失败');
+          const error = await client
+            .lastAssistantError(task.opencodeSessionId)
+            .catch(() => null);
+          if (
+            await this.continueWithBackupModel(
+              task.id,
+              executor.id,
+              task.opencodeSessionId,
+              error,
+            )
+          ) {
+            continue;
+          }
           await this.finalizeFailedTurn(
             task.id,
             '对账补偿：会话执行失败，可重新派发后继续处理',

@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import { TaskStatus, WorkerRole, WorkerRuntime } from '../common/enums';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
-import { runOpencodePrompt } from '../executors/opencode-run';
+import { runOpencodePrompt, planPromptModels } from '../executors/opencode-run';
 import { Worker } from '../workers/worker.entity';
 import { agentTokenShell } from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
@@ -151,13 +151,16 @@ export class TaskRequesterReplyService {
           agentTokenShell(endpoint.workdir, token),
       );
       const conversation = await this.loadConversation(task.id);
+      const plan = planPromptModels(endpoint.worker, endpoint.executor.id, {
+        providerId: endpoint.providerId,
+        modelId: endpoint.modelId,
+        variant: endpoint.variant,
+      });
       await runOpencodePrompt(client, {
         title: `需求方回复 ${task.code}`.slice(0, 100),
-        model: {
-          id: endpoint.modelId,
-          providerID: endpoint.providerId,
-          ...(endpoint.variant ? { variant: endpoint.variant } : {}),
-        },
+        model: plan.model,
+        fallback: plan.fallback,
+        onQuotaError: plan.onQuotaError,
         location: { directory: endpoint.workdir },
         prompt: this.buildPrompt(task, endpoint.worker, content, conversation),
         timeoutMs: REPLY_TIMEOUT_MS,

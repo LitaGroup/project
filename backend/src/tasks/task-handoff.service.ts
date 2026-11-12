@@ -10,7 +10,11 @@ import { TaskStatus, TaskSubStatus, WorkerRuntime } from '../common/enums';
 import { beijingTime } from '../common/frontmatter';
 import { Executor } from '../executors/executor.entity';
 import { OpencodeClient } from '../executors/opencode-client';
-import { runOpencodePrompt } from '../executors/opencode-run';
+import {
+  runOpencodePrompt,
+  planPromptModels,
+  toOpencodeModelRef,
+} from '../executors/opencode-run';
 import { Worker } from '../workers/worker.entity';
 import { WorkersService } from '../workers/workers.service';
 import { Task } from './task.entity';
@@ -232,15 +236,26 @@ export class TaskHandoffService {
     // 真人机器人没有可调用复盘的执行器：REVIEW 直接采用申请验收时提交的交付说明，
     // 缺失小节保留明确占位，不编造 AI 复盘。
     if (endpoint.executor) {
+      const plan = endpoint.worker
+        ? planPromptModels(endpoint.worker, endpoint.executor.id, {
+            providerId: endpoint.providerId,
+            modelId: endpoint.modelId,
+            variant: endpoint.variant,
+          })
+        : {
+            model: toOpencodeModelRef({
+              providerId: endpoint.providerId,
+              modelId: endpoint.modelId,
+              variant: endpoint.variant,
+            }),
+          };
       const raw = await runOpencodePrompt(
         new OpencodeClient(endpoint.executor),
         {
           title: `任务复盘 ${task.code}`.slice(0, 100),
-          model: {
-            id: endpoint.modelId,
-            providerID: endpoint.providerId,
-            ...(endpoint.variant ? { variant: endpoint.variant } : {}),
-          },
+          model: plan.model,
+          fallback: plan.fallback,
+          onQuotaError: plan.onQuotaError,
           location: endpoint.workdir
             ? { directory: endpoint.workdir }
             : endpoint.executor.defaultLocation

@@ -170,6 +170,9 @@ export class PersonalAgentsService {
       providerId: template.providerId,
       modelId: template.modelId,
       variant: template.variant,
+      backupProviderId: template.backupProviderId,
+      backupModelId: template.backupModelId,
+      backupVariant: template.backupVariant,
       prompt: buildPersonalAgentPrompt(user.name, this.apiUrl),
       skills: null,
       standards: null,
@@ -457,6 +460,9 @@ export class PersonalAgentsService {
     providerId: string;
     modelId: string;
     variant: string | null;
+    backupProviderId: string | null;
+    backupModelId: string | null;
+    backupVariant: string | null;
   } | null> {
     const workers = await this.workers.find({
       where: { enabled: true, runtime: WorkerRuntime.OPENCODE },
@@ -494,6 +500,9 @@ export class PersonalAgentsService {
       providerId: chosen.providerId!.trim(),
       modelId: chosen.modelId!.trim(),
       variant: chosen.variant?.trim() || null,
+      backupProviderId: chosen.backupProviderId?.trim() || null,
+      backupModelId: chosen.backupModelId?.trim() || null,
+      backupVariant: chosen.backupVariant?.trim() || null,
     };
   }
 

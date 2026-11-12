@@ -8,6 +8,19 @@ import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 
 jest.mock('../executors/opencode-run', () => ({
   runOpencodePrompt: jest.fn(),
+  planPromptModels: jest.fn(
+    (
+      _worker: unknown,
+      _executorId: number,
+      endpoint: { providerId: string; modelId: string; variant: string | null },
+    ) => ({
+      model: {
+        id: endpoint.modelId,
+        providerID: endpoint.providerId,
+        ...(endpoint.variant ? { variant: endpoint.variant } : {}),
+      },
+    }),
+  ),
 }));
 
 jest.mock('../executors/opencode-client', () => ({

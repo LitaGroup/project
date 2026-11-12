@@ -136,6 +136,10 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
   const [modelId, setModelId] = useState('')
   /** 默认思考等级（opencode variant；空=模型默认） */
   const [variant, setVariant] = useState('')
+  /** 备用模型：主模型限额/限流/token 用尽时自动切换 */
+  const [backupProviderId, setBackupProviderId] = useState('')
+  const [backupModelId, setBackupModelId] = useState('')
+  const [backupVariant, setBackupVariant] = useState('')
   const [prompt, setPrompt] = useState(
     personal || workerId ? '' : NEW_PROMPT_TEMPLATE,
   )
@@ -284,6 +288,9 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
         setProviderId(w.providerId ?? '')
         setModelId(w.modelId ?? '')
         setVariant(w.variant ?? '')
+        setBackupProviderId(w.backupProviderId ?? '')
+        setBackupModelId(w.backupModelId ?? '')
+        setBackupVariant(w.backupVariant ?? '')
         setPrompt(w.prompt ?? '')
         setSkills(
           (w.skills ?? []).filter(
@@ -444,6 +451,25 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
     setVariant(selection.variant ?? '')
   }
 
+  /** 备用模型选择（未选择时 modelId 为空，选择器展示「选择模型」） */
+  const backupSelection: WorkerDebugModelSelection = {
+    providerId: backupProviderId,
+    modelId: backupModelId,
+    variant: backupVariant || null,
+  }
+
+  const applyBackupSelection = (selection: WorkerDebugModelSelection) => {
+    setBackupProviderId(selection.providerId)
+    setBackupModelId(selection.modelId)
+    setBackupVariant(selection.variant ?? '')
+  }
+
+  const clearBackupModel = () => {
+    setBackupProviderId('')
+    setBackupModelId('')
+    setBackupVariant('')
+  }
+
   const submit = async () => {
     if (saving || initializing) return
     setError(null)
@@ -470,6 +496,9 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
       providerId: providerId || null,
       modelId: modelId || null,
       variant: variant || null,
+      backupProviderId: backupModelId ? backupProviderId || null : null,
+      backupModelId: backupModelId || null,
+      backupVariant: backupModelId ? backupVariant || null : null,
       prompt: promptText.trim() || null,
       skills,
       standards,
@@ -998,6 +1027,7 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
                     setProviderId('')
                     setModelId('')
                     setVariant('')
+                    clearBackupModel()
                   }}
                   items={{
                     none: '未选择',
@@ -1040,6 +1070,42 @@ export function WorkerEditPage({ personal = false }: { personal?: boolean }) {
                   正在读取该执行器的模型清单…
                 </span>
               )}
+            </div>
+            <div className="flex flex-col gap-1 text-sm">
+              <span>备用模型</span>
+              <div className="flex items-center gap-2">
+                <ModelSettingsPicker
+                  catalog={modelCatalog}
+                  current={backupSelection}
+                  onChange={applyBackupSelection}
+                  busy={busy}
+                  disabled={!executor}
+                  triggerClassName="flex-1 justify-between"
+                />
+                {backupModelId && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 px-2 text-xs"
+                    disabled={busy}
+                    onClick={clearBackupModel}
+                  >
+                    清除
+                  </Button>
+                )}
+              </div>
+              <span className="text-xs text-foreground-muted">
+                主模型限流、配额或 token
+                用尽时自动切换；同一执行器上该模型进入 30 分钟冷却，冷却结束自动恢复主模型。未配置时保持原有失败流程。
+              </span>
+              {backupModelId &&
+                backupProviderId === providerId &&
+                backupModelId === modelId && (
+                  <span className="text-xs text-foreground-muted">
+                    备用模型与主模型相同，保存时不会生效。
+                  </span>
+                )}
             </div>
           </div>
         </Card>

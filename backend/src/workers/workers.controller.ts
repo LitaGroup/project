@@ -55,6 +55,9 @@ class CreateWorkerDto implements CreateWorkerInput {
   providerId?: string | null;
   modelId?: string | null;
   variant?: string | null;
+  backupProviderId?: string | null;
+  backupModelId?: string | null;
+  backupVariant?: string | null;
   prompt?: string | null;
   skills?: Worker['skills'];
   standards?: Worker['standards'];
@@ -76,6 +79,9 @@ class UpdateWorkerDto implements UpdateWorkerInput {
   providerId?: string | null;
   modelId?: string | null;
   variant?: string | null;
+  backupProviderId?: string | null;
+  backupModelId?: string | null;
+  backupVariant?: string | null;
   prompt?: string | null;
   skills?: Worker['skills'];
   standards?: Worker['standards'];

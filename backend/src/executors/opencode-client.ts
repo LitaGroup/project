@@ -3,6 +3,7 @@
  * 鉴权：HTTP Basic，用户名固定 `opencode`，密码为登记的 server password（token 列）。
  * 响应包裹：部分端点返回 `{ data: ... }` 信封（如 /api/session、/api/provider），统一在方法内解包。
  */
+import { toModelError, type ModelErrorLike } from './model-availability';
 import {
   extractOpencodeTodosFromMessage,
   type OpencodeTodo,
@@ -545,6 +546,53 @@ export class OpencodeClient {
         .map((part) => part.text!.trim())
         .join('\n\n');
       if (text) return text;
+    }
+    return null;
+  }
+
+  /**
+   * 会话最后一条 assistant 消息携带的错误（供应商限流/配额等失败原因）。
+   * 兼容 error 位于消息顶层或 info.error；无错误返回 null。
+   */
+  async lastAssistantError(
+    sessionId: string,
+    afterCreatedMs = 0,
+  ): Promise<ModelErrorLike | null> {
+    interface ListMessage {
+      id?: string;
+      type?: string;
+      role?: string;
+      time?: { created?: number | null };
+    }
+    const json = (await this.messages(sessionId)) as
+      ListMessage[] | { data?: ListMessage[] };
+    const list: ListMessage[] = Array.isArray(json) ? json : (json.data ?? []);
+    const assistants = list
+      .filter(
+        (message) =>
+          (message?.type === 'assistant' || message?.role === 'assistant') &&
+          (message.time?.created ?? 0) >= afterCreatedMs,
+      )
+      .sort((a, b) => {
+        const left = a.time?.created ?? 0;
+        const right = b.time?.created ?? 0;
+        if (left !== right) return right - left;
+        return (b.id ?? '').localeCompare(a.id ?? '');
+      });
+    for (const message of assistants) {
+      if (!message.id) continue;
+      const raw = await this.message(sessionId, message.id);
+      const detail = ((raw as { data?: unknown }).data ?? raw) as Record<
+        string,
+        unknown
+      > | null;
+      if (!detail || typeof detail !== 'object') continue;
+      const info =
+        detail.info && typeof detail.info === 'object'
+          ? (detail.info as Record<string, unknown>)
+          : null;
+      const normalized = toModelError(detail.error ?? info?.error ?? null);
+      if (normalized) return normalized;
     }
     return null;
   }

@@ -1,6 +1,6 @@
 ---
 description: "> AI 助手提示：OP Gateway 必须先携带 Gateway Token 与机器人 Token 调用平台凭证或资源权限接口；接口只对可信 Gateway 开放，响应中的 Token/密码/权限结果不得转发给 AI、写入日志或长期缓存。"
-version: 1.1.0
+version: 1.2.0
 type: docs
 ---
 
@@ -259,7 +259,7 @@ curl -X POST 'https://platform.internal/api/internal/gateway/v1/credentials/acqu
 POST /api/internal/gateway/v1/resource-permissions/verify
 ```
 
-用途：验证 AI Gateway 服务身份与机器人 Token，返回机器人当前的资源网关权限。**该接口不返回任何凭证**，只用于资源列表与数据库/缓存访问前的资源级授权。
+用途：验证 AI Gateway 服务身份与机器人 Token，返回机器人当前的资源网关权限与身份属性。**该接口不返回任何凭证**，只用于资源列表与数据库/缓存访问前的资源级授权，身份属性仅作展示与审计。
 
 ### 9.1 请求头
 
@@ -276,9 +276,24 @@ POST /api/internal/gateway/v1/resource-permissions/verify
 ```json
 {
   "workerId": 1001,
-  "permission": "read"
+  "workerName": "张三",
+  "permission": "read",
+  "user": {
+    "userId": 7,
+    "name": "张三",
+    "avatarUrl": "https://s3-alias.feishucdn.com/…/a.png",
+    "email": "zhangsan@example.com",
+    "department": "研发部"
+  }
 }
 ```
+
+| 字段 | 说明 |
+|:---|:---|
+| `workerId` | 机器人 ID |
+| `workerName` | 机器人名称（真人机器人即用户本人身份的执行主体） |
+| `permission` | 资源权限档位，见下表 |
+| `user` | 绑定真人的展示属性；**AI 机器人或未绑定真人时为 `null`**。真人身份按其真人机器人令牌判定，`user` 即该机器人绑定的用户；仅展示/审计用，不含 open_id 等标识与令牌 |
 
 | permission | 含义 |
 |:---|:---|

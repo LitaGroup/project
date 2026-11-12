@@ -96,6 +96,15 @@ export class WorkersMarkdownService {
       `- 供应商：${worker.providerId ?? '—'}`,
       `- 模型：${worker.modelId ?? '—'}`,
       `- 思考等级：${worker.variant ?? '—'}`,
+      `- 备用模型：${
+        worker.backupModelId
+          ? `${worker.backupProviderId}/${worker.backupModelId}${
+              worker.backupVariant
+                ? `（思考等级：${worker.backupVariant}）`
+                : ''
+            }（主模型限额时自动切换）`
+          : '未配置（主模型限额时按原有失败流程处理）'
+      }`,
       `- 负责人：${worker.ownerName ?? '—'}`,
       `- 绑定用户：${worker.humanUserName ?? '—'}`,
       `- 工位：${worker.workdir ?? '—'}`,

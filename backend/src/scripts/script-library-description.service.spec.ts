@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import * as path from 'path';
 import { Repository } from 'typeorm';
 import { Executor } from '../executors/executor.entity';
-import { runOpencodePrompt } from '../executors/opencode-run';
+import { runOpencodePrompt, planPromptModels } from '../executors/opencode-run';
 import { ScriptLibraryDescription } from './script-library-description.entity';
 import { ScriptLibraryDescriptionService } from './script-library-description.service';
 import { Worker } from '../workers/worker.entity';
@@ -12,9 +12,25 @@ import { WorkersService } from '../workers/workers.service';
 
 jest.mock('../executors/opencode-run', () => ({
   runOpencodePrompt: jest.fn(),
+  planPromptModels: jest.fn(
+    (
+      _worker: unknown,
+      _executorId: number,
+      endpoint: { providerId: string; modelId: string; variant: string | null },
+    ) => ({
+      model: {
+        id: endpoint.modelId,
+        providerID: endpoint.providerId,
+        ...(endpoint.variant ? { variant: endpoint.variant } : {}),
+      },
+    }),
+  ),
 }));
 const runPromptMock = runOpencodePrompt as jest.MockedFunction<
   typeof runOpencodePrompt
+>;
+const planModelsMock = planPromptModels as jest.MockedFunction<
+  typeof planPromptModels
 >;
 
 describe('ScriptLibraryDescriptionService', () => {
@@ -116,6 +132,14 @@ describe('ScriptLibraryDescriptionService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    // resetAllMocks 会清空模块 mock 的实现，这里恢复模型计划
+    planModelsMock.mockImplementation((_worker, _executorId, endpoint) => ({
+      model: {
+        id: endpoint.modelId,
+        providerID: endpoint.providerId,
+        ...(endpoint.variant ? { variant: endpoint.variant } : {}),
+      },
+    }));
     root = await fs.mkdtemp(path.join(tmpdir(), 'project-script-desc-'));
     await fs.mkdir(path.join(root, 'projects/a/tests'), { recursive: true });
     await fs.writeFile(
