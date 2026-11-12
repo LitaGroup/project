@@ -24,8 +24,9 @@ export class TaskWorkerInboxService {
 
   /**
    * 仅机器人需求方需要收件箱；同一开放事件幂等。
-   * 根任务没有父任务，消息事件以任务自身作为 parentTaskId，
-   * 由 LOOP 用需求方机器人执行器创建一次性回复会话。
+   * 根任务没有父任务，消息与提问事件以任务自身作为 parentTaskId，
+   * 由 LOOP 用需求方机器人执行器创建一次性会话处理；
+   * 待验收由独立扫描驱动，不重复入队。
    */
   async enqueue(
     child: Task,
@@ -38,7 +39,8 @@ export class TaskWorkerInboxService {
     if (!isWorkerRequester(child) || !child.requesterId) {
       return null;
     }
-    if (!child.parentId && kind !== 'message') return null;
+    if (!child.parentId && kind !== 'message' && kind !== 'question')
+      return null;
     const referenceId = options?.referenceId ?? null;
     const existing = await this.inbox.findOne({
       where: {
@@ -110,14 +112,19 @@ export class TaskWorkerInboxService {
     );
   }
 
-  /** 是否已存在同一来源的事件（不区分状态，用于补建去重）。 */
-  async hasReference(
+  /** 是否已存在同一来源的开放事件（用于补建去重；已结束事件可重新补建）。 */
+  async hasOpenReference(
     childTaskId: number,
     kind: TaskWorkerInboxKind,
     referenceId: string,
   ): Promise<boolean> {
     const row = await this.inbox.findOne({
-      where: { childTaskId, kind, referenceId },
+      where: {
+        childTaskId,
+        kind,
+        referenceId,
+        status: In([...OPEN_STATUSES]),
+      },
       select: { id: true },
     });
     return Boolean(row);

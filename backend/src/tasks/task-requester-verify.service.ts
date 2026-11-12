@@ -14,6 +14,8 @@ import { runOpencodePrompt, planPromptModels } from '../executors/opencode-run';
 import { Worker } from '../workers/worker.entity';
 import { agentTokenShell } from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
+import { isRequesterInboxReachable } from './task-requester';
+import { TaskRequesterSessionService } from './task-requester-session.service';
 import { Task } from './task.entity';
 import { TasksService } from './tasks.service';
 
@@ -37,19 +39,18 @@ function clip(value: string | null | undefined, limit: number): string {
 }
 
 /**
- * 根任务机器人需求方自动验收：
- * 根任务没有父任务收件箱可唤醒，平台使用需求方机器人自己的执行器创建一次性会话，
- * 读取交付文档并调用验收接口（通过 / 返工 / 失败）。
+ * 机器人需求方自动验收：
+ * 根任务没有父任务收件箱可唤醒，平台使用需求方机器人自己的执行器创建一次性会话；
+ * 子任务在父任务已结束或需求方不是父任务执行方时同样走一次性会话。
+ * 会话读取交付文档并调用验收接口（通过 / 返工 / 失败）。
  * 会话结束仍未推进验收时持续重试，不转移任务需求方或执行方。
- * 子任务仍由父任务收件箱唤醒其执行机器人，不走本服务。
+ * 仍能经父任务收件箱唤醒的子任务由 LOOP 交回父机器人，不走本服务。
  */
 @Injectable()
 export class TaskRequesterVerifyService {
   private readonly logger = new Logger(TaskRequesterVerifyService.name);
   /** 正在自动验收的任务 */
   private readonly activeTasks = new Set<number>();
-  /** 正在被自动验收占用的需求方机器人（同一机器人同一时刻只运行一个一次性会话） */
-  private readonly activeWorkers = new Set<number>();
   private readonly apiUrl: string;
 
   constructor(
@@ -61,6 +62,7 @@ export class TaskRequesterVerifyService {
     private readonly workers: Repository<Worker>,
     private readonly workersService: WorkersService,
     private readonly tasksService: TasksService,
+    private readonly requesterSessions: TaskRequesterSessionService,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -78,7 +80,14 @@ export class TaskRequesterVerifyService {
    */
   async verify(task: Task): Promise<boolean> {
     if (this.activeTasks.has(task.id)) return false;
-    if (task.parentId) return false;
+    if (task.parentId) {
+      const parent = await this.tasks.findOne({
+        where: { id: task.parentId },
+        select: { id: true, status: true, agentId: true },
+      });
+      // 父任务仍可唤醒需求方时，由父机器人经收件箱处理，避免双通道重复验收。
+      if (isRequesterInboxReachable(task, parent)) return false;
+    }
     if (
       task.status !== TaskStatus.WAITING ||
       task.subStatus !== TaskSubStatus.PENDING_ACCEPT
@@ -86,12 +95,23 @@ export class TaskRequesterVerifyService {
       return false;
     }
     if (task.requesterType !== 'worker' || !task.requesterId) return false;
+    const requester = await this.workers.findOne({
+      where: { id: task.requesterId },
+      select: { id: true, runtime: true, personalAgentUserId: true },
+    });
+    if (!requester) return false;
+    // 真人需求方在操作台自行处理，个人 AGENT 不承接任务协作。
+    if (
+      requester.runtime === WorkerRuntime.HUMAN ||
+      requester.personalAgentUserId
+    ) {
+      return true;
+    }
     const endpoint = await this.resolveEndpoint(task.requesterId);
     if (!endpoint) return false;
-    if (this.activeWorkers.has(endpoint.worker.id)) return false;
+    if (!this.requesterSessions.tryAcquire(endpoint.worker.id)) return false;
 
     this.activeTasks.add(task.id);
-    this.activeWorkers.add(endpoint.worker.id);
     const client = new OpencodeClient(endpoint.executor);
     let sessionId: string | null = null;
     try {
@@ -135,7 +155,7 @@ export class TaskRequesterVerifyService {
       return false;
     } finally {
       this.activeTasks.delete(task.id);
-      this.activeWorkers.delete(endpoint.worker.id);
+      this.requesterSessions.release(endpoint.worker.id);
       if (sessionId) {
         await client
           .deleteSession(sessionId)

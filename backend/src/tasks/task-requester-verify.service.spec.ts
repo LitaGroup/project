@@ -8,6 +8,7 @@ import { OpencodeClient } from '../executors/opencode-client';
 import * as opencodeRun from '../executors/opencode-run';
 import type { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
+import { TaskRequesterSessionService } from './task-requester-session.service';
 import { TaskRequesterVerifyService } from './task-requester-verify.service';
 
 describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', () => {
@@ -75,6 +76,7 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
         workdirOf: jest.fn().mockReturnValue('/tmp/worker-1002'),
       } as never,
       tasksService as never,
+      new TaskRequesterSessionService(),
       {
         get: jest.fn().mockReturnValue('http://api.example/api'),
       } as never,
@@ -151,9 +153,16 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
     );
   });
 
-  it('子任务、非待验收状态和真人需求方不自动验收', async () => {
+  it('父任务仍可唤醒的子任务、非待验收状态和真人需求方不自动验收', async () => {
     const run = jest.spyOn(opencodeRun, 'runOpencodePrompt');
 
+    tasks.findOne.mockImplementation(({ where }: { where: { id: number } }) =>
+      Promise.resolve(
+        where.id === 1
+          ? ({ id: 1, status: TaskStatus.RUNNING, agentId: 1002 } as Task)
+          : task({ parentId: 1 }),
+      ),
+    );
     await expect(service.verify(task({ parentId: 1 }))).resolves.toBe(false);
     await expect(
       service.verify(
@@ -168,9 +177,41 @@ describe('TaskRequesterVerifyService 根任务机器人需求方自动验收', (
       runtime: WorkerRuntime.HUMAN,
       humanUserId: 1,
     });
-    await expect(service.verify(task())).resolves.toBe(false);
+    await expect(service.verify(task())).resolves.toBe(true);
 
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('父任务已结束的子任务使用需求方机器人一次性会话验收', async () => {
+    jest
+      .spyOn(opencodeRun, 'runOpencodePrompt')
+      .mockImplementation((_client, input) => {
+        input.onSessionCreated?.('verify-session');
+        return Promise.resolve('已验收通过');
+      });
+    jest.spyOn(OpencodeClient.prototype, 'shell').mockResolvedValue(undefined);
+    jest
+      .spyOn(OpencodeClient.prototype, 'deleteSession')
+      .mockResolvedValue(undefined);
+    tasks.findOne.mockImplementation(({ where }: { where: { id: number } }) =>
+      Promise.resolve(
+        where.id === 1
+          ? ({
+              id: 1,
+              status: TaskStatus.FINISHED,
+              subStatus: TaskSubStatus.COMPLETED,
+              agentId: 1035,
+            } as Task)
+          : task({
+              parentId: 1,
+              rootId: 1,
+              status: TaskStatus.FINISHED,
+              subStatus: TaskSubStatus.COMPLETED,
+            }),
+      ),
+    );
+
+    await expect(service.verify(task({ parentId: 1 }))).resolves.toBe(true);
   });
 
   it('执行器离线时跳过自动验收，不记录失败', async () => {

@@ -1,6 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { User } from '../auth/user.entity';
-import { UserRole } from '../common/enums';
+import { TaskStatus, UserRole } from '../common/enums';
 import type { Worker } from '../workers/worker.entity';
 import type { Task } from './task.entity';
 
@@ -104,6 +104,23 @@ export function assertTaskRequesterOrAdmin(task: Task, actor: TaskActor): void {
   throw new ForbiddenException('仅任务需求方或管理员可以答复提问');
 }
 
-export function isWorkerRequester(task: Task): boolean {
+export function isWorkerRequester(
+  task: Pick<Task, 'requesterType' | 'requesterId'>,
+): boolean {
   return task.requesterType === 'worker' && Boolean(task.requesterId);
+}
+
+/**
+ * 机器人需求方能否经父任务收件箱唤醒：
+ * 子任务要求父任务未结束，且父任务当前执行机器人就是需求方机器人。
+ * 不满足时（根任务 / 父任务已结束 / 需求方不是父任务执行方）由 LOOP
+ * 改用需求方机器人一次性会话处理，避免事件被静默丢弃。
+ */
+export function isRequesterInboxReachable(
+  task: Pick<Task, 'parentId' | 'requesterType' | 'requesterId'>,
+  parent: Pick<Task, 'status' | 'agentId'> | null | undefined,
+): boolean {
+  if (!isWorkerRequester(task) || !task.parentId) return false;
+  if (!parent || parent.status === TaskStatus.FINISHED) return false;
+  return parent.agentId === task.requesterId;
 }

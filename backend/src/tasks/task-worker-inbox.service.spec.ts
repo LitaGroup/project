@@ -244,7 +244,7 @@ describe('TaskWorkerInboxService 子任务收件箱', () => {
     );
   });
 
-  it('根任务消息以自身为 parentTaskId 入队，其他根任务事件不入队', async () => {
+  it('根任务消息与提问以自身为 parentTaskId 入队，验收事件不入队', async () => {
     const repo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn((value: unknown) => value),
@@ -262,15 +262,27 @@ describe('TaskWorkerInboxService 子任务收件箱', () => {
       referenceId: 'chat:54:assistant:1',
       payload: { content: '请确认' },
     });
+    await service.enqueue(root, 'question', {
+      referenceId: 'project-q1',
+      payload: { questions: [] },
+    });
     await service.enqueue(root, 'handoff');
 
-    expect(repo.save).toHaveBeenCalledTimes(1);
+    expect(repo.save).toHaveBeenCalledTimes(2);
     expect(repo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         parentTaskId: 54,
         workerId: 1002,
         childTaskId: 54,
         kind: 'message',
+      }),
+    );
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTaskId: 54,
+        workerId: 1002,
+        childTaskId: 54,
+        kind: 'question',
       }),
     );
   });

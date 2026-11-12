@@ -11,6 +11,7 @@ import { agentTokenShell } from '../workers/worker-env';
 import { WorkersService } from '../workers/workers.service';
 import { nextInboxRetryDelay } from './task-loop.rules';
 import { TaskMessage } from './task-message.entity';
+import { TaskRequesterSessionService } from './task-requester-session.service';
 import { Task } from './task.entity';
 import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
@@ -42,19 +43,18 @@ function payloadText(value: unknown): string {
 }
 
 /**
- * 根任务机器人需求方消息回复：
- * 根任务没有父任务会话可唤醒，平台使用需求方机器人自己的执行器创建一次性会话，
- * 读取最近对话并调用 messages/reply.md 回复执行方，不改变任务状态。
+ * 机器人需求方消息回复：
+ * 根任务没有父任务会话可唤醒，平台使用需求方机器人自己的执行器创建一次性会话；
+ * 子任务在父任务已结束或需求方不是父任务执行方时同样走一次性会话。
+ * 会话读取最近对话并调用 messages/reply.md 回复执行方，不改变任务状态。
  * 会话结束仍未回复时按收件箱退避持续重试，不转移任务需求方或执行方。
- * 子任务仍由父任务收件箱唤醒其执行机器人，不走本服务。
+ * 仍能经父任务收件箱唤醒的子任务由 LOOP 交回父机器人，不走本服务。
  */
 @Injectable()
 export class TaskRequesterReplyService {
   private readonly logger = new Logger(TaskRequesterReplyService.name);
   /** 正在生成需求方回复的任务 */
   private readonly activeTasks = new Set<number>();
-  /** 正在被回复会话占用的需求方机器人（同一机器人同一时刻只运行一个一次性会话） */
-  private readonly activeWorkers = new Set<number>();
   private readonly apiUrl: string;
 
   constructor(
@@ -69,6 +69,7 @@ export class TaskRequesterReplyService {
     private readonly workersService: WorkersService,
     private readonly tasksService: TasksService,
     private readonly workerInbox: TaskWorkerInboxService,
+    private readonly requesterSessions: TaskRequesterSessionService,
     config: ConfigService,
   ) {
     this.apiUrl = (
@@ -86,7 +87,7 @@ export class TaskRequesterReplyService {
    */
   async reply(task: Task, entry: TaskWorkerInbox): Promise<boolean> {
     if (this.activeTasks.has(task.id)) return false;
-    if (task.parentId || entry.kind !== 'message') {
+    if (entry.kind !== 'message') {
       await this.workerInbox.markDead(entry.id);
       return false;
     }
@@ -129,16 +130,14 @@ export class TaskRequesterReplyService {
       );
       return false;
     }
-    if (this.activeWorkers.has(endpoint.worker.id)) return false;
-
     const content = payloadText(entry.payload?.content);
     if (!content) {
       await this.workerInbox.markDead(entry.id);
       return false;
     }
+    if (!this.requesterSessions.tryAcquire(endpoint.worker.id)) return false;
 
     this.activeTasks.add(task.id);
-    this.activeWorkers.add(endpoint.worker.id);
     const client = new OpencodeClient(endpoint.executor);
     let sessionId: string | null = null;
     try {
@@ -196,7 +195,7 @@ export class TaskRequesterReplyService {
       return false;
     } finally {
       this.activeTasks.delete(task.id);
-      this.activeWorkers.delete(endpoint.worker.id);
+      this.requesterSessions.release(endpoint.worker.id);
       if (sessionId) {
         await client
           .deleteSession(sessionId)

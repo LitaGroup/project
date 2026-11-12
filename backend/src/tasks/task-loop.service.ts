@@ -23,6 +23,8 @@ import {
   TASK_REMIND_TIMEOUT_DAYS,
 } from './task-loop.rules';
 import { TasksService } from './tasks.service';
+import { isRequesterInboxReachable } from './task-requester';
+import { TaskRequesterAnswerService } from './task-requester-answer.service';
 import { TaskRequesterReplyService } from './task-requester-reply.service';
 import { TaskRequesterVerifyService } from './task-requester-verify.service';
 import { TaskReleaseNotificationService } from './task-release-notification.service';
@@ -47,7 +49,7 @@ const ROOT_MESSAGE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 /**
  * 多机器人任务 LOOP（每秒）：
  * 待分配→分配；待接受→任务邀约；待继续→机器人仍有执行容量时恢复；
- * 机器人需求方收件箱→父任务待继续 / 根任务需求方一次性回复；
+ * 机器人需求方收件箱→父任务待继续 / 一次性会话（根任务或父任务不可唤醒时）；
  * 待申请验收不占用机器人，收到补充消息或子任务事件时转待继续；
  * 待反馈/待验收仅提醒，不占用机器人。
  */
@@ -82,6 +84,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     private readonly workerInbox: TaskWorkerInboxService,
     private readonly requesterVerify: TaskRequesterVerifyService,
     private readonly requesterReply: TaskRequesterReplyService,
+    private readonly requesterAnswer: TaskRequesterAnswerService,
     private readonly releaseNotification: TaskReleaseNotificationService,
     config: ConfigService,
   ) {
@@ -106,7 +109,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
     this.running = true;
     try {
       await this.repairOrphanChildEvents();
-      await this.repairRootRequesterMessages();
+      await this.repairRequesterMessages();
       await this.queueWorkerInbox();
       await this.queueRootRequesterVerification();
       await this.assignPending();
@@ -570,17 +573,17 @@ export class TaskLoopService implements OnApplicationBootstrap {
   }
 
   /**
-   * 补建根任务执行方消息事件：
+   * 补建机器人需求方消息事件：
    * 历史版本会直接丢弃根任务消息，进程重启也可能在落库后、入队前中断。
-   * 以最近一条真人执行方消息为准，没有对应收件箱事件且之后没有需求方回复时补建。
+   * 以最近一条真人执行方消息为准，没有对应开放收件箱事件且之后没有需求方回复时补建；
+   * 根任务与子任务一并扫描，子任务由 LOOP 按父任务是否可唤醒决定收件箱或一次性会话。
    */
-  private async repairRootRequesterMessages(): Promise<void> {
+  private async repairRequesterMessages(): Promise<void> {
     const now = Date.now();
     if (now - this.lastRootMessageScanAt < ROOT_MESSAGE_SCAN_MS) return;
     this.lastRootMessageScanAt = now;
-    const roots = await this.tasks.find({
+    const candidates = await this.tasks.find({
       where: {
-        parentId: IsNull(),
         requesterType: 'worker',
         status: In([TaskStatus.WAITING, TaskStatus.RUNNING]),
         updatedAt: MoreThan(new Date(now - ROOT_MESSAGE_LOOKBACK_MS)),
@@ -588,7 +591,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
       order: { updatedAt: 'DESC' },
       take: 50,
     });
-    for (const task of roots) {
+    for (const task of candidates) {
       if (!task.requesterId) continue;
       const rows = await this.messages.find({
         where: { taskId: task.id, kind: 'message' },
@@ -609,7 +612,7 @@ export class TaskLoopService implements OnApplicationBootstrap {
       );
       if (replied) continue;
       if (
-        await this.workerInbox.hasReference(
+        await this.workerInbox.hasOpenReference(
           task.id,
           'message',
           latestHumanMessage.messageKey,
@@ -642,24 +645,18 @@ export class TaskLoopService implements OnApplicationBootstrap {
         await this.workerInbox.markDead(entry.id);
         continue;
       }
-      // 根任务消息事件以任务自身作为 parentTaskId，由需求方机器人一次性会话回复。
+      // 根任务事件以任务自身作为 parentTaskId，由需求方机器人一次性会话处理。
       if (entry.parentTaskId === entry.childTaskId) {
-        await this.queueRootRequesterMessage(child, entry);
+        await this.queueRootRequesterEvent(child, entry);
         continue;
       }
       const parent = await this.tasks.findOne({
         where: { id: entry.parentTaskId },
       });
-      if (
-        !parent ||
-        parent.status === TaskStatus.FINISHED ||
-        parent.agentId !== entry.workerId
-      ) {
-        // 父任务不可用时只关闭当前事件，不改写子任务需求方或执行方。
-        this.logger.warn(
-          `子任务 ${child.code} 的 ${entry.kind} 事件无法处理：父任务已结束或处理机器人已变化`,
-        );
-        await this.workerInbox.markDead(entry.id);
+      if (!parent || !isRequesterInboxReachable(child, parent)) {
+        // 父任务已结束或需求方不是父任务执行方：收件箱无法唤醒需求方，
+        // 改用需求方机器人一次性会话处理消息/提问/验收，事件不再静默丢弃。
+        await this.queueRequesterOneShot(child, entry);
         continue;
       }
       if (!this.childEventNeedsAction(entry, child)) {
@@ -820,8 +817,8 @@ export class TaskLoopService implements OnApplicationBootstrap {
     }
   }
 
-  /** 根任务执行方消息：调用需求方机器人一次性会话回复，不覆盖任务状态。 */
-  private async queueRootRequesterMessage(
+  /** 根任务事件：调用需求方机器人一次性会话回复消息或答复提问，不覆盖任务状态。 */
+  private async queueRootRequesterEvent(
     task: Task,
     entry: TaskWorkerInbox,
   ): Promise<void> {
@@ -833,16 +830,81 @@ export class TaskLoopService implements OnApplicationBootstrap {
       await this.workerInbox.markDead(entry.id);
       return;
     }
-    if (entry.kind !== 'message') {
-      await this.workerInbox.markDead(entry.id);
-      return;
-    }
     if (task.status === TaskStatus.FINISHED) {
       await this.workerInbox.markDone(entry.id);
       return;
     }
-    if (this.requesterReply.isActive(task.id)) return;
-    await this.requesterReply.reply(task, entry);
+    if (entry.kind === 'message') {
+      if (this.requesterReply.isActive(task.id)) return;
+      void this.requesterReply.reply(task, entry);
+      return;
+    }
+    if (entry.kind === 'question') {
+      if (this.requesterAnswer.isActive(task.id)) return;
+      void this.requesterAnswer.answer(task, entry);
+      return;
+    }
+    // 待验收由 `queueRootRequesterVerification` 独立扫描驱动，不重复处理。
+    await this.workerInbox.markDead(entry.id);
+  }
+
+  /**
+   * 收件箱无法唤醒的需求方（根任务 / 父任务已结束 / 需求方不是父任务执行方）：
+   * 消息、提问、验收交给需求方机器人一次性会话，事件保持开放并按退避重试。
+   */
+  private async queueRequesterOneShot(
+    child: Task,
+    entry: TaskWorkerInbox,
+  ): Promise<void> {
+    if (
+      child.requesterType !== 'worker' ||
+      !child.requesterId ||
+      child.requesterId !== entry.workerId
+    ) {
+      await this.workerInbox.markDead(entry.id);
+      return;
+    }
+    if (child.status === TaskStatus.FINISHED) {
+      await this.workerInbox.markDone(entry.id);
+      return;
+    }
+    if (!this.childEventNeedsAction(entry, child)) {
+      await this.workerInbox.markDone(entry.id);
+      return;
+    }
+    if (entry.kind === 'question') {
+      if (this.requesterAnswer.isActive(child.id)) return;
+      void this.requesterAnswer.answer(child, entry);
+      return;
+    }
+    if (entry.kind === 'message') {
+      if (this.requesterReply.isActive(child.id)) return;
+      void this.requesterReply.reply(child, entry);
+      return;
+    }
+    if (entry.kind === 'handoff') {
+      if (this.requesterVerify.isActive(child.id)) return;
+      void this.requesterVerify
+        .verify(child)
+        .then(async (advanced) => {
+          if (advanced) {
+            await this.workerInbox.markDone(entry.id);
+            return;
+          }
+          await this.workerInbox.defer(
+            entry.id,
+            new Date(Date.now() + nextInboxRetryDelay(entry.attempts ?? 0)),
+            '需求方机器人自动验收未完成',
+          );
+        })
+        .catch((error: Error) =>
+          this.logger.warn(
+            `任务 ${child.code} 一次性自动验收异常：${error.message}`,
+          ),
+        );
+      return;
+    }
+    await this.workerInbox.markDead(entry.id);
   }
 
   /** 根任务机器人需求方自动验收：每 30s 扫描待验收的根任务。 */

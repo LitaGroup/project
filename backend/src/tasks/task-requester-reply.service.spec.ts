@@ -9,6 +9,7 @@ import * as opencodeRun from '../executors/opencode-run';
 import type { Worker } from '../workers/worker.entity';
 import { Task } from './task.entity';
 import { TaskRequesterReplyService } from './task-requester-reply.service';
+import { TaskRequesterSessionService } from './task-requester-session.service';
 import type { TaskWorkerInbox } from './task-worker-inbox.entity';
 
 describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
@@ -114,6 +115,7 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
       } as never,
       tasksService as never,
       inbox as never,
+      new TaskRequesterSessionService(),
       {
         get: jest.fn().mockReturnValue('http://api.example/api'),
       } as never,
@@ -195,12 +197,36 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
     );
   });
 
-  it('子任务、真人需求方和已结束任务不启动回复会话', async () => {
+  it('子任务消息同样走需求方机器人一次性回复会话', async () => {
+    const run = jest
+      .spyOn(opencodeRun, 'runOpencodePrompt')
+      .mockImplementation((_client, input) => {
+        input.onSessionCreated?.('reply-session');
+        return Promise.resolve('已回复');
+      });
+    jest.spyOn(OpencodeClient.prototype, 'shell').mockResolvedValue(undefined);
+    jest
+      .spyOn(OpencodeClient.prototype, 'deleteSession')
+      .mockResolvedValue(undefined);
+
+    await expect(
+      service.reply(task({ parentId: 1, rootId: 1 }), entry()),
+    ).resolves.toBe(true);
+
+    expect(run).toHaveBeenCalledWith(
+      expect.any(OpencodeClient),
+      expect.objectContaining({
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        prompt: expect.stringContaining(
+          'http://api.example/api/tasks/54/messages/reply.md',
+        ),
+      }),
+    );
+  });
+
+  it('真人需求方和已结束任务不启动回复会话', async () => {
     const run = jest.spyOn(opencodeRun, 'runOpencodePrompt');
 
-    await expect(service.reply(task({ parentId: 1 }), entry())).resolves.toBe(
-      false,
-    );
     workers.findOne.mockResolvedValue({
       ...requester,
       runtime: WorkerRuntime.HUMAN,
@@ -210,6 +236,7 @@ describe('TaskRequesterReplyService 根任务机器人需求方回复', () => {
     await expect(service.reply(task(), entry({ attempts: 0 }))).resolves.toBe(
       true,
     );
+    workers.findOne.mockResolvedValue(requester);
     await expect(
       service.reply(
         task({

@@ -32,7 +32,9 @@ import { TaskNotifyService } from './task-notify.service';
 import { TaskQuestionAutoAnswerService } from './task-question-auto-answer.service';
 import { TaskRealtimeService } from './task-realtime.service';
 import { TaskReleaseNotificationService } from './task-release-notification.service';
+import { TaskRequesterAnswerService } from './task-requester-answer.service';
 import { TaskRequesterReplyService } from './task-requester-reply.service';
+import { TaskRequesterSessionService } from './task-requester-session.service';
 import { TaskRequesterVerifyService } from './task-requester-verify.service';
 import {
   TaskTemplatesController,
@@ -97,7 +99,9 @@ import { WorkbenchService } from './workbench.service';
     TaskLoopService,
     TaskNotifyService,
     TaskQuestionAutoAnswerService,
+    TaskRequesterAnswerService,
     TaskRequesterReplyService,
+    TaskRequesterSessionService,
     TaskRequesterVerifyService,
     TaskReleaseNotificationService,
     TaskWorkerInboxService,
