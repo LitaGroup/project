@@ -114,21 +114,24 @@ export interface TaskOverview {
  * Markdown 正文、工作计划、产物等大文本只在详情接口返回，不随看板快照下发。
  */
 const TASK_BOARD_FIELDS = [
-  'id',
-  'code',
-  'title',
-  'parentId',
-  'status',
-  'subStatus',
-  'requesterType',
-  'requesterId',
-  'createdById',
-  'agentId',
-  'updatedAt',
-] as const satisfies ReadonlyArray<keyof Task>;
+  't.id',
+  't.code',
+  't.title',
+  't.parentId',
+  't.status',
+  't.subStatus',
+  't.requesterType',
+  't.requesterId',
+  't.createdById',
+  't.agentId',
+  't.updatedAt',
+] as const;
 
 /** 看板快照/增量推送使用的轻量任务视图 */
-export type TaskBoardItem = Pick<Task, (typeof TASK_BOARD_FIELDS)[number]> & {
+export type TaskBoardItem = Pick<
+  Task,
+  (typeof TASK_BOARD_FIELDS)[number] extends `t.${infer K}` ? K : never
+> & {
   requesterName: string | null;
 };
 

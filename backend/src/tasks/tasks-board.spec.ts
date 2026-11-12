@@ -67,18 +67,17 @@ describe('TasksService 看板列表投影', () => {
     const selected = (query.select.mock.calls[0] as [string[]])[0];
     expect(selected).toEqual(
       expect.arrayContaining([
-        'id',
-        'code',
-        'title',
-        'parentId',
-        'status',
-        'subStatus',
-        'requesterType',
-        'requesterId',
-        'createdById',
-        'agentId',
-        'updatedAt',
-      ]),
+        't.id',
+        't.code',
+        't.title',
+        't.parentId',
+        't.status',
+        't.subStatus',
+        't.requesterType',
+        't.requesterId',
+        't.createdById',
+        't.agentId',
+        't.updatedAt']),
     );
     for (const heavy of [
       'description',
