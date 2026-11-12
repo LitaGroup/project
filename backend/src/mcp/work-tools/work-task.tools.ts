@@ -1,11 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { TaskStatus } from '../../common/enums';
 import { beijingTime, mdFrontmatter } from '../../common/frontmatter';
 import { TaskActorService } from '../../tasks/task-actor.service';
 import { TaskCollaborationService } from '../../tasks/task-collaboration.service';
 import { TaskDeliveryService } from '../../tasks/task-delivery.service';
 import { TaskDocumentService } from '../../tasks/task-document.service';
+import { TaskExternalEventService } from '../../tasks/task-external-event.service';
 import { TasksAgentService } from '../../tasks/tasks-agent.service';
 import { TasksService } from '../../tasks/tasks.service';
 import {
@@ -79,6 +86,7 @@ export class WorkTaskTools implements WorkToolRegistrar {
     private readonly delivery: TaskDeliveryService,
     private readonly taskDocuments: TaskDocumentService,
     private readonly taskActors: TaskActorService,
+    private readonly externalEvents: TaskExternalEventService,
   ) {}
 
   register(server: McpServer, principal: McpWorkPrincipal): void {
@@ -595,6 +603,57 @@ export class WorkTaskTools implements WorkToolRegistrar {
             ]),
           );
         }),
+    );
+
+    server.registerTool(
+      'get_task_callback_url',
+      {
+        title: '任务外部事件回调地址',
+        description:
+          '获取当前任务的外部事件回调地址：调用 lita-proxy MCP create_ticket 时把它作为 callbackUrl 传入，' +
+          '工单状态变更会回调平台并自动唤醒本任务继续处理。仅任务当前执行机器人可获取。' +
+          '建单后把工单号记入交付文档并结束本轮，不要用 query_tickets 轮询占用执行容量；回调到达后平台会恢复本任务。',
+        inputSchema: {
+          taskId: z.number().int().positive().describe('任务 ID'),
+        },
+      },
+      async (args) =>
+        executeTool(
+          this.logger,
+          'get_task_callback_url',
+          principal,
+          async () => {
+            const worker = requireWorkerPrincipal(principal);
+            const task = await this.tasks.mustFind(args.taskId);
+            if (task.agentId !== worker.id) {
+              throw new ForbiddenException(
+                '仅任务当前执行机器人可以获取任务回调地址',
+              );
+            }
+            if (task.status === TaskStatus.FINISHED) {
+              throw new BadRequestException('任务已结束，不能再接收外部事件');
+            }
+            return markdownResult(
+              [
+                '# 任务外部事件回调地址',
+                '',
+                '```text',
+                this.externalEvents.callbackUrl(task.id),
+                '```',
+                '',
+                `- 任务：${task.code}「${task.title}」`,
+                '',
+                '## 使用方式',
+                '',
+                '1. 调用 lita-proxy MCP `create_ticket` 时把上面的地址作为 `callbackUrl` 传入（工单类型不限）。',
+                '2. 建单成功后把工单号（ticketId）与操作内容记录到交付文档/HANDOFF。',
+                '3. 结束本轮，不要用 `query_tickets` 轮询占用执行容量。',
+                '4. 工单审批/执行/拒绝/取消后，平台会收到回调并唤醒本任务继续处理；同一工单同一状态只处理一次（幂等）。',
+                '',
+              ].join('\n'),
+            );
+          },
+        ),
     );
   }
 }

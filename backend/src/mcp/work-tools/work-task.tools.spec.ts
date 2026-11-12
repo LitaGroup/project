@@ -54,6 +54,14 @@ function buildTools(principal: 'user' | 'worker' = 'user') {
       .mockResolvedValue({ type: 'user', user: { id: 1, name: '张三' } }),
     resolveDocumentAuthor: jest.fn().mockResolvedValue('张三'),
   };
+  const externalEvents = {
+    callbackUrl: jest
+      .fn()
+      .mockImplementation(
+        (taskId: number) =>
+          `http://work.test/api/tasks/${taskId}/external-event`,
+      ),
+  };
   const tools = new Map<string, Handler>();
   const server = {
     registerTool: (name: string, _meta: unknown, handler: Handler) => {
@@ -67,6 +75,7 @@ function buildTools(principal: 'user' | 'worker' = 'user') {
     delivery as never,
     taskDocuments as never,
     taskActors as never,
+    externalEvents as never,
   ).register(
     server,
     principal === 'worker'
@@ -80,6 +89,8 @@ function buildTools(principal: 'user' | 'worker' = 'user') {
     delivery,
     taskDocuments,
     taskActors,
+    externalEvents,
+    tasks,
   };
 }
 
@@ -106,6 +117,7 @@ describe('WorkTaskTools', () => {
         'accept_task_handoff',
         'refuse_task_handoff',
         'fail_task',
+        'get_task_callback_url',
       ]),
     );
   });
@@ -130,6 +142,41 @@ describe('WorkTaskTools', () => {
     });
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toBe('# 操作完成');
+  });
+
+  it('任务执行机器人获取外部事件回调地址', async () => {
+    const { tools, tasks, externalEvents } = buildTools('worker');
+    tasks.mustFind.mockResolvedValue({
+      id: 7,
+      code: 'TK-0007',
+      title: '线上配置变更',
+      agentId: 1001,
+      status: '进行中',
+    });
+    const result = (await tools.get('get_task_callback_url')!({
+      taskId: 7,
+    })) as ToolResult;
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain(
+      'http://work.test/api/tasks/7/external-event',
+    );
+    expect(externalEvents.callbackUrl).toHaveBeenCalledWith(7);
+  });
+
+  it('非当前执行机器人不能获取外部事件回调地址', async () => {
+    const { tools, tasks } = buildTools('worker');
+    tasks.mustFind.mockResolvedValue({
+      id: 7,
+      code: 'TK-0007',
+      title: '线上配置变更',
+      agentId: 2002,
+      status: '进行中',
+    });
+    const result = (await tools.get('get_task_callback_url')!({
+      taskId: 7,
+    })) as ToolResult;
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('仅任务当前执行机器人');
   });
 
   it('答复提问使用需求方身份解析', async () => {

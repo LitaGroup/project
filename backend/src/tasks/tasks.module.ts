@@ -15,6 +15,9 @@ import { Ticket } from '../tickets/ticket.entity';
 import { TicketWorkflowRun } from '../tickets/ticket-workflow-run.entity';
 import { Task } from './task.entity';
 import { TaskEvent } from './task-event.entity';
+import { TaskExternalEvent } from './task-external-event.entity';
+import { TaskExternalEventController } from './task-external-event.controller';
+import { TaskExternalEventService } from './task-external-event.service';
 import { TaskMessage } from './task-message.entity';
 import { TaskTemplateFollow } from './task-template-follow.entity';
 import { TaskTemplate } from './task-template.entity';
@@ -58,6 +61,7 @@ import { WorkbenchService } from './workbench.service';
     TypeOrmModule.forFeature([
       Task,
       TaskEvent,
+      TaskExternalEvent,
       TaskMessage,
       TaskTemplate,
       TaskTemplateFollow,
@@ -79,6 +83,7 @@ import { WorkbenchService } from './workbench.service';
   ],
   controllers: [
     TasksController,
+    TaskExternalEventController,
     TaskTemplatesListMarkdownController,
     TaskTemplatesMarkdownController,
     TaskTemplatesController,
@@ -95,6 +100,7 @@ import { WorkbenchService } from './workbench.service';
     TaskDeliveryService,
     TaskDispatchService,
     TaskDocumentService,
+    TaskExternalEventService,
     TaskHandoffService,
     TaskLoopService,
     TaskNotifyService,
@@ -119,6 +125,7 @@ import { WorkbenchService } from './workbench.service';
     TaskDeliveryService,
     TaskDispatchService,
     TaskDocumentService,
+    TaskExternalEventService,
     TaskHandoffService,
     TaskLoopService,
     TaskNotifyService,

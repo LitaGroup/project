@@ -193,8 +193,11 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | `apply_task_acceptance` | `taskId`、`delivery?`、`problems?`、`detours?`、`lessons?`、`followUps?`、`other?` | 申请验收 |
 | `accept_task_handoff` / `refuse_task_handoff` | `taskId`、`content?` | 需求方验收通过 / 返工 |
 | `fail_task` | `taskId`、`reason` | 需求方判定失败 |
+| `get_task_callback_url` | `taskId` | 获取任务级外部事件回调地址（建 lita-proxy 工单时作为 `callbackUrl`），工单状态变更会自动唤醒本任务 |
 
 > 写操作按令牌身份校验：接受/拒绝/提问/申请验收仅机器人令牌（`X-Worker-Token`）；答复/验收/返工/判失败仅任务需求方。`update_task_handoff` 在首次创建时使用 `baseVersion=0`。
+>
+> `get_task_callback_url` 仅任务当前执行机器人可获取；地址指向 `POST /api/tasks/{taskId}/external-event`（纯内网免鉴权），lita-proxy 工单每次状态变更回调后平台按「任务 + 工单 + 状态」幂等落库并唤醒任务：回合仍在执行时直投当前会话，回合已结束时转「待继续」由 LOOP 恢复。
 
 ### 工单与工单文档
 
