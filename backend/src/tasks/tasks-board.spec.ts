@@ -77,7 +77,8 @@ describe('TasksService 看板列表投影', () => {
         't.requesterId',
         't.createdById',
         't.agentId',
-        't.updatedAt']),
+        't.updatedAt',
+      ]),
     );
     for (const heavy of [
       'description',

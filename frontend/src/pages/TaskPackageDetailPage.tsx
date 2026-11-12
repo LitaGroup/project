@@ -48,8 +48,8 @@ type TaskContentTab =
   | 'review'
 
 const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
-  ['handoff', '交付'],
   ['requirement', '需求'],
+  ['handoff', '交付'],
   ['tasks', '任务'],
   ['info', '信息'],
   ['events', '事件'],
@@ -59,8 +59,8 @@ const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
 ]
 
 /**
- * 任务详情：正文按「交付 / 需求 / 任务 / 信息 / 事件 / 文档 / 会话 / 复盘」组织，
- * 右侧复用工作台的任务协作面板（需求方 / 执行方 / 我的 AI）。
+ * 任务详情：正文按「需求 / 交付 / 任务 / 信息 / 事件 / 文档 / 会话 / 复盘」组织，
+ * 默认打开「需求」；右侧复用工作台的任务协作面板（需求方 / 执行方 / 我的 AI）。
  * 正文「会话」只读实时展示多方交互，右侧按当前用户身份参与任务。
  */
 export function TaskPackageDetailPage() {
@@ -114,7 +114,7 @@ export function TaskDetailView({
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [contentTab, setContentTab] = useState<TaskContentTab>('handoff')
+  const [contentTab, setContentTab] = useState<TaskContentTab>('requirement')
   const [handoffDoc, setHandoffDoc] = useState<TaskHandoffDocument | null>(null)
   const [reviewDoc, setReviewDoc] = useState<TaskDocumentContent | null>(null)
   const [documents, setDocuments] = useState<TaskDocumentsView | null>(null)
