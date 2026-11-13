@@ -13,6 +13,11 @@ import {
   type FeishuHistoryMessage,
 } from '../../feishu-bot/feishu-bot-client.service';
 import {
+  FeishuBotOfficialMessageService,
+  resolveOfficialMessageSender,
+  type SendOfficialMessageInput,
+} from '../../feishu-bot/feishu-bot-official-message.service';
+import {
   executeTool,
   jsonResult,
   requireWorkerPrincipal,
@@ -36,9 +41,9 @@ export interface FeishuHistoryInput {
 }
 
 /**
- * 飞书历史消息查询（lita-work MCP 工具 feishu_history）：
- * - 只允许机器人查询自己绑定飞书应用所在的会话，且只开放最近 7 天；
- * - 复用机器人客户端的历史接口（群聊/话题/私聊），应用需具备消息读取权限。
+ * 飞书工具（lita-work MCP）：
+ * - feishu_history：查询机器人自己绑定飞书应用所在会话最近 7 天的消息；
+ * - feishu_send_message：以平台官方机器人身份发送 Markdown 消息（机器人或管理员）。
  */
 @Injectable()
 export class WorkFeishuTools implements WorkToolRegistrar {
@@ -48,6 +53,7 @@ export class WorkFeishuTools implements WorkToolRegistrar {
     private readonly configs: FeishuBotConfigService,
     private readonly client: FeishuBotClientService,
     private readonly identities: FeishuBotIdentityService,
+    private readonly officialMessages: FeishuBotOfficialMessageService,
     @InjectRepository(FeishuBotGroup)
     private readonly groups: Repository<FeishuBotGroup>,
   ) {}
@@ -84,6 +90,78 @@ export class WorkFeishuTools implements WorkToolRegistrar {
           this.queryHistory(principal, args),
         ),
     );
+
+    server.registerTool(
+      'feishu_send_message',
+      {
+        title: '发送飞书消息（平台名义）',
+        description:
+          '以平台官方机器人身份发送 Markdown 卡片消息。收件人三选一：平台用户 user_id（自动解析飞书 open_id）、飞书 open_id、群 chat_id（官方机器人须在群内）。超长正文自动分片；可传 reply_to_message_id 在话题内回复。发送记录会写入平台审计。',
+        inputSchema: {
+          user_id: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe('平台用户 ID（三选一，与 open_id / chat_id 互斥）'),
+          open_id: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('飞书 open_id（三选一，与 user_id / chat_id 互斥）'),
+          chat_id: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              '飞书群 chat_id（三选一，与 user_id / open_id 互斥；官方机器人须在群内）',
+            ),
+          content: z
+            .string()
+            .min(1)
+            .describe('Markdown 正文（超长自动分片，单次最多 20000 字符）'),
+          title: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('卡片标题（可选，最多 80 字符）'),
+          reply_to_message_id: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('话题内回复的目标消息 ID（可选）'),
+        },
+      },
+      async (args) =>
+        executeTool(this.logger, 'feishu_send_message', principal, () =>
+          this.sendMessage(principal, args),
+        ),
+    );
+  }
+
+  /** 平台名义发送（独立方法便于单测）：身份校验 → 收件人校验 → 发送并留痕 */
+  async sendMessage(
+    principal: McpWorkPrincipal,
+    input: {
+      user_id?: number;
+      open_id?: string;
+      chat_id?: string;
+      content: string;
+      title?: string;
+      reply_to_message_id?: string;
+    },
+  ) {
+    const sender = resolveOfficialMessageSender(principal);
+    const payload: SendOfficialMessageInput = {
+      userId: input.user_id,
+      openId: input.open_id,
+      chatId: input.chat_id,
+      content: input.content,
+      title: input.title,
+      replyToMessageId: input.reply_to_message_id,
+    };
+    const result = await this.officialMessages.send(payload, sender);
+    return jsonResult(result);
   }
 
   /** 查询逻辑（独立方法便于单测）：鉴权 → 拉取 → 7 天过滤 → 结构化输出 */

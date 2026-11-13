@@ -26,6 +26,7 @@ export class FeishuBotMessageService {
    * 发送 Markdown 回复：超长自动分片，逐片发卡。
    * 传入 replyToMessageId 时以回复形式发出（话题群落回原话题；每个分片都必须走回复，
    * 否则话题群里普通发送会掉到话题外）。
+   * 传入 title 时首片卡片带标题头（分片卡片不重复标题）。
    */
   async sendMarkdown(
     configId: number,
@@ -34,24 +35,26 @@ export class FeishuBotMessageService {
     receiveId: string,
     markdown: string,
     replyToMessageId?: string,
+    title?: string,
   ): Promise<FeishuSendResult[]> {
     const chunks = chunkMarkdown(markdown);
     const results: FeishuSendResult[] = [];
-    for (const chunk of chunks) {
+    for (const [index, chunk] of chunks.entries()) {
+      const card = markdownCard(chunk, index === 0 ? title : undefined);
       results.push(
         replyToMessageId
           ? await this.client.replyCard(
               configId,
               secrets,
               replyToMessageId,
-              markdownCard(chunk),
+              card,
             )
           : await this.client.sendCard(
               configId,
               secrets,
               receiveIdType,
               receiveId,
-              markdownCard(chunk),
+              card,
             ),
       );
     }
@@ -148,12 +151,25 @@ export class FeishuBotMessageService {
 /**
  * 生成 Markdown 互动卡片对象（Card JSON 2.0）。
  * 2.0 富文本组件支持 GFM 表格；1.0 卡片会把表格原样输出为 pipe 文本。
+ * 传入 title 时卡片带标题头（平台名义通知的标题落在这里）。
  */
-export function markdownCard(content: string): Record<string, unknown> {
+export function markdownCard(
+  content: string,
+  title?: string,
+): Record<string, unknown> {
   const chunks = splitMarkdownElements(content);
+  const trimmedTitle = title?.trim();
   return {
     schema: '2.0',
     config: { width_mode: 'fill', update_multi: true },
+    ...(trimmedTitle
+      ? {
+          header: {
+            title: { tag: 'plain_text', content: trimmedTitle },
+            template: 'blue',
+          },
+        }
+      : {}),
     body: {
       elements: (chunks.length > 0 ? chunks : ['']).map((chunk) => ({
         tag: 'markdown',

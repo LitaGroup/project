@@ -233,11 +233,16 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | `update_task_template` | `templateId`、`name?`、`description?`、`agentIds?` | 编辑任务定义 |
 | `delete_task_template` | `templateId` | 删除任务定义 |
 
-### 飞书会话历史
+### 飞书
 
 | 工具 | 主要入参 | 说明 |
 |---|---|---|
 | `feishu_history` | `chat_id`、`thread_id?`、`limit?` | 查询机器人所在飞书群聊/话题/私聊最近 7 天内的消息（默认 20 条，最多 50）；需机器人绑定飞书应用且有消息读取权限 |
+| `feishu_send_message` | `user_id?` / `open_id?` / `chat_id?`（三选一）、`content`、`title?`、`reply_to_message_id?` | 以平台官方机器人身份发送 Markdown 卡片；`user_id` 自动解析飞书 open_id，`chat_id` 要求官方机器人在群内；超长自动分片，可话题内回复；发送记录写入平台审计 |
+
+> `feishu_send_message` 权限：机器人令牌或管理员（含公共 Agent）。普通成员网页会话不可发送；每次发送（含失败）都落 `feishu_bot_official_messages` 审计表，管理员可经 `GET /api/feishu-bot/messages` 查询。
+>
+> 不走 MCP 的 HTTP 调用：`POST /api/feishu-bot/messages`（网页管理员，JSON）或 `POST /api/feishu-bot/messages.md`（机器人令牌 `X-Worker-Token` / `X-Agent-Token` / `?token=`，返回 Markdown），body 同工具入参（`userId` / `openId` / `chatId` 三选一 + `content` / `title?` / `replyToMessageId?`）。
 
 ## 四、流式进度与超时
 

@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Header,
   Param,
   ParseIntPipe,
   Post,
@@ -31,6 +32,13 @@ import {
   type FeishuBotGroupRecordView,
   type FeishuBotGroupView,
 } from './feishu-bot-group-chat.service';
+import {
+  FeishuBotOfficialMessageService,
+  resolveOfficialMessageSender,
+  type FeishuOfficialMessagePage,
+  type SendOfficialMessageInput,
+  type SendOfficialMessageResult,
+} from './feishu-bot-official-message.service';
 
 /** 群记录类型过滤白名单 */
 const RECORD_KINDS: readonly FeishuBotGroupRecordKind[] = [
@@ -55,12 +63,14 @@ function assertAdmin(user: User | undefined): void {
  * - POST /api/feishu-bot/:id/test 连接验证；
  * - DELETE /api/feishu-bot/:id 删除。
  * Secret 只写不读；回调为公开端点（自行验签）。
+ * 「平台名义发消息」是唯一非仅管理员的端点：机器人令牌或管理员可发，审计留痕。
  */
 @Controller('feishu-bot')
 export class FeishuBotController {
   constructor(
     private readonly configs: FeishuBotConfigService,
     private readonly groupChats: FeishuBotGroupChatService,
+    private readonly officialMessages: FeishuBotOfficialMessageService,
   ) {}
 
   @Get()
@@ -112,6 +122,62 @@ export class FeishuBotController {
     assertAdmin(req.user);
     await this.configs.remove(id);
     return { ok: true };
+  }
+
+  // ==== 平台名义消息（官方机器人发送） ====
+
+  /**
+   * 以平台官方机器人身份发送 Markdown 卡片消息。
+   * 权限：机器人令牌或管理员（含公共 Agent）；每次发送都写审计表。
+   * 注意：JSON 接口走网页会话鉴权；机器人请用 POST /api/feishu-bot/messages.md
+   * （X-Worker-Token 等令牌体系）或 lita-work MCP `feishu_send_message`。
+   */
+  @Post('messages')
+  async sendMessage(
+    @Body() body: SendOfficialMessageInput,
+    @Req() req: AuthedRequest,
+  ): Promise<SendOfficialMessageResult> {
+    const sender = resolveOfficialMessageSender(req);
+    return this.officialMessages.send(body ?? { content: '' }, sender);
+  }
+
+  /** AI/机器人用：发送平台名义消息并返回 Markdown 结果（body 同 POST /messages） */
+  @Post('messages.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  async sendMessageMarkdown(
+    @Body() body: SendOfficialMessageInput,
+    @Req() req: AuthedRequest,
+  ): Promise<string> {
+    const sender = resolveOfficialMessageSender(req);
+    const input = body ?? { content: '' };
+    const result = await this.officialMessages.send(input, sender);
+    const target = input.userId
+      ? `平台用户 #${input.userId}`
+      : input.openId
+        ? `open_id ${input.openId}`
+        : `群 ${input.chatId ?? ''}`;
+    return [
+      '# 飞书消息已发送',
+      '',
+      `- 发送方：${sender.name}`,
+      `- 收件人：${target}`,
+      `- messageId：${result.messageIds.join('、') || '（飞书未返回）'}`,
+      '',
+    ].join('\n');
+  }
+
+  /** 平台名义消息审计列表（仅管理员；不含正文大字段） */
+  @Get('messages')
+  async listMessages(
+    @Query('page') page: string | undefined,
+    @Query('pageSize') pageSize: string | undefined,
+    @Req() req: AuthedRequest,
+  ): Promise<FeishuOfficialMessagePage> {
+    assertAdmin(req.user);
+    return this.officialMessages.list(
+      Number(page) || 1,
+      Number(pageSize) || 20,
+    );
   }
 
   // ==== 外部群策略与记录 ====

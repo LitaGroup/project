@@ -28,6 +28,8 @@ import { FeishuBotGroupChatService } from './feishu-bot-group-chat.service';
 import { FeishuBotGroupRecord } from './feishu-bot-group-record.entity';
 import { FeishuBotLongConnectionService } from './feishu-bot-long-connection.service';
 import { FeishuBotMessageService } from './feishu-bot-message.service';
+import { FeishuBotOfficialMessage } from './feishu-bot-official-message.entity';
+import { FeishuBotOfficialMessageService } from './feishu-bot-official-message.service';
 import { FeishuBotP2PService } from './feishu-bot-p2p.service';
 import { FeishuBotProjectChat } from './feishu-bot-project-chat.entity';
 import { FeishuBotProjectChatService } from './feishu-bot-project-chat.service';
@@ -60,6 +62,7 @@ import { FeishuBotController } from './feishu-bot.controller';
       FeishuBotApprovalCard,
       FeishuBotGroup,
       FeishuBotGroupRecord,
+      FeishuBotOfficialMessage,
       Feedback,
       FeedbackReply,
       Worker,
@@ -82,6 +85,7 @@ import { FeishuBotController } from './feishu-bot.controller';
     FeishuBotConfigService,
     FeishuBotIdentityService,
     FeishuBotMessageService,
+    FeishuBotOfficialMessageService,
     FeishuBotP2PService,
     FeishuBotTaskChatService,
     FeishuBotProjectChatService,
@@ -96,6 +100,7 @@ import { FeishuBotController } from './feishu-bot.controller';
     FeishuBotConfigService,
     FeishuBotClientService,
     FeishuBotIdentityService,
+    FeishuBotOfficialMessageService,
     FeishuBotProjectChatService,
     FeishuBotBacklogChatService,
   ],

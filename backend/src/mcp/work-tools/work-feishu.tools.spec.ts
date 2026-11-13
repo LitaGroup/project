@@ -1,4 +1,5 @@
 import type { FeishuBotConfig } from '../../feishu-bot/feishu-bot-config.entity';
+import { UserRole } from '../../common/enums';
 import { WorkFeishuTools } from './work-feishu.tools';
 
 /** 解析工具返回的 JSON 文本 */
@@ -43,13 +44,23 @@ describe('WorkFeishuTools 飞书历史查询', () => {
       ),
     };
     const groups = { findOne: jest.fn(() => Promise.resolve(null)) };
+    const officialMessages = {
+      send: jest.fn(() =>
+        Promise.resolve({
+          messageIds: ['om_1'],
+          receiveIdType: 'open_id',
+          receiveId: 'ou_x',
+        }),
+      ),
+    };
     const service = new WorkFeishuTools(
       configs as never,
       client as never,
       identities as never,
+      officialMessages as never,
       groups as never,
     );
-    return { service, configs, client, groups };
+    return { service, configs, client, groups, officialMessages };
   }
 
   it('非机器人身份拒绝查询', async () => {
@@ -150,5 +161,76 @@ describe('WorkFeishuTools 飞书历史查询', () => {
     const payload = payloadOf(result);
     expect(payload.thread_id).toBe('omt_1');
     expect(payload.messages.map((item) => item.message_id)).toEqual(['om_2']);
+  });
+});
+
+describe('WorkFeishuTools 平台名义发送', () => {
+  const worker = { id: 5, name: '技术-实施' };
+
+  function setup() {
+    const officialMessages = { send: jest.fn() };
+    officialMessages.send.mockResolvedValue({
+      messageIds: ['om_9'],
+      receiveIdType: 'open_id',
+      receiveId: 'ou_x',
+    });
+    const service = new WorkFeishuTools(
+      {} as never,
+      {} as never,
+      {} as never,
+      officialMessages as never,
+      {} as never,
+    );
+    return { service, officialMessages };
+  }
+
+  it('普通成员身份拒绝发送', async () => {
+    const { service } = setup();
+    await expect(
+      service.sendMessage(
+        { user: { id: 9, name: '张三', role: UserRole.MEMBER } as never },
+        { content: '你好' },
+      ),
+    ).rejects.toThrow('仅机器人令牌或管理员');
+  });
+
+  it('机器人身份发送并映射入参', async () => {
+    const { service, officialMessages } = setup();
+    const result = await service.sendMessage(
+      { worker: worker as never },
+      {
+        user_id: 7,
+        content: '**你好**',
+        title: '通知',
+        reply_to_message_id: 'om_parent',
+      },
+    );
+    expect(officialMessages.send).toHaveBeenCalledWith(
+      {
+        userId: 7,
+        openId: undefined,
+        chatId: undefined,
+        content: '**你好**',
+        title: '通知',
+        replyToMessageId: 'om_parent',
+      },
+      { type: 'worker', id: 5, name: '技术-实施' },
+    );
+    const first = result.content[0] as { text?: string };
+    expect(JSON.parse(first.text ?? '{}')).toMatchObject({
+      messageIds: ['om_9'],
+    });
+  });
+
+  it('管理员身份允许发送', async () => {
+    const { service, officialMessages } = setup();
+    await service.sendMessage(
+      { user: { id: 1, name: '管理员', role: UserRole.ADMIN } as never },
+      { chat_id: 'oc_group', content: '广播' },
+    );
+    expect(officialMessages.send).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 'oc_group' }),
+      { type: 'user', id: 1, name: '管理员' },
+    );
   });
 });

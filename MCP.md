@@ -12,7 +12,7 @@ type: docs
 
 | 服务 | 地址 | 用途 | 工具数 |
 |---|---|---|---|
-| `lita-work` | `http://work.cinta.team/api/mcp/work` | 直接操作平台数据：项目 / 文档 / 知识库 / 脚本运行 / 缺陷 / 提测 / 反馈 / 灵感 / 代码分支 / 任务协同 / 工单 / 机器人管理 / 飞书会话历史 | 96 |
+| `lita-work` | `http://work.cinta.team/api/mcp/work` | 直接操作平台数据：项目 / 文档 / 知识库 / 脚本运行 / 缺陷 / 提测 / 反馈 / 灵感 / 代码分支 / 任务协同 / 工单 / 机器人管理 / 飞书会话历史与消息发送 | 97 |
 | `lita-bots` | `http://work.cinta.team/api/mcp/bots` | 把平台机器人当**子 Agent** 调用（多轮会话、提问、中断、断线找回） | 6 |
 | `lita-proxy` | `http://proxy.cinta.team/mcp` | 内部资源运维：MySQL SQL、Nacos 配置、XXL-JOB 任务 | 14 |
 
@@ -77,7 +77,7 @@ Claude Code 的 `--header`、Codex 的 `bearer_token_env_var` 均见下文各节
 
 ### 2.1 lita-work：直接操作平台数据
 
-覆盖项目、文档、资源、节点、脚本运行、知识库、缺陷/提测、用户反馈、灵感、GitHub 代码分支、文件上传、任务协同、工单、机器人/任务定义和飞书会话历史查询。代表性工具：
+覆盖项目、文档、资源、节点、脚本运行、知识库、缺陷/提测、用户反馈、灵感、GitHub 代码分支、文件上传、任务协同、工单、机器人/任务定义和飞书会话历史查询、平台名义消息发送。代表性工具：
 
 | 分类 | 代表工具 |
 |---|---|
@@ -91,11 +91,11 @@ Claude Code 的 `--header`、Codex 的 `bearer_token_env_var` 均见下文各节
 | 任务协同 | `list_my_tasks`、`get_task`、`create_task`、`list_task_defines`、`create_subtask`、`accept_task` / `refuse_task`、`ask_task_question`、`answer_task_question`、`reply_task_message`、`list_task_documents`、`upsert_task_document`、`read_task_handoff`、`update_task_handoff`、`apply_task_acceptance`、`accept_task_handoff` / `refuse_task_handoff`、`fail_task`、`get_task_callback_url` |
 | 工单与工单文档 | `get_task_ticket`、`route_task_ticket`、`get_ticket`、`reject_ticket_node`、`list_ticket_documents`、`read_ticket_document`、`deliver_ticket_document`、`update_ticket_document`、`delete_ticket_document` |
 | 机器人与任务定义 | `list_workers`、`get_worker`、`create_worker`、`update_worker`、`delete_worker`、`list_worker_skill_catalog`、`list_worker_standard_catalog`、`list_task_templates`、`get_task_template`、`create_task_template`、`update_task_template`、`delete_task_template` |
-| 飞书会话 | `feishu_history`（群聊/话题/私聊最近 7 天消息，需机器人绑定飞书应用） |
+| 飞书 | `feishu_history`（群聊/话题/私聊最近 7 天消息，需机器人绑定飞书应用）、`feishu_send_message`（平台官方机器人身份发 Markdown 卡片，机器人或管理员可用，审计留痕） |
 
 - 写操作按令牌身份校验：任务接受/拒绝/提问/申请验收仅机器人令牌；答复/验收/返工/判失败仅任务需求方；
 - `/project/**`、`/task/**` 知识为系统镜像，只读，变更走对应业务流程；
-- 全部 96 个工具的清单与入参见 [lita-work 接入指南](http://work.cinta.team/work-mcp.md)。
+- 全部 97 个工具的清单与入参见 [lita-work 接入指南](http://work.cinta.team/work-mcp.md)。
 
 ### 2.2 lita-bots：把平台机器人当子 Agent
 
