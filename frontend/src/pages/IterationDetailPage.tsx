@@ -312,7 +312,7 @@ export function IterationDetailPage() {
           <TableRow>
             <TableHead className="w-24">编号</TableHead>
             <TableHead>标题</TableHead>
-            <TableHead className="text-center">负责人</TableHead>
+            <TableHead className="text-center">成员</TableHead>
             <TableHead className="w-36 text-center">预期上线</TableHead>
             <TableHead className="text-center">状态</TableHead>
             <TableHead className="text-center">交付任务</TableHead>
@@ -323,6 +323,11 @@ export function IterationDetailPage() {
         <TableBody>
           {detail.backlogs.map((backlog) => {
             const terminal = backlog.status === '完成' || backlog.status === '取消'
+            // 成员列：负责人排第一并加粗，其他成员按原有顺序跟在后面
+            const owner = backlog.ownerName
+            const members = (backlog.members ?? []).filter(
+              (member) => member.name !== owner,
+            )
             return (
               <TableRow key={backlog.id}>
                 <TableCell className="font-mono text-sm">{backlog.code}</TableCell>
@@ -335,7 +340,25 @@ export function IterationDetailPage() {
                   </span>
                 </TableCell>
                 <TableCell className="text-center">
-                  {backlog.ownerName ?? '—'}
+                  {owner || members.length > 0 ? (
+                    <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+                      {owner && (
+                        <span className="font-semibold" title="负责人">
+                          {owner}
+                        </span>
+                      )}
+                      {members.map((member) => (
+                        <span
+                          key={`${member.role}:${member.userId}`}
+                          title={member.role}
+                        >
+                          {member.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-foreground-muted">—</span>
+                  )}
                 </TableCell>
                 <TableCell className="text-center">
                   {formatHour(backlog.expectedOnlineAt)}
