@@ -40,6 +40,12 @@ import {
   PopoverTitle,
   PopoverDescription,
 } from '@appica/ui-react/popover'
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from '@appica/ui-react/tabs'
 import { Input } from '@appica/ui-react/input'
 import { Textarea } from '@appica/ui-react/textarea'
 import {
@@ -136,6 +142,9 @@ function eventSummary(event: BacklogEvent): string {
   return parts.join(' · ')
 }
 
+/** 内容分区：信息 / 文档 / 任务 / 事件 / 成员 */
+type BacklogDetailTab = 'info' | 'docs' | 'tasks' | 'events' | 'members'
+
 /**
  * 迭代项详情：基本信息（预期上线时间）、阶段时间、文档（转入时自需求迁入）、
  * 任务与工单面板（交付任务树 + 关联工单）、事件流与成员；
@@ -155,6 +164,9 @@ export function BacklogDetailPage() {
   // AI 面板（右下角浮动入口 + ⌥A 快捷键 + 可收起）
   const [aiOpen, setAiOpen] = useState(false)
   const [aiUnread, setAiUnread] = useState(0)
+
+  // 内容分区 tab
+  const [tab, setTab] = useState<BacklogDetailTab>('info')
 
   // 属性编辑
   const [timeOpen, setTimeOpen] = useState(false)
@@ -776,359 +788,383 @@ export function BacklogDetailPage() {
           </PopoverContent>
         </Popover>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>基本信息</CardTitle>
-            </CardHeader>
-            <div className="flex flex-col gap-2 px-4 pb-4 text-sm">
-              <InfoRow label="所属迭代">
-                <Link to={`/iterations/${backlog.iterationId}`} className="underline">
-                  #{backlog.iterationId}
-                </Link>
-              </InfoRow>
-              <InfoRow label="原始需求">
-                <Link to={`/projects/${backlog.projectId}`} className="underline">
-                  #{backlog.projectId}
-                </Link>
-              </InfoRow>
-              <InfoRow label="负责人">{backlog.ownerName ?? '—'}</InfoRow>
-              <InfoRow label="预期上线">
-                <span className="inline-flex items-center gap-2">
-                  {formatHour(backlog.expectedOnlineAt)}
-                  {canOperate && (
-                    <button
-                      type="button"
-                      className="text-foreground-muted underline"
-                      onClick={openTimeEdit}
-                    >
-                      编辑
-                    </button>
-                  )}
-                </span>
-              </InfoRow>
-              <InfoRow label="交付任务">
-                {backlog.taskId ? (
-                  <Link to={`/tasks/${backlog.taskId}`} className="underline">
-                    #{backlog.taskId}
-                  </Link>
-                ) : (
-                  '—'
-                )}
-              </InfoRow>
-              <InfoRow label="状态操作人">{backlog.statusBy ?? '—'}</InfoRow>
-            </div>
-          </Card>
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as BacklogDetailTab)}
+          variant="line"
+          className="flex min-h-0 flex-1 flex-col gap-0"
+        >
+          <TabsList className="shrink-0">
+            <TabsTrigger value="info">信息</TabsTrigger>
+            <TabsTrigger value="docs">文档 {docs?.length ?? 0}</TabsTrigger>
+            <TabsTrigger value="tasks">任务 {(related?.tasks ?? []).length}</TabsTrigger>
+            <TabsTrigger value="events">事件</TabsTrigger>
+            <TabsTrigger value="members">成员 {backlog.members?.length ?? 0}</TabsTrigger>
+          </TabsList>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>阶段时间</CardTitle>
-            </CardHeader>
-            <div className="flex flex-col gap-2 px-4 pb-4 text-sm">
-              <InfoRow label="开始执行">{formatTime(backlog.startedAt)}</InfoRow>
-              <InfoRow label="进入测试">{formatTime(backlog.testingAt)}</InfoRow>
-              <InfoRow label="进入发布">{formatTime(backlog.releasingAt)}</InfoRow>
-              <InfoRow label="完成">{formatTime(backlog.completedAt)}</InfoRow>
-              <InfoRow label="取消">{formatTime(backlog.canceledAt)}</InfoRow>
-            </div>
-          </Card>
-        </div>
-
-        {/* 文档：转入时自需求迁入，可继续创建 / 导入 / 关联 */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              文档
-              <Badge variant="soft">{docs?.length ?? 0}</Badge>
-            </CardTitle>
-            <CardDescription>
-              转入迭代时已迁移原始需求的文档；可继续创建、导入或关联需求下的其他文档
-            </CardDescription>
-          </CardHeader>
-          <div className="flex flex-wrap gap-2 px-4 pb-2">
-            <CreateDocumentDialog
-              projectId={backlog.projectId}
-              onCreated={(documentId) => {
-                if (documentId) {
-                  api
-                    .addBacklogDocument(id, documentId)
-                    .catch(() => undefined)
-                    .finally(() => {
-                      api.listBacklogDocuments(id).then(setDocs).catch(() => undefined)
-                    })
-                } else {
-                  api.listBacklogDocuments(id).then(setDocs).catch(() => undefined)
-                }
-                showFeedback({ kind: 'success', message: '文档已创建并关联' }, SUCCESS_STAY_MS)
-              }}
-            />
-            <ImportDocumentDialog
-              projectId={backlog.projectId}
-              onImported={(documentId) => {
-                if (documentId) {
-                  api
-                    .addBacklogDocument(id, documentId)
-                    .catch(() => undefined)
-                    .finally(() => {
-                      api.listBacklogDocuments(id).then(setDocs).catch(() => undefined)
-                    })
-                } else {
-                  api.listBacklogDocuments(id).then(setDocs).catch(() => undefined)
-                }
-                showFeedback({ kind: 'success', message: '文档已导入并关联' }, SUCCESS_STAY_MS)
-              }}
-            />
-            {canOperate && (
-              <Dialog open={linkOpen} onOpenChange={(open) => (open ? openLinkDialog() : setLinkOpen(false))}>
-                <DialogTrigger render={<Button variant="outline" size="sm" />}>
-                  关联已有文档
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>关联需求下的已有文档</DialogTitle>
-                  </DialogHeader>
-                  <DialogBody>
-                    <label className="flex flex-col gap-1 text-sm">
-                      文档（仅列出原始需求下尚未关联的文档）
-                      <Select
-                        value={linkTarget}
-                        onValueChange={(v) => setLinkTarget(v as string)}
-                        items={linkableItems}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择文档" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(projectDocs ?? [])
-                            .filter((doc) => !(docs ?? []).some((linked) => linked.id === doc.id))
-                            .map((doc) => (
-                              <SelectItem key={doc.id} value={String(doc.id)}>
-                                {doc.title}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </label>
-                  </DialogBody>
-                  <DialogFooter>
-                    <DialogClose>
-                      <Button variant="outline" size="sm">取消</Button>
-                    </DialogClose>
-                    <Button size="sm" onClick={() => linkDocument()} disabled={linkSaving || !linkTarget}>
-                      {linkSaving ? '关联中…' : '确认关联'}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            )}
-          </div>
-          <Table hoverableRows>
-            <TableHeader>
-              <TableRow>
-                <TableHead>标题</TableHead>
-                <TableHead className="w-20 text-center">类型</TableHead>
-                <TableHead className="w-24 text-center">来源</TableHead>
-                <TableHead className="w-44 text-center">更新时间</TableHead>
-                <TableHead className="w-24 text-center">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(docs ?? []).map((doc) => (
-                <TableRow key={doc.id}>
-                  <TableCell>
-                    <Link to={`/documents/${doc.id}`} className="underline">
-                      {doc.title}
+          <TabsContent value="info" keepMounted className="flex flex-col gap-4 pt-4">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>基本信息</CardTitle>
+                </CardHeader>
+                <div className="flex flex-col gap-2 px-4 pb-4 text-sm">
+                  <InfoRow label="所属迭代">
+                    <Link to={`/iterations/${backlog.iterationId}`} className="underline">
+                      #{backlog.iterationId}
                     </Link>
-                  </TableCell>
-                  <TableCell className="text-center">{doc.type}</TableCell>
-                  <TableCell className="text-center">{documentSourceLabel(doc.source)}</TableCell>
-                  <TableCell className="text-center">{formatTime(doc.updatedAt)}</TableCell>
-                  <TableCell className="text-center">
-                    {canOperate ? (
-                      <button
-                        type="button"
-                        className="text-sm text-foreground-muted underline"
-                        onClick={() => unlinkDocument(doc.id)}
-                      >
-                        取消关联
-                      </button>
-                    ) : (
-                      <span className="text-foreground-muted">—</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {(docs ?? []).length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5}>
-                    {docs === null ? '加载中…' : '暂无文档；转入迭代时会自动迁入原始需求的文档'}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
-
-        {/* 任务与工单：交付任务树 + 相关工单 */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              任务与工单
-              <Badge variant="soft">{(related?.tasks ?? []).length}</Badge>
-              <Badge variant="soft">{(related?.tickets ?? []).length} 工单</Badge>
-            </CardTitle>
-            <CardDescription>
-              交付任务及其全部子任务，以及直接关联（提测工单等）与任务关联的工单
-            </CardDescription>
-          </CardHeader>
-          {(related?.tickets ?? []).length > 0 && (
-            <Table hoverableRows>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-24">工单</TableHead>
-                  <TableHead>标题</TableHead>
-                  <TableHead className="w-28 text-center">状态</TableHead>
-                  <TableHead className="w-36 text-center">当前节点</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(related?.tickets ?? []).map((ticket) => (
-                  <TableRow key={ticket.id}>
-                    <TableCell className="font-mono text-sm">
-                      <Link to={`/tickets/${ticket.id}`} className="underline">
-                        {ticket.code}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="max-w-md truncate" title={ticket.title}>
-                      {ticket.title}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <TicketStatusBadge status={ticket.workflowStatus ?? '处理中'} />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {ticket.currentNodeName ?? '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          <Table hoverableRows>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-24">编号</TableHead>
-                <TableHead>标题</TableHead>
-                <TableHead className="w-32 text-center">状态</TableHead>
-                <TableHead className="w-36 text-center">任务定义</TableHead>
-                <TableHead className="w-44 text-center">更新时间</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(related?.tasks ?? []).map((task) => (
-                <TableRow key={task.id}>
-                  <TableCell className="font-mono text-sm">
-                    <Link to={`/tasks/${task.id}`} className="underline">
-                      {task.code}
+                  </InfoRow>
+                  <InfoRow label="原始需求">
+                    <Link to={`/projects/${backlog.projectId}`} className="underline">
+                      #{backlog.projectId}
                     </Link>
-                  </TableCell>
-                  <TableCell className="max-w-md truncate" title={task.title}>
-                    <span style={{ paddingLeft: (taskDepthById.get(task.id) ?? 0) * 16 }}>
-                      {task.parentId && (
-                        <span className="mr-1 text-foreground-muted">└</span>
+                  </InfoRow>
+                  <InfoRow label="负责人">{backlog.ownerName ?? '—'}</InfoRow>
+                  <InfoRow label="预期上线">
+                    <span className="inline-flex items-center gap-2">
+                      {formatHour(backlog.expectedOnlineAt)}
+                      {canOperate && (
+                        <button
+                          type="button"
+                          className="text-foreground-muted underline"
+                          onClick={openTimeEdit}
+                        >
+                          编辑
+                        </button>
                       )}
-                      {task.title}
                     </span>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <TaskStatusBadge status={task.status} subStatus={task.subStatus} />
-                  </TableCell>
-                  <TableCell className="text-center">{task.templateName ?? '—'}</TableCell>
-                  <TableCell className="text-center">{formatTime(task.updatedAt)}</TableCell>
-                </TableRow>
-              ))}
-              {(related?.tasks ?? []).length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5}>
-                    {related === null ? '加载中…' : '暂无交付任务'}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Card>
+                  </InfoRow>
+                  <InfoRow label="交付任务">
+                    {backlog.taskId ? (
+                      <Link to={`/tasks/${backlog.taskId}`} className="underline">
+                        #{backlog.taskId}
+                      </Link>
+                    ) : (
+                      '—'
+                    )}
+                  </InfoRow>
+                  <InfoRow label="状态操作人">{backlog.statusBy ?? '—'}</InfoRow>
+                </div>
+              </Card>
 
-        {/* 事件流 */}
-        <Card>
-          <CardHeader>
-            <CardTitle>事件</CardTitle>
-            <CardDescription>创建、状态流转（含备注）、移动迭代、提测工单等完整记录</CardDescription>
-          </CardHeader>
-          <div className="flex flex-col gap-1.5 px-4 pb-4 text-sm">
-            {(events ?? []).map((event) => (
-              <div key={event.id} className="flex flex-wrap items-baseline gap-2">
-                <span className="shrink-0 text-xs text-foreground-muted">
-                  {formatTime(event.createdAt)}
-                </span>
-                <Badge variant="soft">{EVENT_LABELS[event.type] ?? event.type}</Badge>
-                <span>{event.operator ?? '系统'}</span>
-                {eventSummary(event) && (
-                  <span className="text-foreground-muted">{eventSummary(event)}</span>
+              <Card>
+                <CardHeader>
+                  <CardTitle>阶段时间</CardTitle>
+                </CardHeader>
+                <div className="flex flex-col gap-2 px-4 pb-4 text-sm">
+                  <InfoRow label="开始执行">{formatTime(backlog.startedAt)}</InfoRow>
+                  <InfoRow label="进入测试">{formatTime(backlog.testingAt)}</InfoRow>
+                  <InfoRow label="进入发布">{formatTime(backlog.releasingAt)}</InfoRow>
+                  <InfoRow label="完成">{formatTime(backlog.completedAt)}</InfoRow>
+                  <InfoRow label="取消">{formatTime(backlog.canceledAt)}</InfoRow>
+                </div>
+              </Card>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to={`/iterations/${backlog.iterationId}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                返回迭代
+              </Link>
+              <Link
+                to={`/projects/${backlog.projectId}`}
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              >
+                查看原始需求
+              </Link>
+              {backlog.taskId && (
+                <Link
+                  to={`/tasks/${backlog.taskId}`}
+                  className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                >
+                  查看交付任务
+                </Link>
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="docs" keepMounted className="pt-4">
+            {/* 文档：转入时自需求迁入，可继续创建 / 导入 / 关联 */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  文档
+                  <Badge variant="soft">{docs?.length ?? 0}</Badge>
+                </CardTitle>
+                <CardDescription>
+                  转入迭代时已迁移原始需求的文档；可继续创建、导入或关联需求下的其他文档
+                </CardDescription>
+              </CardHeader>
+              <div className="flex flex-wrap gap-2 px-4 pb-2">
+                <CreateDocumentDialog
+                  projectId={backlog.projectId}
+                  onCreated={(documentId) => {
+                    if (documentId) {
+                      api
+                        .addBacklogDocument(id, documentId)
+                        .catch(() => undefined)
+                        .finally(() => {
+                          api.listBacklogDocuments(id).then(setDocs).catch(() => undefined)
+                        })
+                    } else {
+                      api.listBacklogDocuments(id).then(setDocs).catch(() => undefined)
+                    }
+                    showFeedback({ kind: 'success', message: '文档已创建并关联' }, SUCCESS_STAY_MS)
+                  }}
+                />
+                <ImportDocumentDialog
+                  projectId={backlog.projectId}
+                  onImported={(documentId) => {
+                    if (documentId) {
+                      api
+                        .addBacklogDocument(id, documentId)
+                        .catch(() => undefined)
+                        .finally(() => {
+                          api.listBacklogDocuments(id).then(setDocs).catch(() => undefined)
+                        })
+                    } else {
+                      api.listBacklogDocuments(id).then(setDocs).catch(() => undefined)
+                    }
+                    showFeedback({ kind: 'success', message: '文档已导入并关联' }, SUCCESS_STAY_MS)
+                  }}
+                />
+                {canOperate && (
+                  <Dialog open={linkOpen} onOpenChange={(open) => (open ? openLinkDialog() : setLinkOpen(false))}>
+                    <DialogTrigger render={<Button variant="outline" size="sm" />}>
+                      关联已有文档
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>关联需求下的已有文档</DialogTitle>
+                      </DialogHeader>
+                      <DialogBody>
+                        <label className="flex flex-col gap-1 text-sm">
+                          文档（仅列出原始需求下尚未关联的文档）
+                          <Select
+                            value={linkTarget}
+                            onValueChange={(v) => setLinkTarget(v as string)}
+                            items={linkableItems}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="选择文档" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(projectDocs ?? [])
+                                .filter((doc) => !(docs ?? []).some((linked) => linked.id === doc.id))
+                                .map((doc) => (
+                                  <SelectItem key={doc.id} value={String(doc.id)}>
+                                    {doc.title}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </label>
+                      </DialogBody>
+                      <DialogFooter>
+                        <DialogClose>
+                          <Button variant="outline" size="sm">取消</Button>
+                        </DialogClose>
+                        <Button size="sm" onClick={() => linkDocument()} disabled={linkSaving || !linkTarget}>
+                          {linkSaving ? '关联中…' : '确认关联'}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 )}
               </div>
-            ))}
-            {(events ?? []).length === 0 && (
-              <span className="text-foreground-muted">
-                {events === null ? '加载中…' : '暂无事件'}
-              </span>
-            )}
-          </div>
-        </Card>
+              <Table hoverableRows>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>标题</TableHead>
+                    <TableHead className="w-20 text-center">类型</TableHead>
+                    <TableHead className="w-24 text-center">来源</TableHead>
+                    <TableHead className="w-44 text-center">更新时间</TableHead>
+                    <TableHead className="w-24 text-center">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(docs ?? []).map((doc) => (
+                    <TableRow key={doc.id}>
+                      <TableCell>
+                        <Link to={`/documents/${doc.id}`} className="underline">
+                          {doc.title}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-center">{doc.type}</TableCell>
+                      <TableCell className="text-center">{documentSourceLabel(doc.source)}</TableCell>
+                      <TableCell className="text-center">{formatTime(doc.updatedAt)}</TableCell>
+                      <TableCell className="text-center">
+                        {canOperate ? (
+                          <button
+                            type="button"
+                            className="text-sm text-foreground-muted underline"
+                            onClick={() => unlinkDocument(doc.id)}
+                          >
+                            取消关联
+                          </button>
+                        ) : (
+                          <span className="text-foreground-muted">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {(docs ?? []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        {docs === null ? '加载中…' : '暂无文档；转入迭代时会自动迁入原始需求的文档'}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </Card>
+          </TabsContent>
 
-        {/* 成员 */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              成员
-              <Badge variant="soft">{backlog.members?.length ?? 0}</Badge>
-            </CardTitle>
-            <CardDescription>
-              产品 / 业务 / 项目 / 技术（前端、后端、测试、客户端）；成员或管理员可推进状态与提测
-            </CardDescription>
-          </CardHeader>
-          <div className="flex flex-wrap gap-2 px-4 pb-4">
-            {(backlog.members ?? []).length === 0 && (
-              <span className="text-sm text-foreground-muted">暂无成员</span>
-            )}
-            {(backlog.members ?? []).map((member) => (
-              <Badge key={`${member.role}:${member.userId}`} variant="soft">
-                {member.role}：{member.name}
-              </Badge>
-            ))}
-          </div>
-        </Card>
+          <TabsContent value="tasks" keepMounted className="pt-4">
+            {/* 任务与工单：交付任务树 + 相关工单 */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  任务与工单
+                  <Badge variant="soft">{(related?.tasks ?? []).length}</Badge>
+                  <Badge variant="soft">{(related?.tickets ?? []).length} 工单</Badge>
+                </CardTitle>
+                <CardDescription>
+                  交付任务及其全部子任务，以及直接关联（提测工单等）与任务关联的工单
+                </CardDescription>
+              </CardHeader>
+              {(related?.tickets ?? []).length > 0 && (
+                <Table hoverableRows>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-24">工单</TableHead>
+                      <TableHead>标题</TableHead>
+                      <TableHead className="w-28 text-center">状态</TableHead>
+                      <TableHead className="w-36 text-center">当前节点</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(related?.tickets ?? []).map((ticket) => (
+                      <TableRow key={ticket.id}>
+                        <TableCell className="font-mono text-sm">
+                          <Link to={`/tickets/${ticket.id}`} className="underline">
+                            {ticket.code}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="max-w-md truncate" title={ticket.title}>
+                          {ticket.title}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <TicketStatusBadge status={ticket.workflowStatus ?? '处理中'} />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {ticket.currentNodeName ?? '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              <Table hoverableRows>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-24">编号</TableHead>
+                    <TableHead>标题</TableHead>
+                    <TableHead className="w-32 text-center">状态</TableHead>
+                    <TableHead className="w-36 text-center">任务定义</TableHead>
+                    <TableHead className="w-44 text-center">更新时间</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(related?.tasks ?? []).map((task) => (
+                    <TableRow key={task.id}>
+                      <TableCell className="font-mono text-sm">
+                        <Link to={`/tasks/${task.id}`} className="underline">
+                          {task.code}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="max-w-md truncate" title={task.title}>
+                        <span style={{ paddingLeft: (taskDepthById.get(task.id) ?? 0) * 16 }}>
+                          {task.parentId && (
+                            <span className="mr-1 text-foreground-muted">└</span>
+                          )}
+                          {task.title}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <TaskStatusBadge status={task.status} subStatus={task.subStatus} />
+                      </TableCell>
+                      <TableCell className="text-center">{task.templateName ?? '—'}</TableCell>
+                      <TableCell className="text-center">{formatTime(task.updatedAt)}</TableCell>
+                    </TableRow>
+                  ))}
+                  {(related?.tasks ?? []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5}>
+                        {related === null ? '加载中…' : '暂无交付任务'}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </Card>
+          </TabsContent>
 
-        <div className="flex flex-wrap gap-2">
-          <Link
-            to={`/iterations/${backlog.iterationId}`}
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            返回迭代
-          </Link>
-          <Link
-            to={`/projects/${backlog.projectId}`}
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            查看原始需求
-          </Link>
-          {backlog.taskId && (
-            <Link
-              to={`/tasks/${backlog.taskId}`}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              查看交付任务
-            </Link>
-          )}
-        </div>
+          <TabsContent value="events" keepMounted className="pt-4">
+            {/* 事件流 */}
+            <Card>
+              <CardHeader>
+                <CardTitle>事件</CardTitle>
+                <CardDescription>创建、状态流转（含备注）、移动迭代、提测工单等完整记录</CardDescription>
+              </CardHeader>
+              <div className="flex flex-col gap-1.5 px-4 pb-4 text-sm">
+                {(events ?? []).map((event) => (
+                  <div key={event.id} className="flex flex-wrap items-baseline gap-2">
+                    <span className="shrink-0 text-xs text-foreground-muted">
+                      {formatTime(event.createdAt)}
+                    </span>
+                    <Badge variant="soft">{EVENT_LABELS[event.type] ?? event.type}</Badge>
+                    <span>{event.operator ?? '系统'}</span>
+                    {eventSummary(event) && (
+                      <span className="text-foreground-muted">{eventSummary(event)}</span>
+                    )}
+                  </div>
+                ))}
+                {(events ?? []).length === 0 && (
+                  <span className="text-foreground-muted">
+                    {events === null ? '加载中…' : '暂无事件'}
+                  </span>
+                )}
+              </div>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="members" keepMounted className="pt-4">
+            {/* 成员 */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  成员
+                  <Badge variant="soft">{backlog.members?.length ?? 0}</Badge>
+                </CardTitle>
+                <CardDescription>
+                  产品 / 业务 / 项目 / 技术（前端、后端、测试、客户端）；成员或管理员可推进状态与提测
+                </CardDescription>
+              </CardHeader>
+              <div className="flex flex-wrap gap-2 px-4 pb-4">
+                {(backlog.members ?? []).length === 0 && (
+                  <span className="text-sm text-foreground-muted">暂无成员</span>
+                )}
+                {(backlog.members ?? []).map((member) => (
+                  <Badge key={`${member.role}:${member.userId}`} variant="soft">
+                    {member.role}：{member.name}
+                  </Badge>
+                ))}
+              </div>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* 预期上线时间编辑弹窗（到小时） */}
