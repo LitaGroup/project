@@ -3,16 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Button } from '@appica/ui-react/button'
 import { Badge } from '@appica/ui-react/badge'
 import { Input } from '@appica/ui-react/input'
-import {
-  AlertDialog,
-  AlertDialogTrigger,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogClose,
-} from '@appica/ui-react/alert-dialog'
 import { Loader, Refresh, Robot } from '@appica/icons-react'
 import {
   api,
@@ -203,6 +193,34 @@ export function RobotChatPage() {
     }
   }, [loadOverview, selectedId, snapshot?.status, valid])
 
+  /** 按钮与 ⌥R 快捷键共用的可用条件 */
+  const canReset =
+    !!snapshot &&
+    snapshot.status !== 'running' &&
+    snapshot.messages.length > 0 &&
+    !resetting
+
+  // ⌥/Alt+R：直接重置当前会话；用 code 兼容 macOS Option+R 的死键行为。
+  useEffect(() => {
+    if (!canReset) return
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (
+        event.repeat ||
+        event.code !== 'KeyR' ||
+        !event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return
+      }
+      event.preventDefault()
+      void reset()
+    }
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [canReset, reset])
+
   return (
     <div className="flex h-full min-h-0">
       <aside className="w-[20%] shrink-0 overflow-y-auto bg-background p-3">
@@ -328,52 +346,19 @@ export function RobotChatPage() {
                   {snapshot?.status === 'running' && (
                     <span className="text-xs text-foreground-muted">回复中…</span>
                   )}
-                  <AlertDialog>
-                    <AlertDialogTrigger
-                      render={
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={
-                            !snapshot ||
-                            snapshot.status === 'running' ||
-                            resetting ||
-                            snapshot.messages.length === 0
-                          }
-                        />
-                      }
-                    >
-                      <Refresh className="size-3.5" />
-                      重置会话
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>重置聊天会话</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          将清空当前会话消息并解绑 opencode
-                          会话，下一条消息会创建新会话。机器人调试与「我的
-                          AI」会话不会受到影响。
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogClose>
-                          <Button variant="outline" size="sm">
-                            取消
-                          </Button>
-                        </AlertDialogClose>
-                        <AlertDialogClose>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            disabled={resetting}
-                            onClick={reset}
-                          >
-                            {resetting ? '重置中…' : '确认重置'}
-                          </Button>
-                        </AlertDialogClose>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!canReset}
+                    title="重置会话（⌥R）"
+                    onClick={() => void reset()}
+                  >
+                    <Refresh className="size-3.5" />
+                    {resetting ? '重置中…' : '重置会话'}
+                    <kbd className="text-[10px] font-normal text-foreground-subtle">
+                      ⌥R
+                    </kbd>
+                  </Button>
                 </div>
               </header>
 
