@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Outlet, Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   Navigation,
@@ -353,19 +353,17 @@ export function Layout() {
     (item) => item.enabled && item.latestPublishedVersion > 0,
   )
 
-  useEffect(() => {
-    if (!user) return
-    let alive = true
+  // 每次打开「+」都重新拉取，避免管理区发布/启用新配置后菜单仍是登录时的旧数据
+  const reloadTicketWorkflows = useCallback(() => {
     api
       .listTicketWorkflowDefinitions()
-      .then((rows) => {
-        if (alive) setTicketWorkflows(rows)
-      })
+      .then((rows) => setTicketWorkflows(rows))
       .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [user])
+  }, [])
+
+  useEffect(() => {
+    if (user) reloadTicketWorkflows()
+  }, [user, reloadTicketWorkflows])
 
   // 工作台/机器人/个人中心不归属任何顶级分区（避免高亮「业务」），个人中心使用独立左侧导航
   const activeSection = isWorkbench || isRobotChat
@@ -482,7 +480,10 @@ export function Layout() {
           </TooltipProvider>
           <DropdownMenu
             open={createOpen}
-            onOpenChange={(open) => setCreateOpen(open)}
+            onOpenChange={(open) => {
+              setCreateOpen(open)
+              if (open) reloadTicketWorkflows()
+            }}
           >
             <Tooltip>
               <TooltipTrigger
@@ -518,17 +519,20 @@ export function Layout() {
                 新建任务
               </DropdownMenuItem>
               {availableTicketWorkflows.length > 0 ? (
-                availableTicketWorkflows.slice(0, 5).map((workflow) => (
-                  <DropdownMenuItem
-                    key={workflow.id}
-                    onClick={() =>
-                      navigate(`/tickets/wf/${workflow.id}/new`)
-                    }
-                  >
-                    <ClipboardList size={16} />
-                    新建{workflow.name}
-                  </DropdownMenuItem>
-                ))
+                <>
+                  <DropdownMenuSeparator />
+                  {availableTicketWorkflows.map((workflow) => (
+                    <DropdownMenuItem
+                      key={workflow.id}
+                      onClick={() =>
+                        navigate(`/tickets/wf/${workflow.id}/new`)
+                      }
+                    >
+                      <ClipboardList size={16} />
+                      新建{workflow.name}
+                    </DropdownMenuItem>
+                  ))}
+                </>
               ) : isAdmin ? (
                 <DropdownMenuItem
                   onClick={() => navigate('/admin/ticket-config')}
