@@ -87,14 +87,20 @@ function normalizeInputFields(
     if (!(WORKFLOW_INPUT_FIELD_TYPES as readonly string[]).includes(type)) {
       bad(`输入字段「${key}」的类型不正确`);
     }
-    const options =
-      type === 'select'
-        ? (Array.isArray(item.options) ? item.options : [])
-            .map((option) => String(option ?? '').trim())
-            .filter(Boolean)
-        : undefined;
-    if (type === 'select' && (!options || options.length === 0)) {
-      bad(`单选字段「${key}」至少需要一个选项`);
+    const choice = type === 'select' || type === 'multiselect';
+    const options = choice
+      ? Array.from(
+          new Set(
+            (Array.isArray(item.options) ? item.options : [])
+              .map((option) => String(option ?? '').trim())
+              .filter(Boolean),
+          ),
+        )
+      : undefined;
+    if (choice && (!options || options.length === 0)) {
+      bad(
+        `${type === 'select' ? '单选' : '多选'}字段「${key}」至少需要一个选项`,
+      );
     }
     const rawDefault = item.defaultValue;
     const defaultValue =
@@ -110,6 +116,28 @@ function normalizeInputFields(
               typeof rawDefault === 'bigint'
             ? rawDefault.toString()
             : JSON.stringify(rawDefault);
+    let normalizedDefault = defaultValue;
+    if (defaultValue !== null && choice) {
+      const defaultValues =
+        type === 'select'
+          ? [defaultValue.trim()]
+          : defaultValue
+              .split(',')
+              .map((value) => value.trim())
+              .filter(Boolean);
+      const invalid = defaultValues.find(
+        (value) => !(options ?? []).includes(value),
+      );
+      if (invalid !== undefined) {
+        bad(
+          `${type === 'select' ? '单选' : '多选'}字段「${key}」的默认值「${invalid}」不在选项中`,
+        );
+      }
+      normalizedDefault =
+        type === 'select'
+          ? defaultValues[0]
+          : Array.from(new Set(defaultValues)).join(',');
+    }
     fields.push({
       key,
       label: text(item.label, `输入字段「${key}」的名称`, 100),
@@ -121,7 +149,7 @@ function normalizeInputFields(
         `输入字段「${key}」的占位提示`,
         200,
       ),
-      defaultValue,
+      defaultValue: normalizedDefault,
     });
   });
   return fields;
@@ -282,6 +310,9 @@ function conditionOperatorsForType(
       return ['eq', 'ne', 'contains', 'empty', 'notEmpty'];
     case 'select':
       return ['eq', 'ne', 'empty', 'notEmpty'];
+    case 'multiselect':
+      // 多选按「选中项包含某选项」判断，不做顺序相关的等值比较
+      return ['contains', 'empty', 'notEmpty'];
     default:
       return [];
   }
@@ -381,7 +412,10 @@ export function normalizeWorkflowDefinition(
         if (field.type === 'date' && !DATE_VALUE_PATTERN.test(value)) {
           bad(`条件字段「${field.label}」的比较值必须是日期（YYYY-MM-DD）`);
         }
-        if (field.type === 'select' && !(field.options ?? []).includes(value)) {
+        if (
+          (field.type === 'select' || field.type === 'multiselect') &&
+          !(field.options ?? []).includes(value)
+        ) {
           bad(`条件字段「${field.label}」的比较值必须是可选选项之一`);
         }
       }

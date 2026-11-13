@@ -704,9 +704,15 @@ export function TicketDetailPage() {
                         {inputEntries.map(([key, value]) => {
                           const field = fieldByKey.get(key)
                           const text =
-                            typeof value === 'object' && value !== null
-                              ? JSON.stringify(value)
-                              : String(value ?? '')
+                            field?.type === 'multiselect'
+                              ? (Array.isArray(value)
+                                  ? value.map((item) => String(item))
+                                  : String(value ?? '').split(','))
+                                  .filter(Boolean)
+                                  .join('、')
+                              : typeof value === 'object' && value !== null
+                                ? JSON.stringify(value)
+                                : String(value ?? '')
                           return (
                             <div
                               key={key}

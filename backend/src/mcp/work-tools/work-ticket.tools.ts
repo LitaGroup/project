@@ -19,21 +19,39 @@ function cell(value: string | number | null | undefined): string {
   return text.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ') || '-';
 }
 
+/** 起始节点输入字段类型的中文名称 */
+const INPUT_FIELD_TYPE_LABEL: Record<WorkflowInputField['type'], string> = {
+  text: '单行文本',
+  textarea: '多行文本',
+  number: '数字',
+  date: '日期',
+  select: '单选',
+  multiselect: '多选',
+  file: '文件',
+};
+
 /** 起始节点输入字段表格 */
 function inputFieldsLines(fields: WorkflowInputField[]): string[] {
   if (!fields.length) return ['起始节点无输入字段。'];
-  return [
+  const lines = [
     '| 字段 key | 名称 | 类型 | 必填 | 选项 | 默认值 |',
     '|---|---|---|---|---|---|',
     ...fields.map(
       (field) =>
-        `| ${cell(field.key)} | ${cell(field.label)} | ${cell(field.type)} | ${
-          field.required ? '是' : '否'
-        } | ${cell((field.options ?? []).join(' / '))} | ${cell(
-          field.defaultValue as string | number | null,
-        )} |`,
+        `| ${cell(field.key)} | ${cell(field.label)} | ${cell(
+          INPUT_FIELD_TYPE_LABEL[field.type] ?? field.type,
+        )} | ${field.required ? '是' : '否'} | ${cell(
+          (field.options ?? []).join(' / '),
+        )} | ${cell(field.defaultValue as string | number | null)} |`,
     ),
   ];
+  if (fields.some((field) => field.type === 'multiselect')) {
+    lines.push(
+      '',
+      '多选字段（类型为「多选」）的值可传字符串数组（如 `["A","B"]`）或英文逗号分隔字符串（如 `"A,B"`），只能取选项列表中的值。',
+    );
+  }
+  return lines;
 }
 
 /**
@@ -121,7 +139,9 @@ export class WorkTicketTools implements WorkToolRegistrar {
           inputValues: z
             .record(z.string(), z.unknown())
             .optional()
-            .describe('起始节点输入字段（key → 值）'),
+            .describe(
+              '起始节点输入字段（key → 值）；多选字段可传字符串数组或英文逗号分隔字符串',
+            ),
         },
       },
       async (args) =>

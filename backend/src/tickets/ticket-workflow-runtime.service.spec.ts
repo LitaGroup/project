@@ -817,6 +817,27 @@ describe('TicketWorkflowRuntimeService', () => {
         'hit',
       ],
       [
+        '多选包含选中项',
+        { tags: '前端,后端' },
+        [{ field: 'tags', operator: 'contains', value: '后端' }],
+        [inputField('tags', 'multiselect', ['前端', '后端'])],
+        'hit',
+      ],
+      [
+        '多选不包含时走默认分支',
+        { tags: '前端' },
+        [{ field: 'tags', operator: 'contains', value: '后端' }],
+        [inputField('tags', 'multiselect', ['前端', '后端'])],
+        'miss',
+      ],
+      [
+        '多选按选项精确匹配而非子串',
+        { tags: '前端页面' },
+        [{ field: 'tags', operator: 'contains', value: '前端' }],
+        [inputField('tags', 'multiselect', ['前端', '前端页面'])],
+        'miss',
+      ],
+      [
         '为空',
         { remark: '' },
         [{ field: 'remark', operator: 'empty' }],
@@ -907,6 +928,64 @@ describe('TicketWorkflowRuntimeService', () => {
         5,
         expect.objectContaining({ workflowStatus: '已失败' }),
       );
+    });
+  });
+
+  describe('多选输入归一化', () => {
+    type Normalizer = {
+      normalizeInputValues: (
+        fields: WorkflowInputField[],
+        input: Record<string, unknown>,
+      ) => Record<string, unknown>;
+    };
+
+    const normalize = (
+      fields: WorkflowInputField[],
+      input: Record<string, unknown>,
+    ) => (service as unknown as Normalizer).normalizeInputValues(fields, input);
+
+    const tagsField = (
+      options: string[],
+      patch: Partial<WorkflowInputField> = {},
+    ): WorkflowInputField => ({
+      key: 'tags',
+      label: '标签',
+      type: 'multiselect',
+      required: false,
+      options,
+      placeholder: null,
+      defaultValue: null,
+      ...patch,
+    });
+
+    it('接受字符串数组并去重后保存为逗号拼接串', () => {
+      expect(
+        normalize([tagsField(['A', 'B'])], { tags: ['A', 'B', 'A'] }),
+      ).toEqual({ tags: 'A,B' });
+    });
+
+    it('接受英文逗号分隔字符串并忽略空项', () => {
+      expect(normalize([tagsField(['A', 'B'])], { tags: ' A, ,B ' })).toEqual({
+        tags: 'A,B',
+      });
+    });
+
+    it('拒绝不在选项内取值', () => {
+      expect(() => normalize([tagsField(['A'])], { tags: ['A', 'C'] })).toThrow(
+        '包含无效选项「C」',
+      );
+    });
+
+    it('必填多选不能为空', () => {
+      expect(() =>
+        normalize([tagsField(['A'], { required: true })], { tags: [] }),
+      ).toThrow('不能为空');
+    });
+
+    it('空值回落到默认值', () => {
+      expect(
+        normalize([tagsField(['A', 'B'], { defaultValue: 'A' })], {}),
+      ).toEqual({ tags: 'A' });
     });
   });
 

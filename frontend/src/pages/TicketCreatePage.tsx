@@ -161,6 +161,7 @@ export function TicketCreatePage() {
                     {field.type === 'number' && '数字'}
                     {field.type === 'date' && '日期'}
                     {field.type === 'select' && '单选'}
+                    {field.type === 'multiselect' && '多选'}
                     {field.type === 'file' && '文件'}
                   </Badge>
                 </span>
@@ -194,6 +195,34 @@ export function TicketCreatePage() {
                       <SelectItem value={NO_OPTION}>
                         {field.placeholder ?? '请选择'}
                       </SelectItem>
+                      {(field.options ?? []).map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : field.type === 'multiselect' ? (
+                  <Select
+                    multiple
+                    value={(values[field.key] ?? '').split(',').filter(Boolean)}
+                    onValueChange={(value) =>
+                      update(field.key, (value as string[]).join(','))
+                    }
+                    items={Object.fromEntries(
+                      (field.options ?? []).map((option) => [option, option]),
+                    )}
+                  >
+                    <SelectTrigger clearable>
+                      <SelectValue placeholder={field.placeholder ?? '请选择'}>
+                        {(selected: string[]) =>
+                          selected.length === 0
+                            ? (field.placeholder ?? '请选择')
+                            : selected.join('、')
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
                       {(field.options ?? []).map((option) => (
                         <SelectItem key={option} value={option}>
                           {option}

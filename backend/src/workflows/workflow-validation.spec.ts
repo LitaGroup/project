@@ -474,6 +474,117 @@ describe('normalizeWorkflowDefinition', () => {
     );
   });
 
+  it('多选字段至少需要一个选项', () => {
+    const definition = conditionDefinition();
+    const start = definition.nodes.find((item) => item.kind === 'start');
+    if (!start) throw new Error('起始节点不存在');
+    start.inputFields = [
+      {
+        key: 'tags',
+        label: '标签',
+        type: 'multiselect',
+        required: false,
+        options: [],
+        placeholder: null,
+        defaultValue: null,
+      },
+    ];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '多选字段「tags」至少需要一个选项',
+    );
+  });
+
+  it('多选字段选项去重并允许包含判断', () => {
+    const definition = conditionDefinition();
+    const start = definition.nodes.find((item) => item.kind === 'start');
+    if (!start) throw new Error('起始节点不存在');
+    start.inputFields = [
+      {
+        key: 'tags',
+        label: '标签',
+        type: 'multiselect',
+        required: false,
+        options: ['A', 'A', 'B'],
+        placeholder: null,
+        defaultValue: 'A,B',
+      },
+    ];
+    const edge = definition.edges.find(
+      (item) => item.from === 'condition' && item.conditions?.length,
+    );
+    if (!edge) throw new Error('判断流转不存在');
+    edge.conditions = [{ field: 'tags', operator: 'contains', value: 'A' }];
+    const normalized = normalizeWorkflowDefinition(definition, true);
+    const field = normalized.nodes.find((item) => item.kind === 'start')
+      ?.inputFields?.[0];
+    expect(field?.options).toEqual(['A', 'B']);
+  });
+
+  it('多选条件的比较值必须在选项内', () => {
+    const definition = conditionDefinition();
+    const start = definition.nodes.find((item) => item.kind === 'start');
+    if (!start) throw new Error('起始节点不存在');
+    start.inputFields = [
+      {
+        key: 'tags',
+        label: '标签',
+        type: 'multiselect',
+        required: false,
+        options: ['高', '低'],
+        placeholder: null,
+        defaultValue: null,
+      },
+    ];
+    const edge = definition.edges.find(
+      (item) => item.from === 'condition' && item.conditions?.length,
+    );
+    if (!edge) throw new Error('判断流转不存在');
+    edge.conditions = [{ field: 'tags', operator: 'contains', value: '中' }];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '比较值必须是可选选项之一',
+    );
+  });
+
+  it('多选字段的默认值必须都在选项内', () => {
+    const definition = conditionDefinition();
+    const start = definition.nodes.find((item) => item.kind === 'start');
+    if (!start) throw new Error('起始节点不存在');
+    start.inputFields = [
+      {
+        key: 'tags',
+        label: '标签',
+        type: 'multiselect',
+        required: false,
+        options: ['高', '低'],
+        placeholder: null,
+        defaultValue: '高,中',
+      },
+    ];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '默认值「中」不在选项中',
+    );
+  });
+
+  it('单选字段的默认值必须在选项内', () => {
+    const definition = conditionDefinition();
+    const start = definition.nodes.find((item) => item.kind === 'start');
+    if (!start) throw new Error('起始节点不存在');
+    start.inputFields = [
+      {
+        key: 'priority',
+        label: '优先级',
+        type: 'select',
+        required: false,
+        options: ['高', '低'],
+        placeholder: null,
+        defaultValue: '中',
+      },
+    ];
+    expect(() => normalizeWorkflowDefinition(definition, true)).toThrow(
+      '默认值「中」不在选项中',
+    );
+  });
+
   it('判断节点可以流转到流程结束', () => {
     const definition: WorkflowDefinitionJson = {
       startNode: 'start',

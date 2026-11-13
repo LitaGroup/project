@@ -1815,10 +1815,12 @@ export type TicketStatus =
 export interface TicketWorkflowInputField {
   key: string
   label: string
-  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'file'
+  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'multiselect' | 'file'
   required: boolean
+  /** 单选 / 多选的可选项 */
   options?: string[]
   placeholder?: string | null
+  /** 多选默认值为英文逗号分隔的选项 */
   defaultValue?: string | number | null
 }
 

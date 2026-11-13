@@ -29,6 +29,7 @@ export const WORKFLOW_INPUT_FIELD_TYPES = [
   'number',
   'date',
   'select',
+  'multiselect',
   'file',
 ] as const;
 
@@ -74,11 +75,11 @@ export interface WorkflowInputField {
   type: WorkflowInputFieldType;
   /** 是否必填 */
   required: boolean;
-  /** select 的可选项 */
+  /** select / multiselect 的可选项 */
   options?: string[];
   /** 占位提示 */
   placeholder?: string | null;
-  /** 默认值（file 不支持） */
+  /** 默认值（file 不支持；multiselect 为英文逗号分隔的选项） */
   defaultValue?: string | number | null;
 }
 

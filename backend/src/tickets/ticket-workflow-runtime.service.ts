@@ -133,6 +133,14 @@ function matchConditionRule(
       }
       return text !== expected;
     case 'contains':
+      if (fieldType === 'multiselect') {
+        // 多选值按英文逗号拼接；判断「选中项包含某选项」而非子串
+        return text
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .includes(expected);
+      }
       return text.includes(expected);
     case 'gt':
     case 'gte':
@@ -182,7 +190,15 @@ export function renderInputValues(
     '| 字段 | 内容 |',
     '| --- | --- |',
     ...fields.map((field) => {
-      const value = inputValueText(values[field.key]).trim();
+      const rawValue = inputValueText(values[field.key]).trim();
+      const value =
+        field.type === 'multiselect' && rawValue
+          ? rawValue
+              .split(',')
+              .map((item) => item.trim())
+              .filter(Boolean)
+              .join('、')
+          : rawValue;
       return `| ${field.label} | ${
         value ? value.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, '<br>') : '-'
       } |`;
@@ -1206,7 +1222,15 @@ export class TicketWorkflowRuntimeService {
     const startFields =
       workflow.nodes.find((item) => item.kind === 'start')?.inputFields ?? [];
     const summaryLines = startFields.map((field) => {
-      const value = inputValueText(ticket.inputValues?.[field.key]).trim();
+      const rawValue = inputValueText(ticket.inputValues?.[field.key]).trim();
+      const value =
+        field.type === 'multiselect' && rawValue
+          ? rawValue
+              .split(',')
+              .map((item) => item.trim())
+              .filter(Boolean)
+              .join('、')
+          : rawValue;
       return `- ${field.label}：${
         value ? value.replace(/\s*\n\s*/g, ' ') : '-'
       }`;
@@ -1295,6 +1319,32 @@ export class TicketWorkflowRuntimeService {
     const values: Record<string, unknown> = {};
     for (const field of fields) {
       const raw = input[field.key];
+      if (field.type === 'multiselect') {
+        // 兼容数组（MCP 调用）与英文逗号分隔字符串，统一存逗号拼接串
+        const submitted = Array.isArray(raw)
+          ? raw.map((item) => inputValueText(item))
+          : inputValueText(raw).split(',');
+        const selected = Array.from(
+          new Set(submitted.map((item) => item.trim()).filter(Boolean)),
+        );
+        if (!selected.length) {
+          if (field.required && !field.defaultValue) {
+            throw new BadRequestException(`「${field.label}」不能为空`);
+          }
+          values[field.key] = field.defaultValue ?? '';
+          continue;
+        }
+        const invalid = selected.find(
+          (item) => !(field.options ?? []).includes(item),
+        );
+        if (invalid !== undefined) {
+          throw new BadRequestException(
+            `「${field.label}」包含无效选项「${invalid}」`,
+          );
+        }
+        values[field.key] = selected.join(',');
+        continue;
+      }
       const value = inputValueText(raw).trim();
       if (!value) {
         if (field.required && !field.defaultValue) {

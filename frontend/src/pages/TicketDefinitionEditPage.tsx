@@ -78,7 +78,60 @@ function conditionOperatorsForType(
     return ['eq', 'ne', 'contains', 'empty', 'notEmpty']
   }
   if (type === 'select') return ['eq', 'ne', 'empty', 'notEmpty']
+  if (type === 'multiselect') return ['contains', 'empty', 'notEmpty']
   return []
+}
+
+/** 单选 / 多选共用选项配置 */
+function isChoiceField(type: TicketWorkflowInputField['type'] | undefined): boolean {
+  return type === 'select' || type === 'multiselect'
+}
+
+/** 解析逗号分隔的选项：兼容中英文逗号，去空去重 */
+function parseOptions(text: string): string[] {
+  return Array.from(
+    new Set(
+      text
+        .split(/[,，]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
+/**
+ * 选项编辑：聚焦期间保留原始文本，失焦或回车时才解析提交。
+ * 若每次按键都 split/join，逗号会被立即吞掉，导致无法输入分隔符。
+ */
+function OptionsInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string[]
+  onChange: (options: string[]) => void
+  placeholder?: string
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const commit = (text: string) => {
+    onChange(parseOptions(text))
+    setDraft(null)
+  }
+  return (
+    <Input
+      value={draft ?? value.join(',')}
+      placeholder={placeholder}
+      onFocus={() => setDraft(value.join(','))}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={(event) => commit(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          commit(event.currentTarget.value)
+        }
+      }}
+    />
+  )
 }
 
 function conditionSummary(
@@ -105,6 +158,7 @@ const FIELD_TYPE_LABEL: Record<TicketWorkflowInputField['type'], string> = {
   number: '数字',
   date: '日期',
   select: '单选',
+  multiselect: '多选',
   file: '文件',
 }
 
@@ -398,12 +452,11 @@ export function TicketDefinitionEditPage() {
             {
               field: field.key,
               operator,
-              value:
-                field.type === 'select'
-                  ? (field.options?.[0] ?? '')
-                  : conditionNeedsValue(operator)
-                    ? ''
-                    : null,
+              value: isChoiceField(field.type)
+                ? (field.options?.[0] ?? '')
+                : conditionNeedsValue(operator)
+                  ? ''
+                  : null,
             },
           ],
         }
@@ -959,7 +1012,9 @@ export function TicketDefinitionEditPage() {
                                     onValueChange={(value) =>
                                       updateInputField(index, fieldIndex, {
                                         type: value as TicketWorkflowInputField['type'],
-                                        ...(value === 'select'
+                                        ...(isChoiceField(
+                                          value as TicketWorkflowInputField['type'],
+                                        )
                                           ? { options: field.options ?? [] }
                                           : { options: undefined }),
                                       })
@@ -1019,28 +1074,31 @@ export function TicketDefinitionEditPage() {
                                   />
                                 </label>
                                 <label className="flex flex-col gap-1 text-xs md:col-span-2">
-                                  {field.type === 'select' ? '选项（逗号分隔）' : '默认值'}
-                                  <Input
-                                    value={
-                                      field.type === 'select'
-                                        ? (field.options ?? []).join(',')
-                                        : field.defaultValue == null
+                                  {isChoiceField(field.type) ? '选项（逗号分隔）' : '默认值'}
+                                  {isChoiceField(field.type) ? (
+                                    <OptionsInput
+                                      value={field.options ?? []}
+                                      placeholder="如：选项A,选项B"
+                                      onChange={(options) =>
+                                        updateInputField(index, fieldIndex, {
+                                          options,
+                                        })
+                                      }
+                                    />
+                                  ) : (
+                                    <Input
+                                      value={
+                                        field.defaultValue == null
                                           ? ''
                                           : String(field.defaultValue)
-                                    }
-                                    onChange={(event) =>
-                                      updateInputField(index, fieldIndex, {
-                                        ...(field.type === 'select'
-                                          ? {
-                                              options: event.target.value
-                                                .split(',')
-                                                .map((item) => item.trim())
-                                                .filter(Boolean),
-                                            }
-                                          : { defaultValue: event.target.value }),
-                                      })
-                                    }
-                                  />
+                                      }
+                                      onChange={(event) =>
+                                        updateInputField(index, fieldIndex, {
+                                          defaultValue: event.target.value,
+                                        })
+                                      }
+                                    />
+                                  )}
                                 </label>
                               </div>
                             </div>
@@ -1237,7 +1295,7 @@ export function TicketDefinitionEditPage() {
                                       field: String(value),
                                       operator: nextOperators[0] ?? 'eq',
                                       value:
-                                        nextField?.type === 'select'
+                                        nextField && isChoiceField(nextField.type)
                                           ? (nextField.options?.[0] ?? '')
                                           : '',
                                     })
@@ -1294,7 +1352,7 @@ export function TicketDefinitionEditPage() {
                                   </SelectContent>
                                 </Select>
                                 {conditionNeedsValue(rule.operator) ? (
-                                  field?.type === 'select' ? (
+                                  field && isChoiceField(field.type) ? (
                                     <Select
                                       value={rule.value ?? ''}
                                       onValueChange={(value) =>

@@ -133,7 +133,7 @@ describe('WorkTicketTools', () => {
       '发布申请（workflowDefinitionId=5）',
     );
     expect(result.content[0].text).toContain(
-      '| title | 发布标题 | text | 是 |',
+      '| title | 发布标题 | 单行文本 | 是 |',
     );
     expect(result.content[0].text).toContain('紧急 / 普通');
     expect(result.content[0].text).not.toContain('未发布配置');
