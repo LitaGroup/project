@@ -655,6 +655,7 @@ export class BacklogsService {
   /**
    * 提测：按系统「提测工单」工作流创建工单，自动填入迭代项上下文，
    * 人工可补充说明；创建成功后写 release-ticket 事件。
+   * 提测不与迭代项/迭代状态绑定，同一迭代项可多次发起。
    */
   async createReleaseTicket(
     id: number,
@@ -665,9 +666,6 @@ export class BacklogsService {
     const backlog = await this.findOne(id);
     if (!actor.isAdmin && !this.isMember(backlog, actor.userId)) {
       throw new ForbiddenException('仅迭代项成员或管理员可发起提测');
-    }
-    if (this.isTerminal(backlog.status)) {
-      throw new BadRequestException('已结束的迭代项不可再提测');
     }
     const workflow = await this.releaseWorkflowInfo();
     if (!workflow || !workflow.enabled) {

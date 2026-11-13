@@ -153,7 +153,7 @@
 - 文档：转入迭代时把原始需求的文档关联迁入 `backlog_documents`（需求 → 迭代单向搬运），此后可新建/导入（复用 documents 接口，挂需求名下）/关联/取消关联，删除文档时应用层清理关联；文档本体始终归属需求。
 - 事件流：`backlog_events` append-only 记录 created / status（from/to/remark）/ moved / release-ticket（提测工单）等，`GET /api/backlogs/{id}/events`；`.md` 视图附文档清单与最近事件。
 - 任务与工单面板：`GET /api/backlogs/{id}/tasks` 返回交付任务为根的任务树（含全部子任务）与相关工单（`tickets.backlogId` ∪ `tickets.taskId` ∪ `ticket_workflow_runs.taskId` 去重）。
-- 提测：迭代项详情页「提测」按钮按系统工作流 `release-ticket`（代码预置 + 迁移预置并发布 v1）创建工单，描述自动填入迭代项上下文、人工可补充；`tickets.backlogId` 记录关联，创建成功写 `release-ticket` 事件。
+- 提测：迭代项详情页「提测」按钮按系统工作流 `release-ticket`（代码预置 + 迁移预置并发布 v1）创建工单，描述自动填入迭代项上下文、人工可补充；`tickets.backlogId` 记录关联，创建成功写 `release-ticket` 事件。提测不与迭代项/迭代状态绑定，同一迭代项可多次发起提测工单（完成、取消后仍可提测）。
 - 迭代项详情页为标准双栏布局 + 右下角可收起 AI 面板（⌥A）；AI 页面上下文类型 `backlog`（`agent:page:backlog:*`），`contextReadUrl` 固定 `/api/backlogs/{id}.md`。
 - 支持向已有迭代追加需求、移动 backlog 到其它迭代（移动不重建交付任务与沟通群）；W1 到期未完成的 backlog 留在原迭代，由管理员手动结转到新迭代。
 - 每个 backlog 创建后自动建立飞书沟通群（`LitaWork-迭代-{标题} 沟通群`），拉入成员真人与负责人机器人绑定的飞书应用；完成/取消后保留 7 天自动解散，建群失败不阻断、定时对账重试。
