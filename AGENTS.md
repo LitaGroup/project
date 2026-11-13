@@ -265,6 +265,7 @@
 - 协议端点 `GET /api/sso/authorize`、`POST /api/sso/token`、`GET /api/sso/userinfo` 均 `@Public` 且各自鉴权；管理端点 `/api/sso/clients*` 走全局 Guard 并要求管理员。
 - authorize 未登录时把接入方参数暂存短效 Cookie（`pmp_sso_ctx`）→ 飞书登录 → callback 据此回跳 authorize 续发授权码；回跳地址由 Cookie 重建并再次完整校验，无开放重定向风险。
 - 授权码一次性、10 分钟有效、绑定 user/client/redirect_uri 三元组；`access_token` 为独立 JWT（`typ=sso_access`、`aud=clientId`、密钥优先 `SSO_JWT_SECRET`，缺省从 `AUTH_JWT_SECRET` 派生），与平台会话令牌互不通用，2 小时有效，无 refresh token。
+- `userinfo` 返回登录真人绑定的**真人机器人身份**（`id/name/avatarUrl` 为 `workers`，`department` 取绑定真人部门，`humanUserId` 供接入方映射），不再返回真人邮箱与飞书标识；机器人经 `ensureHumanWorker` 幂等补齐，`access_token` 本身仍绑定真人 `users.id`。
 
 ### 提测与缺陷
 

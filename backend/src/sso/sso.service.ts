@@ -6,6 +6,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { IsNull, LessThan, Repository } from 'typeorm';
 import { AuthService } from '../auth/auth.service';
 import { User } from '../auth/user.entity';
+import { WorkersService } from '../workers/workers.service';
 import {
   SaveSsoClientInput,
   SsoClient,
@@ -34,15 +35,17 @@ export class SsoOAuthError extends Error {
   }
 }
 
-/** userinfo 返回的用户信息（基础信息 + 飞书标识） */
+/** userinfo 返回的机器人身份（登录真人绑定的真人机器人） */
 export interface SsoUserInfo {
+  /** 机器人 ID（workers.id，与真人用户 ID 不同） */
   id: number;
+  /** 机器人名称（与绑定真人同名，重名时带 #id 后缀） */
   name: string;
   avatarUrl: string | null;
-  email: string | null;
+  /** 组织：机器人无组织字段，取绑定真人的部门 */
   department: string | null;
-  feishuOpenId: string;
-  feishuUnionId: string | null;
+  /** 绑定真人用户 ID（接入方映射真人用） */
+  humanUserId: number;
 }
 
 /** token 端点响应 */
@@ -57,7 +60,7 @@ export interface SsoTokenResult {
  * - 接入方管理：clientId / clientSecret（只写不回显）与回调地址白名单；
  * - authorize：已登录签发一次性授权码 302 回跳；未登录暂存上下文走飞书登录后续发；
  * - token：授权码 + client 凭证换短效 access_token（独立 JWT，与平台会话令牌互不通用）；
- * - userinfo：Bearer access_token 换用户信息。
+ * - userinfo：Bearer access_token 换登录真人绑定的真人机器人身份（令牌仍绑定真人）。
  */
 @Injectable()
 export class SsoService {
@@ -66,6 +69,7 @@ export class SsoService {
   constructor(
     private readonly config: ConfigService,
     private readonly authService: AuthService,
+    private readonly workersService: WorkersService,
     @InjectRepository(SsoClient)
     private readonly clientsRepo: Repository<SsoClient>,
     @InjectRepository(SsoCode)
@@ -257,7 +261,10 @@ export class SsoService {
 
   // ---- userinfo ----
 
-  /** Bearer access_token 换用户信息；用户被禁用或令牌失效即 401 */
+  /**
+   * Bearer access_token 换登录真人绑定的真人机器人身份；用户被禁用或令牌失效即 401。
+   * 令牌本身仍绑定真人用户 ID，返回内容改为机器人身份（三方按机器人 ID 映射执行器）。
+   */
   async getUserInfoByAccessToken(token: string): Promise<SsoUserInfo> {
     let payload: jwt.JwtPayload;
     try {
@@ -272,14 +279,15 @@ export class SsoService {
     if (!user) {
       throw new SsoOAuthError('invalid_token', '用户不存在或已禁用');
     }
+    // 与登录/通讯录同步同一入口，幂等保证真人机器人存在并同步名称/头像
+    const worker = await this.workersService.ensureHumanWorker(user);
     return {
-      id: user.id,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      email: user.email,
+      id: worker.id,
+      name: worker.name,
+      avatarUrl: worker.avatarUrl,
+      // 机器人没有组织字段，组织取绑定真人的部门
       department: user.department,
-      feishuOpenId: user.feishuOpenId,
-      feishuUnionId: user.unionId,
+      humanUserId: user.id,
     };
   }
 

@@ -4,6 +4,7 @@ import * as jwt from 'jsonwebtoken';
 import { UserRole } from '../common/enums';
 import { AuthService } from '../auth/auth.service';
 import { User } from '../auth/user.entity';
+import type { Worker } from '../workers/worker.entity';
 import { SsoClient } from './sso-client.entity';
 import { SsoCode } from './sso-code.entity';
 import { SsoService } from './sso.service';
@@ -136,6 +137,30 @@ function createAuthService(users: Partial<User>[]) {
   };
 }
 
+/** WorkersService 桩：每个真人幂等绑定一个同名真人机器人（ID 段 >= 1000，与生产一致） */
+function createWorkersService() {
+  const store: Worker[] = [];
+  return {
+    store,
+    ensureHumanWorker: jest.fn((user: User) => {
+      let worker = store.find((w) => w.humanUserId === user.id);
+      if (!worker) {
+        worker = {
+          id: 1000 + user.id,
+          name: user.name,
+          avatarUrl: user.avatarUrl ?? null,
+          humanUserId: user.id,
+        } as Worker;
+        store.push(worker);
+      } else {
+        worker.name = user.name;
+        worker.avatarUrl = user.avatarUrl ?? null;
+      }
+      return Promise.resolve(worker);
+    }),
+  };
+}
+
 function createService(
   env: Record<string, string> = {},
   users: Partial<User>[] = [],
@@ -143,13 +168,15 @@ function createService(
   const clientsRepo = createClientsRepo();
   const codesRepo = createCodesRepo();
   const authService = createAuthService(users);
+  const workersService = createWorkersService();
   const service = new SsoService(
     createConfig({ AUTH_JWT_SECRET: 'test-secret', ...env }),
     authService as unknown as AuthService,
+    workersService as never,
     clientsRepo as never,
     codesRepo as never,
   );
-  return { service, clientsRepo, codesRepo, authService };
+  return { service, clientsRepo, codesRepo, authService, workersService };
 }
 
 async function seedClient(
@@ -474,12 +501,13 @@ describe('SsoService（单点登录 OAuth2 IdP）', () => {
       return createService(env, users);
     }
 
-    it('返回基础信息 + 飞书标识', async () => {
+    it('返回登录真人绑定的真人机器人身份（非真人用户本身）', async () => {
       const { service, clientsRepo } = serviceWith([
         {
           feishuOpenId: 'ou_9',
           unionId: 'un_9',
           name: '李四',
+          avatarUrl: '/images/l.jpg',
           email: 'l@example.com',
           department: '产品部',
         },
@@ -488,14 +516,26 @@ describe('SsoService（单点登录 OAuth2 IdP）', () => {
       const token = await tokenFor(service, clientsRepo, client.clientId);
       const info = await service.getUserInfoByAccessToken(token);
       expect(info).toEqual({
-        id: 1,
+        id: 1001,
         name: '李四',
-        avatarUrl: null,
-        email: 'l@example.com',
+        avatarUrl: '/images/l.jpg',
         department: '产品部',
-        feishuOpenId: 'ou_9',
-        feishuUnionId: 'un_9',
+        humanUserId: 1,
       });
+    });
+
+    it('多次调用复用同一机器人，不重复创建', async () => {
+      const { service, clientsRepo, workersService } = serviceWith([
+        { name: '王五', department: '测试部' },
+      ]);
+      const client = await seedClient(service, clientsRepo);
+      const token = await tokenFor(service, clientsRepo, client.clientId);
+      const first = await service.getUserInfoByAccessToken(token);
+      const second = await service.getUserInfoByAccessToken(token);
+      expect(second).toEqual(first);
+      expect(workersService.ensureHumanWorker).toHaveBeenCalledTimes(2);
+      expect(workersService.store).toHaveLength(1);
+      expect(workersService.store[0].id).toBe(1001);
     });
 
     it('平台会话令牌（typ 缺失）不能当 access_token 使用', async () => {

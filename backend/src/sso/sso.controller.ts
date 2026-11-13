@@ -136,7 +136,7 @@ export class SsoController {
     }
   }
 
-  /** 用户信息端点：Bearer access_token 换用户基础信息 + 飞书标识 */
+  /** 用户信息端点：Bearer access_token 换登录真人绑定的真人机器人身份（令牌仍绑定真人） */
   @Public()
   @Get('userinfo')
   async userinfo(@Req() req: Request): Promise<unknown> {

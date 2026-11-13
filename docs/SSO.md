@@ -95,15 +95,25 @@ Authorization: Bearer {access_token}
 
 ```json
 {
-  "id": 123,
+  "id": 1024,
   "name": "张三",
   "avatarUrl": "https://…",
-  "email": "zhangsan@example.com",
   "department": "研发部",
-  "feishuOpenId": "ou_…",
-  "feishuUnionId": "un_…"
+  "humanUserId": 123
 }
 ```
+
+字段说明：返回的是**登录真人绑定的「真人机器人」身份**，而非真人用户本身。
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 机器人 ID（`workers.id`，登录真人首次读取时自动创建并幂等复用） |
+| `name` | 机器人名称（与绑定真人同名，重名时带 `#用户ID` 后缀） |
+| `avatarUrl` | 机器人头像（与绑定真人同步） |
+| `department` | 组织，取绑定真人的部门（机器人无组织字段） |
+| `humanUserId` | 绑定真人用户 ID（`users.id`），供接入方映射真人 |
+
+`access_token` 本身仍绑定真人用户 ID，登录主体不变。
 
 ---
 
