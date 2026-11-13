@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Header,
+  HttpCode,
   Param,
   ParseIntPipe,
   Patch,
@@ -78,6 +80,13 @@ class CreateBacklogsDto {
 class UpdateBacklogStatusDto {
   /** 等待 / 执行 / 测试 / 发布 / 完成 / 取消 */
   status: BacklogStatus;
+  /** 备注（可空；写入迭代项事件流） */
+  remark?: string;
+}
+
+class UpdateBacklogDto {
+  /** 预期上线时间（ISO 字符串，到小时；传 null 清空） */
+  expectedOnlineAt?: string | null;
 }
 
 class MoveBacklogDto {
@@ -87,6 +96,18 @@ class MoveBacklogDto {
 
 class UpdateBacklogMembersDto {
   members: BacklogMemberInput[];
+}
+
+class AddBacklogDocumentDto {
+  /** 已有文档（documents.id，须属于该迭代项的原始需求） */
+  documentId: number;
+}
+
+class CreateBacklogReleaseTicketDto {
+  /** 工单标题（缺省自动生成「提测-{code} {标题}」） */
+  title?: string;
+  /** 补充说明（Markdown，可空；拼入工单描述） */
+  supplement?: string;
 }
 
 @Controller('iterations')
@@ -179,11 +200,13 @@ export class BacklogsController {
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number): Promise<Backlog> {
-    return this.backlogsService.findOne(id);
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+  ): ReturnType<BacklogsService['getDetail']> {
+    return this.backlogsService.getDetail(id);
   }
 
-  /** 状态流转（成员或管理员）：等待 → 执行 → 测试 → 发布 → 完成，允许取消 */
+  /** 状态流转（成员或管理员）：备注可空，写入事件流 */
   @Post(':id/status')
   updateStatus(
     @Param('id', ParseIntPipe) id: number,
@@ -194,6 +217,85 @@ export class BacklogsController {
       id,
       dto.status,
       iterationActor(req),
+      dto.remark,
+    );
+  }
+
+  /** 更新迭代项属性（预期上线时间）；成员或管理员 */
+  @Patch(':id')
+  updateBacklog(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateBacklogDto,
+    @Req() req: AuthedRequest,
+  ): Promise<Backlog> {
+    return this.backlogsService.updateBacklog(id, dto, iterationActor(req));
+  }
+
+  /** 关联文档列表（不含正文大字段） */
+  @Get(':id/documents')
+  listDocuments(
+    @Param('id', ParseIntPipe) id: number,
+  ): ReturnType<BacklogsService['listDocuments']> {
+    return this.backlogsService.listDocuments(id);
+  }
+
+  /** 关联已有文档（须属于该迭代项的原始需求）；成员或管理员 */
+  @Post(':id/documents')
+  addDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddBacklogDocumentDto,
+    @Req() req: AuthedRequest,
+  ): Promise<{ linked: boolean }> {
+    return this.backlogsService.addDocument(
+      id,
+      Number(dto.documentId),
+      iterationActor(req),
+    );
+  }
+
+  /** 取消文档关联（不删除文档本体）；成员或管理员 */
+  @Delete(':id/documents/:documentId')
+  @HttpCode(204)
+  removeDocument(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('documentId', ParseIntPipe) documentId: number,
+    @Req() req: AuthedRequest,
+  ): Promise<void> {
+    return this.backlogsService.removeDocument(
+      id,
+      documentId,
+      iterationActor(req),
+    );
+  }
+
+  /** 事件流（倒序，最近 100 条） */
+  @Get(':id/events')
+  listEvents(
+    @Param('id', ParseIntPipe) id: number,
+  ): ReturnType<BacklogsService['listEvents']> {
+    return this.backlogsService.listEvents(id);
+  }
+
+  /** 任务与工单面板：交付任务树（含子任务）+ 相关工单 */
+  @Get(':id/tasks')
+  relatedRecords(
+    @Param('id', ParseIntPipe) id: number,
+  ): ReturnType<BacklogsService['relatedRecords']> {
+    return this.backlogsService.relatedRecords(id);
+  }
+
+  /** 发起提测（创建提测工单，自动填入迭代项上下文）；成员或管理员 */
+  @Post(':id/release-ticket')
+  createReleaseTicket(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateBacklogReleaseTicketDto,
+    @Req() req: AuthedRequest,
+  ) {
+    return this.backlogsService.createReleaseTicket(
+      id,
+      dto ?? {},
+      iterationActor(req),
+      { user: req.user, worker: req.worker },
     );
   }
 

@@ -36,6 +36,8 @@ export interface CreateTicketInput {
   /** 工单配置：按起始节点字段创建工作流工单 */
   workflowDefinitionId?: number;
   inputValues?: Record<string, unknown>;
+  /** 关联迭代项（backlogs.id，可空；迭代项提测入口创建时传入） */
+  backlogId?: number;
 }
 
 export interface RouteTicketInput {
@@ -305,6 +307,7 @@ export class TicketsService {
         workflowDefinitionId: input.workflowDefinitionId,
         title: input.title,
         inputValues: input.inputValues ?? {},
+        backlogId: input.backlogId,
       },
       actor,
     );

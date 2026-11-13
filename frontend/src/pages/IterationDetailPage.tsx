@@ -11,13 +11,6 @@ import {
   TableCell,
 } from '@appica/ui-react/table'
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from '@appica/ui-react/select'
-import {
   Dialog,
   DialogTrigger,
   DialogContent,
@@ -36,14 +29,13 @@ import {
 } from '@appica/ui-react/popover'
 import {
   api,
-  BACKLOG_STATUSES,
-  type BacklogStatus,
   type IterationDetail,
   type Project,
   type Worker,
 } from '../lib/api'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { BacklogSelection } from '../components/BacklogSelection'
+import { BacklogStatusDialog } from '../components/BacklogStatusDialog'
 import { BacklogStatusBadge, IterationStatusBadge } from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
 
@@ -55,9 +47,13 @@ type ActionFeedback =
   | { kind: 'failure'; message: string }
   | null
 
-const STATUS_ITEMS = Object.fromEntries(
-  BACKLOG_STATUSES.map((status) => [status, status]),
-)
+/** 预期上线时间展示到小时 */
+function formatHour(value: string | null): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
+}
 
 /**
  * 迭代详情：展示迭代信息与迭代项看板/列表，支持手动推进迭代项状态、
@@ -71,7 +67,6 @@ export function IterationDetailPage() {
 
   const [detail, setDetail] = useState<IterationDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<number | null>(null)
   const [feedback, setFeedback] = useState<ActionFeedback>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -147,24 +142,6 @@ export function IterationDetailPage() {
   }
 
   if (!detail) return <p className="text-sm text-foreground-muted">加载中…</p>
-
-  const changeStatus = (backlogId: number, status: BacklogStatus) => {
-    if (busyId !== null) return
-    setBusyId(backlogId)
-    api
-      .updateBacklogStatus(backlogId, status)
-      .then(() => {
-        showFeedback({ kind: 'success', message: '状态已更新' }, SUCCESS_STAY_MS)
-        load()
-      })
-      .catch((e: Error) =>
-        showFeedback(
-          { kind: 'failure', message: e.message || '更新失败' },
-          FAILURE_STAY_MS,
-        ),
-      )
-      .finally(() => setBusyId(null))
-  }
 
   const toggleIterationStatus = () => {
     const next = detail.status === '进行中' ? '已结束' : '进行中'
@@ -334,11 +311,12 @@ export function IterationDetailPage() {
         <TableHeader>
           <TableRow>
             <TableHead className="w-24">编号</TableHead>
-            <TableHead>需求</TableHead>
+            <TableHead>标题</TableHead>
             <TableHead className="text-center">负责人</TableHead>
+            <TableHead className="w-36 text-center">预期上线</TableHead>
             <TableHead className="text-center">状态</TableHead>
             <TableHead className="text-center">交付任务</TableHead>
-            <TableHead className="w-44 text-center">推进状态</TableHead>
+            <TableHead className="w-24 text-center">推进状态</TableHead>
             <TableHead className="w-16 text-center">详情</TableHead>
           </TableRow>
         </TableHeader>
@@ -349,15 +327,18 @@ export function IterationDetailPage() {
               <TableRow key={backlog.id}>
                 <TableCell className="font-mono text-sm">{backlog.code}</TableCell>
                 <TableCell className="max-w-md truncate" title={backlog.title}>
-                  <Link to={`/projects/${backlog.projectId}`} className="underline">
+                  <Link to={`/backlogs/${backlog.id}`} className="underline">
                     {backlog.title}
                   </Link>
-                  <span className="ml-2 text-xs text-foreground-muted">
-                    #{backlog.projectId}
+                  <span className="ml-2 text-xs text-foreground-muted" title="原始需求">
+                    需求 #{backlog.projectId}
                   </span>
                 </TableCell>
                 <TableCell className="text-center">
                   {backlog.ownerName ?? '—'}
+                </TableCell>
+                <TableCell className="text-center">
+                  {formatHour(backlog.expectedOnlineAt)}
                 </TableCell>
                 <TableCell className="text-center">
                   <BacklogStatusBadge status={backlog.status} />
@@ -372,25 +353,15 @@ export function IterationDetailPage() {
                   )}
                 </TableCell>
                 <TableCell className="text-center">
-                  <Select
-                    value={backlog.status}
-                    onValueChange={(v) =>
-                      changeStatus(backlog.id, v as BacklogStatus)
-                    }
-                    items={STATUS_ITEMS}
-                    disabled={terminal || busyId !== null}
-                  >
-                    <SelectTrigger aria-label="更新迭代项状态">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BACKLOG_STATUSES.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <BacklogStatusDialog
+                    backlogId={backlog.id}
+                    currentStatus={backlog.status}
+                    terminal={terminal}
+                    onDone={() => {
+                      showFeedback({ kind: 'success', message: '状态已更新' }, SUCCESS_STAY_MS)
+                      load()
+                    }}
+                  />
                 </TableCell>
                 <TableCell className="text-center">
                   <Link
@@ -405,7 +376,7 @@ export function IterationDetailPage() {
           })}
           {detail.backlogs.length === 0 && (
             <TableRow>
-              <TableCell colSpan={7}>
+              <TableCell colSpan={8}>
                 暂无迭代项，管理员可点击右上角「添加需求」转入
               </TableCell>
             </TableRow>

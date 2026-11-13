@@ -18,6 +18,7 @@ import {
 } from '../apipost/apipost-markdown';
 import { FeishuService } from '../feishu/feishu.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
+import { BacklogDocument } from '../iterations/backlog-document.entity';
 import { Document } from './document.entity';
 
 /**
@@ -53,6 +54,8 @@ export class DocumentsService implements OnApplicationBootstrap {
   constructor(
     @InjectRepository(Document)
     private readonly documents: Repository<Document>,
+    @InjectRepository(BacklogDocument)
+    private readonly backlogDocuments: Repository<BacklogDocument>,
     private readonly feishu: FeishuService,
     private readonly apipost: ApipostService,
     private readonly knowledge: KnowledgeService,
@@ -427,6 +430,8 @@ export class DocumentsService implements OnApplicationBootstrap {
     if (this.knowledge.isEnabled) {
       await this.knowledge.removeProjectDocument(doc.id);
     }
+    // 清理迭代项文档关联（应用层软引用，无数据库级联）
+    await this.backlogDocuments.delete({ documentId: doc.id });
     await this.documents.remove(doc);
   }
 
@@ -434,6 +439,13 @@ export class DocumentsService implements OnApplicationBootstrap {
   async removeByProject(projectId: number): Promise<void> {
     if (this.knowledge.isEnabled) {
       await this.knowledge.removeProject(projectId);
+    }
+    const ids = await this.documents.find({
+      where: { projectId },
+      select: { id: true },
+    });
+    for (const doc of ids) {
+      await this.backlogDocuments.delete({ documentId: doc.id });
     }
     await this.documents.delete({ projectId });
   }

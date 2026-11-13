@@ -20,6 +20,7 @@ function backlogRow(overrides?: Partial<Backlog>): Backlog {
     status: BacklogStatus.WAITING,
     ownerWorkerId: 2,
     ownerName: '机器人 A',
+    expectedOnlineAt: null,
     members: null,
     taskId: 500,
     statusBy: null,
@@ -40,6 +41,10 @@ function makeService(row: Backlog) {
     .fn()
     .mockImplementation((value: Backlog) => Promise.resolve(value));
   const repository = { findOne, save } as never;
+  const events = {
+    create: jest.fn().mockImplementation((value: unknown) => value),
+    save: jest.fn().mockResolvedValue(undefined),
+  } as never;
   const tasks = { cancel: jest.fn().mockResolvedValue(undefined) };
   const chat = {
     notifyBacklog: jest.fn().mockResolvedValue(undefined),
@@ -51,10 +56,19 @@ function makeService(row: Backlog) {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
+    events,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
     tasks as never,
     chat as never,
+    {} as never,
   );
-  return { service, save, tasks, chat };
+  return { service, save, tasks, chat, events };
 }
 
 describe('summarizeBacklogs', () => {
@@ -189,5 +203,93 @@ describe('BacklogsService.updateStatus', () => {
       actor(),
     );
     expect(updated.status).toBe(BacklogStatus.EXECUTING);
+  });
+
+  it('推进状态写入事件流（含备注）', async () => {
+    const { service, events } = makeService(
+      backlogRow({ status: BacklogStatus.WAITING }),
+    );
+    await service.updateStatus(
+      1,
+      BacklogStatus.EXECUTING,
+      actor({ isAdmin: true }),
+      '开始开发',
+    );
+    expect(events.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backlogId: 1,
+        type: 'status',
+        payload: { from: '等待', to: '执行', remark: '开始开发' },
+        operator: '小明',
+      }),
+    );
+  });
+
+  it('推进状态备注为空时事件 remark 落 null', async () => {
+    const { service, events } = makeService(
+      backlogRow({ status: BacklogStatus.WAITING }),
+    );
+    await service.updateStatus(
+      1,
+      BacklogStatus.EXECUTING,
+      actor({ isAdmin: true }),
+      '  ',
+    );
+    expect(events.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'status',
+        payload: { from: '等待', to: '执行', remark: null },
+      }),
+    );
+  });
+});
+
+describe('BacklogsService.updateBacklog', () => {
+  it('成员可设置预期上线时间', async () => {
+    const { service, save } = makeService(
+      backlogRow({ members: [{ role: '产品', userId: 7, name: '小明' }] }),
+    );
+    const updated = await service.updateBacklog(
+      1,
+      { expectedOnlineAt: '2026-11-20T10:00:00+08:00' },
+      actor(),
+    );
+    expect(updated.expectedOnlineAt).toBeInstanceOf(Date);
+    expect(save).toHaveBeenCalled();
+  });
+
+  it('传 null 清空预期上线时间', async () => {
+    const { service } = makeService(
+      backlogRow({
+        members: [{ role: '产品', userId: 7, name: '小明' }],
+        expectedOnlineAt: new Date(),
+      }),
+    );
+    const updated = await service.updateBacklog(
+      1,
+      { expectedOnlineAt: null },
+      actor(),
+    );
+    expect(updated.expectedOnlineAt).toBeNull();
+  });
+
+  it('非法时间格式返回 400', async () => {
+    const { service } = makeService(
+      backlogRow({ members: [{ role: '产品', userId: 7, name: '小明' }] }),
+    );
+    await expect(
+      service.updateBacklog(1, { expectedOnlineAt: 'not-a-date' }, actor()),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('非成员非管理员不可编辑属性', async () => {
+    const { service } = makeService(backlogRow());
+    await expect(
+      service.updateBacklog(
+        1,
+        { expectedOnlineAt: '2026-11-20T10:00:00+08:00' },
+        actor(),
+      ),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

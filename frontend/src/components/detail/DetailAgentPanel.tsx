@@ -287,9 +287,13 @@ export function DetailAgentPanel({
   }, [context, taskId, setSnapshot])
 
   const label = context
-    ? { document: '文档', script: '脚本', project: '项目', idea: '灵感' }[
-        context.type
-      ]
+    ? {
+        document: '文档',
+        script: '脚本',
+        project: '项目',
+        idea: '灵感',
+        backlog: '迭代项',
+      }[context.type]
     : taskId
       ? '任务'
       : null

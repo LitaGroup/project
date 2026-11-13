@@ -62,6 +62,10 @@ export class Backlog {
   @Column({ type: 'varchar', length: 100, nullable: true })
   ownerName: string | null;
 
+  /** 预期上线时间（到小时；成员或管理员可修改，展示按北京时间） */
+  @Column({ type: 'timestamptz', nullable: true })
+  expectedOnlineAt: Date | null;
+
   /** 成员：产品/业务/项目/技术（前端/后端/测试/客户端） */
   @Column({ type: 'simple-json', nullable: true })
   members: BacklogMember[] | null;

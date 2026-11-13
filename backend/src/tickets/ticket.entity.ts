@@ -17,6 +17,7 @@ export type TicketAssigneeType = 'user' | 'worker';
 @Entity('tickets')
 @Index(['category'])
 @Index('IDX_tickets_taskId', ['taskId'], { unique: true })
+@Index('IDX_tickets_backlogId', ['backlogId'])
 export class Ticket {
   @PrimaryGeneratedColumn()
   id: number;
@@ -56,6 +57,10 @@ export class Ticket {
   /** 关联调度任务（tasks.id，旧模型一对一；工作流工单为空） */
   @Column({ type: 'int', nullable: true })
   taskId: number | null;
+
+  /** 关联迭代项（backlogs.id，可空；迭代项提测等入口创建时写入） */
+  @Column({ type: 'int', nullable: true })
+  backlogId: number | null;
 
   /** 工单工作流配置（workflow_definitions.id；旧工单为空） */
   @Column({ type: 'int', nullable: true })

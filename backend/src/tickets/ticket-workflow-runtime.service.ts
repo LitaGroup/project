@@ -37,11 +37,14 @@ import { WorkflowDefinitionVersion } from '../workflows/workflow-definition-vers
 import { WorkflowDefinition } from '../workflows/workflow-definition.entity';
 import { TicketWorkflowRun } from './ticket-workflow-run.entity';
 import { Ticket } from './ticket.entity';
+import { Backlog } from '../iterations/backlog.entity';
 
 export interface CreateWorkflowTicketInput {
   workflowDefinitionId: number;
   title?: string;
   inputValues: Record<string, unknown>;
+  /** 关联迭代项（backlogs.id，可空） */
+  backlogId?: number;
 }
 
 /**
@@ -233,6 +236,8 @@ export class TicketWorkflowRuntimeService {
     private readonly templates: Repository<TaskTemplate>,
     @InjectRepository(Task)
     private readonly tasks: Repository<Task>,
+    @InjectRepository(Backlog)
+    private readonly backlogs: Repository<Backlog>,
     @InjectRepository(Worker)
     private readonly workers: Repository<Worker>,
     private readonly tasksService: TasksService,
@@ -339,6 +344,18 @@ export class TicketWorkflowRuntimeService {
       `新${definition.name}`;
     if (!title) throw new BadRequestException('工单标题不能为空');
 
+    // 迭代项关联：必须指向真实存在的 backlog（应用层软引用，不建物理外键）
+    let backlogId: number | null = null;
+    if (input.backlogId !== undefined && input.backlogId !== null) {
+      const id = Number(input.backlogId);
+      if (!Number.isInteger(id) || id <= 0) {
+        throw new BadRequestException('迭代项 ID 非法');
+      }
+      const backlog = await this.backlogs.findOne({ where: { id } });
+      if (!backlog) throw new BadRequestException(`迭代项 #${id} 不存在`);
+      backlogId = id;
+    }
+
     const ticket = await this.tickets.save(
       this.tickets.create({
         code: `TMP-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
@@ -351,6 +368,7 @@ export class TicketWorkflowRuntimeService {
         assigneeId: initiator.worker.id,
         assigneeName: initiator.worker.name,
         taskId: null,
+        backlogId,
         workflowDefinitionId: definition.id,
         workflowVersionId: version.id,
         workflowVersion: version.version,

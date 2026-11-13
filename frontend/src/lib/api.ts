@@ -776,10 +776,13 @@ export interface Backlog {
   iterationId: number
   /** 原始需求（projects.id） */
   projectId: number
+  /** 迭代项自己的标题（转入后异步由 title-naming 模型生成，兜底为需求名） */
   title: string
   status: BacklogStatus
   ownerWorkerId: number | null
   ownerName: string | null
+  /** 预期上线时间（到小时，北京时间展示；可空） */
+  expectedOnlineAt: string | null
   members: BacklogMember[] | null
   /** 自动创建的交付任务（tasks.id） */
   taskId: number | null
@@ -793,7 +796,64 @@ export interface Backlog {
   updatedAt: string
 }
 
-/** 迭代详情（GET /iterations/:id）：迭代信息 + 迭代项列表 */
+/** 迭代项提测工单工作流可用性（详情接口返回，供提测按钮置灰） */
+export interface BacklogReleaseWorkflow {
+  id: number
+  /** 已启用且已发布版本（可创建工单） */
+  enabled: boolean
+}
+
+/** 迭代项详情（GET /backlogs/:id）：迭代项 + 提测工作流信息 */
+export interface BacklogDetail extends Backlog {
+  releaseWorkflow: BacklogReleaseWorkflow | null
+}
+
+/** 迭代项关联文档摘要（不含正文大字段） */
+export type BacklogDocumentSummary = ProjectDocument
+
+/** 迭代项事件（append-only）：created / status / moved / release-ticket 等 */
+export interface BacklogEvent {
+  id: number
+  backlogId: number
+  type: string
+  /** 事件明细（status: { from, to, remark } 等） */
+  payload: Record<string, unknown> | null
+  operator: string | null
+  createdAt: string
+}
+
+/** 迭代项任务面板任务摘要（交付任务树，含子任务） */
+export interface BacklogTaskSummary {
+  id: number
+  code: string
+  title: string
+  type: string
+  status: string
+  subStatus: string
+  parentId: number | null
+  rootId: number
+  projectId: number | null
+  agentId: number | null
+  templateName: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** 迭代项任务面板工单摘要（直接关联 + 任务树关联） */
+export interface BacklogTicketSummary {
+  id: number
+  code: string
+  title: string
+  category: string
+  workflowStatus: string | null
+  currentNodeName: string | null
+  initiatorWorkerName: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 迭代项详情（GET /iterations/:id）：迭代信息 + 迭代项列表 */
 export interface IterationDetail extends IterationSummary {
   backlogs: Backlog[]
 }
@@ -2159,7 +2219,12 @@ export interface WorkbenchAgentInfo {
 }
 
 /** 详情页「我的 AI」页面类型（每个类型 + ID 使用独立会话） */
-export type AgentPageContextType = 'document' | 'script' | 'project' | 'idea'
+export type AgentPageContextType =
+  | 'document'
+  | 'script'
+  | 'project'
+  | 'idea'
+  | 'backlog'
 
 /** 详情页「我的 AI」上下文：会话按 type + id 隔离，内容读取接口供 AI 取当前页面 */
 export interface AgentPageContext {
@@ -2469,13 +2534,53 @@ export const api = {
       body: JSON.stringify({ items }),
     }),
   /** 迭代项详情 */
-  getBacklog: (id: number) => request<Backlog>(`/backlogs/${id}`),
-  /** 迭代项状态流转（成员或管理员） */
-  updateBacklogStatus: (id: number, status: BacklogStatus) =>
+  getBacklog: (id: number) => request<BacklogDetail>(`/backlogs/${id}`),
+  /** 迭代项状态流转（成员或管理员；备注可空，写入事件流） */
+  updateBacklogStatus: (id: number, status: BacklogStatus, remark?: string) =>
     request<Backlog>(`/backlogs/${id}/status`, {
       method: 'POST',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, remark }),
     }),
+  /** 更新迭代项属性（预期上线时间，传 null 清空） */
+  updateBacklog: (id: number, input: { expectedOnlineAt?: string | null }) =>
+    request<Backlog>(`/backlogs/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  /** 迭代项关联文档列表（不含正文大字段） */
+  listBacklogDocuments: (id: number) =>
+    request<BacklogDocumentSummary[]>(`/backlogs/${id}/documents`),
+  /** 关联已有文档（须属于该迭代项的原始需求） */
+  addBacklogDocument: (id: number, documentId: number) =>
+    request<{ linked: boolean }>(`/backlogs/${id}/documents`, {
+      method: 'POST',
+      body: JSON.stringify({ documentId }),
+    }),
+  /** 取消文档关联（不删除文档本体） */
+  removeBacklogDocument: (id: number, documentId: number) =>
+    request<void>(`/backlogs/${id}/documents/${documentId}`, {
+      method: 'DELETE',
+    }),
+  /** 迭代项事件流（倒序，最近 100 条） */
+  listBacklogEvents: (id: number) =>
+    request<BacklogEvent[]>(`/backlogs/${id}/events`),
+  /** 任务与工单面板：交付任务树（含子任务）+ 相关工单 */
+  listBacklogTasks: (id: number) =>
+    request<{ tasks: BacklogTaskSummary[]; tickets: BacklogTicketSummary[] }>(
+      `/backlogs/${id}/tasks`,
+    ),
+  /** 发起提测（创建提测工单，自动填入迭代项上下文） */
+  createBacklogReleaseTicket: (
+    id: number,
+    input: { title?: string; supplement?: string },
+  ) =>
+    request<{ ticketId: number; ticketCode: string; title: string }>(
+      `/backlogs/${id}/release-ticket`,
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
   /** 移动迭代项到另一个迭代 */
   moveBacklog: (id: number, iterationId: number) =>
     request<Backlog>(`/backlogs/${id}/move`, {

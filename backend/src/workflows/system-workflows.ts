@@ -222,10 +222,80 @@ export const DEPLOY_TICKET_WORKFLOW = {
   } satisfies WorkflowDefinitionJson,
 } satisfies SystemTicketWorkflow;
 
+/**
+ * 系统内置的提测工单定义（迭代项 Backlog 的「提测」按钮发起）：
+ * 发起（自动填入迭代项上下文，人工可补充）→ 提测处理 → 发起人验收。
+ */
+export const RELEASE_TICKET_WORKFLOW = {
+  code: 'release-ticket',
+  category: '提测工单',
+  name: '提测工单流程',
+  description:
+    '迭代项提测申请工单：发起人提交提测说明（平台自动填入迭代项上下文），机器人整理提测材料，最后由发起人验收。',
+  definition: {
+    startNode: 'start',
+    nodes: [
+      {
+        key: 'start',
+        name: '发起提测',
+        kind: 'start',
+        taskTemplateId: null,
+        responsibleWorkerId: null,
+        inputFields: inputFields(),
+        autoAccept: false,
+        description:
+          '由迭代项成员或管理员发起，工单内容自动填入迭代项上下文，可补充提测说明。',
+      },
+      {
+        key: 'submit',
+        name: '整理提测材料',
+        kind: 'operation',
+        taskTemplateId: null,
+        responsibleWorkerId: null,
+        inputFields: null,
+        autoAccept: false,
+        description: '由任务定义自动分配的机器人整理提测材料并提交验收。',
+      },
+      {
+        key: 'acceptance',
+        name: '发起人验收',
+        kind: 'acceptance',
+        taskTemplateId: null,
+        responsibleWorkerId: null,
+        inputFields: null,
+        autoAccept: false,
+        description: '只能由工单发起机器人验收；驳回后回到材料整理节点。',
+      },
+    ],
+    edges: [
+      { from: 'start', to: 'submit', outcome: null, label: '开始处理' },
+      {
+        from: 'submit',
+        to: 'acceptance',
+        outcome: 'succeeded',
+        label: '提交验收',
+      },
+      {
+        from: 'acceptance',
+        to: '$end',
+        outcome: 'approved',
+        label: '验收通过',
+      },
+      {
+        from: 'acceptance',
+        to: 'submit',
+        outcome: 'rejected',
+        label: '验收驳回',
+      },
+    ],
+  } satisfies WorkflowDefinitionJson,
+} satisfies SystemTicketWorkflow;
+
 /** 全部系统内置工单工作流，启动时与迁移按此幂等预置 */
 export const SYSTEM_TICKET_WORKFLOWS: SystemTicketWorkflow[] = [
   TEST_TICKET_WORKFLOW,
   DEPLOY_TICKET_WORKFLOW,
+  RELEASE_TICKET_WORKFLOW,
 ];
 
 /** 网页新建工单配置的默认流程骨架 */

@@ -42,6 +42,45 @@ export interface CreateBacklogItemInput {
   members?: BacklogMemberInput[];
 }
 
+/** 提测工单工作流可用性（迭代项详情返回，供前端提测按钮置灰） */
+export interface BacklogReleaseWorkflow {
+  /** 工单配置（workflow_definitions.id） */
+  id: number;
+  /** 已启用且已发布版本（可创建工单） */
+  enabled: boolean;
+}
+
+/** 迭代项任务面板任务摘要（交付任务树，含子任务） */
+export interface BacklogTaskSummary {
+  id: number;
+  code: string;
+  title: string;
+  type: string;
+  status: string;
+  subStatus: string;
+  parentId: number | null;
+  rootId: number;
+  projectId: number | null;
+  agentId: number | null;
+  templateName: string | null;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** 迭代项任务面板工单摘要（直接关联 + 任务树关联） */
+export interface BacklogTicketSummary {
+  id: number;
+  code: string;
+  title: string;
+  category: string;
+  workflowStatus: string | null;
+  currentNodeName: string | null;
+  initiatorWorkerName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /** 迭代进度汇总 */
 export interface IterationProgress {
   total: number;

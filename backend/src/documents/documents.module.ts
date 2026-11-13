@@ -3,13 +3,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApipostModule } from '../apipost/apipost.module';
 import { FeishuModule } from '../feishu/feishu.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { BacklogDocument } from '../iterations/backlog-document.entity';
 import { Document } from './document.entity';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Document]),
+    TypeOrmModule.forFeature([Document, BacklogDocument]),
     FeishuModule,
     ApipostModule,
     KnowledgeModule,

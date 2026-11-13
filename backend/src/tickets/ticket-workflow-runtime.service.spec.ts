@@ -53,6 +53,7 @@ describe('TicketWorkflowRuntimeService', () => {
     syncApprovalCardResult: jest.Mock;
   };
   let llm: { generateTitle: jest.Mock };
+  let backlogs: { findOne: jest.Mock };
   let service: TicketWorkflowRuntimeService;
 
   beforeEach(() => {
@@ -97,6 +98,7 @@ describe('TicketWorkflowRuntimeService', () => {
       syncApprovalCardResult: jest.fn().mockResolvedValue(undefined),
     };
     llm = { generateTitle: jest.fn().mockResolvedValue(null) };
+    backlogs = { findOne: jest.fn().mockResolvedValue({ id: 1 }) };
     service = new TicketWorkflowRuntimeService(
       tickets as never,
       runs as never,
@@ -104,6 +106,7 @@ describe('TicketWorkflowRuntimeService', () => {
       versions as never,
       templates as never,
       tasks as never,
+      backlogs as never,
       workers as never,
       tasksService as never,
       dispatchService as never,

@@ -147,7 +147,14 @@
 - 迭代由 **Backlog** 组成，独立于需求池：`backlogs.projectId` 记录原始需求（`projects.id`，应用层软引用）。一个需求同时只允许一个未取消的 backlog；取消后可再次转入。
 - 转入/追加必须指定**负责人机器人**（AI 或真人）：创建交付任务时显式 `agentId=负责人`，使用系统任务定义 **ID=9「迭代-Backlog交付」**，AI 与真人均走任务中心派发。
 - 成员角色：产品 / 业务 / 项目 / 前端 / 后端 / 测试 / 客户端；产品与技术从需求 `resources` 按姓名自动带入，项目与业务由管理员手动选择。
-- 状态：等待 → 执行 → 测试 → 发布 → 完成，允许回退与取消；由成员或管理员手动流转，记录操作人与各阶段时间；取消时联动取消未结束的交付任务。状态与任务/需求状态解耦。
+- 状态：等待 → 执行 → 测试 → 发布 → 完成，允许回退与取消；由成员或管理员手动流转，记录操作人与各阶段时间；取消时联动取消未结束的交付任务。状态与任务/需求状态解耦。推进走弹窗（选状态 + 备注可空，备注写入事件流），网页两处（迭代表格/迭代项详情）共用同一弹窗组件，不再使用行内下拉。
+- 迭代项有自己的标题：转入后异步用 `title-naming` 场景生成 `「BL-{id}」+ 模型标题`（乐观条件更新，失败保留需求名快照兜底，不覆盖人工修改）；迭代表格展示迭代项标题并链接 `/backlogs/{id}`（需求仅保留 `#id` 提示）。
+- 属性：预期上线时间到小时（`backlogs.expectedOnlineAt`，timestamptz，北京时间展示），成员或管理员可改（`PATCH /api/backlogs/{id}`）。
+- 文档：转入迭代时把原始需求的文档关联迁入 `backlog_documents`（需求 → 迭代单向搬运），此后可新建/导入（复用 documents 接口，挂需求名下）/关联/取消关联，删除文档时应用层清理关联；文档本体始终归属需求。
+- 事件流：`backlog_events` append-only 记录 created / status（from/to/remark）/ moved / release-ticket（提测工单）等，`GET /api/backlogs/{id}/events`；`.md` 视图附文档清单与最近事件。
+- 任务与工单面板：`GET /api/backlogs/{id}/tasks` 返回交付任务为根的任务树（含全部子任务）与相关工单（`tickets.backlogId` ∪ `tickets.taskId` ∪ `ticket_workflow_runs.taskId` 去重）。
+- 提测：迭代项详情页「提测」按钮按系统工作流 `release-ticket`（代码预置 + 迁移预置并发布 v1）创建工单，描述自动填入迭代项上下文、人工可补充；`tickets.backlogId` 记录关联，创建成功写 `release-ticket` 事件。
+- 迭代项详情页为标准双栏布局 + 右下角可收起 AI 面板（⌥A）；AI 页面上下文类型 `backlog`（`agent:page:backlog:*`），`contextReadUrl` 固定 `/api/backlogs/{id}.md`。
 - 支持向已有迭代追加需求、移动 backlog 到其它迭代（移动不重建交付任务与沟通群）；W1 到期未完成的 backlog 留在原迭代，由管理员手动结转到新迭代。
 - 每个 backlog 创建后自动建立飞书沟通群（`LitaWork-迭代-{标题} 沟通群`），拉入成员真人与负责人机器人绑定的飞书应用；完成/取消后保留 7 天自动解散，建群失败不阻断、定时对账重试。
 - Agent 视图：`GET /api/iterations.md`、`GET /api/iterations/{id}.md`、`GET /api/backlogs/{id}.md`。
