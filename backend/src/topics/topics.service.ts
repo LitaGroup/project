@@ -620,6 +620,12 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
         `任务待反馈：${subject.title}`,
         formatQuestions(question.questions),
       );
+      await this.notify.notifyGroup(
+        subject,
+        view,
+        formatQuestions(question.questions),
+        message.sender.name,
+      );
     } else {
       topic.metadata = {
         ...((topic.metadata ?? {}) as Record<string, unknown>),
