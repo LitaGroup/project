@@ -372,17 +372,18 @@ export function TopicPanel({
         content: reply.trim(),
         mentions: replyMentions,
       })
-      setDetail((current) =>
-        current
-          ? {
-              ...current,
-              replies: [...current.replies, result.reply],
-              replyCount: current.replyCount + 1,
-              lastReplyAt: result.reply.createdAt,
-              lastReplyByName: result.reply.author.name,
-            }
-          : current,
-      )
+      setDetail((current) => {
+        if (!current || current.replies.some((item) => item.id === result.reply.id)) {
+          return current
+        }
+        return {
+          ...current,
+          replies: [...current.replies, result.reply],
+          replyCount: current.replyCount + 1,
+          lastReplyAt: result.reply.createdAt,
+          lastReplyByName: result.reply.author.name,
+        }
+      })
       setReply('')
       setReplyMentions([])
     } catch (e) {
@@ -437,15 +438,16 @@ export function TopicPanel({
       setNewType('content')
       setNewTags([])
       setNewMentions([])
-      setList((current) =>
-        current
-          ? {
-              ...current,
-              items: [created, ...current.items],
-              total: current.total + 1,
-            }
-          : current,
-      )
+      setList((current) => {
+        if (!current || current.items.some((item) => item.id === created.id)) {
+          return current
+        }
+        return {
+          ...current,
+          items: [created, ...current.items],
+          total: current.total + 1,
+        }
+      })
       await loadDetail(created.id)
     } catch (e) {
       setError((e as Error).message)
