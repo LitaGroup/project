@@ -1,9 +1,11 @@
+import { Subject } from 'rxjs';
 import {
   TaskStatus,
   TaskSubStatus,
   TopicStatus,
   TopicType,
 } from '../common/enums';
+import type { TaskChatMessage } from '../tasks/task-chat.types';
 import { TopicsService } from './topics.service';
 
 function now(): Date {
@@ -44,7 +46,7 @@ describe('TopicsService', () => {
   const tickets = repoMock();
   const workers = repoMock();
   const knowledge = { getNodeById: jest.fn() };
-  const taskChat = { messagePersisted$: { subscribe: jest.fn() } };
+  const taskChat = { messagePersisted$: new Subject<TaskChatMessage>() };
   const tasksService = { sendMessage: jest.fn() };
   const taskActors = { resolveRequesterActor: jest.fn() };
   const collaboration = { answer: jest.fn() };
@@ -414,5 +416,21 @@ describe('TopicsService', () => {
       expect.objectContaining({ taskId: 101, topicId: 12, status: 'queued' }),
     );
     expect(taskContexts.save).not.toHaveBeenCalled();
+  });
+
+  it('机器人普通输出不再自动写成话题回复', async () => {
+    service.onApplicationBootstrap();
+    taskChat.messagePersisted$.next({
+      id: 'chat:300:1',
+      taskId: 300,
+      role: 'assistant',
+      sender: { id: 'worker:7', name: '机器人七', kind: 'worker', workerId: 7 },
+      content: '这是执行会话输出，不应自动进话题',
+      createdAt: now().toISOString(),
+      status: 'complete',
+      kind: 'message',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(replies.save).not.toHaveBeenCalled();
   });
 });
