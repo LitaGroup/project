@@ -429,7 +429,8 @@ export function normalizeDebugMode(value: unknown): WorkerDebugMode {
   return value === 'plan' ? 'plan' : 'build';
 }
 
-const RUN_TIMEOUT_MS = 10 * 60_000;
+/** 单轮运行等待上限：60 分钟（长任务在飞书里发起后要能跑完）。 */
+const RUN_TIMEOUT_MS = 60 * 60_000;
 const POLL_MS = 1_000;
 /** 会话保留期：7 天不活跃才丢弃（重进页面仍复用原 opencode 会话） */
 const SESSION_TTL_MS = 7 * 24 * 60 * 60_000;

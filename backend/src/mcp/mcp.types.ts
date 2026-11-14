@@ -9,11 +9,11 @@ import type { OpencodeTodo } from '../executors/opencode-todos';
 /** MCP 会话 scope 前缀：worker_debug_sessions.contextKey = `mcp:{sessionId}` */
 export const MCP_SCOPE_PREFIX = 'mcp:';
 
-/** 默认单轮执行超时：10 分钟 */
-export const MCP_DEFAULT_TIMEOUT_MS = 10 * 60_000;
+/** 默认单轮执行超时：60 分钟 */
+export const MCP_DEFAULT_TIMEOUT_MS = 60 * 60_000;
 
-/** 单轮执行超时上限：30 分钟 */
-export const MCP_MAX_TIMEOUT_MS = 30 * 60_000;
+/** 单轮执行超时上限：60 分钟 */
+export const MCP_MAX_TIMEOUT_MS = 60 * 60_000;
 
 /** 外部调用会话 ID 格式：8-64 位字母数字下划线连字符 */
 export const MCP_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
