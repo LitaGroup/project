@@ -36,6 +36,7 @@ import {
 } from '../../lib/api'
 import { MarkdownViewer } from '../MarkdownViewer'
 import { RobotAvatar } from '../task-detail/WorkerAvatar'
+import { useAuth } from '../../context/AuthContext'
 
 type TopicFilter = 'all' | 'question' | '澄清' | '建议'
 
@@ -177,6 +178,8 @@ export function TopicPanel({
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [workers, setWorkers] = useState<Worker[]>([])
   const [filter, setFilter] = useState<TopicFilter>('all')
+  const [searchDraft, setSearchDraft] = useState('')
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -193,6 +196,7 @@ export function TopicPanel({
   const [answerDraft, setAnswerDraft] = useState('')
   const [notifications, setNotifications] =
     useState<TopicNotificationList | null>(null)
+  const { user } = useAuth()
   const selectedRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -221,7 +225,12 @@ export function TopicPanel({
     setLoading(true)
     setError(null)
     try {
-      const next = await api.listTopics({ subjectType, subjectId, pageSize: 100 })
+      const next = await api.listTopics({
+        subjectType,
+        subjectId,
+        pageSize: 100,
+        q: search.trim() || undefined,
+      })
       setList(next)
       const fromUrl = Number(
         new URLSearchParams(window.location.search).get('topic'),
@@ -242,7 +251,7 @@ export function TopicPanel({
     } finally {
       setLoading(false)
     }
-  }, [loadDetail, subjectId, subjectType])
+  }, [loadDetail, search, subjectId, subjectType])
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
@@ -351,7 +360,7 @@ export function TopicPanel({
       }
     }
     return () => source.close()
-  }, [loadDetail, subjectId, subjectType])
+  }, [loadDetail, search, subjectId, subjectType])
 
   const filtered = useMemo(() => {
     const items = list?.items ?? []
@@ -565,6 +574,29 @@ export function TopicPanel({
             {label}
           </Button>
         ))}
+        <Input
+          className="ml-auto h-8 w-52"
+          value={searchDraft}
+          placeholder="搜索标题或正文，回车确认"
+          onChange={(event) => setSearchDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            setSearch(searchDraft.trim())
+          }}
+        />
+        {search && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setSearchDraft('')
+              setSearch('')
+            }}
+          >
+            清除搜索
+          </Button>
+        )}
       </div>
 
       {error && <p className="text-sm text-foreground-muted">加载失败：{error}</p>}
@@ -588,6 +620,44 @@ export function TopicPanel({
               onAnswerDraftChange={setAnswerDraft}
               onSubmitAnswer={submitAnswer}
               onResolve={resolveTopic}
+              canManage={
+                user?.role === '管理员' ||
+                (detail.author.type === 'user' &&
+                  detail.author.id === user?.id)
+              }
+              onTogglePin={async () => {
+                try {
+                  const next = await api.updateTopic(detail.id, {
+                    pinned: !detail.pinned,
+                  })
+                  setDetail((current) =>
+                    current ? { ...current, pinned: next.pinned } : current,
+                  )
+                  setList((current) =>
+                    current
+                      ? {
+                          ...current,
+                          items: current.items
+                            .map((item) =>
+                              item.id === next.id ? next : item,
+                            )
+                            .sort(
+                              (a, b) =>
+                                Number(b.pinned) - Number(a.pinned) ||
+                                new Date(
+                                  b.lastReplyAt ?? b.createdAt,
+                                ).getTime() -
+                                  new Date(
+                                    a.lastReplyAt ?? a.createdAt,
+                                  ).getTime(),
+                            ),
+                        }
+                      : current,
+                  )
+                } catch (e) {
+                  setError((e as Error).message)
+                }
+              }}
             />
           ) : (
             <p className="text-sm text-foreground-muted">
@@ -624,6 +694,7 @@ export function TopicPanel({
                   {topic.isDefault && (
                     <Badge variant="secondary">主话题</Badge>
                   )}
+                  {topic.pinned && <Badge variant="secondary">置顶</Badge>}
                   {topic.type === 'question' && (
                     <Badge variant="secondary">问答</Badge>
                   )}
@@ -862,6 +933,8 @@ function TopicDetailView({
   onAnswerDraftChange,
   onSubmitAnswer,
   onResolve,
+  canManage,
+  onTogglePin,
 }: {
   detail: TopicDetail
   workers: Worker[]
@@ -876,6 +949,8 @@ function TopicDetailView({
   onAnswerDraftChange: (value: string) => void
   onSubmitAnswer: (reject?: boolean) => void
   onResolve: () => void
+  canManage: boolean
+  onTogglePin: () => void
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -899,11 +974,18 @@ function TopicDetailView({
             {detail.replyCount} 条回复
           </p>
         </div>
-        {detail.type === 'question' && detail.status === 'open' && (
-          <Button variant="outline" size="sm" onClick={onResolve}>
-            标记已解决
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {canManage && !detail.isDefault && (
+            <Button variant="outline" size="sm" onClick={onTogglePin}>
+              {detail.pinned ? '取消置顶' : '置顶'}
+            </Button>
+          )}
+          {detail.type === 'question' && detail.status === 'open' && (
+            <Button variant="outline" size="sm" onClick={onResolve}>
+              标记已解决
+            </Button>
+          )}
+        </div>
       </div>
 
       {(detail.content || detail.images?.length) && (
