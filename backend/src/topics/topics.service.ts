@@ -1,8 +1,6 @@
 import {
   BadRequestException,
   ForbiddenException,
-  forwardRef,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -33,6 +31,7 @@ import type {
   TaskChatQuestion,
 } from '../tasks/task-chat.types';
 import { TaskCollaborationService } from '../tasks/task-collaboration.service';
+import { TaskTopicHooksService } from '../tasks/task-topic-hooks.service';
 import { TasksService } from '../tasks/tasks.service';
 import type { TaskActor } from '../tasks/task-requester';
 import { Ticket } from '../tickets/ticket.entity';
@@ -142,14 +141,31 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly taskChat: TaskChatService,
     private readonly tasksService: TasksService,
     private readonly taskActors: TaskActorService,
-    @Inject(forwardRef(() => TaskCollaborationService))
     private readonly collaboration: TaskCollaborationService,
+    private readonly taskTopicHooks: TaskTopicHooksService,
     private readonly debug: WorkerDebugService,
     private readonly notify: TopicNotifyService,
     private readonly realtime: TopicRealtimeService,
   ) {}
 
   onApplicationBootstrap(): void {
+    this.taskTopicHooks.register(async (event) => {
+      if (event.type === 'question-answered') {
+        await this.syncQuestionAnswer(
+          event.taskId,
+          event.questionId,
+          event.actor,
+          event.answers,
+          event.rejected,
+        );
+        return;
+      }
+      await this.recordAcceptanceRejection(
+        event.task,
+        event.actor,
+        event.content,
+      );
+    });
     this.taskMessageSub = this.taskChat.messagePersisted$.subscribe(
       (message) => {
         void this.handleTaskMessage(message).catch((error: Error) => {

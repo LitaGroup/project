@@ -28,6 +28,7 @@ import { TaskAssignmentService } from './task-assignment.service';
 import { TaskChatService } from './task-chat.service';
 import { TaskDeliveryService } from './task-delivery.service';
 import { TaskDispatchService } from './task-dispatch.service';
+import { TaskTopicHooksService } from './task-topic-hooks.service';
 import { TaskDocumentService } from './task-document.service';
 import { TaskHandoffService } from './task-handoff.service';
 import { TaskLoopService } from './task-loop.service';
@@ -53,7 +54,6 @@ import {
   TasksListMarkdownController,
 } from './tasks-agent.controller';
 import { TasksAgentService } from './tasks-agent.service';
-import { TopicsModule } from '../topics/topics.module';
 import { WorkbenchController } from './workbench.controller';
 import { WorkbenchService } from './workbench.service';
 
@@ -78,7 +78,6 @@ import { WorkbenchService } from './workbench.service';
     ExecutorsModule,
     FeishuModule,
     forwardRef(() => FeishuBotModule),
-    forwardRef(() => TopicsModule),
     KnowledgeModule,
     McpServersModule,
     ModelConfigModule,
@@ -116,6 +115,7 @@ import { WorkbenchService } from './workbench.service';
     TaskCollaborationService,
     TaskRealtimeService,
     TaskTemplatesService,
+    TaskTopicHooksService,
     WorkbenchService,
   ],
   exports: [
@@ -133,6 +133,7 @@ import { WorkbenchService } from './workbench.service';
     TaskNotifyService,
     TaskRealtimeService,
     TaskTemplatesService,
+    TaskTopicHooksService,
     TaskWorkerInboxService,
   ],
 })

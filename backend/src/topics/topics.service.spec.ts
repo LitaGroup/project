@@ -42,6 +42,7 @@ describe('TopicsService', () => {
   const tasksService = { sendMessage: jest.fn() };
   const taskActors = { resolveRequesterActor: jest.fn() };
   const collaboration = { answer: jest.fn() };
+  const taskTopicHooks = { register: jest.fn(), emit: jest.fn() };
   const debug = { stream: jest.fn(), send: jest.fn() };
   const notify = {
     notifyGroup: jest.fn(),
@@ -67,6 +68,7 @@ describe('TopicsService', () => {
     tasksService as never,
     taskActors as never,
     collaboration as never,
+    taskTopicHooks as never,
     debug as never,
     notify as never,
     realtime as never,

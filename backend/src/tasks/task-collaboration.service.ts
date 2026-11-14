@@ -2,8 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  forwardRef,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -32,7 +30,7 @@ import {
   type TaskActor,
 } from './task-requester';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
-import { TopicsService } from '../topics/topics.service';
+import { TaskTopicHooksService } from './task-topic-hooks.service';
 
 export interface CreateSubtaskInput {
   templateId: number;
@@ -71,8 +69,7 @@ export class TaskCollaborationService {
     private readonly taskChat: TaskChatService,
     private readonly taskNotify: TaskNotifyService,
     private readonly workerInbox: TaskWorkerInboxService,
-    @Inject(forwardRef(() => TopicsService))
-    private readonly topics: TopicsService,
+    private readonly taskTopicHooks: TaskTopicHooksService,
   ) {}
 
   /** task-defines：仅返回当前确有启用处理机器人的任务定义。 */
@@ -455,13 +452,14 @@ export class TaskCollaborationService {
     );
     await this.workerInbox.completeForChild(taskId, 'question', questionId);
     try {
-      await this.topics.syncQuestionAnswer(
+      await this.taskTopicHooks.emit({
+        type: 'question-answered',
         taskId,
         questionId,
         actor,
         answers,
         rejected,
-      );
+      });
     } catch (error) {
       this.logger.warn(
         `问答答复同步话题失败（taskId=${taskId}）: ${(error as Error).message}`,

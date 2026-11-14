@@ -123,6 +123,7 @@ describe('TaskCollaborationService 多机器人协同动作', () => {
         notifyTaskRequester: jest.fn().mockResolvedValue({ sent: true }),
       } as never,
       inbox as never,
+      { emit: jest.fn().mockResolvedValue(undefined) } as never,
     );
   });
 
