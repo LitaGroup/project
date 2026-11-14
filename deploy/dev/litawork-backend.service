@@ -1,0 +1,21 @@
+[Unit]
+Description=LitaWork backend (dev acceptance environment)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ecs-user
+Group=ecs-user
+WorkingDirectory=/home/ecs-user/work/litawork/backend
+EnvironmentFile=/home/ecs-user/work/litawork/backend/.env
+ExecStart=/usr/bin/node dist/src/main.js
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+StandardOutput=append:/home/ecs-user/work/litawork/logs/backend.log
+StandardError=append:/home/ecs-user/work/litawork/logs/backend.log
+
+[Install]
+WantedBy=multi-user.target
