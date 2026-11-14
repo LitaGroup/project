@@ -39,7 +39,11 @@ import { Ticket } from '../tickets/ticket.entity';
 import { Worker } from '../workers/worker.entity';
 import { WorkerDebugService } from '../workers/worker-debug.service';
 import type { DebugStreamPayload } from '../workers/worker-debug.types';
-import { Topic, type TopicMention } from './topic.entity';
+import {
+  Topic,
+  type TopicMention,
+  type TopicQuestionPayload,
+} from './topic.entity';
 import { TopicNotification } from './topic-notification.entity';
 import { TopicRead } from './topic-read.entity';
 import { TopicReply } from './topic-reply.entity';
@@ -375,7 +379,17 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
           actor.user?.avatarUrl ?? actor.worker?.avatarUrl ?? null,
         images: input.images?.length ? input.images : null,
         mentions: mentions.length ? mentions : null,
-        metadata: null,
+        metadata:
+          type === TopicType.QUESTION
+            ? ({
+                questions: [
+                  {
+                    header: title,
+                    question: content,
+                  },
+                ],
+              } satisfies TopicQuestionPayload)
+            : null,
       }),
     );
     const view = this.toTopicView(topic, subject, 0);

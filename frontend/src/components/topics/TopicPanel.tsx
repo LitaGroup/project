@@ -26,6 +26,7 @@ import {
   type Topic,
   type TopicDetail,
   type TopicListResult,
+  type TopicNotification,
   type TopicNotificationList,
   type TopicQuestionPayload,
   type TopicReply,
@@ -188,6 +189,7 @@ export function TopicPanel({
   const [newType, setNewType] = useState<TopicType>('content')
   const [newTags, setNewTags] = useState<string[]>([])
   const [newMentions, setNewMentions] = useState<number[]>([])
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [answerDraft, setAnswerDraft] = useState('')
   const [notifications, setNotifications] =
     useState<TopicNotificationList | null>(null)
@@ -480,6 +482,37 @@ export function TopicPanel({
 
   const unread = notifications?.unread ?? list?.unreadTotal ?? 0
 
+  const openNotification = async (item: TopicNotification) => {
+    try {
+      const topic = await api.getTopic(item.topicId)
+      await api.markTopicNotificationsRead([item.id]).catch(() => undefined)
+      setNotifications((current) =>
+        current
+          ? {
+              ...current,
+              unread: Math.max(0, current.unread - (item.readAt ? 0 : 1)),
+              items: current.items.map((row) =>
+                row.id === item.id
+                  ? { ...row, readAt: row.readAt ?? new Date().toISOString() }
+                  : row,
+              ),
+            }
+          : current,
+      )
+      if (
+        topic.subjectType === subjectType &&
+        String(topic.subjectId) === String(subjectId)
+      ) {
+        setNotificationsOpen(false)
+        await loadDetail(topic.id)
+      } else {
+        window.location.href = `${topic.subjectUrl}?topic=${topic.id}`
+      }
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
   return (
     <section
       className={`flex min-w-0 flex-col gap-4 ${compact ? '' : 'rounded-lg border border-border bg-background p-4'}`}
@@ -495,6 +528,15 @@ export function TopicPanel({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {notifications && notifications.total > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setNotificationsOpen(true)}
+            >
+              通知 {notifications.unread > 0 ? notifications.unread : ''}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -727,6 +769,78 @@ export function TopicPanel({
             >
               {sending ? '发布中…' : '发布话题'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>话题通知</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="max-h-[60vh] overflow-y-auto">
+            {!notifications?.items.length ? (
+              <p className="text-sm text-foreground-muted">暂无话题通知。</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {notifications.items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:bg-background-muted"
+                    onClick={() => {
+                      void openNotification(item)
+                    }}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">{item.title}</span>
+                      {!item.readAt && <Badge>未读</Badge>}
+                      <span className="text-[11px] text-foreground-subtle">
+                        {timeLabel(item.createdAt)}
+                      </span>
+                    </div>
+                    {item.content && (
+                      <p className="line-clamp-2 text-xs text-foreground-muted">
+                        {item.content}
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </DialogBody>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!notifications?.unread}
+              onClick={() => {
+                void api
+                  .markTopicNotificationsRead()
+                  .then(() => {
+                    setNotifications((current) =>
+                      current
+                        ? {
+                            ...current,
+                            unread: 0,
+                            items: current.items.map((item) => ({
+                              ...item,
+                              readAt: item.readAt ?? new Date().toISOString(),
+                            })),
+                          }
+                        : current,
+                    )
+                  })
+                  .catch((e: Error) => setError(e.message))
+              }}
+            >
+              全部已读
+            </Button>
+            <DialogClose>
+              <Button variant="outline" size="sm">
+                关闭
+              </Button>
+            </DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>
