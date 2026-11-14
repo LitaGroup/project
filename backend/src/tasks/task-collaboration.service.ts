@@ -412,6 +412,31 @@ export class TaskCollaborationService {
               `问：${question.question}\n答：${(answers?.[index] ?? []).join('、') || '（空）'}`,
           )
           .join('\n\n');
+    // 先同步问答话题并取得话题 ID，再把「必须通过 MCP reply_topic 回复」写入恢复提示
+    let topicInstruction = '';
+    try {
+      const hookResult = await this.taskTopicHooks.emit({
+        type: 'question-answered',
+        taskId,
+        questionId,
+        actor,
+        answers,
+        rejected,
+      });
+      if (hookResult?.topicId) {
+        topicInstruction = [
+          '',
+          '',
+          '# 话题回复要求',
+          '',
+          `当前话题 ID：${hookResult.topicId}。请使用 MCP 工具 reply_topic(topicId=${hookResult.topicId}, content=你的答复) 将答复发布到该话题；平台不会自动把执行会话输出转发到话题。`,
+        ].join('\n');
+      }
+    } catch (error) {
+      this.logger.warn(
+        `问答答复同步话题失败（taskId=${taskId}）: ${(error as Error).message}`,
+      );
+    }
     const updated = await this.tasks.update(
       {
         id: taskId,
@@ -420,7 +445,7 @@ export class TaskCollaborationService {
       },
       {
         subStatus: TaskSubStatus.PENDING_RESUME,
-        resumePrompt: `# 提问答复（${questionId}）\n\n${answerText}`,
+        resumePrompt: `# 提问答复（${questionId}）\n\n${answerText}${topicInstruction}`,
         missingItems: null,
         remindCount: 0,
         firstRemindedAt: null,
@@ -451,20 +476,6 @@ export class TaskCollaborationService {
       { questionId },
     );
     await this.workerInbox.completeForChild(taskId, 'question', questionId);
-    try {
-      await this.taskTopicHooks.emit({
-        type: 'question-answered',
-        taskId,
-        questionId,
-        actor,
-        answers,
-        rejected,
-      });
-    } catch (error) {
-      this.logger.warn(
-        `问答答复同步话题失败（taskId=${taskId}）: ${(error as Error).message}`,
-      );
-    }
     return saved;
   }
 

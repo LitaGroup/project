@@ -211,7 +211,7 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 | `resolve_topic` | `topicId` | 标记话题已解决 |
 | `list_my_topic_notifications` | — | 我的话题通知（@/回复/问答待回答） |
 
-> 任务默认消息进主话题；其它主体 `@AI机器人` 会在话题内联回答，`@真人机器人` 通知其负责人回复。话题与验收状态解耦。
+> 任务默认消息进主话题；其它主体 `@AI机器人` 会在话题内联回答，`@真人机器人` 通知其负责人回复。**机器人答复话题必须调用 `reply_topic`，平台不会自动把执行会话输出转发到话题**。话题与验收状态解耦。
 
 ### 工单与工单文档
 

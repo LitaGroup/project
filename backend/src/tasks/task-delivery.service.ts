@@ -527,21 +527,31 @@ export class TaskDeliveryService {
     const current = await this.mustFind(task.id);
     const count = current.acceptRejectCount ?? 1;
     const operator = actorName(actor);
-    const reworkPrompt = this.buildReworkPrompt(task.id, content);
+    let topicInstruction = '';
     if (this.taskTopicHooks) {
       try {
-        await this.taskTopicHooks.emit({
+        const hookResult = await this.taskTopicHooks.emit({
           type: 'acceptance-rejected',
           task,
           actor,
           content,
         });
+        if (hookResult?.topicId) {
+          topicInstruction = [
+            '',
+            '',
+            '# 话题回复要求',
+            '',
+            `当前话题 ID：${hookResult.topicId}。返工处理过程和结果请使用 MCP 工具 reply_topic(topicId=${hookResult.topicId}, content=你的答复) 发布到该话题；平台不会自动把执行会话输出转发到话题。`,
+          ].join('\n');
+        }
       } catch (error) {
         this.logger.warn(
           `验收不通过话题创建失败（taskId=${task.id}）: ${(error as Error).message}`,
         );
       }
     }
+    const reworkPrompt = `${this.buildReworkPrompt(task.id, content)}${topicInstruction}`;
 
     const claimed = await this.dispatchService.claimExecution(
       task.id,

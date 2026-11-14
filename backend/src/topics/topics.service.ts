@@ -38,7 +38,6 @@ import type { TaskActor } from '../tasks/task-requester';
 import { Ticket } from '../tickets/ticket.entity';
 import { Worker } from '../workers/worker.entity';
 import { WorkerDebugService } from '../workers/worker-debug.service';
-import type { DebugStreamPayload } from '../workers/worker-debug.types';
 import {
   Topic,
   type TopicMention,
@@ -160,24 +159,25 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
   onApplicationBootstrap(): void {
     this.taskTopicHooks.register(async (event) => {
       if (event.type === 'question-answered') {
-        await this.syncQuestionAnswer(
+        const topic = await this.syncQuestionAnswer(
           event.taskId,
           event.questionId,
           event.actor,
           event.answers,
           event.rejected,
         );
-        return;
+        return { topicId: topic?.id };
       }
       if (event.type === 'turn-finished') {
         await this.finishTaskTurn(event.taskId, event.error);
         return;
       }
-      await this.recordAcceptanceRejection(
+      const topic = await this.recordAcceptanceRejection(
         event.task,
         event.actor,
         event.content,
       );
+      return { topicId: topic.id };
     });
     this.taskMessageSub = this.taskChat.messagePersisted$.subscribe(
       (message) => {
@@ -684,9 +684,9 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     actor: TaskActor,
     answers: string[][] | undefined,
     rejected: boolean,
-  ): Promise<void> {
+  ): Promise<Topic | null> {
     const topic = await this.findQuestionTopic(taskId, questionId);
-    if (!topic) return;
+    if (!topic) return null;
     const subject = await this.resolveSubject(
       TopicSubjectType.TASK,
       String(taskId),
@@ -744,6 +744,7 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     });
     await this.notify.notifyGroup(subject, view, answerText, authorName);
     await this.setActiveTopic(taskId, saved.id, saved.title ?? '机器人提问');
+    return saved;
   }
 
   /** 验收不通过：单独生成一个系统帖子 */
@@ -794,75 +795,14 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     return topic;
   }
 
-  /** 任务机器人文本消息镜像到当前话题 */
+  /**
+   * 任务消息只同步机器人提问；机器人正文不再自动转成话题回复。
+   * 执行机器人/内联机器人必须通过 MCP reply_topic 主动答复话题。
+   */
   private async handleTaskMessage(message: TaskChatMessage): Promise<void> {
     if (message.kind === 'question') {
       await this.syncTaskQuestion(message);
-      return;
     }
-    if (message.role !== 'assistant' || message.kind !== 'message') return;
-    if (message.status === 'running') return;
-    const content = message.content?.trim();
-    if (!content) return;
-    const subject = await this.resolveSubject(
-      TopicSubjectType.TASK,
-      String(message.taskId),
-    );
-    let topic = await this.activeTopic(message.taskId);
-    if (!topic) {
-      topic = await this.ensureDefaultTopic(subject);
-    }
-    const existing = await this.replies.findOne({
-      where: { topicId: topic.id, sourceMessageId: message.id },
-    });
-    if (existing) {
-      existing.content = content;
-      existing.status =
-        message.status === 'error'
-          ? TopicReplyStatus.ERROR
-          : TopicReplyStatus.COMPLETE;
-      existing.authorName = message.sender.name;
-      existing.authorAvatarUrl = message.sender.avatarUrl ?? null;
-      await this.replies.save(existing);
-      this.realtime.publish({
-        type: 'reply.upsert',
-        subjectType: subject.type,
-        subjectId: subject.id,
-        topicId: topic.id,
-        reply: this.toReplyView(existing),
-      });
-      return;
-    }
-    const reply = await this.replies.save(
-      this.replies.create({
-        topicId: topic.id,
-        content,
-        authorType: message.sender.workerId
-          ? TopicAuthorType.WORKER
-          : message.sender.kind === 'system'
-            ? TopicAuthorType.SYSTEM
-            : TopicAuthorType.USER,
-        authorId: message.sender.workerId ?? null,
-        authorName: message.sender.name,
-        authorAvatarUrl: message.sender.avatarUrl ?? null,
-        metadata: { taskMessageId: message.id },
-        status:
-          message.status === 'error'
-            ? TopicReplyStatus.ERROR
-            : TopicReplyStatus.COMPLETE,
-        sourceMessageId: message.id,
-      }),
-    );
-    await this.touchTopic(topic, reply);
-    const view = this.toTopicView(topic, subject, 0);
-    this.realtime.publish({
-      type: 'reply.upsert',
-      subjectType: subject.type,
-      subjectId: subject.id,
-      topicId: topic.id,
-      reply: this.toReplyView(reply),
-    });
-    await this.notify.notifyGroup(subject, view, content, message.sender.name);
   }
 
   private async afterWrite(
@@ -905,8 +845,8 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
   ): Promise<void> {
     if (!actor.user && !actor.worker) return;
     if (actor.workerId && actor.workerId === subject.defaultWorkerId) {
-      // 真人执行机器人自己回复，只落话题，不再投递任务
-      if (actor.worker?.runtime === WorkerRuntime.HUMAN) return;
+      // 执行机器人自己通过 MCP 答复话题：只落话题，不再投递任务，避免自触发循环
+      return;
     }
     const taskId = Number(subject.id);
     const task = await this.tasks.findOne({ where: { id: taskId } });
@@ -1014,6 +954,10 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
             {
               actorWorkerId: next.actorWorkerId,
               perspective: 'requester',
+              modelContent: this.withTopicReplyInstruction(
+                next.content,
+                next.topicId,
+              ),
             },
           );
         } catch (error) {
@@ -1043,6 +987,17 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
       await this.taskTurns.save(running);
     }
     await this.drainTaskTurns(taskId);
+  }
+
+  /** 模型可见的话题回复要求：正文仍按原消息落任务事件，不污染用户气泡 */
+  private withTopicReplyInstruction(content: string, topicId: number): string {
+    return [
+      content,
+      '',
+      '# 话题回复要求',
+      '',
+      `当前话题 ID：${topicId}。请使用 MCP 工具 reply_topic(topicId=${topicId}, content=你的答复) 将答复发布到该话题；平台不会自动把执行会话输出转发到话题。`,
+    ].join('\n');
   }
 
   private async topicTitle(topicId: number): Promise<string | null> {
@@ -1111,6 +1066,7 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
       '# 话题上下文',
       '',
       `- 主体：${subject.title}`,
+      `- 话题 ID：${topic.id}`,
       `- 话题：${topic.title ?? '主话题'}`,
       `- 发起人：${actor.name}`,
       '',
@@ -1118,110 +1074,20 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
       '',
       context || '（暂无）',
       '',
-      '请只针对当前话题给出简洁、可执行的回答；不要重复角色设定，不要创建新话题。',
+      '# 答复要求',
+      '',
+      `请调用 MCP 工具 reply_topic(topicId=${topic.id}, content=你的答复) 把答复发布到该话题。`,
+      '平台不会自动把执行会话输出转发到话题；只在会话里输出不算答复。',
     ].join('\n');
-    let assistantId: string | null = null;
-    let done = false;
-    const subscription = this.debug.stream(0, worker.id, scope).subscribe({
-      next: (event: MessageEvent) => {
-        if (done) return;
-        const payload = event.data as DebugStreamPayload;
-        if (payload.type !== 'snapshot' || !payload.snapshot) return;
-        if (!assistantId) {
-          const last = [...payload.snapshot.messages]
-            .reverse()
-            .find((item) => item.role === 'assistant');
-          if (last) assistantId = last.id;
-          else return;
-        }
-        const message = payload.snapshot.messages.find(
-          (item) => item.id === assistantId,
-        );
-        if (!message || message.status === 'running') return;
-        done = true;
-        subscription.unsubscribe();
-        const text = message.content.trim();
-        if (!text) return;
-        void this.addBotReply(
-          subject,
-          topic,
-          worker,
-          text,
-          message.status === 'error',
-          `debug:${worker.id}:${assistantId}`,
-        ).catch((error: Error) => {
-          this.logger.warn(
-            `话题机器人回复落库失败（worker=${worker.id}）: ${error.message}`,
-          );
-        });
-      },
-      error: (error: Error) => {
-        done = true;
-        subscription.unsubscribe();
-        this.logger.warn(
-          `话题机器人流失败（worker=${worker.id}）: ${error.message}`,
-        );
-      },
+    await this.debug.send(0, worker.id, content, {
+      scope,
+      promptPrefix,
+      firstPrompt: [
+        '# 话题内联回答',
+        '',
+        '你正在平台话题中回答用户。请结合上下文，并务必通过 MCP reply_topic 将答复发布到当前话题。',
+      ].join('\n'),
     });
-    try {
-      await this.debug.send(0, worker.id, content, {
-        scope,
-        promptPrefix,
-        firstPrompt: [
-          '# 话题内联回答',
-          '',
-          '你正在平台话题中回答用户。请结合上下文直接回复，回答会展示在该话题下。',
-        ].join('\n'),
-      });
-    } catch (error) {
-      done = true;
-      subscription.unsubscribe();
-      throw error;
-    }
-  }
-
-  private async addBotReply(
-    subject: TopicSubjectInfo,
-    topic: Topic,
-    worker: Worker,
-    content: string,
-    error: boolean,
-    sourceMessageId: string,
-  ): Promise<void> {
-    const existing = await this.replies.findOne({
-      where: { topicId: topic.id, sourceMessageId },
-    });
-    if (existing) {
-      existing.content = content;
-      existing.status = error
-        ? TopicReplyStatus.ERROR
-        : TopicReplyStatus.COMPLETE;
-      await this.replies.save(existing);
-      return;
-    }
-    const reply = await this.replies.save(
-      this.replies.create({
-        topicId: topic.id,
-        content,
-        authorType: TopicAuthorType.WORKER,
-        authorId: worker.id,
-        authorName: worker.name,
-        authorAvatarUrl: worker.avatarUrl,
-        metadata: { botReply: true },
-        status: error ? TopicReplyStatus.ERROR : TopicReplyStatus.COMPLETE,
-        sourceMessageId,
-      }),
-    );
-    await this.touchTopic(topic, reply);
-    const view = this.toTopicView(topic, subject, 0);
-    this.realtime.publish({
-      type: 'reply.upsert',
-      subjectType: subject.type,
-      subjectId: subject.id,
-      topicId: topic.id,
-      reply: this.toReplyView(reply),
-    });
-    await this.notify.notifyGroup(subject, view, content, worker.name);
   }
 
   private async answerLocally(
@@ -1460,14 +1326,6 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     context.activeTopicId = topicId;
     context.activeTopicTitle = title?.slice(0, 200) ?? null;
     await this.taskContexts.save(context);
-  }
-
-  private async activeTopic(taskId: number): Promise<Topic | null> {
-    const context = await this.taskContexts.findOne({ where: { taskId } });
-    if (!context?.activeTopicId) return null;
-    return this.topics.findOne({
-      where: { id: context.activeTopicId, deletedAt: IsNull() },
-    });
   }
 
   private async findQuestionTopic(

@@ -1010,6 +1010,8 @@ export class TasksService {
     options?: {
       actorWorkerId?: number | null;
       perspective?: TaskChatPerspective;
+      /** 仅进入模型提示词、不写入任务描述/聊天气泡的附加内容（如话题回复要求） */
+      modelContent?: string;
     },
   ): Promise<Task> {
     const task = await this.mustFind(id);
@@ -1035,6 +1037,7 @@ export class TasksService {
     return this.dispatchService.continueConversation(id, text, operator, {
       actorWorkerId: options?.actorWorkerId,
       perspective: options?.perspective,
+      modelContent: options?.modelContent,
     });
   }
 
@@ -1049,6 +1052,7 @@ export class TasksService {
     options?: {
       actorWorkerId?: number | null;
       perspective?: TaskChatPerspective;
+      modelContent?: string;
     },
   ): Promise<Task> {
     const task = await this.mustFind(id);
@@ -1068,6 +1072,7 @@ export class TasksService {
     }
     const text = content.trim();
     if (!text) throw new BadRequestException('消息内容不能为空');
+    const modelText = options?.modelContent?.trim() || text;
     const from = `${task.status}-${task.subStatus}`;
     const previousSubStatus = task.subStatus;
     task.description = [task.description?.trim(), text]
@@ -1078,7 +1083,9 @@ export class TasksService {
       task.subStatus = task.agentId
         ? TaskSubStatus.PENDING_RESUME
         : TaskSubStatus.PENDING_ASSIGNMENT;
-      task.resumePrompt = task.agentId ? `# 需求方补充反馈\n\n${text}` : null;
+      task.resumePrompt = task.agentId
+        ? `# 需求方补充反馈\n\n${modelText}`
+        : null;
     } else if (
       previousSubStatus === TaskSubStatus.PENDING_RESUME ||
       previousSubStatus === TaskSubStatus.PENDING_APPLY
@@ -1088,7 +1095,7 @@ export class TasksService {
       task.subStatus = TaskSubStatus.PENDING_RESUME;
       task.resumePrompt = [
         task.resumePrompt?.trim(),
-        `# 需求方补充消息\n\n${text}`,
+        `# 需求方补充消息\n\n${modelText}`,
       ]
         .filter(Boolean)
         .join('\n\n---\n\n');

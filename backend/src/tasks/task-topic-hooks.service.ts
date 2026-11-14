@@ -24,20 +24,29 @@ export type TaskTopicHookEvent =
       error?: string;
     };
 
+export interface TaskTopicHookResult {
+  /** 事件对应的话题 id（用于把话题回复要求写入任务恢复提示） */
+  topicId?: number;
+}
+
 /**
  * 任务 → 话题挂接点：TaskCollaborationService / TaskDeliveryService 只负责发事件，
  * TopicsService 在启动时注册处理函数并负责落库。
  */
 @Injectable()
 export class TaskTopicHooksService {
-  private handler: ((event: TaskTopicHookEvent) => Promise<void>) | null = null;
+  private handler:
+    | ((event: TaskTopicHookEvent) => Promise<TaskTopicHookResult | void>)
+    | null = null;
 
-  register(handler: (event: TaskTopicHookEvent) => Promise<void>): void {
+  register(
+    handler: (event: TaskTopicHookEvent) => Promise<TaskTopicHookResult | void>,
+  ): void {
     this.handler = handler;
   }
 
-  async emit(event: TaskTopicHookEvent): Promise<void> {
+  async emit(event: TaskTopicHookEvent): Promise<TaskTopicHookResult | void> {
     if (!this.handler) return;
-    await this.handler(event);
+    return this.handler(event);
   }
 }

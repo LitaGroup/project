@@ -150,7 +150,7 @@ export class WorkTopicTools implements WorkToolRegistrar {
       {
         title: '回复话题',
         description:
-          '在指定话题下追加一条回复；@执行机器人会触发任务会话，其它主体 @AI 机器人会内联回答。',
+          '在指定话题下追加一条回复。机器人答复话题必须调用本工具，平台不会自动把执行会话输出转发到话题；@执行机器人会触发任务会话，其它主体 @AI 机器人会内联回答。',
         inputSchema: {
           topicId: z.number().int().positive().describe('话题 ID'),
           content: z.string().min(1).describe('回复正文（Markdown）'),
