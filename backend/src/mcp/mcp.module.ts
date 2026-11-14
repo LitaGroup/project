@@ -23,6 +23,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { TestsModule } from '../tests/tests.module';
 import { TicketsModule } from '../tickets/tickets.module';
+import { TopicsModule } from '../topics/topics.module';
 import { WorkersModule } from '../workers/workers.module';
 import { WorkflowsModule } from '../workflows/workflows.module';
 import { McpCallLog } from './mcp-log.entity';
@@ -44,6 +45,7 @@ import { WorkRunTools } from './work-tools/work-run.tools';
 import { WorkTaskTools } from './work-tools/work-task.tools';
 import { WorkTicketTools } from './work-tools/work-ticket.tools';
 import { WorkAgentTools } from './work-tools/work-agent.tools';
+import { WorkTopicTools } from './work-tools/work-topic.tools';
 /**
  * MCP 开放：
  * - POST /api/mcp/bots：lita-bots，外部 Agent 把平台机器人当子 Agent 调用；
@@ -75,6 +77,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     GithubModule,
     TasksModule,
     TicketsModule,
+    TopicsModule,
     WorkflowsModule,
   ],
   controllers: [McpController, McpWorkController, McpLogsController],
@@ -94,6 +97,7 @@ import { WorkAgentTools } from './work-tools/work-agent.tools';
     WorkTicketTools,
     WorkAgentTools,
     WorkFeishuTools,
+    WorkTopicTools,
   ],
 })
 export class McpModule {}

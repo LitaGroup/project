@@ -2466,7 +2466,229 @@ export const GATEWAY_GITHUB_ACTIONS = [
 ] as const
 export type GatewayGithubAction = (typeof GATEWAY_GITHUB_ACTIONS)[number]
 
+/** 话题主体类型（与后端 TopicSubjectType 对应） */
+export const TOPIC_SUBJECT_TYPES = ['idea', 'backlog', 'knowledge', 'task', 'ticket'] as const
+export type TopicSubjectType = (typeof TOPIC_SUBJECT_TYPES)[number]
+
+/** 话题类型（与后端 TopicType 对应） */
+export const TOPIC_TYPES = ['content', 'question', 'system'] as const
+export type TopicType = (typeof TOPIC_TYPES)[number]
+
+/** 话题状态（与后端 TopicStatus 对应） */
+export const TOPIC_STATUSES = ['open', 'resolved', 'closed'] as const
+export type TopicStatus = (typeof TOPIC_STATUSES)[number]
+
+/** 话题固定标签 */
+export const TOPIC_FIXED_TAGS = ['澄清', '建议'] as const
+
+export interface TopicMention {
+  type: 'worker'
+  id: number
+  name: string
+}
+
+export interface TopicAuthor {
+  type: 'user' | 'worker' | 'system'
+  id: number | null
+  name: string
+  avatarUrl: string | null
+}
+
+export interface TopicQuestionInfo {
+  header: string
+  question: string
+  options?: Array<{ label: string; description?: string }>
+  multiple?: boolean
+  custom?: boolean
+  fieldKey?: string
+}
+
+export interface TopicQuestionPayload {
+  questionId?: string
+  taskId?: number
+  questions?: TopicQuestionInfo[]
+  answers?: string[][] | null
+  answeredBy?: { type: string; id: number | null; name: string }
+  answeredAt?: string
+  rejected?: boolean
+  [key: string]: unknown
+}
+
+export interface TopicReply {
+  id: number
+  topicId: number
+  content: string
+  author: TopicAuthor
+  images: string[] | null
+  mentions: TopicMention[] | null
+  metadata: Record<string, unknown> | null
+  status: 'running' | 'complete' | 'error'
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Topic {
+  id: number
+  subjectType: TopicSubjectType
+  subjectId: string
+  subjectTitle: string
+  subjectUrl: string
+  title: string | null
+  content: string
+  type: TopicType
+  status: TopicStatus
+  tags: string[]
+  blocking: boolean
+  isDefault: boolean
+  pinned: boolean
+  locked: boolean
+  author: TopicAuthor
+  images: string[] | null
+  mentions: TopicMention[] | null
+  metadata: TopicQuestionPayload | Record<string, unknown> | null
+  replyCount: number
+  unreadCount: number
+  lastReplyAt: string | null
+  lastReplyByName: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TopicDetail extends Topic {
+  replies: TopicReply[]
+  totalReplies: number
+}
+
+export interface TopicListResult {
+  subjectType: TopicSubjectType
+  subjectId: string
+  subjectTitle: string
+  subjectUrl: string
+  defaultTopicId: number | null
+  total: number
+  page: number
+  pageSize: number
+  items: Topic[]
+  unreadTotal: number
+}
+
+export interface TopicNotification {
+  id: number
+  type: string
+  topicId: number
+  replyId: number | null
+  title: string
+  content: string | null
+  readAt: string | null
+  createdAt: string
+}
+
+export interface TopicNotificationList {
+  total: number
+  unread: number
+  items: TopicNotification[]
+}
+
+export interface TopicListParams {
+  subjectType: TopicSubjectType
+  subjectId: string | number
+  q?: string
+  type?: TopicType
+  status?: TopicStatus
+  tag?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface CreateTopicInput {
+  subjectType: TopicSubjectType
+  subjectId: string | number
+  title?: string
+  content: string
+  type?: TopicType
+  tags?: string[]
+  mentions?: number[]
+  images?: string[]
+}
+
+export interface ReplyTopicInput {
+  content: string
+  mentions?: number[]
+  images?: string[]
+}
+
+function topicQuery(params: TopicListParams): string {
+  const qs = new URLSearchParams()
+  qs.set('subjectType', params.subjectType)
+  qs.set('subjectId', String(params.subjectId))
+  if (params.q) qs.set('q', params.q)
+  if (params.type) qs.set('type', params.type)
+  if (params.status) qs.set('status', params.status)
+  if (params.tag) qs.set('tag', params.tag)
+  if (params.page) qs.set('page', String(params.page))
+  if (params.pageSize) qs.set('pageSize', String(params.pageSize))
+  return qs.toString()
+}
+
+/** 话题 SSE 地址（网页 EventSource 使用） */
+export function topicStreamUrl(
+  subjectType: TopicSubjectType,
+  subjectId: string | number,
+): string {
+  const qs = new URLSearchParams({ subjectType, subjectId: String(subjectId) })
+  return `/api/topics/stream?${qs.toString()}`
+}
+
 export const api = {
+  // ===== 话题（Topic）=====
+  listTopics: (params: TopicListParams) =>
+    request<TopicListResult>(`/topics?${topicQuery(params)}`),
+  getTopic: (id: number) => request<TopicDetail>(`/topics/${id}`),
+  createTopic: (input: CreateTopicInput) =>
+    request<TopicDetail>('/topics', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  updateTopic: (
+    id: number,
+    input: {
+      title?: string | null
+      tags?: string[]
+      status?: TopicStatus
+      pinned?: boolean
+      locked?: boolean
+    },
+  ) =>
+    request<Topic>(`/topics/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  deleteTopic: (id: number) =>
+    request<void>(`/topics/${id}`, { method: 'DELETE' }),
+  replyTopic: (id: number, input: ReplyTopicInput) =>
+    request<{ topic: Topic; reply: TopicReply }>(`/topics/${id}/replies`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  answerTopic: (
+    id: number,
+    input: { answers?: string[][]; reject?: boolean },
+  ) =>
+    request<TopicDetail>(`/topics/${id}/answer`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  markTopicRead: (id: number) =>
+    request<{ lastReadReplyId: number }>(`/topics/${id}/read`, {
+      method: 'POST',
+    }),
+  getTopicNotifications: () =>
+    request<TopicNotificationList>('/topics/notifications'),
+  markTopicNotificationsRead: (ids?: number[]) =>
+    request<{ updated: number }>('/topics/notifications/read', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
   listProjects: () => request<Project[]>('/projects'),
   /** 项目表格分页：只返回当前页 + total + 筛选值，避免全量拉回 */
   listProjectPage: (params: ProjectPageParams) => {

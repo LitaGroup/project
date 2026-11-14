@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -31,6 +33,7 @@ import {
   type TaskActor,
 } from './task-requester';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
+import { TopicsService } from '../topics/topics.service';
 
 export interface DeliveryReplyInput {
   /** accept=通过验收；refuse=拒绝并退回执行 */
@@ -68,6 +71,8 @@ export class TaskDeliveryService {
     private readonly taskNotify: TaskNotifyService,
     private readonly workerInbox: TaskWorkerInboxService,
     config: ConfigService,
+    @Inject(forwardRef(() => TopicsService))
+    private readonly topics: TopicsService,
   ) {
     this.apiUrl = (
       config.get<string>('API_URL') ?? 'http://localhost:3100/api'
@@ -526,6 +531,15 @@ export class TaskDeliveryService {
     const count = current.acceptRejectCount ?? 1;
     const operator = actorName(actor);
     const reworkPrompt = this.buildReworkPrompt(task.id, content);
+    if (this.topics) {
+      try {
+        await this.topics.recordAcceptanceRejection(task, actor, content);
+      } catch (error) {
+        this.logger.warn(
+          `验收不通过话题创建失败（taskId=${task.id}）: ${(error as Error).message}`,
+        );
+      }
+    }
 
     const claimed = await this.dispatchService.claimExecution(
       task.id,

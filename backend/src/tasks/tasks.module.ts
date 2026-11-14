@@ -53,6 +53,7 @@ import {
   TasksListMarkdownController,
 } from './tasks-agent.controller';
 import { TasksAgentService } from './tasks-agent.service';
+import { TopicsModule } from '../topics/topics.module';
 import { WorkbenchController } from './workbench.controller';
 import { WorkbenchService } from './workbench.service';
 
@@ -77,6 +78,7 @@ import { WorkbenchService } from './workbench.service';
     ExecutorsModule,
     FeishuModule,
     forwardRef(() => FeishuBotModule),
+    forwardRef(() => TopicsModule),
     KnowledgeModule,
     McpServersModule,
     ModelConfigModule,

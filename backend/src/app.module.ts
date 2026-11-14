@@ -37,6 +37,7 @@ import { FilesModule } from './files/files.module';
 import { ImagesModule } from './images/images.module';
 import { ReleasesModule } from './releases/releases.module';
 import { TicketsModule } from './tickets/tickets.module';
+import { TopicsModule } from './topics/topics.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { McpModule } from './mcp/mcp.module';
 import { McpServersModule } from './mcp-servers/mcp-servers.module';
@@ -95,6 +96,7 @@ import { SsoModule } from './sso/sso.module';
     WorkersModule,
     TasksModule,
     TicketsModule,
+    TopicsModule,
     WorkflowsModule,
     McpModule,
     McpServersModule,

@@ -50,6 +50,7 @@ import {
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { MarkdownEditor, type MarkdownEditorHandle } from '../components/MarkdownEditor'
 import { splitFrontmatter } from '../lib/doc-frontmatter'
+import { TopicPanel } from '../components/topics/TopicPanel'
 
 interface KnowledgeLocation {
   path: string
@@ -431,6 +432,23 @@ function KnowledgeArticleView({
           >
             MD
           </a>
+          <Dialog>
+            <DialogTrigger render={<Button variant="outline" size="sm" />}>
+              话题
+            </DialogTrigger>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>文章话题</DialogTitle>
+              </DialogHeader>
+              <DialogBody className="max-h-[70vh] overflow-y-auto">
+                <TopicPanel
+                  subjectType="knowledge"
+                  subjectId={article.id}
+                  compact
+                />
+              </DialogBody>
+            </DialogContent>
+          </Dialog>
           {article.source === 'project-document' && article.sourceDocumentId && (
             <Button
               variant="outline"

@@ -2,7 +2,10 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -29,6 +32,7 @@ import {
   type TaskActor,
 } from './task-requester';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
+import { TopicsService } from '../topics/topics.service';
 
 export interface CreateSubtaskInput {
   templateId: number;
@@ -50,6 +54,8 @@ export interface AnswerQuestionInput {
 /** 多机器人协同动作：定义查询、子任务、接受/拒绝、project 提问与终态。 */
 @Injectable()
 export class TaskCollaborationService {
+  private readonly logger = new Logger(TaskCollaborationService.name);
+
   constructor(
     @InjectRepository(Task)
     private readonly tasks: Repository<Task>,
@@ -65,6 +71,8 @@ export class TaskCollaborationService {
     private readonly taskChat: TaskChatService,
     private readonly taskNotify: TaskNotifyService,
     private readonly workerInbox: TaskWorkerInboxService,
+    @Inject(forwardRef(() => TopicsService))
+    private readonly topics: TopicsService,
   ) {}
 
   /** task-defines：仅返回当前确有启用处理机器人的任务定义。 */
@@ -446,6 +454,19 @@ export class TaskCollaborationService {
       { questionId },
     );
     await this.workerInbox.completeForChild(taskId, 'question', questionId);
+    try {
+      await this.topics.syncQuestionAnswer(
+        taskId,
+        questionId,
+        actor,
+        answers,
+        rejected,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `问答答复同步话题失败（taskId=${taskId}）: ${(error as Error).message}`,
+      );
+    }
     return saved;
   }
 

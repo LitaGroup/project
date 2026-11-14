@@ -199,6 +199,20 @@ claude mcp add --transport http lita-work http://your-host:3100/api/mcp/work \
 >
 > `get_task_callback_url` 仅任务当前执行机器人可获取；地址指向 `POST /api/tasks/{taskId}/external-event`（纯内网免鉴权），lita-proxy 工单每次状态变更回调后平台按「任务 + 工单 + 状态」幂等落库并唤醒任务：回合仍在执行时直投当前会话，回合已结束时转「待继续」由 LOOP 恢复。
 
+### 话题
+
+| 工具 | 主要入参 | 说明 |
+|---|---|---|
+| `list_topics` | `subjectType`、`subjectId`、`q?`、`type?`、`status?`、`tag?` | 主体话题清单（灵感/迭代项/知识/任务/工单） |
+| `get_topic` | `topicId` | 话题正文、标签、问答状态与最近回复 |
+| `create_topic` | `subjectType`、`subjectId`、`content`、`title?`、`type?`、`tags?`、`mentions?` | 新开话题；默认消息进主话题 |
+| `reply_topic` | `topicId`、`content`、`mentions?` | 回复话题；@执行机器人会驱动任务会话 |
+| `answer_topic_question` | `topicId`、`answers?`、`reject?` | 答复问答话题，任务问答会恢复任务 |
+| `resolve_topic` | `topicId` | 标记话题已解决 |
+| `list_my_topic_notifications` | — | 我的话题通知（@/回复/问答待回答） |
+
+> 任务默认消息进主话题；其它主体 `@AI机器人` 会在话题内联回答，`@真人机器人` 通知其负责人回复。话题与验收状态解耦。
+
 ### 工单与工单文档
 
 | 工具 | 主要入参 | 说明 |

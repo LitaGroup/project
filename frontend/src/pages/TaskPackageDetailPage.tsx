@@ -22,6 +22,7 @@ import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import { TaskActions } from '../components/task-detail/TaskActions'
 import { TaskConversationView } from '../components/task-detail/TaskConversationView'
+import { TopicPanel } from '../components/topics/TopicPanel'
 import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel'
 import { TaskDocumentsPanel } from '../components/task-detail/TaskDocumentsPanel'
 import { TaskEventsPanel } from '../components/task-detail/TaskEventsPanel'
@@ -45,6 +46,7 @@ type TaskContentTab =
   | 'events'
   | 'documents'
   | 'conversation'
+  | 'topics'
   | 'review'
 
 const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
@@ -54,7 +56,7 @@ const TASK_CONTENT_TABS: Array<[TaskContentTab, string]> = [
   ['info', '信息'],
   ['events', '事件'],
   ['documents', '文档'],
-  ['conversation', '会话'],
+  ['topics', '话题'],
   ['review', '复盘'],
 ]
 
@@ -736,6 +738,10 @@ export function TaskDetailView({
                 loading={docsLoading}
                 error={docsError}
               />
+            )}
+
+            {contentTab === 'topics' && (
+              <TopicPanel subjectType="task" subjectId={taskId} compact />
             )}
 
             {contentTab === 'conversation' && (

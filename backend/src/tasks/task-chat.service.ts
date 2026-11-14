@@ -73,6 +73,10 @@ export class TaskChatService implements OnModuleDestroy {
   /** rootTaskId → 流事件 */
   private readonly subject = new Subject<InternalStreamEvent>();
 
+  /** 消息落库后广播（话题镜像/外部订阅使用） */
+  private readonly persisted = new Subject<TaskChatMessage>();
+  readonly messagePersisted$ = this.persisted.asObservable();
+
   /** taskId → (messageId → 实时消息) */
   private readonly live = new Map<number, Map<string, InternalChatMessage>>();
 
@@ -1357,7 +1361,9 @@ export class TaskChatService implements OnModuleDestroy {
         },
         ['taskId', 'messageKey'],
       )
-      .then(() => undefined)
+      .then(() => {
+        this.persisted.next(this.toPublic(message));
+      })
       .catch((error: Error) => {
         this.logger.warn(
           `任务消息落库失败（taskId=${message.taskId}）: ${error.message}`,

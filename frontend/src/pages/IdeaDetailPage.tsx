@@ -48,6 +48,7 @@ import { MarkdownViewer } from '../components/MarkdownViewer'
 import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
+import { TopicPanel } from '../components/topics/TopicPanel'
 import { matchesPinyinSearch } from '../lib/pinyin-search'
 import { useAuth } from '../context/AuthContext'
 
@@ -205,6 +206,8 @@ export function IdeaDetailPage() {
             )}
           </div>
         </Card>
+
+        <TopicPanel subjectType="idea" subjectId={idea.id} compact />
 
         <Card>
           <CardHeader>

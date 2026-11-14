@@ -417,3 +417,43 @@ export enum BacklogMemberRole {
   QA = '测试',
   CLIENT = '客户端',
 }
+
+/** 话题所属主体：灵感 / 迭代项 / 知识文章 / 任务 / 工单 */
+export enum TopicSubjectType {
+  IDEA = 'idea',
+  BACKLOG = 'backlog',
+  KNOWLEDGE = 'knowledge',
+  TASK = 'task',
+  TICKET = 'ticket',
+}
+
+/** 话题类型：内容 / 问答 / 系统（验收不通过等平台生成） */
+export enum TopicType {
+  CONTENT = 'content',
+  QUESTION = 'question',
+  SYSTEM = 'system',
+}
+
+/** 话题状态：进行中 / 已解决 / 已关闭 */
+export enum TopicStatus {
+  OPEN = 'open',
+  RESOLVED = 'resolved',
+  CLOSED = 'closed',
+}
+
+/** 话题/回复作者类型 */
+export enum TopicAuthorType {
+  USER = 'user',
+  WORKER = 'worker',
+  SYSTEM = 'system',
+}
+
+/** 回复状态：机器人回复中 / 已完成 / 失败 */
+export enum TopicReplyStatus {
+  RUNNING = 'running',
+  COMPLETE = 'complete',
+  ERROR = 'error',
+}
+
+/** 固定标签：澄清 / 建议（自定义标签存文本） */
+export const TOPIC_FIXED_TAGS = ['澄清', '建议'] as const;

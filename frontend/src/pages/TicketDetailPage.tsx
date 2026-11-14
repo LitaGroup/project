@@ -30,6 +30,7 @@ import { PageBreadcrumb } from '../components/PageBreadcrumb'
 import { TicketStatusBadge } from '../components/StatusBadge'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
+import { TopicPanel } from '../components/topics/TopicPanel'
 import { TaskActions } from '../components/task-detail/TaskActions'
 import { TaskWorkbenchPanel } from '../components/task-detail/TaskWorkbenchPanel'
 import { TicketCurrentNodePanel } from '../components/ticket-detail/TicketCurrentNodePanel'
@@ -49,6 +50,7 @@ type TicketContentTab =
   | 'events'
   | 'tasks'
   | 'documents'
+  | 'topics'
   | 'review'
 
 const TICKET_CONTENT_TABS: Array<[TicketContentTab, string]> = [
@@ -58,6 +60,7 @@ const TICKET_CONTENT_TABS: Array<[TicketContentTab, string]> = [
   ['events', '事件'],
   ['tasks', '任务'],
   ['documents', '文档'],
+  ['topics', '话题'],
   ['review', '复盘'],
 ]
 
@@ -770,6 +773,12 @@ export function TicketDetailPage() {
               ) : (
                 <EmptyTabPanel text="暂无任务文档" />
               ))}
+
+            {contentTab === 'topics' && (
+              <section className="flex h-full min-h-0 flex-col overflow-y-auto p-3">
+                <TopicPanel subjectType="ticket" subjectId={ticket.id} compact />
+              </section>
+            )}
 
             {contentTab === 'review' &&
               (activeTaskId ? (

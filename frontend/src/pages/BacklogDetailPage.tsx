@@ -71,6 +71,7 @@ import {
 } from '../components/StatusBadge'
 import { DetailPageLayout } from '../components/detail/DetailPageLayout'
 import { DetailAgentPanel } from '../components/detail/DetailAgentPanel'
+import { TopicPanel } from '../components/topics/TopicPanel'
 import { useAuth } from '../context/AuthContext'
 
 const SUCCESS_STAY_MS = 2_000
@@ -143,7 +144,7 @@ function eventSummary(event: BacklogEvent): string {
 }
 
 /** 内容分区：信息 / 文档 / 任务 / 事件 / 成员 */
-type BacklogDetailTab = 'info' | 'docs' | 'tasks' | 'events' | 'members'
+type BacklogDetailTab = 'info' | 'docs' | 'tasks' | 'topics' | 'events' | 'members'
 
 /**
  * 迭代项详情：基本信息（预期上线时间）、阶段时间、文档（转入时自需求迁入）、
@@ -798,6 +799,7 @@ export function BacklogDetailPage() {
             <TabsTrigger value="info">信息</TabsTrigger>
             <TabsTrigger value="docs">文档 {docs?.length ?? 0}</TabsTrigger>
             <TabsTrigger value="tasks">任务 {(related?.tasks ?? []).length}</TabsTrigger>
+            <TabsTrigger value="topics">话题</TabsTrigger>
             <TabsTrigger value="events">事件</TabsTrigger>
             <TabsTrigger value="members">成员 {backlog.members?.length ?? 0}</TabsTrigger>
           </TabsList>
@@ -1163,6 +1165,10 @@ export function BacklogDetailPage() {
                 ))}
               </div>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="topics" keepMounted className="pt-4">
+            <TopicPanel subjectType="backlog" subjectId={backlog.id} compact />
           </TabsContent>
         </Tabs>
       </div>
