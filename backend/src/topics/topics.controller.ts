@@ -259,8 +259,13 @@ export class TopicsMarkdownController {
   @Header('Content-Type', 'text/markdown; charset=utf-8')
   async detail(
     @Req() req: AuthedRequest,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id') rawId: string,
   ): Promise<string> {
+    // Express 5 会把 `.md` 一起放进 :id，需手动剥离后缀
+    const id = Number(rawId.replace(/\.md$/i, ''));
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new BadRequestException('话题 ID 必须为正整数');
+    }
     return renderTopicDetail(await this.topics.get(id, topicActorOf(req)));
   }
 

@@ -58,9 +58,9 @@ import { TopicsService } from './topics.service';
     forwardRef(() => TasksModule),
   ],
   controllers: [
-    TopicsController,
     TopicsListMarkdownController,
     TopicsMarkdownController,
+    TopicsController,
   ],
   providers: [TopicsService, TopicNotifyService, TopicRealtimeService],
   exports: [TopicsService, TopicRealtimeService],
