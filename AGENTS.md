@@ -243,9 +243,9 @@
 ### 话题（Topic）
 
 - 主体类型：`idea` / `backlog` / `knowledge` / `task` / `ticket`；每个主体懒创建 `isDefault=true` 的主话题，默认消息进主话题，另可新开话题。
-- 表：`discussion_topics`（主帖）、`discussion_replies`（回复）、`discussion_reads`（已读）、`discussion_notifications`（站内通知）、`discussion_task_contexts`（任务当前输出来源话题）；无物理外键，主体删除时应用层清理。
+- 表：`discussion_topics`（主帖）、`discussion_replies`（回复）、`discussion_reads`（已读）、`discussion_notifications`（站内通知）、`discussion_task_contexts`（任务当前输出来源话题）、`discussion_task_turns`（任务话题轮次 FIFO）；无物理外键，主体删除时应用层清理。
 - 话题类型：`content` / `question` / `system`；固定标签「澄清 / 建议」+ 自定义标签。问答话题 `metadata` 保存 questions/answers，任务问答答复后恢复任务执行。
-- 任务仍只有一个 opencode 会话：主话题回复或话题内 `@` 当前执行机器人时经 `TasksService.sendMessage` 投递；机器人输出按 `activeTopicId` 镜像回话题；任务提问同步为问答话题。验收与话题解耦，验收不通过按钮额外生成「验收不通过」系统话题。
+- 任务仍只有一个 opencode 会话：主话题回复或话题内 `@` 当前执行机器人时进入 `discussion_task_turns` FIFO，同一任务同时只投递一轮；机器人输出按本轮 `topicId` 镜像回对应话题；任务提问同步为问答话题。验收与话题解耦，验收不通过按钮额外生成「验收不通过」系统话题。
 - 非任务主体 `@AI机器人` 复用 `WorkerDebugService` 的 `topic:{id}` 会话内联回答；`@真人机器人` 通知其负责人回复。通知平台 → 飞书单向：主体有群发群卡片，@机器人/问答待回答发个人。
 - 接口：`GET/POST /api/topics`、`GET/PATCH/DELETE /api/topics/:id`、`POST /api/topics/:id/{replies,answer,read}`、`GET /api/topics/notifications`、SSE `/api/topics/stream`；Agent `.md` 端点与 MCP 工具 `list_topics` / `get_topic` / `create_topic` / `reply_topic` / `answer_topic_question` / `resolve_topic` / `list_my_topic_notifications`。
 - 历史 `task_messages` 不迁移、不展示；任务详情「会话」tab 由「话题」tab 替代。详细设计见 `docs/features/10 - 话题.md`。

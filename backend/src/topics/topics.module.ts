@@ -21,6 +21,7 @@ import { TopicRead } from './topic-read.entity';
 import { TopicRealtimeService } from './topic-realtime.service';
 import { TopicReply } from './topic-reply.entity';
 import { TopicTaskContext } from './topic-task-context.entity';
+import { TopicTaskTurn } from './topic-task-turn.entity';
 import {
   TopicsController,
   TopicsListMarkdownController,
@@ -41,6 +42,7 @@ import { TopicsService } from './topics.service';
       TopicRead,
       TopicNotification,
       TopicTaskContext,
+      TopicTaskTurn,
       Idea,
       Backlog,
       Task,

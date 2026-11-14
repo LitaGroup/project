@@ -17,6 +17,11 @@ export type TaskTopicHookEvent =
       task: Task;
       actor: TaskActor;
       content: string;
+    }
+  | {
+      type: 'turn-finished';
+      taskId: number;
+      error?: string;
     };
 
 /**

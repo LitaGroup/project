@@ -1,4 +1,9 @@
-import { TopicStatus, TopicType } from '../common/enums';
+import {
+  TaskStatus,
+  TaskSubStatus,
+  TopicStatus,
+  TopicType,
+} from '../common/enums';
 import { TopicsService } from './topics.service';
 
 function now(): Date {
@@ -32,6 +37,7 @@ describe('TopicsService', () => {
   const reads = repoMock();
   const notifications = repoMock();
   const taskContexts = repoMock();
+  const taskTurns = repoMock();
   const ideas = repoMock();
   const backlogs = repoMock();
   const tasks = repoMock();
@@ -58,6 +64,7 @@ describe('TopicsService', () => {
     reads as never,
     notifications as never,
     taskContexts as never,
+    taskTurns as never,
     ideas as never,
     backlogs as never,
     tasks as never,
@@ -145,6 +152,22 @@ describe('TopicsService', () => {
       createdById: 1,
       agentId: 7,
     });
+    const queuedTurn = {
+      id: 1,
+      taskId: 100,
+      topicId: 11,
+      replyId: 2,
+      content: '请继续实现',
+      status: 'queued',
+      actorWorkerId: null,
+      actorName: '张三',
+    };
+    taskTurns.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(queuedTurn);
+    taskTurns.save.mockImplementation((input: Record<string, unknown>) =>
+      Promise.resolve(input),
+    );
 
     const result = await service.reply(
       11,
@@ -316,5 +339,80 @@ describe('TopicsService', () => {
       }),
     );
     expect(notify.notifyMentions).toHaveBeenCalled();
+  });
+
+  it('任务执行中收到话题消息时先排队，不直接投递', async () => {
+    topics.findOne.mockResolvedValue({
+      id: 12,
+      subjectType: 'task',
+      subjectId: '101',
+      title: '主话题',
+      content: '',
+      type: TopicType.CONTENT,
+      status: TopicStatus.OPEN,
+      tags: [],
+      blocking: false,
+      isDefault: true,
+      pinned: false,
+      locked: false,
+      authorType: 'system',
+      authorId: null,
+      authorName: '系统',
+      authorAvatarUrl: null,
+      images: null,
+      mentions: null,
+      metadata: null,
+      replyCount: 0,
+      lastReplyAt: null,
+      lastReplyByName: null,
+      deletedAt: null,
+      createdAt: now(),
+      updatedAt: now(),
+    });
+    tasks.findOne.mockResolvedValue({
+      id: 101,
+      code: 'TK-0101',
+      title: '执行中任务',
+      status: TaskStatus.RUNNING,
+      subStatus: TaskSubStatus.EXECUTING,
+      requesterType: 'user',
+      requesterId: 1,
+      createdById: 1,
+      agentId: 7,
+    });
+    const queuedTurn = {
+      id: 2,
+      taskId: 101,
+      topicId: 12,
+      replyId: 3,
+      content: '执行中补充',
+      status: 'queued',
+      actorWorkerId: null,
+      actorName: '张三',
+    };
+    taskTurns.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(queuedTurn);
+    taskTurns.save.mockImplementation((input: Record<string, unknown>) =>
+      Promise.resolve(input),
+    );
+
+    await service.reply(
+      12,
+      { content: '执行中补充' },
+      {
+        user: { id: 1, name: '张三', role: '成员', avatarUrl: null } as never,
+        name: '张三',
+        isAdmin: false,
+        userId: 1,
+        workerId: null,
+      },
+    );
+
+    expect(tasksService.sendMessage).not.toHaveBeenCalled();
+    expect(taskTurns.save).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 101, topicId: 12, status: 'queued' }),
+    );
+    expect(taskContexts.save).not.toHaveBeenCalled();
   });
 });

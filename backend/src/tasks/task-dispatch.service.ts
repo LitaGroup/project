@@ -66,6 +66,7 @@ import {
 import { TaskNotifyService } from './task-notify.service';
 import { TaskQuestionAutoAnswerService } from './task-question-auto-answer.service';
 import { TaskRealtimeService } from './task-realtime.service';
+import { TaskTopicHooksService } from './task-topic-hooks.service';
 import { TaskWorkerInboxService } from './task-worker-inbox.service';
 
 export interface TaskAcceptanceApplication {
@@ -136,6 +137,7 @@ export class TaskDispatchService
     private readonly mcpServers: McpServersService,
     private readonly dataSource: DataSource,
     config: ConfigService,
+    private readonly taskTopicHooks: TaskTopicHooksService,
   ) {
     this.apiUrl = (
       config.get<string>('API_URL') ?? 'http://localhost:3100/api'
@@ -829,6 +831,7 @@ export class TaskDispatchService
     this.awaitingTurnStart.delete(taskId);
     this.releaseTask(taskId);
     await this.requeueInboxAfterTurn(taskId);
+    await this.emitTurnFinished(taskId, '人工中断');
     return this.mustFind(taskId);
   }
 
@@ -1753,6 +1756,21 @@ export class TaskDispatchService
     } finally {
       this.releaseTask(taskId);
       await this.requeueInboxAfterTurn(taskId);
+      await this.emitTurnFinished(taskId, content);
+    }
+  }
+
+  /** 通知话题队列：本轮结束，可继续投递下一个话题消息 */
+  private async emitTurnFinished(
+    taskId: number,
+    error?: string,
+  ): Promise<void> {
+    try {
+      await this.taskTopicHooks?.emit({ type: 'turn-finished', taskId, error });
+    } catch (cause) {
+      this.logger.warn(
+        `任务 #${taskId} 话题轮次结束通知失败: ${(cause as Error).message}`,
+      );
     }
   }
 
@@ -1810,6 +1828,7 @@ export class TaskDispatchService
   private async finalizeSuccess(taskId: number): Promise<void> {
     this.awaitingTurnStart.delete(taskId);
     await this.finalizeSuccessTurn(taskId);
+    await this.emitTurnFinished(taskId);
   }
 
   private async finalizeSuccessTurn(taskId: number): Promise<void> {

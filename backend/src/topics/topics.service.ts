@@ -13,6 +13,7 @@ import { Observable, Subscription } from 'rxjs';
 import { In, IsNull, Repository } from 'typeorm';
 import {
   TaskStatus,
+  TaskSubStatus,
   TopicAuthorType,
   TopicReplyStatus,
   TopicStatus,
@@ -43,6 +44,7 @@ import { TopicNotification } from './topic-notification.entity';
 import { TopicRead } from './topic-read.entity';
 import { TopicReply } from './topic-reply.entity';
 import { TopicTaskContext } from './topic-task-context.entity';
+import { TopicTaskTurn } from './topic-task-turn.entity';
 import { TopicNotifyService } from './topic-notify.service';
 import { TopicRealtimeService } from './topic-realtime.service';
 import type {
@@ -115,6 +117,7 @@ function formatAnswers(
 export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(TopicsService.name);
   private taskMessageSub: Subscription | null = null;
+  private readonly draining = new Set<number>();
 
   constructor(
     @InjectRepository(Topic)
@@ -127,6 +130,8 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly notifications: Repository<TopicNotification>,
     @InjectRepository(TopicTaskContext)
     private readonly taskContexts: Repository<TopicTaskContext>,
+    @InjectRepository(TopicTaskTurn)
+    private readonly taskTurns: Repository<TopicTaskTurn>,
     @InjectRepository(Idea)
     private readonly ideas: Repository<Idea>,
     @InjectRepository(Backlog)
@@ -158,6 +163,10 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
           event.answers,
           event.rejected,
         );
+        return;
+      }
+      if (event.type === 'turn-finished') {
+        await this.finishTaskTurn(event.taskId, event.error);
         return;
       }
       await this.recordAcceptanceRejection(
@@ -427,6 +436,10 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     }
     topic.deletedAt = new Date();
     await this.topics.save(topic);
+    await this.taskTurns.update(
+      { topicId: topic.id, status: 'queued' },
+      { status: 'cancelled', finishedAt: new Date() },
+    );
     this.realtime.publish({
       type: 'topic.delete',
       subjectType: topic.subjectType,
@@ -848,7 +861,14 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     notifiedWorkerIds: number[] = [],
   ): Promise<void> {
     if (subject.type === TopicSubjectType.TASK) {
-      await this.maybeTriggerTask(subject, topic, content, actor, mentions);
+      await this.enqueueTaskTurn(
+        subject,
+        topic,
+        content,
+        actor,
+        mentions,
+        reply,
+      );
     }
     await this.triggerBotReplies(
       subject,
@@ -860,13 +880,14 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     );
   }
 
-  /** 任务话题：主话题消息或 @执行机器人 时投递到任务会话 */
-  private async maybeTriggerTask(
+  /** 任务话题：主话题消息或 @执行机器人 时进入任务轮次队列 */
+  private async enqueueTaskTurn(
     subject: TopicSubjectInfo,
     topic: Topic,
     content: string,
     actor: TopicActor,
     mentions: TopicMention[],
+    reply: TopicReply | null,
   ): Promise<void> {
     if (!actor.user && !actor.worker) return;
     if (actor.workerId && actor.workerId === subject.defaultWorkerId) {
@@ -876,22 +897,146 @@ export class TopicsService implements OnApplicationBootstrap, OnModuleDestroy {
     const taskId = Number(subject.id);
     const task = await this.tasks.findOne({ where: { id: taskId } });
     if (!task || task.status === TaskStatus.FINISHED) return;
+    if (
+      task.status === TaskStatus.WAITING &&
+      (task.subStatus === TaskSubStatus.PENDING_ACCEPTANCE ||
+        task.subStatus === TaskSubStatus.PENDING_ACCEPT)
+    ) {
+      // 待接受/待验收只作为讨论，不驱动执行，避免绕过邀约或验收按钮
+      return;
+    }
+    if (!task.agentId) return;
     const mentionedAgent =
       subject.defaultWorkerId != null &&
       mentions.some((mention) => mention.id === subject.defaultWorkerId);
     if (!topic.isDefault && !mentionedAgent) return;
     if (!(await this.canActAsTaskRequester(task, actor))) return;
-    await this.setActiveTopic(taskId, topic.id, topic.title ?? '主话题');
-    try {
-      await this.tasksService.sendMessage(taskId, content, actor.name, {
+    await this.taskTurns.save(
+      this.taskTurns.create({
+        taskId,
+        topicId: topic.id,
+        replyId: reply?.id ?? null,
+        content,
+        status: 'queued',
         actorWorkerId: actor.workerId,
-        perspective: 'requester',
-      });
-    } catch (error) {
-      this.logger.warn(
-        `话题消息投递任务失败（taskId=${taskId}）: ${(error as Error).message}`,
-      );
+        actorName: actor.name,
+      }),
+    );
+    await this.drainTaskTurns(taskId);
+  }
+
+  /** 任务话题 FIFO：同一任务同时只投递一轮，机器人输出按本轮 topicId 归位 */
+  private async drainTaskTurns(taskId: number): Promise<void> {
+    if (this.draining.has(taskId)) return;
+    this.draining.add(taskId);
+    try {
+      for (;;) {
+        const running = await this.taskTurns.findOne({
+          where: { taskId, status: 'running' },
+          order: { id: 'ASC' },
+        });
+        if (running) return;
+        const next = await this.taskTurns.findOne({
+          where: { taskId, status: 'queued' },
+          order: { id: 'ASC' },
+        });
+        if (!next) return;
+        const task = await this.tasks.findOne({ where: { id: taskId } });
+        if (
+          !task ||
+          task.status === TaskStatus.FINISHED ||
+          (task.status === TaskStatus.WAITING &&
+            (task.subStatus === TaskSubStatus.PENDING_ACCEPTANCE ||
+              task.subStatus === TaskSubStatus.PENDING_ACCEPT))
+        ) {
+          await this.taskTurns.update(
+            { taskId, status: 'queued' },
+            { status: 'cancelled', finishedAt: new Date() },
+          );
+          return;
+        }
+        if (
+          task.status === TaskStatus.WAITING &&
+          task.subStatus === TaskSubStatus.PENDING_FEEDBACK
+        ) {
+          // 机器人正在等需求方答复提问，先不投递后续话题
+          return;
+        }
+        if (
+          task.status === TaskStatus.RUNNING &&
+          task.subStatus === TaskSubStatus.EXECUTING
+        ) {
+          // 已有非话题回合在执行，等待本轮结束信号
+          return;
+        }
+        if (
+          task.status === TaskStatus.WAITING &&
+          task.subStatus === TaskSubStatus.PENDING_ASSIGNMENT
+        ) {
+          await this.taskTurns.update(
+            { id: next.id },
+            {
+              status: 'cancelled',
+              error: '任务尚未分配机器人',
+              finishedAt: new Date(),
+            },
+          );
+          continue;
+        }
+        next.status = 'running';
+        next.startedAt = new Date();
+        next.error = null;
+        await this.taskTurns.save(next);
+        await this.setActiveTopic(
+          taskId,
+          next.topicId,
+          await this.topicTitle(next.topicId),
+        );
+        try {
+          await this.tasksService.sendMessage(
+            taskId,
+            next.content,
+            next.actorName,
+            {
+              actorWorkerId: next.actorWorkerId,
+              perspective: 'requester',
+            },
+          );
+        } catch (error) {
+          next.status = 'error';
+          next.error = (error as Error).message;
+          next.finishedAt = new Date();
+          await this.taskTurns.save(next);
+          continue;
+        }
+        return;
+      }
+    } finally {
+      this.draining.delete(taskId);
     }
+  }
+
+  /** 任务本轮结束：标记当前话题轮次完成并继续下一个 */
+  private async finishTaskTurn(taskId: number, error?: string): Promise<void> {
+    const running = await this.taskTurns.findOne({
+      where: { taskId, status: 'running' },
+      order: { id: 'ASC' },
+    });
+    if (running) {
+      running.status = error ? 'error' : 'done';
+      running.error = error ?? null;
+      running.finishedAt = new Date();
+      await this.taskTurns.save(running);
+    }
+    await this.drainTaskTurns(taskId);
+  }
+
+  private async topicTitle(topicId: number): Promise<string | null> {
+    const topic = await this.topics.findOne({
+      where: { id: topicId },
+      select: { id: true, title: true },
+    });
+    return topic?.title ?? null;
   }
 
   /** 非任务主体或非当前执行机器人：@AI 机器人内联回答 */
